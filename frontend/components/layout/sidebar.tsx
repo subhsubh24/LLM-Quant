@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Terminal,
   Brain,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,7 @@ const navigation = [
   { name: "AI Insights", href: "/insights", icon: Brain },
   { name: "Research", href: "/research", icon: FlaskConical },
   { name: "Trading", href: "/trading", icon: TrendingUp },
+  { name: "Options", href: "/options", icon: Layers },
   { name: "Analytics", href: "/performance", icon: BarChart3 },
   { name: "Learn", href: "/learn", icon: GraduationCap },
 ];

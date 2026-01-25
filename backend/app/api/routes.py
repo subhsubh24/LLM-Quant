@@ -895,3 +895,799 @@ async def analyze_portfolio(session=Depends(get_session_dependency)):
     )
 
     return analysis
+
+
+# ============ Automated Trading Endpoints ============
+
+@router.get("/signals/generate")
+async def generate_signals(
+    universe_name: str = "liquid_50",
+    session=Depends(get_session_dependency)
+):
+    """Generate trading signals for a universe."""
+    from ..signals import get_signal_engine
+    from ..data import DataCache, UniverseManager
+
+    # Get universe
+    manager = UniverseManager(session)
+    universe = manager.get_by_name(universe_name)
+    if universe is None:
+        universe = manager.get_or_create_default()
+
+    # Get price data
+    end_date = date.today()
+    start_date = end_date - timedelta(days=365 * 2)
+
+    cache = DataCache(session)
+    prices = cache.get_price_matrix(universe.tickers, start_date, end_date)
+
+    if prices.empty:
+        raise HTTPException(status_code=404, detail="No price data available")
+
+    # Generate signals
+    engine = get_signal_engine()
+    signals = engine.generate_signals(prices)
+
+    return signals.to_dict()
+
+
+@router.get("/trading/status")
+async def get_trading_status():
+    """Get auto-trader status."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+    return trader.get_status()
+
+
+@router.post("/trading/enable")
+async def enable_auto_trading():
+    """Enable automated trading."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+    trader.enable_auto_trading()
+    return {"status": "enabled", "message": "Auto-trading enabled (paper mode)"}
+
+
+@router.post("/trading/disable")
+async def disable_auto_trading():
+    """Disable automated trading."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+    trader.disable_auto_trading()
+    return {"status": "disabled", "message": "Auto-trading disabled"}
+
+
+@router.post("/trading/rebalance")
+async def trigger_rebalance(
+    universe_name: str = "liquid_50",
+    session=Depends(get_session_dependency)
+):
+    """Trigger portfolio rebalance based on current signals."""
+    from ..signals import get_signal_engine
+    from ..trading import get_auto_trader
+    from ..data import DataCache, UniverseManager
+    from ..data.live import get_live_market_service
+
+    # Get universe and prices
+    manager = UniverseManager(session)
+    universe = manager.get_by_name(universe_name)
+    if universe is None:
+        universe = manager.get_or_create_default()
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=365 * 2)
+
+    cache = DataCache(session)
+    prices = cache.get_price_matrix(universe.tickers, start_date, end_date)
+
+    if prices.empty:
+        raise HTTPException(status_code=404, detail="No price data available")
+
+    # Get current prices
+    market_service = get_live_market_service()
+    quotes = await market_service.get_quotes_batch(universe.tickers)
+    current_prices = {q.symbol: q.price for q in quotes.values()}
+
+    # Generate signals and rebalance
+    trader = get_auto_trader()
+    signals = trader.generate_signals(prices)
+    trader.update_prices(current_prices)
+    orders = trader.rebalance(signals, current_prices)
+
+    return {
+        "status": "rebalanced",
+        "orders_created": len(orders),
+        "orders": [o.to_dict() for o in orders],
+        "new_weights": signals.recommended_weights,
+        "market_regime": signals.market_regime,
+    }
+
+
+@router.post("/trading/order/market")
+async def create_market_order(
+    symbol: str,
+    side: str,  # buy, sell
+    quantity: float,
+):
+    """Create a market order."""
+    from ..trading import get_order_manager, OrderSide
+
+    manager = get_order_manager()
+    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    order = manager.create_market_order(
+        symbol=symbol,
+        side=order_side,
+        quantity=quantity,
+    )
+
+    return order.to_dict()
+
+
+@router.post("/trading/order/limit")
+async def create_limit_order(
+    symbol: str,
+    side: str,
+    quantity: float,
+    limit_price: float,
+):
+    """Create a limit order."""
+    from ..trading import get_order_manager, OrderSide
+
+    manager = get_order_manager()
+    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    order = manager.create_limit_order(
+        symbol=symbol,
+        side=order_side,
+        quantity=quantity,
+        limit_price=limit_price,
+    )
+
+    return order.to_dict()
+
+
+@router.post("/trading/order/bracket")
+async def create_bracket_order(
+    symbol: str,
+    side: str,
+    quantity: float,
+    entry_price: Optional[float] = None,
+    stop_loss_pct: float = 0.05,
+    take_profit_pct: float = 0.10,
+):
+    """Create a bracket order with automatic stop-loss and take-profit."""
+    from ..trading import get_order_manager, OrderSide
+
+    manager = get_order_manager()
+    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    bracket = manager.create_bracket_order(
+        symbol=symbol,
+        side=order_side,
+        quantity=quantity,
+        entry_price=entry_price,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+    )
+
+    return bracket.to_dict()
+
+
+@router.post("/trading/order/stop")
+async def create_stop_order(
+    symbol: str,
+    side: str,
+    quantity: float,
+    stop_price: float,
+    limit_price: Optional[float] = None,
+):
+    """Create a stop or stop-limit order."""
+    from ..trading import get_order_manager, OrderSide
+
+    manager = get_order_manager()
+    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    order = manager.create_stop_order(
+        symbol=symbol,
+        side=order_side,
+        quantity=quantity,
+        stop_price=stop_price,
+        limit_price=limit_price,
+    )
+
+    return order.to_dict()
+
+
+@router.post("/trading/order/trailing-stop")
+async def create_trailing_stop(
+    symbol: str,
+    side: str,
+    quantity: float,
+    trail_amount: float,
+    trail_percent: bool = False,
+):
+    """Create a trailing stop order."""
+    from ..trading import get_order_manager, OrderSide
+
+    manager = get_order_manager()
+    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    order = manager.create_trailing_stop(
+        symbol=symbol,
+        side=order_side,
+        quantity=quantity,
+        trail_amount=trail_amount,
+        trail_percent=trail_percent,
+    )
+
+    return order.to_dict()
+
+
+@router.get("/trading/orders")
+async def get_orders(status: str = "open"):
+    """Get orders by status."""
+    from ..trading import get_order_manager
+
+    manager = get_order_manager()
+
+    if status == "open":
+        orders = manager.get_open_orders()
+    elif status == "filled":
+        orders = manager.get_filled_orders()
+    else:
+        orders = list(manager.orders.values())
+
+    return {
+        "orders": [o.to_dict() for o in orders],
+        "count": len(orders),
+    }
+
+
+@router.delete("/trading/order/{order_id}")
+async def cancel_order(order_id: str):
+    """Cancel an order."""
+    from ..trading import get_order_manager
+
+    manager = get_order_manager()
+    success = manager.cancel_order(order_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Order not found or cannot be cancelled")
+
+    return {"status": "cancelled", "order_id": order_id}
+
+
+@router.get("/trading/portfolio")
+async def get_trading_portfolio():
+    """Get current auto-trader portfolio."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+    return trader.portfolio.to_dict()
+
+
+@router.get("/trading/performance")
+async def get_trading_performance():
+    """Get trading performance metrics."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+    return trader.get_performance_metrics()
+
+
+@router.get("/trading/history")
+async def get_trade_history(limit: int = 50):
+    """Get trade history."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+    trades = trader.trade_history[-limit:]
+
+    return {
+        "trades": [t.to_dict() for t in trades],
+        "count": len(trades),
+        "total_trades": len(trader.trade_history),
+    }
+
+
+@router.post("/trading/execute-signal")
+async def execute_signal(symbol: str):
+    """Execute the current signal for a symbol."""
+    from ..trading import get_auto_trader
+    from ..data.live import get_live_market_service
+
+    trader = get_auto_trader()
+
+    if not trader.last_signals:
+        raise HTTPException(status_code=400, detail="No signals generated yet")
+
+    # Find signal for symbol
+    signal = next(
+        (s for s in trader.last_signals.signals if s.symbol == symbol.upper()),
+        None
+    )
+
+    if not signal:
+        raise HTTPException(status_code=404, detail=f"No signal found for {symbol}")
+
+    # Get current price
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    # Execute
+    order = trader.execute_signal(signal, quote.price)
+
+    if not order:
+        return {"status": "no_action", "signal": signal.to_dict()}
+
+    return {
+        "status": "executed",
+        "signal": signal.to_dict(),
+        "order": order.to_dict(),
+    }
+
+
+# ============ Options Trading Endpoints ============
+
+@router.get("/options/chain/{symbol}")
+async def get_options_chain(
+    symbol: str,
+    expiration_days: int = 30,
+    volatility: float = 0.30,
+    num_strikes: int = 11,
+):
+    """Get options chain for a symbol."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    # Get current price
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    # Generate chain
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    chain = manager.generate_options_chain(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        expiration=expiration,
+        volatility=volatility,
+        num_strikes=num_strikes,
+    )
+
+    return {
+        "symbol": symbol.upper(),
+        "underlying_price": quote.price,
+        "expiration": expiration.isoformat(),
+        "volatility": volatility,
+        "calls": [c.to_dict() for c in chain["calls"]],
+        "puts": [p.to_dict() for p in chain["puts"]],
+    }
+
+
+@router.post("/options/price")
+async def price_option(
+    symbol: str,
+    strike: float,
+    expiration_days: int,
+    option_type: str = "call",
+    volatility: float = 0.30,
+):
+    """Price a single option contract."""
+    from ..trading import get_options_manager, OptionType
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    opt_type = OptionType.CALL if option_type.lower() == "call" else OptionType.PUT
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    contract = manager.price_option(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        strike=strike,
+        expiration=expiration,
+        volatility=volatility,
+        option_type=opt_type,
+    )
+
+    return contract.to_dict()
+
+
+@router.post("/options/implied-volatility")
+async def calculate_iv(
+    symbol: str,
+    strike: float,
+    expiration_days: int,
+    option_price: float,
+    option_type: str = "call",
+):
+    """Calculate implied volatility from option price."""
+    from ..trading import BlackScholes, OptionType
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    opt_type = OptionType.CALL if option_type.lower() == "call" else OptionType.PUT
+    T = expiration_days / 365.0
+    r = 0.05  # Risk-free rate
+
+    iv = BlackScholes.implied_volatility(
+        option_price=option_price,
+        S=quote.price,
+        K=strike,
+        T=T,
+        r=r,
+        option_type=opt_type,
+    )
+
+    return {
+        "symbol": symbol.upper(),
+        "strike": strike,
+        "option_type": option_type,
+        "option_price": option_price,
+        "implied_volatility": round(iv, 4),
+        "implied_volatility_pct": f"{iv * 100:.1f}%",
+    }
+
+
+@router.post("/options/strategy/covered-call")
+async def create_covered_call(
+    symbol: str,
+    strike: float,
+    expiration_days: int,
+    volatility: float = 0.30,
+):
+    """Create a covered call strategy."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_covered_call(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        strike=strike,
+        expiration=expiration,
+        volatility=volatility,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/protective-put")
+async def create_protective_put(
+    symbol: str,
+    strike: float,
+    expiration_days: int,
+    volatility: float = 0.30,
+):
+    """Create a protective put strategy."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_protective_put(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        strike=strike,
+        expiration=expiration,
+        volatility=volatility,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/bull-call-spread")
+async def create_bull_call_spread(
+    symbol: str,
+    lower_strike: float,
+    upper_strike: float,
+    expiration_days: int,
+    volatility: float = 0.30,
+):
+    """Create a bull call spread strategy."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_bull_call_spread(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        lower_strike=lower_strike,
+        upper_strike=upper_strike,
+        expiration=expiration,
+        volatility=volatility,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/bear-put-spread")
+async def create_bear_put_spread(
+    symbol: str,
+    lower_strike: float,
+    upper_strike: float,
+    expiration_days: int,
+    volatility: float = 0.30,
+):
+    """Create a bear put spread strategy."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_bear_put_spread(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        lower_strike=lower_strike,
+        upper_strike=upper_strike,
+        expiration=expiration,
+        volatility=volatility,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/straddle")
+async def create_straddle(
+    symbol: str,
+    strike: float,
+    expiration_days: int,
+    is_long: bool = True,
+    volatility: float = 0.30,
+):
+    """Create a straddle strategy (long or short)."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_straddle(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        strike=strike,
+        expiration=expiration,
+        volatility=volatility,
+        is_long=is_long,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/strangle")
+async def create_strangle(
+    symbol: str,
+    put_strike: float,
+    call_strike: float,
+    expiration_days: int,
+    is_long: bool = True,
+    volatility: float = 0.30,
+):
+    """Create a strangle strategy (long or short)."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_strangle(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        put_strike=put_strike,
+        call_strike=call_strike,
+        expiration=expiration,
+        volatility=volatility,
+        is_long=is_long,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/iron-condor")
+async def create_iron_condor(
+    symbol: str,
+    put_lower: float,
+    put_upper: float,
+    call_lower: float,
+    call_upper: float,
+    expiration_days: int,
+    volatility: float = 0.30,
+):
+    """Create an iron condor strategy."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_iron_condor(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        put_lower=put_lower,
+        put_upper=put_upper,
+        call_lower=call_lower,
+        call_upper=call_upper,
+        expiration=expiration,
+        volatility=volatility,
+    )
+
+    return strategy.to_dict()
+
+
+@router.post("/options/strategy/butterfly")
+async def create_butterfly(
+    symbol: str,
+    lower_strike: float,
+    middle_strike: float,
+    upper_strike: float,
+    expiration_days: int,
+    use_calls: bool = True,
+    volatility: float = 0.30,
+):
+    """Create a butterfly spread strategy."""
+    from ..trading import get_options_manager
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    manager = get_options_manager()
+    expiration = date.today() + timedelta(days=expiration_days)
+
+    strategy = manager.create_butterfly(
+        symbol=symbol.upper(),
+        underlying_price=quote.price,
+        lower_strike=lower_strike,
+        middle_strike=middle_strike,
+        upper_strike=upper_strike,
+        expiration=expiration,
+        volatility=volatility,
+        use_calls=use_calls,
+    )
+
+    return strategy.to_dict()
+
+
+@router.get("/options/strategies")
+async def list_strategies():
+    """List all options strategies."""
+    from ..trading import get_options_manager
+
+    manager = get_options_manager()
+    return {
+        "strategies": manager.list_strategies(),
+        "count": len(manager.strategies),
+    }
+
+
+@router.get("/options/strategy/{strategy_id}")
+async def get_strategy(strategy_id: str):
+    """Get strategy details and risk analysis."""
+    from ..trading import get_options_manager
+
+    manager = get_options_manager()
+    strategy = manager.get_strategy(strategy_id)
+
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    return strategy.to_dict()
+
+
+@router.get("/options/strategy/{strategy_id}/risk")
+async def get_strategy_risk(strategy_id: str):
+    """Get comprehensive risk analysis for a strategy."""
+    from ..trading import get_options_manager
+
+    manager = get_options_manager()
+    analysis = manager.analyze_strategy_risk(strategy_id)
+
+    if "error" in analysis:
+        raise HTTPException(status_code=404, detail=analysis["error"])
+
+    return analysis
+
+
+@router.get("/options/greeks-explain")
+async def explain_greeks():
+    """Get explanation of option Greeks for education."""
+    return {
+        "delta": {
+            "definition": "Rate of change of option price with respect to underlying price",
+            "range": "Calls: 0 to 1, Puts: -1 to 0",
+            "interpretation": "Delta of 0.5 means option price moves $0.50 for every $1 move in stock",
+            "hedge_ratio": "Number of shares needed to delta hedge 100 options",
+        },
+        "gamma": {
+            "definition": "Rate of change of delta with respect to underlying price",
+            "interpretation": "Measures how fast delta changes - high gamma = delta changes quickly",
+            "peak": "Highest for ATM options near expiration",
+        },
+        "theta": {
+            "definition": "Rate of time decay (per day)",
+            "interpretation": "How much value the option loses each day from time decay",
+            "sign": "Negative for long options (lose value), positive for short options",
+        },
+        "vega": {
+            "definition": "Sensitivity to volatility (per 1% change)",
+            "interpretation": "How much option price changes for 1% change in implied volatility",
+            "highest": "ATM options have highest vega",
+        },
+        "rho": {
+            "definition": "Sensitivity to interest rate changes (per 1% change)",
+            "interpretation": "Usually small impact except for long-dated options",
+        },
+    }
