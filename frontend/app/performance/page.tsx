@@ -250,10 +250,10 @@ export default function PerformancePage() {
       <div className="mt-8 p-4 rounded-lg bg-muted/50 border border-border">
         <h3 className="font-medium mb-2">Interpreting Metrics</h3>
         <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-          <li>Sharpe > 1 is generally considered good; > 2 is excellent (and rare)</li>
+          <li>Sharpe &gt; 1 is generally considered good; &gt; 2 is excellent (and rare)</li>
           <li>Max drawdown shows worst-case scenario - can you handle that emotionally?</li>
           <li>Alpha represents skill; Beta represents market exposure</li>
-          <li>Information Ratio > 0.5 suggests genuine stock selection ability</li>
+          <li>Information Ratio &gt; 0.5 suggests genuine stock selection ability</li>
         </ul>
       </div>
     </div>

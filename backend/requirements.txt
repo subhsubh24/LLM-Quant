@@ -18,7 +18,7 @@ statsmodels>=0.14.0
 
 # Portfolio Optimization
 cvxpy>=1.4.0
-pypfopt>=1.5.5
+# pypfopt removed - using cvxpy directly for optimization
 
 # Database
 sqlmodel>=0.0.14

@@ -3,7 +3,7 @@ SQLModel database models for QuantLab.
 All models use SQLite for local-first storage.
 """
 
-from datetime import datetime, date
+from datetime import datetime, date as dt_date
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 import json
@@ -16,7 +16,7 @@ class StockPrice(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
-    date: date = Field(index=True)
+    date: dt_date = Field(index=True)
     open: float
     high: float
     low: float
@@ -63,7 +63,7 @@ class Feature(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
-    date: date = Field(index=True)
+    date: dt_date = Field(index=True)
     feature_set_id: str = Field(index=True)  # Hash of feature config
 
     # Store features as JSON for flexibility
@@ -105,10 +105,10 @@ class ModelRun(SQLModel, table=True):
     model_type: str  # ridge, elasticnet, rf, gbm
 
     # Training details
-    train_start: date
-    train_end: date
-    validation_start: date
-    validation_end: date
+    train_start: dt_date
+    train_end: dt_date
+    validation_start: dt_date
+    validation_end: dt_date
     embargo_days: int = 5
 
     # Metrics
@@ -131,8 +131,8 @@ class BacktestRun(SQLModel, table=True):
     model_run_id: Optional[int] = Field(foreign_key="model_runs.id")
 
     # Period
-    start_date: date
-    end_date: date
+    start_date: dt_date
+    end_date: dt_date
     rebalance_frequency: str = "weekly"  # daily, weekly, monthly
 
     # Costs

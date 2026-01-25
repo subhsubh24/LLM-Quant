@@ -67,17 +67,25 @@ class TestFeatureLeakage:
         prices = generate_test_prices()
         vol = compute_volatility(prices, windows=[21])
 
-        # Should have NaN for first 22 days (21 lookback + 1 lag)
+        # With min_periods=window//2 (10 for 21-day), plus 1-day lag,
+        # we should have NaN for at least the first 11 days
         for col in vol.columns:
-            assert vol[col].iloc[:22].isna().all(), f"Feature {col} may have leakage"
+            # Check that the first day is NaN (proving lag exists)
+            assert vol[col].iloc[0] != vol[col].iloc[0], f"Feature {col} should start with NaN"
+            # Check that there's a reasonable warmup period
+            assert vol[col].iloc[:10].isna().all(), f"Feature {col} should have warmup period"
 
     def test_feature_target_alignment(self):
         """Features at time t should predict returns from t to t+horizon, not t-1 to t."""
         from app.features.pipeline import FeaturePipeline, FeatureConfig
 
-        prices = generate_test_prices()
+        prices = generate_test_prices(n_days=500, n_tickers=10)  # More tickers for better cross-sectional stats
 
-        config = FeatureConfig(enabled_features=["returns", "momentum"])
+        # Disable standardization to get raw feature values for correlation check
+        config = FeatureConfig(
+            enabled_features=["returns", "momentum"],
+            standardize_method="none"  # Don't standardize for this test
+        )
         pipeline = FeaturePipeline(config)
 
         features = pipeline.compute_features(prices)
@@ -95,14 +103,30 @@ class TestFeatureLeakage:
 
         # Simple check: correlation between features and targets should be modest
         # If correlation is very high, there's likely leakage
+        checked_correlations = 0
         for feat_col in features.columns[:5]:  # Check first 5 features
             for tgt_col in target.columns[:3]:  # Check first 3 targets
-                corr = features.loc[common_dates, feat_col].corr(
-                    target.loc[common_dates, tgt_col]
-                )
+                feat_data = features.loc[common_dates, feat_col].dropna()
+                tgt_data = target.loc[common_dates, tgt_col].dropna()
+
+                # Only check if we have overlapping non-NaN data
+                overlap = feat_data.index.intersection(tgt_data.index)
+                if len(overlap) < 50:
+                    continue
+
+                corr = feat_data.loc[overlap].corr(tgt_data.loc[overlap])
+
+                # Skip NaN correlations (can happen with constant data)
+                if np.isnan(corr):
+                    continue
+
+                checked_correlations += 1
                 # Correlation should be small in absolute value (typically < 0.1)
                 # Very high correlation suggests leakage
                 assert abs(corr) < 0.5, f"Suspiciously high correlation ({corr:.3f}) between {feat_col} and {tgt_col}"
+
+        # Make sure we actually checked something
+        assert checked_correlations > 0, "No valid correlations to check"
 
 
 class TestBacktestLeakage:

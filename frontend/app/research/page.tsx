@@ -263,7 +263,7 @@ export default function ResearchPage() {
         <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
           <li>Always use walk-forward validation, not random train/test splits</li>
           <li>Expect 30-50% performance degradation in live trading vs backtest</li>
-          <li>High Sharpe ratios (>2) should be scrutinized for data issues</li>
+          <li>High Sharpe ratios (&gt;2) should be scrutinized for data issues</li>
           <li>Transaction costs of 10+ bps are realistic for retail traders</li>
         </ul>
       </div>
