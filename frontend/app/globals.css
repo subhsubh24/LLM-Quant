@@ -117,6 +117,14 @@ body {
   color: #ff3b30;
 }
 
+.bg-positive {
+  background-color: #00d26a;
+}
+
+.bg-negative {
+  background-color: #ff3b30;
+}
+
 .text-bloomberg-orange {
   color: #ff9500;
 }
@@ -214,7 +222,7 @@ body {
 }
 
 .status-live {
-  @apply bg-positive;
+  background-color: #00d26a;
   animation: pulse 2s infinite;
 }
 
