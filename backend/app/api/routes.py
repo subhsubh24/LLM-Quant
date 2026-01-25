@@ -683,3 +683,96 @@ async def get_status():
         "initial_cash": settings.initial_cash,
         "disclaimer": DISCLAIMER
     }
+
+
+# ============ Live Market Data Endpoints ============
+
+@router.get("/market/quote/{symbol}")
+async def get_quote(symbol: str):
+    """Get real-time quote for a symbol."""
+    from ..data.live import get_live_market_service
+
+    service = get_live_market_service()
+    quote = await service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    return quote.to_dict()
+
+
+@router.post("/market/quotes")
+async def get_quotes(symbols: List[str]):
+    """Get real-time quotes for multiple symbols."""
+    from ..data.live import get_live_market_service
+
+    service = get_live_market_service()
+    quotes = await service.get_quotes_batch([s.upper() for s in symbols])
+
+    return {
+        symbol: quote.to_dict()
+        for symbol, quote in quotes.items()
+    }
+
+
+@router.get("/market/overview")
+async def get_market_overview():
+    """Get market overview with indices and sector performance."""
+    from ..data.live import get_live_market_service
+
+    service = get_live_market_service()
+    overview = await service.get_market_overview()
+
+    return overview
+
+
+@router.get("/market/news")
+async def get_market_news(category: str = "general", limit: int = 20):
+    """Get market news."""
+    from ..data.live import get_live_market_service
+
+    service = get_live_market_service()
+    news = await service.get_news(category, limit)
+
+    return {
+        "news": [n.to_dict() for n in news],
+        "count": len(news),
+    }
+
+
+@router.get("/market/news/{symbol}")
+async def get_symbol_news(symbol: str, limit: int = 10):
+    """Get news for a specific symbol."""
+    from ..data.live import get_live_market_service
+
+    service = get_live_market_service()
+    news = await service.get_symbol_news(symbol.upper(), limit)
+
+    return {
+        "symbol": symbol.upper(),
+        "news": [n.to_dict() for n in news],
+        "count": len(news),
+    }
+
+
+@router.get("/market/watchlist")
+async def get_watchlist_data(session=Depends(get_session_dependency)):
+    """Get data for default watchlist (top liquid stocks)."""
+    from ..data.live import get_live_market_service
+
+    # Default watchlist
+    watchlist = [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+        "JPM", "V", "UNH", "XOM", "JNJ", "WMT", "MA"
+    ]
+
+    service = get_live_market_service()
+    quotes = await service.get_quotes_batch(watchlist)
+
+    return {
+        "watchlist": [
+            quotes[s].to_dict() if s in quotes else {"symbol": s, "error": "unavailable"}
+            for s in watchlist
+        ],
+        "timestamp": datetime.now().isoformat()
+    }

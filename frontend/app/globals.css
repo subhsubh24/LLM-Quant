@@ -4,48 +4,49 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    /* Bloomberg-style dark terminal theme */
+    --background: 220 20% 4%;
+    --foreground: 60 10% 90%;
+    --card: 220 18% 7%;
+    --card-foreground: 60 10% 90%;
+    --popover: 220 18% 7%;
+    --popover-foreground: 60 10% 90%;
+    --primary: 36 100% 50%;
+    --primary-foreground: 220 20% 4%;
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 60 10% 90%;
+    --muted: 220 15% 12%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 220 15% 15%;
+    --accent-foreground: 60 10% 90%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 60 10% 90%;
+    --border: 220 15% 15%;
+    --input: 220 15% 15%;
+    --ring: 36 100% 50%;
+    --radius: 0.25rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --background: 220 20% 4%;
+    --foreground: 60 10% 90%;
+    --card: 220 18% 7%;
+    --card-foreground: 60 10% 90%;
+    --popover: 220 18% 7%;
+    --popover-foreground: 60 10% 90%;
+    --primary: 36 100% 50%;
+    --primary-foreground: 220 20% 4%;
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 60 10% 90%;
+    --muted: 220 15% 12%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 220 15% 15%;
+    --accent-foreground: 60 10% 90%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 60 10% 90%;
+    --border: 220 15% 15%;
+    --input: 220 15% 15%;
+    --ring: 36 100% 50%;
   }
 }
 
@@ -59,19 +60,30 @@
   }
 }
 
-/* Custom scrollbar */
+/* Terminal-style font */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+}
+
+/* Custom scrollbar - Bloomberg style */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: hsl(var(--background));
 }
 
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--muted-foreground) / 0.3);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -81,18 +93,14 @@
 /* Smooth transitions */
 .transition-colors {
   transition-property: color, background-color, border-color;
-  transition-duration: 150ms;
+  transition-duration: 100ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Card hover effect */
-.card-hover {
-  transition: transform 150ms ease, box-shadow 150ms ease;
-}
-
-.card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.1);
+/* Terminal panel */
+.terminal-panel {
+  @apply bg-card border border-border rounded;
+  box-shadow: 0 0 0 1px hsl(var(--border));
 }
 
 /* Number formatting */
@@ -100,19 +108,140 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Positive/negative colors */
+/* Bloomberg-style colors */
 .text-positive {
-  color: hsl(142.1 76.2% 36.3%);
+  color: #00d26a;
 }
 
 .text-negative {
-  color: hsl(0 84.2% 60.2%);
+  color: #ff3b30;
 }
 
-.dark .text-positive {
-  color: hsl(142.1 70.6% 45.3%);
+.text-bloomberg-orange {
+  color: #ff9500;
 }
 
-.dark .text-negative {
-  color: hsl(0 62.8% 50.6%);
+.text-bloomberg-blue {
+  color: #007aff;
+}
+
+.bg-bloomberg-orange {
+  background-color: #ff9500;
+}
+
+/* Ticker tape animation */
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.ticker-tape {
+  animation: ticker 30s linear infinite;
+}
+
+/* Blinking cursor */
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+.cursor-blink::after {
+  content: '|';
+  animation: blink 1s step-end infinite;
+  color: hsl(var(--primary));
+}
+
+/* Grid patterns */
+.grid-pattern {
+  background-image:
+    linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Price flash animation */
+@keyframes flash-green {
+  0% { background-color: rgba(0, 210, 106, 0.3); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flash-red {
+  0% { background-color: rgba(255, 59, 48, 0.3); }
+  100% { background-color: transparent; }
+}
+
+.flash-positive {
+  animation: flash-green 0.5s ease-out;
+}
+
+.flash-negative {
+  animation: flash-red 0.5s ease-out;
+}
+
+/* Index boxes */
+.index-box {
+  @apply px-3 py-2 rounded bg-secondary/50 border border-border;
+}
+
+/* News headline styles */
+.news-headline {
+  @apply text-sm leading-snug;
+}
+
+.news-headline:hover {
+  @apply text-primary;
+}
+
+/* Sector heatmap colors */
+.sector-positive-1 { background-color: rgba(0, 210, 106, 0.2); }
+.sector-positive-2 { background-color: rgba(0, 210, 106, 0.4); }
+.sector-positive-3 { background-color: rgba(0, 210, 106, 0.6); }
+.sector-negative-1 { background-color: rgba(255, 59, 48, 0.2); }
+.sector-negative-2 { background-color: rgba(255, 59, 48, 0.4); }
+.sector-negative-3 { background-color: rgba(255, 59, 48, 0.6); }
+
+/* Status indicators */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-live {
+  @apply bg-positive;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Command line input */
+.command-input {
+  @apply bg-background border border-border rounded px-3 py-2 font-mono text-sm;
+  @apply focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary;
+}
+
+/* Data table */
+.data-table {
+  @apply w-full text-sm font-mono;
+}
+
+.data-table th {
+  @apply text-left text-muted-foreground font-medium py-2 px-3 border-b border-border;
+}
+
+.data-table td {
+  @apply py-2 px-3 border-b border-border/50;
+}
+
+.data-table tr:hover {
+  @apply bg-secondary/30;
 }

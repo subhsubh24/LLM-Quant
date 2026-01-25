@@ -18,8 +18,11 @@ class Settings(BaseSettings):
     # LLM Integration (optional)
     openai_api_key: str = ""
 
+    # Market Data API Keys (optional but recommended for live data)
+    finnhub_api_key: str = ""  # Free tier: 60 calls/min
+
     # Data Provider
-    data_provider: Literal["stooq", "yfinance"] = "stooq"
+    data_provider: Literal["stooq", "yfinance"] = "yfinance"
     data_cache_days: int = 1
 
     # Paper Trading
@@ -32,8 +35,8 @@ class Settings(BaseSettings):
     target_volatility: float = 0.15
     max_drawdown_limit: float = 0.20
 
-    # Demo Mode
-    demo_mode: bool = True
+    # Demo Mode (set to False for live data)
+    demo_mode: bool = False
     demo_seed: int = 42
 
     # Server
