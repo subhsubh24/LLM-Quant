@@ -776,3 +776,122 @@ async def get_watchlist_data(session=Depends(get_session_dependency)):
         ],
         "timestamp": datetime.now().isoformat()
     }
+
+
+# ============ AI Analysis Endpoints ============
+
+@router.get("/ai/analyze/{symbol}")
+async def analyze_stock(symbol: str):
+    """Get AI-powered deep analysis for a stock."""
+    from ..llm.analyst import get_quant_analyst
+    from ..data.live import get_live_market_service
+
+    # Get current quote
+    market_service = get_live_market_service()
+    quote = await market_service.get_quote(symbol.upper())
+    news = await market_service.get_symbol_news(symbol.upper(), limit=5)
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
+
+    analyst = get_quant_analyst()
+    analysis = await analyst.analyze_stock(
+        symbol=symbol.upper(),
+        quote=quote.to_dict(),
+        news=[n.to_dict() for n in news]
+    )
+
+    return analysis
+
+
+@router.get("/ai/market-commentary")
+async def get_market_commentary():
+    """Get AI-generated market commentary."""
+    from ..llm.analyst import get_quant_analyst
+    from ..data.live import get_live_market_service
+
+    market_service = get_live_market_service()
+    overview = await market_service.get_market_overview()
+
+    analyst = get_quant_analyst()
+    commentary = await analyst.generate_market_commentary(overview)
+
+    return commentary
+
+
+@router.post("/ai/critique-strategy")
+async def critique_strategy(strategy: str, backtest_results: Optional[Dict] = None):
+    """Get rigorous AI critique of a trading strategy."""
+    from ..llm.analyst import get_quant_analyst
+
+    analyst = get_quant_analyst()
+    critique = await analyst.critique_strategy(strategy, backtest_results)
+
+    return critique
+
+
+@router.get("/ai/learning-path")
+async def get_learning_path(
+    level: str = "beginner",
+    interests: str = "general quant",
+    goal: str = "become a quant trader"
+):
+    """Get personalized quant learning path."""
+    from ..llm.analyst import get_quant_analyst
+
+    analyst = get_quant_analyst()
+    path = await analyst.get_learning_path(
+        current_level=level,
+        interests=interests.split(","),
+        goals=goal
+    )
+
+    return path
+
+
+@router.get("/ai/explain/{concept}")
+async def explain_concept(concept: str, context: str = ""):
+    """Get deep dive explanation of a quant concept."""
+    from ..llm.analyst import get_quant_analyst
+
+    analyst = get_quant_analyst()
+    explanation = await analyst.explain_concept(concept, context)
+
+    return explanation
+
+
+@router.post("/ai/analyze-portfolio")
+async def analyze_portfolio(session=Depends(get_session_dependency)):
+    """Get AI analysis of the current paper portfolio."""
+    from sqlmodel import select
+    from ..llm.analyst import get_quant_analyst
+
+    # Get active portfolio
+    statement = select(PaperPortfolio).where(PaperPortfolio.is_active == True)
+    portfolio = session.exec(statement).first()
+
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="No active portfolio")
+
+    # Get positions
+    pos_statement = select(PaperPosition).where(PaperPosition.portfolio_id == portfolio.id)
+    positions = session.exec(pos_statement).all()
+
+    positions_data = [
+        {
+            "ticker": pos.ticker,
+            "shares": pos.shares,
+            "market_value": pos.market_value,
+            "weight": pos.weight,
+            "unrealized_pnl": pos.unrealized_pnl
+        }
+        for pos in positions
+    ]
+
+    analyst = get_quant_analyst()
+    analysis = await analyst.analyze_portfolio(
+        positions=positions_data,
+        total_value=portfolio.total_value
+    )
+
+    return analysis

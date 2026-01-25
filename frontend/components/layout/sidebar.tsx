@@ -9,11 +9,13 @@ import {
   BarChart3,
   GraduationCap,
   Terminal,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Terminal", href: "/dashboard", icon: Terminal },
+  { name: "AI Insights", href: "/insights", icon: Brain },
   { name: "Research", href: "/research", icon: FlaskConical },
   { name: "Trading", href: "/trading", icon: TrendingUp },
   { name: "Analytics", href: "/performance", icon: BarChart3 },
