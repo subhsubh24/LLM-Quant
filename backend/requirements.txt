@@ -36,3 +36,4 @@ pytest-cov>=4.1.0
 # Utilities
 loguru>=0.7.2
 python-multipart>=0.0.6
+scipy>=1.10.0
