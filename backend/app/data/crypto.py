@@ -1,6 +1,7 @@
 """
 Cryptocurrency market data service.
-Uses CoinGecko API (free) for real-time crypto prices.
+Uses Binance WebSocket for REAL-TIME prices (primary).
+Falls back to CoinGecko API if WebSocket unavailable.
 """
 
 import asyncio
@@ -12,6 +13,7 @@ import httpx
 import logging
 
 from ..config import get_settings
+from .binance_ws import get_binance_ws, LivePrice
 
 logger = logging.getLogger(__name__)
 
@@ -512,33 +514,41 @@ class CryptoMarketService:
     def __init__(self):
         self.settings = get_settings()
         self.cache: Dict[str, Any] = {}
-        self.cache_ttl = 30  # seconds (crypto moves fast!)
+        self.cache_ttl = 30  # seconds - only used for CoinGecko fallback
         self.base_url = "https://api.coingecko.com/api/v3"
         self.use_mock_fallback = False  # DISABLE mock fallback - error on API failure
         self._last_batch_fetch: Optional[datetime] = None
-        self._batch_cache: Dict[str, CryptoQuote] = {}  # Cache for batch fetched data
+        self._batch_cache: Dict[str, CryptoQuote] = {}  # Cache for CoinGecko fallback
         self._batch_cache_ttl = 30  # seconds
+        # Binance WebSocket is the PRIMARY data source for truly live prices
+        self._binance_ws = get_binance_ws()
 
     async def get_quote(self, symbol: str) -> Optional[CryptoQuote]:
-        """Get real-time quote for a cryptocurrency. NO MOCK FALLBACK."""
+        """
+        Get real-time quote for a cryptocurrency.
+
+        PRIMARY: Binance WebSocket (truly live, sub-second updates)
+        FALLBACK: CoinGecko REST API (only if WebSocket unavailable)
+        """
         symbol = symbol.upper()
+
+        # PRIMARY SOURCE: Binance WebSocket (truly live data)
+        if self._binance_ws.is_connected:
+            live_price = self._binance_ws.get_price(symbol)
+            if live_price:
+                return self._live_price_to_quote(live_price)
+
+        # FALLBACK: CoinGecko REST API (only if WebSocket not connected)
+        logger.debug(f"WebSocket not available for {symbol}, falling back to CoinGecko")
+
         cache_key = f"crypto_quote_{symbol}"
 
-        # Check regular cache first
+        # Check cache for fallback
         cached = self._get_cached_with_age(cache_key)
         if cached:
             quote, age_seconds = cached
             quote.data_age_seconds = age_seconds
             return quote
-
-        # Check batch cache (from bulk fetch)
-        if symbol in self._batch_cache:
-            quote = self._batch_cache[symbol]
-            if self._last_batch_fetch:
-                age = (datetime.now() - self._last_batch_fetch).total_seconds()
-                if age < self._batch_cache_ttl:
-                    quote.data_age_seconds = age
-                    return quote
 
         # Convert symbol to CoinGecko ID
         coin_id = self.SYMBOL_TO_ID.get(symbol)
@@ -550,26 +560,41 @@ class CryptoMarketService:
                 quote = await self._fetch_coingecko_quote(client, coin_id, symbol)
                 if quote:
                     self._set_cached(cache_key, quote)
-                    logger.debug(f"✓ LIVE price for {symbol}: ${quote.price} from CoinGecko")
+                    logger.debug(f"✓ Price for {symbol}: ${quote.price} from CoinGecko (fallback)")
                     return quote
         except Exception as e:
             logger.error(f"CoinGecko API failed for {symbol}: {e}")
 
         # NO MOCK FALLBACK - return None and log error
-        logger.error(f"❌ NO DATA for {symbol} - API unavailable, no mock fallback")
+        logger.error(f"❌ NO DATA for {symbol} - WebSocket disconnected, API unavailable")
         return None
 
     async def get_quotes_batch(self, symbols: List[str]) -> Dict[str, CryptoQuote]:
         """
-        Get quotes for multiple cryptocurrencies using CoinGecko's efficient batch API.
-        Uses /simple/price endpoint which can fetch 250+ coins in ONE request.
+        Get quotes for multiple cryptocurrencies.
 
-        RATE LIMIT AWARE: Only fetches if cache is expired (30s TTL).
+        PRIMARY: Binance WebSocket (truly live, sub-second updates)
+        FALLBACK: CoinGecko REST API (only if WebSocket unavailable)
         """
         quotes = {}
         symbols = [s.upper() for s in symbols]
 
-        # Check if we have fresh batch data (within TTL)
+        # PRIMARY SOURCE: Binance WebSocket (truly live data)
+        if self._binance_ws.is_connected:
+            for symbol in symbols:
+                live_price = self._binance_ws.get_price(symbol)
+                if live_price:
+                    quotes[symbol] = self._live_price_to_quote(live_price)
+
+            if quotes:
+                # Log how many we got from WebSocket
+                logger.debug(f"📊 LIVE prices from Binance WebSocket: {len(quotes)}/{len(symbols)} symbols")
+                return quotes
+
+        # FALLBACK: CoinGecko REST API (only if WebSocket not connected or no data)
+        logger.info("WebSocket not available, falling back to CoinGecko API")
+
+        # Check if we have fresh batch data (within TTL) for fallback
         if self._last_batch_fetch:
             age = (datetime.now() - self._last_batch_fetch).total_seconds()
             if age < self._batch_cache_ttl:
@@ -582,10 +607,10 @@ class CryptoMarketService:
 
                 # If we have most of the data cached, return it
                 if len(quotes) >= len(symbols) * 0.8:  # 80% threshold
-                    logger.debug(f"Using cached batch data ({age:.1f}s old, {len(quotes)}/{len(symbols)} coins)")
+                    logger.debug(f"Using cached CoinGecko data ({age:.1f}s old, {len(quotes)}/{len(symbols)} coins)")
                     return quotes
 
-        # Need to fetch fresh data
+        # Need to fetch fresh data from CoinGecko
         # Convert symbols to CoinGecko IDs
         coin_ids = []
         symbol_to_id_map = {}
@@ -666,6 +691,37 @@ class CryptoMarketService:
                     quotes[symbol] = self._batch_cache[symbol]
 
         return quotes
+
+    def _live_price_to_quote(self, live: LivePrice) -> CryptoQuote:
+        """Convert Binance WebSocket LivePrice to CryptoQuote."""
+        # Get name from our mapping
+        coin_id = self.SYMBOL_TO_ID.get(live.symbol)
+        name = self.TOP_CRYPTOS.get(coin_id, (live.symbol, live.symbol))[1] if coin_id else live.symbol
+
+        # Estimate market cap from volume (rough approximation)
+        # Real market cap would need additional API call
+        estimated_mcap = live.quote_volume_24h * 10  # Very rough estimate
+
+        return CryptoQuote(
+            symbol=live.symbol,
+            name=name,
+            price=live.price,
+            change_24h=live.price_change_24h,
+            change_percent_24h=live.price_change_percent_24h,
+            high_24h=live.high_24h,
+            low_24h=live.low_24h,
+            volume_24h=live.quote_volume_24h,  # Use USDT volume
+            market_cap=estimated_mcap,
+            market_cap_rank=0,  # Not available from WebSocket
+            circulating_supply=0,  # Not available from WebSocket
+            total_supply=None,
+            ath=live.high_24h,  # Best approximation
+            ath_change_percent=0,
+            timestamp=live.timestamp,
+            is_live=True,
+            data_source="binance_websocket",
+            data_age_seconds=live.data_age_seconds,
+        )
 
     def _create_quote_from_simple_price(
         self, symbol: str, coin_id: str, data: Dict
@@ -902,6 +958,18 @@ class CryptoMarketService:
     def _set_cached(self, key: str, data: Any):
         """Set value in cache."""
         self.cache[key] = {"data": data, "time": datetime.now()}
+
+    def get_data_source_status(self) -> Dict[str, Any]:
+        """Get status of all data sources."""
+        ws_status = self._binance_ws.get_status()
+        return {
+            "primary_source": "binance_websocket",
+            "fallback_source": "coingecko_api",
+            "websocket": ws_status,
+            "is_live": ws_status["connected"],
+            "symbols_available": ws_status["symbols_count"],
+            "last_update": ws_status["last_update"],
+        }
 
 
 # Singleton instance

@@ -3032,30 +3032,38 @@ class QuantBot:
         """
         Check the health and freshness of market data sources.
         Returns detailed status of API connectivity and data freshness.
-        MOCK FALLBACK IS DISABLED - APIs must work or errors are raised.
+
+        PRIMARY: Binance WebSocket (real-time, no rate limits)
+        FALLBACK: CoinGecko REST API
         """
+        # Get WebSocket status
+        ws_status = self.crypto_service.get_data_source_status()
+
         health = {
             "timestamp": datetime.now().isoformat(),
             "mock_fallback_enabled": False,  # Mock fallback is DISABLED
+            "websocket": ws_status["websocket"],
             "crypto": {"status": "unknown", "source": "unknown", "sample_price": None},
             "stocks": {"status": "unknown", "source": "unknown", "sample_price": None},
             "overall": "unknown",
         }
 
-        # Test crypto data source
+        # Test crypto data source (WebSocket or CoinGecko fallback)
         try:
             btc_quote = await self.crypto_service.get_quote("BTC")
             if btc_quote:
+                is_websocket = btc_quote.data_source == "binance_websocket"
                 health["crypto"] = {
                     "status": "live",
                     "source": btc_quote.data_source,
                     "sample_price": btc_quote.price,
-                    "data_age_seconds": round(btc_quote.data_age_seconds, 1),
-                    "cache_ttl": self.crypto_service.cache_ttl,
+                    "data_age_seconds": round(btc_quote.data_age_seconds, 2),
                     "is_live": True,
+                    "is_realtime": is_websocket,
+                    "latency": "< 1 second" if is_websocket else f"{self.crypto_service.cache_ttl}s polling",
                 }
             else:
-                health["crypto"] = {"status": "error", "error": "No data returned - API may be rate limited"}
+                health["crypto"] = {"status": "error", "error": "No data returned - WebSocket disconnected, API may be rate limited"}
         except Exception as e:
             health["crypto"] = {"status": "error", "error": str(e)}
 
@@ -3079,19 +3087,23 @@ class QuantBot:
         # Overall status
         crypto_ok = health["crypto"].get("status") == "live"
         stocks_ok = health["stocks"].get("status") == "live"
+        ws_connected = ws_status["websocket"].get("connected", False)
 
         if crypto_ok and stocks_ok:
             health["overall"] = "all_live"
-            health["message"] = "✓ All data sources are LIVE (no mock fallback)"
+            if ws_connected:
+                health["message"] = "✓ All data sources LIVE - Crypto via Binance WebSocket (REAL-TIME)"
+            else:
+                health["message"] = "✓ All data sources LIVE (CoinGecko fallback for crypto)"
         elif crypto_ok:
             health["overall"] = "crypto_only"
-            health["message"] = f"⚠️ Crypto LIVE, Stocks ERROR: {health['stocks'].get('error', 'unknown')}"
+            health["message"] = f"⚠️ Crypto LIVE ({health['crypto'].get('source')}), Stocks ERROR: {health['stocks'].get('error', 'unknown')}"
         elif stocks_ok:
             health["overall"] = "stocks_only"
             health["message"] = f"⚠️ Stocks LIVE, Crypto ERROR: {health['crypto'].get('error', 'unknown')}"
         else:
             health["overall"] = "all_error"
-            health["message"] = "❌ ALL APIs FAILED - no trading possible"
+            health["message"] = "❌ ALL DATA SOURCES FAILED - no trading possible"
 
         return health
 
