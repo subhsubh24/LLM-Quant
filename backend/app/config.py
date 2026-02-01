@@ -35,8 +35,9 @@ class Settings(BaseSettings):
     target_volatility: float = 0.15
     max_drawdown_limit: float = 0.20
 
-    # Demo Mode (set to False for live data)
-    demo_mode: bool = False
+    # Demo Mode - ENABLED BY DEFAULT for easy setup
+    # Uses fallback data when external APIs unavailable
+    demo_mode: bool = True
     demo_seed: int = 42
 
     # Server
