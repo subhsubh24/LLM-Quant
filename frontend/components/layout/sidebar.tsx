@@ -5,31 +5,22 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   FlaskConical,
-  TrendingUp,
   BarChart3,
   GraduationCap,
-  Cpu,
-  Brain,
-  Layers,
-  Bitcoin,
-  Sparkles,
-  Wallet,
   Activity,
   Bot,
   Settings,
+  Zap,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Trading", href: "/trading", icon: TrendingUp },
-  { name: "Crypto", href: "/crypto", icon: Bitcoin },
-  { name: "Quant Bot", href: "/bot", icon: Bot },
-  { name: "Options", href: "/options", icon: Layers },
-  { name: "AI Insights", href: "/insights", icon: Sparkles },
-  { name: "Research", href: "/research", icon: FlaskConical },
-  { name: "Analytics", href: "/performance", icon: BarChart3 },
-  { name: "Learn", href: "/learn", icon: GraduationCap },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, description: "Market Overview" },
+  { name: "Quant Bot", href: "/bot", icon: Bot, badge: "LIVE", badgeColor: "green", description: "Automated Trading" },
+  { name: "Research", href: "/research", icon: FlaskConical, description: "Algorithm Config" },
+  { name: "Analytics", href: "/performance", icon: BarChart3, description: "Market Health" },
+  { name: "Learn", href: "/learn", icon: GraduationCap, badge: "AI", badgeColor: "purple", description: "Trade Coaching" },
 ];
 
 export function Sidebar() {
@@ -55,33 +46,38 @@ export function Sidebar() {
         <div className="space-y-1">
           {navigation.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            const badgeColors: Record<string, { active: string; inactive: string }> = {
+              green: { active: "bg-white/20 text-white", inactive: "bg-green-50 text-green-600" },
+              purple: { active: "bg-white/20 text-white", inactive: "bg-purple-50 text-purple-600" },
+              orange: { active: "bg-white/20 text-white", inactive: "bg-orange-50 text-orange-600" },
+            };
             return (
               <Link
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all",
+                  "flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all group",
                   isActive
                     ? "bg-gray-900 text-white shadow-lg"
                     : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                 )}
               >
-                <item.icon className={cn("w-5 h-5", isActive ? "text-white" : "text-gray-400")} />
-                <span className="text-sm">{item.name}</span>
-                {item.name === "Quant Bot" && (
+                <item.icon className={cn("w-5 h-5", isActive ? "text-white" : "text-gray-400 group-hover:text-gray-600")} />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm block">{item.name}</span>
                   <span className={cn(
-                    "ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                    isActive ? "bg-white/20 text-white" : "bg-green-50 text-green-600"
-                  )}>
-                    LIVE
-                  </span>
-                )}
-                {item.name === "Crypto" && (
+                    "text-[10px] block",
+                    isActive ? "text-gray-300" : "text-gray-400"
+                  )}>{item.description}</span>
+                </div>
+                {item.badge && (
                   <span className={cn(
-                    "ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                    isActive ? "bg-white/20 text-white" : "bg-orange-50 text-orange-600"
+                    "text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                    isActive
+                      ? badgeColors[item.badgeColor || "green"].active
+                      : badgeColors[item.badgeColor || "green"].inactive
                   )}>
-                    24/7
+                    {item.badge}
                   </span>
                 )}
               </Link>
