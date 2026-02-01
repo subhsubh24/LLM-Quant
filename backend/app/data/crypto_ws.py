@@ -335,11 +335,11 @@ class MultiProviderWebSocket:
         self._reconnect_delay = 1
         self._max_reconnect_delay = 60
 
-        # Providers to try in order
+        # Providers to try in order - Binance.US first for US users
         self._providers: List[WebSocketProvider] = [
+            BinanceUSProvider(),  # Priority for US users with Binance.US accounts
             CoinbaseProvider(),
             KrakenProvider(),
-            BinanceUSProvider(),
             BinanceProvider(),
         ]
 
