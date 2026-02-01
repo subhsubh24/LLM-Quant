@@ -2413,6 +2413,62 @@ async def get_supported_crypto_derivatives():
     }
 
 
+class CryptoOptionRequest(BaseModel):
+    """Request model for opening crypto option."""
+    base_asset: str = "BTC"  # "BTC" or "ETH"
+    option_type: str = "call"  # "call" or "put"
+    strike: float = 100000
+    expiry_days: int = 30
+    size_usd: float = 5000
+    is_buy: bool = True
+
+
+@router.post("/options-bot/crypto/option/open")
+async def open_crypto_option(request: CryptoOptionRequest):
+    """
+    Open a crypto option position (Deribit-style).
+
+    Supports BTC and ETH options with Black-Scholes pricing.
+    """
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+
+    if request.base_asset not in ["BTC", "ETH"]:
+        raise HTTPException(status_code=400, detail="Only BTC and ETH options supported")
+
+    if request.option_type not in ["call", "put"]:
+        raise HTTPException(status_code=400, detail="Option type must be 'call' or 'put'")
+
+    position = await bot.open_crypto_option(
+        base_asset=request.base_asset,
+        option_type=request.option_type,
+        strike=request.strike,
+        expiry_days=request.expiry_days,
+        size_usd=request.size_usd,
+        is_buy=request.is_buy,
+    )
+
+    if position is None:
+        raise HTTPException(status_code=400, detail="Failed to open option - check funds")
+
+    return {"status": "opened", "position": position.to_dict()}
+
+
+@router.post("/options-bot/crypto/option/close/{position_id}")
+async def close_crypto_option(position_id: str, reason: str = "Manual close"):
+    """Close a crypto option position."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+
+    if position_id not in bot.crypto_positions:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    await bot.close_crypto_option(position_id, reason)
+    return {"status": "closed", "position_id": position_id}
+
+
 # ============ Strategy Backtesting Endpoints ============
 
 class StrategyBacktestRequest(BaseModel):

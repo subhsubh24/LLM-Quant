@@ -1134,6 +1134,134 @@ class OptionsQuantBot:
 
         del self.crypto_positions[position_id]
 
+    async def open_crypto_option(
+        self,
+        base_asset: str,  # "BTC" or "ETH"
+        option_type: str,  # "call" or "put"
+        strike: float,
+        expiry_days: int = 30,
+        size_usd: float = 5000,
+        is_buy: bool = True,
+    ) -> Optional[CryptoDerivativePosition]:
+        """
+        Open a crypto option position (Deribit-style).
+
+        Args:
+            base_asset: "BTC" or "ETH"
+            option_type: "call" or "put"
+            strike: Strike price
+            expiry_days: Days to expiration
+            size_usd: Notional size in USD
+            is_buy: True for long option, False for short (selling)
+        """
+        if base_asset not in ["BTC", "ETH"]:
+            self._add_commentary(f"⚠️ Crypto options only supported for BTC/ETH", "error")
+            return None
+
+        # Get current price
+        symbol = f"{base_asset}-OPT"
+        current_price = await self._get_crypto_price(symbol)
+
+        # Calculate option price using Black-Scholes approximation
+        # In production, would use Deribit API for actual IV and prices
+        from datetime import timedelta
+        import math
+
+        # Simulate crypto IV (typically 50-100% for BTC/ETH)
+        iv = 0.65 + np.random.uniform(-0.15, 0.15)
+        t = expiry_days / 365
+        r = 0.05  # Risk-free rate
+
+        # Black-Scholes for call/put
+        d1 = (math.log(current_price / strike) + (r + iv**2 / 2) * t) / (iv * math.sqrt(t))
+        d2 = d1 - iv * math.sqrt(t)
+
+        from scipy.stats import norm
+        if option_type == "call":
+            option_price = current_price * norm.cdf(d1) - strike * math.exp(-r * t) * norm.cdf(d2)
+            delta = norm.cdf(d1)
+        else:  # put
+            option_price = strike * math.exp(-r * t) * norm.cdf(-d2) - current_price * norm.cdf(-d1)
+            delta = norm.cdf(d1) - 1
+
+        # Calculate Greeks
+        gamma = norm.pdf(d1) / (current_price * iv * math.sqrt(t))
+        theta = -(current_price * norm.pdf(d1) * iv) / (2 * math.sqrt(t)) / 365
+        vega = current_price * math.sqrt(t) * norm.pdf(d1) / 100
+
+        # Calculate position cost
+        contracts = size_usd / current_price
+        premium = option_price * contracts
+
+        if is_buy:
+            cost = premium
+            side = "long"
+            max_loss = premium
+        else:
+            cost = premium * 0.2  # Margin for short options
+            side = "short"
+            max_loss = size_usd * 0.5  # Simplified max loss for shorts
+
+        if cost > self.cash:
+            self._add_commentary(
+                f"⚠️ Insufficient funds for {base_asset} {option_type}: need ${cost:,.0f}",
+                "risk"
+            )
+            return None
+
+        position_id = str(uuid.uuid4())[:8]
+
+        position = CryptoDerivativePosition(
+            id=position_id,
+            symbol=f"{base_asset}-{expiry_days}D-{strike}-{'C' if option_type == 'call' else 'P'}",
+            derivative_type=option_type,
+            side=side,
+            entry_price=option_price,
+            size=contracts,
+            leverage=1.0,
+            current_price=option_price,
+            delta=delta * (1 if is_buy else -1),
+            gamma=gamma,
+            theta=theta * (1 if is_buy else -1),
+            vega=vega * (1 if is_buy else -1),
+            iv=iv,
+        )
+
+        self.crypto_positions[position_id] = position
+        self.cash -= cost
+
+        action = "BOUGHT" if is_buy else "SOLD"
+        self._add_commentary(
+            f"✅ {action} {base_asset} {strike} {option_type.upper()} ({expiry_days}D) | "
+            f"Premium: ${premium:,.0f} | Delta: {delta:.2f} | IV: {iv*100:.0f}%",
+            "trade"
+        )
+
+        return position
+
+    async def close_crypto_option(self, position_id: str, reason: str = "Manual close"):
+        """Close a crypto option position."""
+        if position_id not in self.crypto_positions:
+            return
+
+        position = self.crypto_positions[position_id]
+
+        # Simulate exit price (would use Deribit in production)
+        exit_price = position.entry_price * (1 + np.random.uniform(-0.3, 0.3))
+        pnl = (exit_price - position.entry_price) * position.size
+        if position.side == "short":
+            pnl = -pnl
+
+        self.cash += abs(position.entry_price * position.size) + pnl
+
+        emoji = "💰" if pnl >= 0 else "📉"
+        self._add_commentary(
+            f"{emoji} CLOSED {position.symbol}: P&L ${pnl:+,.2f} | {reason}",
+            "trade"
+        )
+
+        del self.crypto_positions[position_id]
+
     def get_crypto_positions(self) -> List[Dict]:
         """Get all crypto derivative positions."""
         return [p.to_dict() for p in self.crypto_positions.values()]
