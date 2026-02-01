@@ -1341,10 +1341,20 @@ class MasterQuantBot:
 
         executed = 0
         max_new_positions = 3
+        stock_market_open = self.is_stock_market_open()
 
         for opp in self.opportunities[:10]:
             if executed >= max_new_positions:
                 break
+
+            # CRITICAL: Don't trade stock/ETF/commodity options when market is closed
+            is_stock_asset = opp.asset_class in [
+                AssetClass.STOCK_OPTIONS,
+                AssetClass.ETF_OPTIONS,
+                AssetClass.COMMODITY_OPTIONS
+            ]
+            if is_stock_asset and not stock_market_open:
+                continue  # Skip stock-based trades when market is closed
 
             # Check allocation limit
             current_alloc = self.current_allocations.get(opp.asset_class, 0)
@@ -1399,6 +1409,14 @@ class MasterQuantBot:
 
             # Paper trading execution
             if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
+                # Double-check: don't trade stock options when market is closed
+                if not self.is_stock_market_open():
+                    self._add_commentary(
+                        f"⏸️ Skipping {opp.symbol} - stock market is closed",
+                        "system"
+                    )
+                    return False
+
                 iv_analysis = self.engine.iv_cache.get(opp.symbol)
                 if not iv_analysis:
                     return False
