@@ -250,31 +250,31 @@ export default function MasterQuantBotPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[600px] bg-slate-950">
+      <div className="flex items-center justify-center min-h-[600px]">
         <div className="text-center">
           <div className="relative w-16 h-16 mx-auto mb-4">
-            <div className="absolute inset-0 rounded-full border-2 border-slate-700" />
-            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-cyan-500 animate-spin" />
-            <Brain className="absolute inset-0 m-auto w-6 h-6 text-cyan-400" />
+            <div className="absolute inset-0 rounded-full border-2 border-gray-200" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-blue-500 animate-spin" />
+            <Brain className="absolute inset-0 m-auto w-6 h-6 text-blue-500" />
           </div>
-          <p className="text-slate-400 text-sm">Initializing ML Models...</p>
+          <p className="text-gray-500 text-sm">Initializing ML Models...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+    <div className="min-h-screen p-8">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
               <Brain className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">Master Quant Bot</h1>
-              <p className="text-slate-400 text-sm">PhD-Level Autonomous Trading System</p>
+              <h1 className="text-2xl font-bold text-gray-900">Master Quant Bot</h1>
+              <p className="text-gray-500 text-sm">PhD-Level Autonomous Trading System</p>
             </div>
           </div>
 
@@ -283,36 +283,36 @@ export default function MasterQuantBotPage() {
             <div className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium",
               marketSession.open
-                ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
-                : "bg-slate-800 text-slate-300 ring-1 ring-slate-700"
+                ? "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200"
+                : "bg-gray-100 text-gray-600 ring-1 ring-gray-200"
             )}>
               {marketSession.open ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               {marketSession.session}
             </div>
             <button
               onClick={fetchData}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors ring-1 ring-slate-700"
+              className="p-2.5 rounded-xl bg-white hover:bg-gray-50 transition-colors border border-gray-200"
             >
-              <RefreshCw className="w-4 h-4 text-slate-400" />
+              <RefreshCw className="w-4 h-4 text-gray-500" />
             </button>
           </div>
         </div>
 
         {/* Live Feeds Status */}
         {brokerStatus && (
-          <div className="flex items-center gap-6 px-4 py-3 rounded-xl bg-slate-900 ring-1 ring-slate-800">
-            <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Live Feeds</span>
+          <div className="flex items-center gap-6 px-4 py-3 rounded-xl bg-white border border-gray-200 shadow-sm">
+            <span className="text-xs text-gray-400 uppercase tracking-wider font-medium">Live Feeds</span>
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2">
                 <div className={cn(
                   "w-2.5 h-2.5 rounded-full",
                   brokerStatus.alpaca?.connected
                     ? "bg-emerald-500 shadow-lg shadow-emerald-500/50"
-                    : "bg-slate-600"
+                    : "bg-gray-300"
                 )} />
                 <span className={cn(
                   "text-sm font-medium",
-                  brokerStatus.alpaca?.connected ? "text-emerald-400" : "text-slate-500"
+                  brokerStatus.alpaca?.connected ? "text-emerald-600" : "text-gray-400"
                 )}>
                   Alpaca
                 </span>
@@ -322,18 +322,18 @@ export default function MasterQuantBotPage() {
                   "w-2.5 h-2.5 rounded-full",
                   brokerStatus.binance?.connected
                     ? "bg-emerald-500 shadow-lg shadow-emerald-500/50"
-                    : "bg-slate-600"
+                    : "bg-gray-300"
                 )} />
                 <span className={cn(
                   "text-sm font-medium",
-                  brokerStatus.binance?.connected ? "text-emerald-400" : "text-slate-500"
+                  brokerStatus.binance?.connected ? "text-emerald-600" : "text-gray-400"
                 )}>
                   Binance
                 </span>
               </div>
             </div>
             {!marketSession.open && (
-              <div className="ml-auto flex items-center gap-2 text-amber-400 text-sm">
+              <div className="ml-auto flex items-center gap-2 text-amber-600 text-sm">
                 <Bitcoin className="w-4 h-4" />
                 <span>Crypto markets active 24/7</span>
               </div>
@@ -344,31 +344,31 @@ export default function MasterQuantBotPage() {
         {/* Start Panel */}
         {!status?.is_running && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 rounded-2xl bg-slate-900 ring-1 ring-slate-800 p-6">
+            <div className="lg:col-span-2 rounded-2xl bg-white border border-gray-200 shadow-sm p-6">
               <div className="flex items-center gap-3 mb-6">
-                <Cpu className="w-5 h-5 text-cyan-400" />
-                <h2 className="text-lg font-semibold text-white">Configure & Launch</h2>
+                <Cpu className="w-5 h-5 text-blue-500" />
+                <h2 className="text-lg font-semibold text-gray-900">Configure & Launch</h2>
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2 font-medium">Initial Capital</label>
+                  <label className="block text-sm text-gray-500 mb-2 font-medium">Initial Capital</label>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-medium">$</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">$</span>
                     <input
                       type="number"
                       value={capital}
                       onChange={(e) => setCapital(e.target.value)}
-                      className="w-full pl-8 pr-4 py-3.5 bg-slate-800 ring-1 ring-slate-700 rounded-xl text-white text-lg font-semibold focus:ring-cyan-500 focus:outline-none transition-all"
+                      className="w-full pl-8 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 text-lg font-semibold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none transition-all"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2 font-medium">Strategy Mode</label>
+                  <label className="block text-sm text-gray-500 mb-2 font-medium">Strategy Mode</label>
                   <select
                     value={mode}
                     onChange={(e) => setMode(e.target.value)}
-                    className="w-full px-4 py-3.5 bg-slate-800 ring-1 ring-slate-700 rounded-xl text-white text-lg font-semibold focus:ring-cyan-500 focus:outline-none transition-all appearance-none cursor-pointer"
+                    className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 text-lg font-semibold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none transition-all appearance-none cursor-pointer"
                   >
                     <option value="aggressive">Aggressive</option>
                     <option value="balanced">Balanced</option>
@@ -380,7 +380,7 @@ export default function MasterQuantBotPage() {
               <button
                 onClick={startBot}
                 disabled={starting}
-                className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl font-bold text-white text-lg hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all shadow-lg shadow-cyan-500/25"
+                className="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl font-bold text-white text-lg hover:from-blue-400 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 transition-all shadow-lg"
               >
                 {starting ? (
                   <>
@@ -396,18 +396,18 @@ export default function MasterQuantBotPage() {
               </button>
             </div>
 
-            <div className="rounded-2xl bg-gradient-to-br from-cyan-900/30 to-blue-900/30 ring-1 ring-cyan-500/20 p-6">
-              <div className="flex items-center gap-2 text-cyan-400 mb-4">
+            <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 p-6">
+              <div className="flex items-center gap-2 text-blue-600 mb-4">
                 <Shield className="w-5 h-5" />
                 <span className="font-semibold">Paper Trading</span>
               </div>
-              <p className="text-sm text-slate-300 leading-relaxed mb-4">
+              <p className="text-sm text-gray-600 leading-relaxed mb-4">
                 All trades are simulated. No real money at risk.
               </p>
               <div className="space-y-2.5 text-sm">
                 {["DQN + PPO Reinforcement Learning", "HMM Market Regime Detection", "GARCH Volatility Forecasting", "Black-Litterman Optimization"].map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 text-slate-300">
-                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                  <div key={i} className="flex items-center gap-2 text-gray-600">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                     {item}
                   </div>
                 ))}
@@ -421,78 +421,78 @@ export default function MasterQuantBotPage() {
           <div className="space-y-6">
             {/* After Hours Warning */}
             {!marketSession.open && (
-              <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/30 text-amber-400">
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700">
                 <AlertTriangle className="w-5 h-5" />
                 <span className="font-medium">Stock market closed - Trading CRYPTO only</span>
-                <span className="text-amber-400/70 text-sm ml-auto">Stock positions will resume when market opens</span>
+                <span className="text-amber-600 text-sm ml-auto">Stock positions will resume when market opens</span>
               </div>
             )}
 
             {/* Key Metrics */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 p-5">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400 font-medium">Portfolio Value</span>
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
-                    <DollarSign className="w-5 h-5 text-blue-400" />
+                  <span className="text-sm text-gray-500 font-medium">Portfolio Value</span>
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                    <DollarSign className="w-5 h-5 text-blue-500" />
                   </div>
                 </div>
-                <div className="text-3xl font-bold text-white">
+                <div className="text-3xl font-bold text-gray-900">
                   ${status.total_value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 p-5">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400 font-medium">Total P&L</span>
+                  <span className="text-sm text-gray-500 font-medium">Total P&L</span>
                   <div className={cn(
                     "w-10 h-10 rounded-xl flex items-center justify-center",
-                    status.total_pnl >= 0 ? "bg-emerald-500/20" : "bg-red-500/20"
+                    status.total_pnl >= 0 ? "bg-emerald-50" : "bg-red-50"
                   )}>
                     {status.total_pnl >= 0 ? (
-                      <TrendingUp className="w-5 h-5 text-emerald-400" />
+                      <TrendingUp className="w-5 h-5 text-emerald-500" />
                     ) : (
-                      <TrendingDown className="w-5 h-5 text-red-400" />
+                      <TrendingDown className="w-5 h-5 text-red-500" />
                     )}
                   </div>
                 </div>
                 <div className={cn(
                   "text-3xl font-bold",
-                  status.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                  status.total_pnl >= 0 ? "text-emerald-600" : "text-red-600"
                 )}>
                   {status.total_pnl >= 0 ? "+" : ""}${status.total_pnl?.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
                 <div className={cn(
                   "text-sm font-medium mt-1",
-                  status.total_pnl_pct >= 0 ? "text-emerald-400/70" : "text-red-400/70"
+                  status.total_pnl_pct >= 0 ? "text-emerald-500" : "text-red-500"
                 )}>
                   {status.total_pnl_pct >= 0 ? "+" : ""}{status.total_pnl_pct?.toFixed(2)}%
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 p-5">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400 font-medium">Active Positions</span>
-                  <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
-                    <Layers className="w-5 h-5 text-violet-400" />
+                  <span className="text-sm text-gray-500 font-medium">Active Positions</span>
+                  <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center">
+                    <Layers className="w-5 h-5 text-violet-500" />
                   </div>
                 </div>
-                <div className="text-3xl font-bold text-white">
+                <div className="text-3xl font-bold text-gray-900">
                   {(status.positions?.options || 0) + (status.positions?.crypto || 0)}
                 </div>
-                <div className="text-sm text-slate-500 mt-1">
+                <div className="text-sm text-gray-500 mt-1">
                   {status.positions?.options || 0} options · {status.positions?.crypto || 0} crypto
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 p-5">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400 font-medium">Cash Available</span>
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
-                    <Target className="w-5 h-5 text-amber-400" />
+                  <span className="text-sm text-gray-500 font-medium">Cash Available</span>
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center">
+                    <Target className="w-5 h-5 text-amber-500" />
                   </div>
                 </div>
-                <div className="text-3xl font-bold text-white">
+                <div className="text-3xl font-bold text-gray-900">
                   ${status.cash?.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </div>
               </div>
@@ -500,45 +500,45 @@ export default function MasterQuantBotPage() {
 
             {/* Market Regime */}
             <div className={cn(
-              "rounded-2xl p-5 ring-1",
+              "rounded-2xl p-5 border",
               status.market_regime === "high_volatility"
-                ? "bg-red-500/5 ring-red-500/20"
+                ? "bg-red-50 border-red-200"
                 : status.market_regime === "low_volatility"
-                ? "bg-emerald-500/5 ring-emerald-500/20"
-                : "bg-blue-500/5 ring-blue-500/20"
+                ? "bg-emerald-50 border-emerald-200"
+                : "bg-blue-50 border-blue-200"
             )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className={cn(
                     "w-12 h-12 rounded-xl flex items-center justify-center",
-                    status.market_regime === "high_volatility" ? "bg-red-500/20" :
-                    status.market_regime === "low_volatility" ? "bg-emerald-500/20" :
-                    "bg-blue-500/20"
+                    status.market_regime === "high_volatility" ? "bg-red-100" :
+                    status.market_regime === "low_volatility" ? "bg-emerald-100" :
+                    "bg-blue-100"
                   )}>
                     <Gauge className={cn(
                       "w-6 h-6",
-                      status.market_regime === "high_volatility" ? "text-red-400" :
-                      status.market_regime === "low_volatility" ? "text-emerald-400" :
-                      "text-blue-400"
+                      status.market_regime === "high_volatility" ? "text-red-600" :
+                      status.market_regime === "low_volatility" ? "text-emerald-600" :
+                      "text-blue-600"
                     )} />
                   </div>
                   <div>
-                    <div className="text-lg font-bold text-white capitalize">
+                    <div className="text-lg font-bold text-gray-900 capitalize">
                       {status.market_regime?.replace(/_/g, " ")} Regime
                     </div>
-                    <div className="text-sm text-slate-400">
+                    <div className="text-sm text-gray-500">
                       VIX: {status.vix_level?.toFixed(1)} · Confidence: {((status.regime_confidence || 0.5) * 100).toFixed(0)}%
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-white">{status.opportunities_count || 0}</div>
-                    <div className="text-sm text-slate-500">opportunities</div>
+                    <div className="text-2xl font-bold text-gray-900">{status.opportunities_count || 0}</div>
+                    <div className="text-sm text-gray-500">opportunities</div>
                   </div>
                   <button
                     onClick={triggerScan}
-                    className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium flex items-center gap-2 transition-colors"
+                    className="px-5 py-2.5 rounded-xl bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 font-medium flex items-center gap-2 transition-colors shadow-sm"
                   >
                     <Eye className="w-4 h-4" />
                     Scan Now
@@ -549,42 +549,42 @@ export default function MasterQuantBotPage() {
 
             {/* Greeks */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="rounded-xl bg-slate-900 ring-1 ring-slate-800 p-4">
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400">Portfolio Delta</span>
-                  <span className="text-xl font-bold text-white">{status.risk_summary?.portfolio_delta?.toFixed(1) || "0"}</span>
+                  <span className="text-sm text-gray-500">Portfolio Delta</span>
+                  <span className="text-xl font-bold text-gray-900">{status.risk_summary?.portfolio_delta?.toFixed(1) || "0"}</span>
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, status.risk_summary?.delta_utilization || 0)}%` }} />
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-900 ring-1 ring-slate-800 p-4">
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400">Daily Theta</span>
+                  <span className="text-sm text-gray-500">Daily Theta</span>
                   <span className={cn(
                     "text-xl font-bold",
-                    (status.risk_summary?.portfolio_theta || 0) > 0 ? "text-emerald-400" : "text-red-400"
+                    (status.risk_summary?.portfolio_theta || 0) > 0 ? "text-emerald-600" : "text-red-600"
                   )}>
                     ${status.risk_summary?.portfolio_theta?.toFixed(0) || "0"}
                   </span>
                 </div>
-                <div className="text-xs text-slate-500">per day decay</div>
+                <div className="text-xs text-gray-500">per day decay</div>
               </div>
-              <div className="rounded-xl bg-slate-900 ring-1 ring-slate-800 p-4">
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400">Portfolio Vega</span>
-                  <span className="text-xl font-bold text-white">{status.risk_summary?.portfolio_vega?.toFixed(1) || "0"}</span>
+                  <span className="text-sm text-gray-500">Portfolio Vega</span>
+                  <span className="text-xl font-bold text-gray-900">{status.risk_summary?.portfolio_vega?.toFixed(1) || "0"}</span>
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full bg-violet-500 rounded-full" style={{ width: `${Math.min(100, status.risk_summary?.vega_utilization || 0)}%` }} />
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-900 ring-1 ring-slate-800 p-4">
+              <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-slate-400">Capital Deployed</span>
-                  <span className="text-xl font-bold text-white">{status.risk_summary?.buying_power_used_pct?.toFixed(0) || "0"}%</span>
+                  <span className="text-sm text-gray-500">Capital Deployed</span>
+                  <span className="text-xl font-bold text-gray-900">{status.risk_summary?.buying_power_used_pct?.toFixed(0) || "0"}%</span>
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(100, status.risk_summary?.buying_power_used_pct || 0)}%` }} />
                 </div>
               </div>
@@ -593,53 +593,53 @@ export default function MasterQuantBotPage() {
             {/* Main Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Opportunities */}
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Target className="w-4 h-4 text-cyan-400" />
-                    <span className="font-semibold text-white">Top Opportunities</span>
+                    <Target className="w-4 h-4 text-cyan-500" />
+                    <span className="font-semibold text-gray-900">Top Opportunities</span>
                   </div>
-                  <span className="text-sm text-slate-500">{opportunities.length} found</span>
+                  <span className="text-sm text-gray-500">{opportunities.length} found</span>
                 </div>
                 <div className="p-4 space-y-3 max-h-[400px] overflow-y-auto">
                   {opportunities.length === 0 ? (
                     <div className="text-center py-12">
-                      <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-slate-800 flex items-center justify-center">
-                        <Eye className="w-6 h-6 text-slate-600" />
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+                        <Eye className="w-6 h-6 text-gray-400" />
                       </div>
-                      <p className="text-slate-500">Scanning markets...</p>
+                      <p className="text-gray-500">Scanning markets...</p>
                     </div>
                   ) : (
                     opportunities.map((opp, i) => {
                       const style = getAssetClassStyle(opp.asset_class);
                       return (
-                        <div key={i} className="p-4 rounded-xl bg-slate-800/50 ring-1 ring-slate-700/50 hover:ring-slate-600 transition-all">
+                        <div key={i} className="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition-all">
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex items-center gap-2">
                               <span className={cn("px-2 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5", style.bg, style.text)}>
                                 {style.icon}
                                 {opp.asset_class.split("_")[0]}
                               </span>
-                              <span className="font-bold text-white text-lg">{opp.symbol}</span>
+                              <span className="font-bold text-gray-900 text-lg">{opp.symbol}</span>
                             </div>
                             <div className="text-right">
-                              <div className="text-lg font-bold text-cyan-400">{opp.score.toFixed(0)}</div>
-                              <div className="text-xs text-slate-500">score</div>
+                              <div className="text-lg font-bold text-cyan-600">{opp.score.toFixed(0)}</div>
+                              <div className="text-xs text-gray-500">score</div>
                             </div>
                           </div>
-                          <div className="text-sm text-slate-300 mb-3">{opp.strategy}</div>
+                          <div className="text-sm text-gray-600 mb-3">{opp.strategy}</div>
                           <div className="grid grid-cols-3 gap-2 text-xs">
-                            <div className="text-center p-2 rounded-lg bg-slate-900/50">
-                              <div className="text-emerald-400 font-bold text-sm">{opp.expected_return?.toFixed(0)}%</div>
-                              <div className="text-slate-500">return</div>
+                            <div className="text-center p-2 rounded-lg bg-white border border-gray-100">
+                              <div className="text-emerald-600 font-bold text-sm">{opp.expected_return?.toFixed(0)}%</div>
+                              <div className="text-gray-500">return</div>
                             </div>
-                            <div className="text-center p-2 rounded-lg bg-slate-900/50">
-                              <div className="text-white font-bold text-sm">{opp.probability_of_profit?.toFixed(0)}%</div>
-                              <div className="text-slate-500">P(profit)</div>
+                            <div className="text-center p-2 rounded-lg bg-white border border-gray-100">
+                              <div className="text-gray-900 font-bold text-sm">{opp.probability_of_profit?.toFixed(0)}%</div>
+                              <div className="text-gray-500">P(profit)</div>
                             </div>
-                            <div className="text-center p-2 rounded-lg bg-slate-900/50">
-                              <div className="text-amber-400 font-bold text-sm">{opp.iv_rank?.toFixed(0)}%</div>
-                              <div className="text-slate-500">IV rank</div>
+                            <div className="text-center p-2 rounded-lg bg-white border border-gray-100">
+                              <div className="text-amber-600 font-bold text-sm">{opp.iv_rank?.toFixed(0)}%</div>
+                              <div className="text-gray-500">IV rank</div>
                             </div>
                           </div>
                         </div>
@@ -650,18 +650,18 @@ export default function MasterQuantBotPage() {
               </div>
 
               {/* Activity */}
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-800 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-cyan-400" />
-                  <span className="font-semibold text-white">Bot Activity</span>
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-cyan-500" />
+                  <span className="font-semibold text-gray-900">Bot Activity</span>
                 </div>
                 <div className="p-4 space-y-2 max-h-[400px] overflow-y-auto">
                   {commentary.length === 0 ? (
                     <div className="text-center py-12">
-                      <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-slate-800 flex items-center justify-center">
-                        <Activity className="w-6 h-6 text-slate-600" />
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
+                        <Activity className="w-6 h-6 text-gray-400" />
                       </div>
-                      <p className="text-slate-500">Waiting for activity...</p>
+                      <p className="text-gray-500">Waiting for activity...</p>
                     </div>
                   ) : (
                     [...commentary].reverse().map((entry, i) => (
@@ -669,17 +669,17 @@ export default function MasterQuantBotPage() {
                         key={i}
                         className={cn(
                           "p-3 rounded-xl text-sm border-l-3",
-                          entry.category === "trade" ? "bg-emerald-500/10 border-l-emerald-500" :
-                          entry.category === "risk" ? "bg-red-500/10 border-l-red-500" :
-                          entry.category === "scan" ? "bg-blue-500/10 border-l-blue-500" :
-                          entry.category === "analysis" ? "bg-violet-500/10 border-l-violet-500" :
-                          entry.category === "system" ? "bg-amber-500/10 border-l-amber-500" :
-                          "bg-slate-800/50 border-l-slate-600"
+                          entry.category === "trade" ? "bg-emerald-50 border-l-emerald-500" :
+                          entry.category === "risk" ? "bg-red-50 border-l-red-500" :
+                          entry.category === "scan" ? "bg-blue-50 border-l-blue-500" :
+                          entry.category === "analysis" ? "bg-violet-50 border-l-violet-500" :
+                          entry.category === "system" ? "bg-amber-50 border-l-amber-500" :
+                          "bg-gray-50 border-l-gray-400"
                         )}
                         style={{ borderLeftWidth: '3px' }}
                       >
-                        <div className="text-slate-200 leading-relaxed">{entry.message}</div>
-                        <div className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5">
+                        <div className="text-gray-700 leading-relaxed">{entry.message}</div>
+                        <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-1.5">
                           <Clock className="w-3 h-3" />
                           {new Date(entry.timestamp).toLocaleTimeString()}
                         </div>
@@ -693,33 +693,33 @@ export default function MasterQuantBotPage() {
             {/* Positions */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Options */}
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-blue-400" />
-                    <span className="font-semibold text-white">Options</span>
+                    <Layers className="w-4 h-4 text-blue-500" />
+                    <span className="font-semibold text-gray-900">Options</span>
                   </div>
-                  <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-xs font-bold">
+                  <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold">
                     {optionsPositions.length} positions
                   </span>
                 </div>
                 <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
                   {optionsPositions.length === 0 ? (
-                    <div className="text-center py-8 text-slate-500">No options positions</div>
+                    <div className="text-center py-8 text-gray-500">No options positions</div>
                   ) : (
                     optionsPositions.map((pos) => (
-                      <div key={pos.id} className="p-4 rounded-xl bg-slate-800/50 ring-1 ring-slate-700/50">
+                      <div key={pos.id} className="p-4 rounded-xl bg-gray-50 border border-gray-100">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="font-bold text-white text-lg">{pos.symbol}</span>
+                          <span className="font-bold text-gray-900 text-lg">{pos.symbol}</span>
                           <span className={cn(
                             "text-lg font-bold",
-                            (pos.current_pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                            (pos.current_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-600"
                           )}>
                             {(pos.current_pnl || 0) >= 0 ? "+" : ""}${pos.current_pnl?.toFixed(0) || 0}
                           </span>
                         </div>
-                        <div className="text-sm text-slate-400 mb-2">{pos.strategy_name}</div>
-                        <div className="flex items-center gap-4 text-xs text-slate-500">
+                        <div className="text-sm text-gray-500 mb-2">{pos.strategy_name}</div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
                           <span>Δ {pos.greeks?.delta?.toFixed(2) || 0}</span>
                           <span>Θ {pos.greeks?.theta?.toFixed(2) || 0}</span>
                           <span>IV: {pos.entry_iv || 0}%</span>
@@ -731,43 +731,43 @@ export default function MasterQuantBotPage() {
               </div>
 
               {/* Crypto */}
-              <div className="rounded-2xl bg-slate-900 ring-1 ring-slate-800 overflow-hidden">
-                <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Bitcoin className="w-4 h-4 text-orange-400" />
-                    <span className="font-semibold text-white">Crypto</span>
+                    <Bitcoin className="w-4 h-4 text-orange-500" />
+                    <span className="font-semibold text-gray-900">Crypto</span>
                   </div>
-                  <span className="px-3 py-1 rounded-full bg-orange-500/20 text-orange-400 text-xs font-bold">
+                  <span className="px-3 py-1 rounded-full bg-orange-50 text-orange-600 text-xs font-bold">
                     {cryptoPositions.length} positions
                   </span>
                 </div>
                 <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
                   {cryptoPositions.length === 0 ? (
-                    <div className="text-center py-8 text-slate-500">No crypto positions</div>
+                    <div className="text-center py-8 text-gray-500">No crypto positions</div>
                   ) : (
                     cryptoPositions.map((pos) => (
-                      <div key={pos.id} className="p-4 rounded-xl bg-slate-800/50 ring-1 ring-slate-700/50">
+                      <div key={pos.id} className="p-4 rounded-xl bg-gray-50 border border-gray-100">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-lg">{pos.symbol}</span>
+                            <span className="font-bold text-gray-900 text-lg">{pos.symbol}</span>
                             <span className={cn(
                               "text-xs px-2 py-0.5 rounded-md font-bold",
                               pos.side === "long"
-                                ? "bg-emerald-500/20 text-emerald-400"
-                                : "bg-red-500/20 text-red-400"
+                                ? "bg-emerald-50 text-emerald-600"
+                                : "bg-red-50 text-red-600"
                             )}>
                               {pos.side?.toUpperCase()}
                             </span>
                           </div>
                           <span className={cn(
                             "text-lg font-bold",
-                            (pos.unrealized_pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"
+                            (pos.unrealized_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-600"
                           )}>
                             {(pos.unrealized_pnl || 0) >= 0 ? "+" : ""}${pos.unrealized_pnl?.toFixed(2) || 0}
                           </span>
                         </div>
-                        <div className="text-sm text-slate-400 mb-2">{pos.derivative_type}</div>
-                        <div className="flex items-center gap-4 text-xs text-slate-500">
+                        <div className="text-sm text-gray-500 mb-2">{pos.derivative_type}</div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
                           <span>Size: ${pos.size?.toLocaleString() || 0}</span>
                           <span>{pos.leverage || 1}x</span>
                           <span>Entry: ${pos.entry_price?.toLocaleString() || 0}</span>
@@ -781,31 +781,31 @@ export default function MasterQuantBotPage() {
 
             {/* ML Metrics */}
             {status.ml_metrics && (
-              <div className="rounded-2xl bg-gradient-to-r from-violet-900/20 to-blue-900/20 ring-1 ring-violet-500/20 p-5">
+              <div className="rounded-2xl bg-gradient-to-r from-violet-50 to-blue-50 border border-violet-200 p-5">
                 <div className="flex items-center gap-2 mb-4">
-                  <Brain className="w-4 h-4 text-violet-400" />
-                  <span className="font-semibold text-white">ML Training Status</span>
+                  <Brain className="w-4 h-4 text-violet-500" />
+                  <span className="font-semibold text-gray-900">ML Training Status</span>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                   <div>
-                    <div className="text-slate-400 text-sm">RL Steps</div>
-                    <div className="text-white font-bold text-xl">{status.ml_metrics.rl_training_steps?.toLocaleString()}</div>
+                    <div className="text-gray-500 text-sm">RL Steps</div>
+                    <div className="text-gray-900 font-bold text-xl">{status.ml_metrics.rl_training_steps?.toLocaleString()}</div>
                   </div>
                   <div>
-                    <div className="text-slate-400 text-sm">DQN Epsilon</div>
-                    <div className="text-white font-bold text-xl">{status.ml_metrics.dqn_epsilon?.toFixed(4)}</div>
+                    <div className="text-gray-500 text-sm">DQN Epsilon</div>
+                    <div className="text-gray-900 font-bold text-xl">{status.ml_metrics.dqn_epsilon?.toFixed(4)}</div>
                   </div>
                   <div>
-                    <div className="text-slate-400 text-sm">Episode Reward</div>
-                    <div className="text-white font-bold text-xl">{status.ml_metrics.episode_reward?.toFixed(2)}</div>
+                    <div className="text-gray-500 text-sm">Episode Reward</div>
+                    <div className="text-gray-900 font-bold text-xl">{status.ml_metrics.episode_reward?.toFixed(2)}</div>
                   </div>
                   <div>
-                    <div className="text-slate-400 text-sm mb-1">Models Fitted</div>
+                    <div className="text-gray-500 text-sm mb-1">Models Fitted</div>
                     <div className="flex items-center gap-3">
-                      <span className={cn("text-sm font-bold", status.ml_metrics.hmm_fitted ? "text-emerald-400" : "text-slate-500")}>
+                      <span className={cn("text-sm font-bold", status.ml_metrics.hmm_fitted ? "text-emerald-600" : "text-gray-400")}>
                         HMM {status.ml_metrics.hmm_fitted ? "✓" : "○"}
                       </span>
-                      <span className={cn("text-sm font-bold", status.ml_metrics.garch_fitted ? "text-emerald-400" : "text-slate-500")}>
+                      <span className={cn("text-sm font-bold", status.ml_metrics.garch_fitted ? "text-emerald-600" : "text-gray-400")}>
                         GARCH {status.ml_metrics.garch_fitted ? "✓" : "○"}
                       </span>
                     </div>
@@ -818,7 +818,7 @@ export default function MasterQuantBotPage() {
             <div className="flex justify-center pt-4">
               <button
                 onClick={stopBot}
-                className="px-8 py-3 rounded-xl bg-red-500/10 ring-1 ring-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-2 font-semibold"
+                className="px-8 py-3 rounded-xl bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 transition-colors flex items-center gap-2 font-semibold"
               >
                 <Square className="w-4 h-4" />
                 Stop Trading Bot
