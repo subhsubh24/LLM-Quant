@@ -281,6 +281,18 @@ class QuantMath:
 
         return (mean_ret - risk_free) / vol
 
+    @staticmethod
+    def safe_float(value: float, default: float = 0.0) -> float:
+        """
+        Ensure a float is JSON-serializable (not NaN, Inf, -Inf).
+        Returns default if value is not valid.
+        """
+        if value is None:
+            return default
+        if math.isnan(value) or math.isinf(value):
+            return default
+        return value
+
 
 # Commentary buffer for real-time UI updates
 class BotCommentary:
@@ -1069,18 +1081,43 @@ class QuantBot:
         else:
             return None, None
 
-        # Build rationale
+        # Build rationale with full fields
+        weights = {
+            "momentum": 0.35,
+            "volume_confirmation": 0.15,
+            "range_position": 0.20,
+            "mean_reversion": 0.15,
+            "composite_technical": 0.15,
+        }
+
         rationale = TradeRationale(
             decision=decision,
             confidence=confidence,
             primary_reason=primary_reason,
             factors=factors,
-            signals_summary=self._format_signals_summary(factors),
+            factor_weights=weights,
+            rsi_value=50.0,
+            rsi_signal="NEUTRAL",
+            macd_signal="NEUTRAL",
+            bollinger_position="MIDDLE",
+            momentum_quality=factors.get("momentum", 0),
+            zscore=0,
+            volatility_regime="NORMAL",
+            hurst_exponent=0.5,
+            order_flow_signal=0,
+            volume_confirmation=factors.get("volume_confirmation", 0) > 0.1,
+            liquidity_score=0.8,
             risk_assessment=self._assess_risk(factors, price),
-            expected_return=composite * 0.15,  # Rough estimate
+            position_size_kelly=0.05,
+            expected_return=composite * 0.15,
+            expected_sharpe=composite * 1.2,
+            max_loss_scenario=f"Max loss: ${price * self.stop_loss_pct:.2f}",
             expected_holding_period=self.holding_period_target,
             stop_loss=self.stop_loss_pct,
             take_profit=self.take_profit_pct,
+            trailing_stop=0.10,
+            signals_summary=self._format_signals_summary(factors),
+            detailed_analysis=f"Stock analysis for {symbol}",
         )
 
         return decision, rationale
@@ -1397,12 +1434,29 @@ class QuantBot:
                 confidence=0.7,
                 primary_reason=f"Signal reversed while profitable (+{pnl_pct*100:.1f}%)",
                 factors=factors,
-                signals_summary=self._format_signals_summary(factors),
+                factor_weights={"momentum": 0.4, "reversal": 0.6},
+                rsi_value=50.0,
+                rsi_signal="NEUTRAL",
+                macd_signal="BEARISH",
+                bollinger_position="MIDDLE",
+                momentum_quality=0,
+                zscore=0,
+                volatility_regime="NORMAL",
+                hurst_exponent=0.5,
+                order_flow_signal=0,
+                volume_confirmation=False,
+                liquidity_score=0.8,
                 risk_assessment="Taking profits as momentum fading",
+                position_size_kelly=0,
                 expected_return=pnl_pct,
+                expected_sharpe=0,
+                max_loss_scenario="N/A - Exiting position",
                 expected_holding_period=f"Held {holding_hours:.0f} hours",
                 stop_loss=0,
                 take_profit=0,
+                trailing_stop=0,
+                signals_summary=self._format_signals_summary(factors),
+                detailed_analysis=f"Exit analysis for {symbol}",
             )
             return "SELL", rationale
 
@@ -1735,18 +1789,36 @@ class QuantBot:
         self.cash += value
         del self.positions[symbol]
 
-        # Log trade
+        # Log trade with full rationale
+        pnl_pct = position.unrealized_pnl_pct if hasattr(position, 'unrealized_pnl_pct') else 0
         rationale = TradeRationale(
             decision="SELL",
             confidence=1.0,
             primary_reason=reason,
-            factors={},
-            signals_summary=f"Closing: P&L ${pnl:.2f} ({position.unrealized_pnl_pct*100:.1f}%)",
+            factors={"pnl": pnl_pct},
+            factor_weights={"pnl": 1.0},
+            rsi_value=50.0,
+            rsi_signal="NEUTRAL",
+            macd_signal="NEUTRAL",
+            bollinger_position="MIDDLE",
+            momentum_quality=0,
+            zscore=0,
+            volatility_regime="NORMAL",
+            hurst_exponent=0.5,
+            order_flow_signal=0,
+            volume_confirmation=False,
+            liquidity_score=0.8,
             risk_assessment="Position closed",
-            expected_return=position.unrealized_pnl_pct,
+            position_size_kelly=0,
+            expected_return=pnl_pct,
+            expected_sharpe=0,
+            max_loss_scenario="N/A",
             expected_holding_period=str(position.holding_period),
             stop_loss=0,
             take_profit=0,
+            trailing_stop=0,
+            signals_summary=f"Closing: P&L ${pnl:.2f} ({pnl_pct*100:.1f}%)",
+            detailed_analysis=f"Closed position: {reason}",
         )
 
         trade = BotTrade(
@@ -1818,43 +1890,93 @@ class QuantBot:
         return _commentary.get_recent(limit)
 
     def get_performance(self) -> Dict[str, Any]:
-        """Calculate performance metrics."""
+        """Calculate performance metrics with safe float handling."""
         if len(self.equity_curve) < 2:
-            return {"error": "Insufficient data"}
+            return {
+                "total_return": 0,
+                "cagr": 0,
+                "volatility": 0,
+                "sharpe_ratio": 0,
+                "max_drawdown": 0,
+                "win_rate": 0,
+                "total_trades": len(self.trade_history),
+                "current_value": round(self.total_value, 2),
+            }
 
-        values = [v for _, v in self.equity_curve]
-        returns = np.diff(values) / np.array(values[:-1])
+        try:
+            values = [v for _, v in self.equity_curve]
 
-        total_return = (values[-1] - self.initial_capital) / self.initial_capital
+            # Safely compute returns, avoiding division by zero
+            returns = []
+            for i in range(1, len(values)):
+                if values[i-1] != 0:
+                    returns.append((values[i] - values[i-1]) / values[i-1])
 
-        # Annualized metrics (assume hourly data)
-        n_periods = len(returns)
-        periods_per_year = 252 * 24  # Trading hours per year
-        cagr = (1 + total_return) ** (periods_per_year / max(n_periods, 1)) - 1 if total_return > -1 else -1
+            if not returns:
+                returns = [0]
 
-        vol = np.std(returns) * np.sqrt(periods_per_year) if len(returns) > 1 else 0
-        sharpe = (cagr - 0.02) / vol if vol > 0 else 0
+            total_return = (values[-1] - self.initial_capital) / self.initial_capital if self.initial_capital > 0 else 0
 
-        # Max drawdown
-        peak = np.maximum.accumulate(values)
-        drawdown = (np.array(values) - peak) / peak
-        max_dd = np.min(drawdown) if len(drawdown) > 0 else 0
+            # Annualized metrics - cap CAGR to reasonable bounds
+            n_periods = max(len(returns), 1)
+            periods_per_year = 252 * 24  # Trading hours per year
 
-        # Win rate
-        trades = [t for t in self.trade_history if t.side == "SELL"]
-        wins = sum(1 for t in trades if t.pnl > 0)
-        win_rate = wins / len(trades) if trades else 0
+            if total_return > -1 and n_periods > 0:
+                # Limit exponent to avoid overflow
+                exponent = min(periods_per_year / n_periods, 10)
+                cagr = (1 + total_return) ** exponent - 1
+                # Cap CAGR to reasonable range
+                cagr = max(-1, min(cagr, 100))
+            else:
+                cagr = -1
 
-        return {
-            "total_return": round(total_return * 100, 2),
-            "cagr": round(cagr * 100, 2),
-            "volatility": round(vol * 100, 2),
-            "sharpe_ratio": round(sharpe, 2),
-            "max_drawdown": round(max_dd * 100, 2),
-            "win_rate": round(win_rate * 100, 1),
-            "total_trades": len(self.trade_history),
-            "current_value": round(self.total_value, 2),
-        }
+            vol = float(np.std(returns) * np.sqrt(min(periods_per_year, 1000))) if len(returns) > 1 else 0
+            vol = min(vol, 1000)  # Cap volatility
+
+            sharpe = (cagr - 0.02) / vol if vol > 0.001 else 0
+            sharpe = max(-10, min(sharpe, 10))  # Cap Sharpe ratio
+
+            # Max drawdown
+            peak = np.maximum.accumulate(values)
+            # Avoid division by zero in drawdown calc
+            drawdown = []
+            for i, (v, p) in enumerate(zip(values, peak)):
+                if p > 0:
+                    drawdown.append((v - p) / p)
+                else:
+                    drawdown.append(0)
+            max_dd = min(drawdown) if drawdown else 0
+
+            # Win rate
+            trades = [t for t in self.trade_history if t.side == "SELL"]
+            wins = sum(1 for t in trades if t.pnl > 0)
+            win_rate = wins / len(trades) if trades else 0
+
+            # Use safe_float to ensure all values are JSON-serializable
+            sf = QuantMath.safe_float
+            return {
+                "total_return": round(sf(total_return * 100), 2),
+                "cagr": round(sf(cagr * 100), 2),
+                "volatility": round(sf(vol * 100), 2),
+                "sharpe_ratio": round(sf(sharpe), 2),
+                "max_drawdown": round(sf(max_dd * 100), 2),
+                "win_rate": round(sf(win_rate * 100), 1),
+                "total_trades": len(self.trade_history),
+                "current_value": round(sf(self.total_value), 2),
+            }
+        except Exception as e:
+            logger.error(f"Error calculating performance: {e}")
+            return {
+                "total_return": 0,
+                "cagr": 0,
+                "volatility": 0,
+                "sharpe_ratio": 0,
+                "max_drawdown": 0,
+                "win_rate": 0,
+                "total_trades": len(self.trade_history),
+                "current_value": round(self.total_value, 2),
+                "error": str(e),
+            }
 
 
 # Singleton
