@@ -1,7 +1,8 @@
 """
 Cryptocurrency market data service.
-Uses Binance WebSocket for REAL-TIME prices (primary).
-Falls back to CoinGecko API if WebSocket unavailable.
+Uses multi-provider WebSocket for REAL-TIME prices (primary).
+Providers: Coinbase -> Kraken -> Binance.US -> Binance Global
+Falls back to CoinGecko API for symbols not available via WebSocket.
 """
 
 import asyncio
@@ -528,12 +529,12 @@ class CryptoMarketService:
         """
         Get real-time quote for a cryptocurrency.
 
-        PRIMARY: Binance WebSocket (truly live, sub-second updates)
+        PRIMARY: Multi-provider WebSocket (truly live, sub-second updates)
         FALLBACK: Batch cache from CoinGecko (no individual API calls)
         """
         symbol = symbol.upper()
 
-        # PRIMARY SOURCE: Binance WebSocket (truly live data)
+        # PRIMARY SOURCE: Multi-provider WebSocket (truly live data)
         if self._crypto_ws.is_connected:
             live_price = self._crypto_ws.get_price(symbol)
             if live_price:
@@ -576,48 +577,67 @@ class CryptoMarketService:
         """
         Get quotes for multiple cryptocurrencies.
 
-        PRIMARY: Binance WebSocket (truly live, sub-second updates)
-        FALLBACK: CoinGecko REST API (only if WebSocket unavailable)
+        PRIMARY: Multi-provider WebSocket (truly live, sub-second updates)
+        FALLBACK: CoinGecko REST API (for symbols not available from WebSocket)
+
+        Combines both sources to maximize coverage.
         """
         quotes = {}
         symbols = [s.upper() for s in symbols]
+        missing_symbols = []
 
-        # PRIMARY SOURCE: Binance WebSocket (truly live data)
+        # PRIMARY SOURCE: Multi-provider WebSocket (truly live data)
         if self._crypto_ws.is_connected:
             for symbol in symbols:
                 live_price = self._crypto_ws.get_price(symbol)
                 if live_price:
                     quotes[symbol] = self._live_price_to_quote(live_price)
+                else:
+                    missing_symbols.append(symbol)
 
             if quotes:
-                # Log how many we got from WebSocket
-                logger.debug(f"📊 LIVE prices from Binance WebSocket: {len(quotes)}/{len(symbols)} symbols")
-                return quotes
+                logger.debug(f"📊 LIVE prices from WebSocket: {len(quotes)}/{len(symbols)} symbols")
 
-        # FALLBACK: CoinGecko REST API (only if WebSocket not connected or no data)
-        logger.info("WebSocket not available, falling back to CoinGecko API")
+                # If we got all symbols, return immediately
+                if not missing_symbols:
+                    return quotes
 
-        # Check if we have fresh batch data (within TTL) for fallback
-        if self._last_batch_fetch:
+                # Otherwise, fetch missing symbols from CoinGecko
+                logger.debug(f"Fetching {len(missing_symbols)} missing symbols from CoinGecko")
+        else:
+            # WebSocket not connected - all symbols need CoinGecko
+            missing_symbols = symbols
+            logger.info("WebSocket not connected, using CoinGecko API for all symbols")
+
+        # Check if we have fresh cached data for missing symbols
+        if self._last_batch_fetch and missing_symbols:
             age = (datetime.now() - self._last_batch_fetch).total_seconds()
             if age < self._batch_cache_ttl:
-                # Return cached data - don't hit API
-                for symbol in symbols:
+                # Use cached data for missing symbols
+                still_missing = []
+                for symbol in missing_symbols:
                     if symbol in self._batch_cache:
                         quote = self._batch_cache[symbol]
                         quote.data_age_seconds = age
                         quotes[symbol] = quote
+                    else:
+                        still_missing.append(symbol)
+                missing_symbols = still_missing
 
-                # If we have most of the data cached, return it
-                if len(quotes) >= len(symbols) * 0.8:  # 80% threshold
+                # If we have all data now, return
+                if not missing_symbols:
                     logger.debug(f"Using cached CoinGecko data ({age:.1f}s old, {len(quotes)}/{len(symbols)} coins)")
                     return quotes
 
-        # Need to fetch fresh data from CoinGecko
+        # No missing symbols to fetch? Return what we have
+        if not missing_symbols:
+            return quotes
+
+        # Need to fetch fresh data from CoinGecko for missing symbols
         # Convert symbols to CoinGecko IDs
         coin_ids = []
         symbol_to_id_map = {}
-        for symbol in symbols:
+        for symbol in missing_symbols:
             coin_id = self.SYMBOL_TO_ID.get(symbol)
             if coin_id:
                 coin_ids.append(coin_id)
@@ -649,8 +669,8 @@ class CryptoMarketService:
 
                     if response.status_code == 429:
                         logger.warning(f"CoinGecko rate limited (429) - using cached data if available")
-                        # Return whatever we have cached instead of waiting
-                        for symbol in symbols:
+                        # Use cached data for missing symbols
+                        for symbol in missing_symbols:
                             if symbol in self._batch_cache:
                                 quotes[symbol] = self._batch_cache[symbol]
                         return quotes
@@ -680,23 +700,29 @@ class CryptoMarketService:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                logger.warning(f"CoinGecko RATE LIMITED - returning cached data")
-                for symbol in symbols:
+                logger.warning(f"CoinGecko RATE LIMITED - using cached data for missing symbols")
+                for symbol in missing_symbols:
                     if symbol in self._batch_cache:
                         quotes[symbol] = self._batch_cache[symbol]
             else:
                 logger.error(f"❌ CoinGecko API error: {e}")
         except Exception as e:
             logger.error(f"❌ Batch fetch failed: {e}")
-            # Return cached on error
-            for symbol in symbols:
+            # Use cached on error
+            for symbol in missing_symbols:
                 if symbol in self._batch_cache:
                     quotes[symbol] = self._batch_cache[symbol]
+
+        # Log combined results
+        ws_count = len([q for q in quotes.values() if hasattr(q, 'data_source') and 'websocket' in q.data_source])
+        api_count = len(quotes) - ws_count
+        if ws_count > 0 and api_count > 0:
+            logger.info(f"📊 Combined: {ws_count} LIVE (WebSocket) + {api_count} (CoinGecko) = {len(quotes)}/{len(symbols)} coins")
 
         return quotes
 
     def _live_price_to_quote(self, live: LivePrice) -> CryptoQuote:
-        """Convert Binance WebSocket LivePrice to CryptoQuote."""
+        """Convert WebSocket LivePrice to CryptoQuote."""
         # Get name from our mapping
         coin_id = self.SYMBOL_TO_ID.get(live.symbol)
         name = self.TOP_CRYPTOS.get(coin_id, (live.symbol, live.symbol))[1] if coin_id else live.symbol
@@ -722,7 +748,7 @@ class CryptoMarketService:
             ath_change_percent=0,
             timestamp=live.timestamp,
             is_live=True,
-            data_source="binance_websocket",
+            data_source=live.data_source,  # Use actual provider (coinbase, kraken, etc.)
             data_age_seconds=live.data_age_seconds,
         )
 
@@ -965,8 +991,9 @@ class CryptoMarketService:
     def get_data_source_status(self) -> Dict[str, Any]:
         """Get status of all data sources."""
         ws_status = self._crypto_ws.get_status()
+        provider = ws_status.get("provider", "unknown")
         return {
-            "primary_source": "binance_websocket",
+            "primary_source": f"{provider.lower()}_websocket" if provider else "websocket",
             "fallback_source": "coingecko_api",
             "websocket": ws_status,
             "is_live": ws_status["connected"],
