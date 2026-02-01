@@ -563,34 +563,29 @@ class CryptoMarketService:
         """
         Get quotes for multiple cryptocurrencies using CoinGecko's efficient batch API.
         Uses /simple/price endpoint which can fetch 250+ coins in ONE request.
+
+        RATE LIMIT AWARE: Only fetches if cache is expired (30s TTL).
         """
         quotes = {}
         symbols = [s.upper() for s in symbols]
 
-        # Check cache first - return cached if still fresh
-        all_cached = True
-        for symbol in symbols:
-            cache_key = f"crypto_quote_{symbol}"
-            cached = self._get_cached_with_age(cache_key)
-            if cached:
-                quote, age = cached
-                quote.data_age_seconds = age
-                quotes[symbol] = quote
-            elif symbol in self._batch_cache and self._last_batch_fetch:
-                age = (datetime.now() - self._last_batch_fetch).total_seconds()
-                if age < self._batch_cache_ttl:
-                    quote = self._batch_cache[symbol]
-                    quote.data_age_seconds = age
-                    quotes[symbol] = quote
-                else:
-                    all_cached = False
-            else:
-                all_cached = False
+        # Check if we have fresh batch data (within TTL)
+        if self._last_batch_fetch:
+            age = (datetime.now() - self._last_batch_fetch).total_seconds()
+            if age < self._batch_cache_ttl:
+                # Return cached data - don't hit API
+                for symbol in symbols:
+                    if symbol in self._batch_cache:
+                        quote = self._batch_cache[symbol]
+                        quote.data_age_seconds = age
+                        quotes[symbol] = quote
 
-        if all_cached and len(quotes) == len(symbols):
-            return quotes
+                # If we have most of the data cached, return it
+                if len(quotes) >= len(symbols) * 0.8:  # 80% threshold
+                    logger.debug(f"Using cached batch data ({age:.1f}s old, {len(quotes)}/{len(symbols)} coins)")
+                    return quotes
 
-        # Fetch fresh data using batch API
+        # Need to fetch fresh data
         # Convert symbols to CoinGecko IDs
         coin_ids = []
         symbol_to_id_map = {}
@@ -625,9 +620,12 @@ class CryptoMarketService:
                     response = await client.get(url, params=params)
 
                     if response.status_code == 429:
-                        logger.error(f"CoinGecko rate limited (429) - waiting and retrying...")
-                        await asyncio.sleep(60)  # Wait 60 seconds for rate limit reset
-                        response = await client.get(url, params=params)
+                        logger.warning(f"CoinGecko rate limited (429) - using cached data if available")
+                        # Return whatever we have cached instead of waiting
+                        for symbol in symbols:
+                            if symbol in self._batch_cache:
+                                quotes[symbol] = self._batch_cache[symbol]
+                        return quotes
 
                     response.raise_for_status()
                     data = response.json()
@@ -654,11 +652,18 @@ class CryptoMarketService:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                logger.error(f"❌ CoinGecko RATE LIMITED (429) - reduce request frequency!")
+                logger.warning(f"CoinGecko RATE LIMITED - returning cached data")
+                for symbol in symbols:
+                    if symbol in self._batch_cache:
+                        quotes[symbol] = self._batch_cache[symbol]
             else:
                 logger.error(f"❌ CoinGecko API error: {e}")
         except Exception as e:
             logger.error(f"❌ Batch fetch failed: {e}")
+            # Return cached on error
+            for symbol in symbols:
+                if symbol in self._batch_cache:
+                    quotes[symbol] = self._batch_cache[symbol]
 
         return quotes
 
