@@ -40,6 +40,7 @@ interface OptionContract {
   intrinsic_value: number;
   time_value: number;
   moneyness: string;
+  quantity?: number;
 }
 
 interface Strategy {
@@ -546,7 +547,7 @@ export default function OptionsPage() {
                   {selectedStrategy.legs.map((leg, i) => (
                     <div key={i} className="flex justify-between">
                       <span>
-                        {leg.quantity > 0 ? "+" : ""}{leg.quantity} {leg.option_type.toUpperCase()} ${leg.strike}
+                        {(leg.quantity ?? 1) > 0 ? "+" : ""}{leg.quantity ?? 1} {leg.option_type.toUpperCase()} ${leg.strike}
                       </span>
                       <span className="font-mono">${leg.premium.toFixed(2)}</span>
                     </div>

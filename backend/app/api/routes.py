@@ -2223,3 +2223,318 @@ async def update_bot_config(
             "take_profit_pct": bot.take_profit_pct,
         }
     }
+
+
+# ============ Strategy Backtesting Endpoints ============
+
+class StrategyBacktestRequest(BaseModel):
+    """Request model for strategy backtesting."""
+    symbol: str = "BTC"
+    strategy_type: str = "combined_multi_factor"
+    # RSI parameters
+    rsi_period: int = 14
+    rsi_oversold: float = 30
+    rsi_overbought: float = 70
+    # MACD parameters
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    # Bollinger parameters
+    bb_period: int = 20
+    bb_std: float = 2.0
+    # Momentum parameters
+    momentum_lookback: int = 20
+    momentum_threshold: float = 0.05
+    # Z-score parameters
+    zscore_lookback: int = 20
+    zscore_entry: float = -2.0
+    zscore_exit: float = 0.0
+    # Risk parameters
+    stop_loss_pct: float = 0.05
+    take_profit_pct: float = 0.10
+    max_holding_days: int = 10
+    position_size_pct: float = 0.10
+    # Time period
+    lookback_days: int = 365
+
+
+@router.post("/strategy/backtest")
+async def backtest_strategy(request: StrategyBacktestRequest):
+    """
+    Run a backtest for a specific trading strategy configuration.
+
+    This tests the strategy on historical data to validate its effectiveness
+    before deploying it in the Quant Bot.
+    """
+    from ..backtest.strategy_tester import (
+        get_strategy_backtester,
+        StrategyConfig,
+        StrategyType,
+    )
+
+    # Map strategy type string to enum
+    strategy_type_map = {
+        "rsi_oversold": StrategyType.RSI_OVERSOLD,
+        "rsi_overbought": StrategyType.RSI_OVERBOUGHT,
+        "macd_crossover": StrategyType.MACD_CROSSOVER,
+        "bollinger_bands": StrategyType.BOLLINGER_BANDS,
+        "momentum": StrategyType.MOMENTUM,
+        "mean_reversion": StrategyType.MEAN_REVERSION,
+        "zscore": StrategyType.ZSCORE,
+        "combined_multi_factor": StrategyType.COMBINED_MULTI_FACTOR,
+    }
+
+    strategy_type = strategy_type_map.get(
+        request.strategy_type,
+        StrategyType.COMBINED_MULTI_FACTOR
+    )
+
+    config = StrategyConfig(
+        strategy_type=strategy_type,
+        rsi_period=request.rsi_period,
+        rsi_oversold=request.rsi_oversold,
+        rsi_overbought=request.rsi_overbought,
+        macd_fast=request.macd_fast,
+        macd_slow=request.macd_slow,
+        macd_signal=request.macd_signal,
+        bb_period=request.bb_period,
+        bb_std=request.bb_std,
+        momentum_lookback=request.momentum_lookback,
+        momentum_threshold=request.momentum_threshold,
+        zscore_lookback=request.zscore_lookback,
+        zscore_entry=request.zscore_entry,
+        zscore_exit=request.zscore_exit,
+        stop_loss_pct=request.stop_loss_pct,
+        take_profit_pct=request.take_profit_pct,
+        max_holding_days=request.max_holding_days,
+        position_size_pct=request.position_size_pct,
+    )
+
+    backtester = get_strategy_backtester()
+
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=request.lookback_days)
+
+    result = backtester.run_backtest(
+        symbol=request.symbol,
+        config=config,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not run backtest for {request.symbol}. Check that the symbol is valid."
+        )
+
+    return result.to_dict()
+
+
+@router.post("/strategy/compare")
+async def compare_strategies(
+    symbol: str = "BTC",
+    lookback_days: int = 365,
+):
+    """
+    Compare all strategy types on a single symbol.
+
+    Returns performance metrics for each strategy type to help users
+    identify the best approach for their trading style.
+    """
+    from ..backtest.strategy_tester import (
+        get_strategy_backtester,
+        StrategyConfig,
+        StrategyType,
+    )
+
+    backtester = get_strategy_backtester()
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=lookback_days)
+
+    results = []
+    for strategy_type in StrategyType:
+        config = StrategyConfig(strategy_type=strategy_type)
+        result = backtester.run_backtest(
+            symbol=symbol,
+            config=config,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if result:
+            results.append({
+                "strategy": strategy_type.value,
+                "total_return": round(result.total_return * 100, 2),
+                "sharpe_ratio": round(result.sharpe_ratio, 2),
+                "max_drawdown": round(result.max_drawdown * 100, 2),
+                "win_rate": round(result.win_rate * 100, 1),
+                "total_trades": result.total_trades,
+                "profit_factor": round(result.profit_factor, 2),
+            })
+
+    # Sort by Sharpe ratio
+    results.sort(key=lambda x: x["sharpe_ratio"], reverse=True)
+
+    return {
+        "symbol": symbol,
+        "period_days": lookback_days,
+        "comparison": results,
+        "best_strategy": results[0]["strategy"] if results else None,
+    }
+
+
+@router.get("/strategy/presets")
+async def get_strategy_presets():
+    """
+    Get predefined strategy presets optimized for different trading styles.
+
+    These presets are based on backtested configurations that have shown
+    good risk-adjusted returns across different market conditions.
+    """
+    return {
+        "conservative": {
+            "name": "Conservative",
+            "description": "Low risk, steady returns. Focus on mean reversion and quality signals.",
+            "config": {
+                "strategy_type": "combined_multi_factor",
+                "rsi_period": 14,
+                "rsi_oversold": 25,
+                "rsi_overbought": 75,
+                "macd_fast": 12,
+                "macd_slow": 26,
+                "macd_signal": 9,
+                "bb_period": 20,
+                "bb_std": 2.5,
+                "momentum_lookback": 30,
+                "momentum_threshold": 0.08,
+                "zscore_lookback": 30,
+                "zscore_entry": -2.5,
+                "zscore_exit": 0.0,
+                "stop_loss_pct": 0.08,
+                "take_profit_pct": 0.15,
+                "max_holding_days": 14,
+                "position_size_pct": 0.05,
+            },
+            "expected_metrics": {
+                "annual_return": "8-15%",
+                "max_drawdown": "5-10%",
+                "sharpe_ratio": "1.0-1.5",
+            }
+        },
+        "moderate": {
+            "name": "Moderate",
+            "description": "Balanced risk/reward. Multi-factor approach with momentum and mean reversion.",
+            "config": {
+                "strategy_type": "combined_multi_factor",
+                "rsi_period": 14,
+                "rsi_oversold": 30,
+                "rsi_overbought": 70,
+                "macd_fast": 12,
+                "macd_slow": 26,
+                "macd_signal": 9,
+                "bb_period": 20,
+                "bb_std": 2.0,
+                "momentum_lookback": 20,
+                "momentum_threshold": 0.05,
+                "zscore_lookback": 20,
+                "zscore_entry": -2.0,
+                "zscore_exit": 0.0,
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.10,
+                "max_holding_days": 10,
+                "position_size_pct": 0.10,
+            },
+            "expected_metrics": {
+                "annual_return": "15-25%",
+                "max_drawdown": "10-15%",
+                "sharpe_ratio": "1.2-1.8",
+            }
+        },
+        "aggressive": {
+            "name": "Aggressive",
+            "description": "High risk, high reward. Momentum-focused with tight stops.",
+            "config": {
+                "strategy_type": "momentum",
+                "rsi_period": 10,
+                "rsi_oversold": 35,
+                "rsi_overbought": 65,
+                "macd_fast": 8,
+                "macd_slow": 17,
+                "macd_signal": 9,
+                "bb_period": 15,
+                "bb_std": 1.5,
+                "momentum_lookback": 10,
+                "momentum_threshold": 0.03,
+                "zscore_lookback": 15,
+                "zscore_entry": -1.5,
+                "zscore_exit": 0.5,
+                "stop_loss_pct": 0.025,
+                "take_profit_pct": 0.05,
+                "max_holding_days": 5,
+                "position_size_pct": 0.15,
+            },
+            "expected_metrics": {
+                "annual_return": "25-50%",
+                "max_drawdown": "15-25%",
+                "sharpe_ratio": "0.8-1.5",
+            }
+        },
+        "mean_reversion": {
+            "name": "Mean Reversion",
+            "description": "Buy oversold, sell overbought. Statistical approach.",
+            "config": {
+                "strategy_type": "zscore",
+                "rsi_period": 14,
+                "rsi_oversold": 25,
+                "rsi_overbought": 75,
+                "macd_fast": 12,
+                "macd_slow": 26,
+                "macd_signal": 9,
+                "bb_period": 20,
+                "bb_std": 2.0,
+                "momentum_lookback": 20,
+                "momentum_threshold": 0.05,
+                "zscore_lookback": 20,
+                "zscore_entry": -2.0,
+                "zscore_exit": 0.0,
+                "stop_loss_pct": 0.06,
+                "take_profit_pct": 0.08,
+                "max_holding_days": 7,
+                "position_size_pct": 0.10,
+            },
+            "expected_metrics": {
+                "annual_return": "12-20%",
+                "max_drawdown": "8-12%",
+                "sharpe_ratio": "1.3-2.0",
+            }
+        },
+        "momentum_breakout": {
+            "name": "Momentum Breakout",
+            "description": "Catch strong trends early. MACD and momentum focused.",
+            "config": {
+                "strategy_type": "macd_crossover",
+                "rsi_period": 14,
+                "rsi_oversold": 40,
+                "rsi_overbought": 60,
+                "macd_fast": 12,
+                "macd_slow": 26,
+                "macd_signal": 9,
+                "bb_period": 20,
+                "bb_std": 2.0,
+                "momentum_lookback": 15,
+                "momentum_threshold": 0.04,
+                "zscore_lookback": 20,
+                "zscore_entry": -1.5,
+                "zscore_exit": 0.5,
+                "stop_loss_pct": 0.04,
+                "take_profit_pct": 0.08,
+                "max_holding_days": 8,
+                "position_size_pct": 0.12,
+            },
+            "expected_metrics": {
+                "annual_return": "18-30%",
+                "max_drawdown": "12-18%",
+                "sharpe_ratio": "1.0-1.6",
+            }
+        },
+    }

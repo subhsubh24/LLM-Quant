@@ -18,6 +18,10 @@ import {
   DollarSign,
   Clock,
   Info,
+  BarChart2,
+  LineChart,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +29,7 @@ import { cn } from "@/lib/utils";
 interface AlgorithmConfig {
   // Strategy Mode
   mode: "conservative" | "moderate" | "aggressive";
+  strategyType: string;
 
   // Technical Indicators
   rsiPeriod: number;
@@ -36,25 +41,30 @@ interface AlgorithmConfig {
   bollingerPeriod: number;
   bollingerStdDev: number;
 
+  // Z-score Mean Reversion
+  zscoreLookback: number;
+  zscoreEntry: number;
+  zscoreExit: number;
+
+  // Momentum
+  momentumLookback: number;
+  momentumThreshold: number;
+
   // Risk Management
   maxPositionSize: number;
-  maxPortfolioRisk: number;
   stopLossPercent: number;
   takeProfitPercent: number;
-  maxDrawdownLimit: number;
+  maxHoldingDays: number;
 
   // Position Sizing
   kellyFraction: number;
   minConfidence: number;
   maxPositions: number;
-
-  // Timing
-  scanInterval: number;
-  cooldownPeriod: number;
 }
 
 const defaultConfig: AlgorithmConfig = {
   mode: "moderate",
+  strategyType: "combined_multi_factor",
   rsiPeriod: 14,
   rsiOversold: 30,
   rsiOverbought: 70,
@@ -63,56 +73,80 @@ const defaultConfig: AlgorithmConfig = {
   macdSignal: 9,
   bollingerPeriod: 20,
   bollingerStdDev: 2,
-  maxPositionSize: 5,
-  maxPortfolioRisk: 20,
+  zscoreLookback: 20,
+  zscoreEntry: -2.0,
+  zscoreExit: 0.0,
+  momentumLookback: 20,
+  momentumThreshold: 0.05,
+  maxPositionSize: 10,
   stopLossPercent: 5,
-  takeProfitPercent: 15,
-  maxDrawdownLimit: 10,
+  takeProfitPercent: 10,
+  maxHoldingDays: 10,
   kellyFraction: 0.25,
   minConfidence: 0.6,
   maxPositions: 10,
-  scanInterval: 30,
-  cooldownPeriod: 300,
 };
 
 const presets: Record<string, Partial<AlgorithmConfig>> = {
   conservative: {
     mode: "conservative",
+    strategyType: "combined_multi_factor",
     rsiOversold: 25,
     rsiOverbought: 75,
-    maxPositionSize: 3,
-    maxPortfolioRisk: 10,
-    stopLossPercent: 3,
-    takeProfitPercent: 10,
+    bollingerStdDev: 2.5,
+    zscoreEntry: -2.5,
+    maxPositionSize: 5,
+    stopLossPercent: 8,
+    takeProfitPercent: 15,
+    maxHoldingDays: 14,
     kellyFraction: 0.15,
     minConfidence: 0.7,
     maxPositions: 5,
   },
   moderate: {
     mode: "moderate",
+    strategyType: "combined_multi_factor",
     rsiOversold: 30,
     rsiOverbought: 70,
-    maxPositionSize: 5,
-    maxPortfolioRisk: 20,
+    bollingerStdDev: 2.0,
+    zscoreEntry: -2.0,
+    maxPositionSize: 10,
     stopLossPercent: 5,
-    takeProfitPercent: 15,
+    takeProfitPercent: 10,
+    maxHoldingDays: 10,
     kellyFraction: 0.25,
     minConfidence: 0.6,
     maxPositions: 10,
   },
   aggressive: {
     mode: "aggressive",
+    strategyType: "momentum",
     rsiOversold: 35,
     rsiOverbought: 65,
-    maxPositionSize: 10,
-    maxPortfolioRisk: 35,
-    stopLossPercent: 8,
-    takeProfitPercent: 25,
+    bollingerStdDev: 1.5,
+    zscoreEntry: -1.5,
+    momentumThreshold: 0.03,
+    maxPositionSize: 15,
+    stopLossPercent: 2.5,
+    takeProfitPercent: 5,
+    maxHoldingDays: 5,
     kellyFraction: 0.4,
     minConfidence: 0.5,
     maxPositions: 15,
   },
 };
+
+const strategyTypes = [
+  { id: "combined_multi_factor", name: "Multi-Factor", description: "RSI + MACD + Bollinger + Z-score" },
+  { id: "rsi_oversold", name: "RSI Oversold", description: "Buy when RSI < oversold threshold" },
+  { id: "macd_crossover", name: "MACD Crossover", description: "Buy on bullish MACD crossover" },
+  { id: "bollinger_bands", name: "Bollinger Bands", description: "Buy at lower band, sell at upper" },
+  { id: "momentum", name: "Momentum", description: "Follow strong price trends" },
+  { id: "mean_reversion", name: "Mean Reversion", description: "Fade extreme moves" },
+  { id: "zscore", name: "Z-Score Statistical", description: "Trade on statistical extremes" },
+];
+
+const testSymbols = ["BTC", "ETH", "AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "SPY"];
 
 export default function ResearchPage() {
   const [config, setConfig] = useState<AlgorithmConfig>(defaultConfig);
@@ -121,23 +155,11 @@ export default function ResearchPage() {
   const [testResults, setTestResults] = useState<any>(null);
   const [saved, setSaved] = useState(false);
   const [botStatus, setBotStatus] = useState<any>(null);
+  const [testSymbol, setTestSymbol] = useState("BTC");
+  const [lookbackDays, setLookbackDays] = useState(365);
 
   // Fetch current bot configuration on load
   useEffect(() => {
-    const fetchBotConfig = async () => {
-      try {
-        const response = await fetch("/api/bot/config");
-        if (response.ok) {
-          const data = await response.json();
-          if (data.config) {
-            setConfig({ ...defaultConfig, ...data.config });
-          }
-        }
-      } catch {
-        // Use defaults
-      }
-    };
-
     const fetchBotStatus = async () => {
       try {
         const response = await fetch("/api/bot/status");
@@ -150,7 +172,6 @@ export default function ResearchPage() {
       }
     };
 
-    fetchBotConfig();
     fetchBotStatus();
   }, []);
 
@@ -159,12 +180,14 @@ export default function ResearchPage() {
     if (presetConfig) {
       setConfig({ ...config, ...presetConfig });
       setSaved(false);
+      setTestResults(null);
     }
   };
 
   const resetToDefaults = () => {
     setConfig(defaultConfig);
     setSaved(false);
+    setTestResults(null);
   };
 
   const saveConfig = async () => {
@@ -172,7 +195,12 @@ export default function ResearchPage() {
       const response = await fetch("/api/bot/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({
+          max_positions: config.maxPositions,
+          max_position_pct: config.maxPositionSize / 100,
+          stop_loss_pct: config.stopLossPercent / 100,
+          take_profit_pct: config.takeProfitPercent / 100,
+        }),
       });
       if (response.ok) {
         setSaved(true);
@@ -188,13 +216,30 @@ export default function ResearchPage() {
     setTestResults(null);
 
     try {
-      const response = await fetch("/api/backtest/run", {
+      const response = await fetch("/api/strategy/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          config,
-          universe_name: "liquid_50",
-          lookback_days: 30,
+          symbol: testSymbol,
+          strategy_type: config.strategyType,
+          rsi_period: config.rsiPeriod,
+          rsi_oversold: config.rsiOversold,
+          rsi_overbought: config.rsiOverbought,
+          macd_fast: config.macdFast,
+          macd_slow: config.macdSlow,
+          macd_signal: config.macdSignal,
+          bb_period: config.bollingerPeriod,
+          bb_std: config.bollingerStdDev,
+          momentum_lookback: config.momentumLookback,
+          momentum_threshold: config.momentumThreshold,
+          zscore_lookback: config.zscoreLookback,
+          zscore_entry: config.zscoreEntry,
+          zscore_exit: config.zscoreExit,
+          stop_loss_pct: config.stopLossPercent / 100,
+          take_profit_pct: config.takeProfitPercent / 100,
+          max_holding_days: config.maxHoldingDays,
+          position_size_pct: config.maxPositionSize / 100,
+          lookback_days: lookbackDays,
         }),
       });
 
@@ -202,24 +247,16 @@ export default function ResearchPage() {
         const data = await response.json();
         setTestResults(data);
       } else {
+        const errorData = await response.json().catch(() => ({}));
         setTestResults({
           error: true,
-          message: "Backtest failed - check backend logs",
+          message: errorData.detail || "Backtest failed - check backend logs",
         });
       }
-    } catch {
-      // Generate simulated results for demo
+    } catch (e) {
       setTestResults({
-        metrics: {
-          total_return: (Math.random() * 0.3 - 0.05),
-          sharpe_ratio: (0.5 + Math.random() * 1.5),
-          max_drawdown: -(0.05 + Math.random() * 0.15),
-          win_rate: (0.4 + Math.random() * 0.3),
-          profit_factor: (0.8 + Math.random() * 1.2),
-        },
-        trades: Math.floor(20 + Math.random() * 80),
-        signals_generated: Math.floor(50 + Math.random() * 150),
-        duration_days: 30,
+        error: true,
+        message: "Network error - ensure backend is running",
       });
     } finally {
       setTesting(false);
@@ -227,10 +264,10 @@ export default function ResearchPage() {
   };
 
   const sections = [
-    { id: "strategy", name: "Strategy Mode", icon: Zap },
-    { id: "technical", name: "Technical Indicators", icon: Activity },
-    { id: "risk", name: "Risk Management", icon: Shield },
-    { id: "position", name: "Position Sizing", icon: Target },
+    { id: "strategy", name: "Strategy", icon: Zap },
+    { id: "technical", name: "Indicators", icon: Activity },
+    { id: "statistical", name: "Statistical", icon: BarChart2 },
+    { id: "risk", name: "Risk", icon: Shield },
     { id: "timing", name: "Timing", icon: Clock },
   ];
 
@@ -240,9 +277,9 @@ export default function ResearchPage() {
       <div className="mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Algorithm Configuration</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Strategy Research Lab</h1>
             <p className="text-gray-500 mt-1">
-              Fine-tune the Quant Bot&apos;s trading parameters and test before deploying
+              Backtest strategies on historical data before deploying to Quant Bot
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -269,7 +306,7 @@ export default function ResearchPage() {
               )}
             >
               {saved ? <CheckCircle className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              {saved ? "Saved!" : "Save Config"}
+              {saved ? "Saved!" : "Deploy to Bot"}
             </button>
           </div>
         </div>
@@ -334,20 +371,25 @@ export default function ResearchPage() {
             {activeSection === "strategy" && (
               <div className="space-y-6">
                 <SectionHeader
-                  title="Strategy Mode"
-                  description="Choose your overall risk tolerance and trading style"
+                  title="Strategy Type"
+                  description="Choose the core trading algorithm"
                 />
-                <div className="grid grid-cols-1 gap-4">
-                  <div className="p-4 rounded-xl bg-gray-50">
-                    <p className="text-sm text-gray-600 mb-3">
-                      Current mode: <span className="font-semibold capitalize">{config.mode}</span>
-                    </p>
-                    <div className="text-xs text-gray-500 space-y-1">
-                      <p>• Conservative: Prioritizes capital preservation, fewer trades</p>
-                      <p>• Moderate: Balanced risk/reward, suitable for most traders</p>
-                      <p>• Aggressive: Maximizes opportunities, higher drawdown tolerance</p>
-                    </div>
-                  </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {strategyTypes.map((strategy) => (
+                    <button
+                      key={strategy.id}
+                      onClick={() => setConfig({ ...config, strategyType: strategy.id })}
+                      className={cn(
+                        "p-4 rounded-xl border-2 text-left transition-all",
+                        config.strategyType === strategy.id
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
+                      )}
+                    >
+                      <div className="font-medium text-gray-900">{strategy.name}</div>
+                      <div className="text-xs text-gray-500 mt-1">{strategy.description}</div>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -444,6 +486,84 @@ export default function ResearchPage() {
               </div>
             )}
 
+            {activeSection === "statistical" && (
+              <div className="space-y-6">
+                <SectionHeader
+                  title="Statistical Indicators"
+                  description="Mean reversion and momentum parameters"
+                />
+
+                <div className="space-y-4">
+                  <h4 className="text-sm font-semibold text-gray-700">Z-Score Mean Reversion</h4>
+                  <div className="grid grid-cols-3 gap-4">
+                    <ConfigInput
+                      label="Lookback"
+                      value={config.zscoreLookback}
+                      onChange={(v) => setConfig({ ...config, zscoreLookback: v })}
+                      min={10}
+                      max={60}
+                      hint="Days for mean calc"
+                    />
+                    <ConfigInput
+                      label="Entry Z"
+                      value={config.zscoreEntry}
+                      onChange={(v) => setConfig({ ...config, zscoreEntry: v })}
+                      min={-4}
+                      max={-0.5}
+                      step={0.1}
+                      hint="Buy when Z < this"
+                    />
+                    <ConfigInput
+                      label="Exit Z"
+                      value={config.zscoreExit}
+                      onChange={(v) => setConfig({ ...config, zscoreExit: v })}
+                      min={-1}
+                      max={1}
+                      step={0.1}
+                      hint="Exit when Z > this"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-sm font-semibold text-gray-700">Momentum</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <ConfigInput
+                      label="Lookback Days"
+                      value={config.momentumLookback}
+                      onChange={(v) => setConfig({ ...config, momentumLookback: v })}
+                      min={5}
+                      max={60}
+                      hint="Days to measure momentum"
+                    />
+                    <ConfigInput
+                      label="Threshold"
+                      value={config.momentumThreshold * 100}
+                      onChange={(v) => setConfig({ ...config, momentumThreshold: v / 100 })}
+                      min={1}
+                      max={20}
+                      suffix="%"
+                      hint="Min move to trigger"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+                  <div className="flex items-start gap-3">
+                    <Info className="w-5 h-5 text-blue-500 mt-0.5" />
+                    <div className="text-sm text-blue-700">
+                      <p className="font-medium mb-1">Z-Score Strategy</p>
+                      <p className="text-blue-600">
+                        Z-score measures how far price is from its mean in standard deviations.
+                        Z &lt; -2 means price is 2 standard deviations below average (statistically oversold).
+                        Mean reversion strategies buy at extreme negative Z and sell when Z returns to 0.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeSection === "risk" && (
               <div className="space-y-6">
                 <SectionHeader
@@ -462,13 +582,12 @@ export default function ResearchPage() {
                     hint="Max % of portfolio per trade"
                   />
                   <ConfigInput
-                    label="Max Portfolio Risk"
-                    value={config.maxPortfolioRisk}
-                    onChange={(v) => setConfig({ ...config, maxPortfolioRisk: v })}
-                    min={5}
-                    max={50}
-                    suffix="%"
-                    hint="Total portfolio at risk"
+                    label="Max Positions"
+                    value={config.maxPositions}
+                    onChange={(v) => setConfig({ ...config, maxPositions: v })}
+                    min={1}
+                    max={25}
+                    hint="Maximum concurrent trades"
                   />
                   <ConfigInput
                     label="Stop Loss"
@@ -483,32 +602,11 @@ export default function ResearchPage() {
                     label="Take Profit"
                     value={config.takeProfitPercent}
                     onChange={(v) => setConfig({ ...config, takeProfitPercent: v })}
-                    min={5}
+                    min={2}
                     max={50}
                     suffix="%"
                     hint="Exit on profit threshold"
                   />
-                  <ConfigInput
-                    label="Max Drawdown Limit"
-                    value={config.maxDrawdownLimit}
-                    onChange={(v) => setConfig({ ...config, maxDrawdownLimit: v })}
-                    min={5}
-                    max={30}
-                    suffix="%"
-                    hint="Stop trading if exceeded"
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeSection === "position" && (
-              <div className="space-y-6">
-                <SectionHeader
-                  title="Position Sizing"
-                  description="Determine how much to allocate to each trade"
-                />
-
-                <div className="grid grid-cols-2 gap-4">
                   <ConfigInput
                     label="Kelly Fraction"
                     value={config.kellyFraction}
@@ -527,28 +625,6 @@ export default function ResearchPage() {
                     step={0.05}
                     hint="Minimum signal confidence"
                   />
-                  <ConfigInput
-                    label="Max Positions"
-                    value={config.maxPositions}
-                    onChange={(v) => setConfig({ ...config, maxPositions: v })}
-                    min={1}
-                    max={25}
-                    hint="Maximum concurrent trades"
-                  />
-                </div>
-
-                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
-                  <div className="flex items-start gap-3">
-                    <Info className="w-5 h-5 text-blue-500 mt-0.5" />
-                    <div className="text-sm text-blue-700">
-                      <p className="font-medium mb-1">Kelly Criterion</p>
-                      <p className="text-blue-600">
-                        The Kelly fraction determines position sizing based on edge and odds.
-                        A 0.25 fraction means using 1/4 of the mathematically optimal size,
-                        which reduces volatility while capturing most of the expected growth.
-                      </p>
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
@@ -557,28 +633,33 @@ export default function ResearchPage() {
               <div className="space-y-6">
                 <SectionHeader
                   title="Timing Parameters"
-                  description="Control scan frequency and trade cooldowns"
+                  description="Control holding periods and trade frequency"
                 />
 
                 <div className="grid grid-cols-2 gap-4">
                   <ConfigInput
-                    label="Scan Interval"
-                    value={config.scanInterval}
-                    onChange={(v) => setConfig({ ...config, scanInterval: v })}
-                    min={10}
-                    max={300}
-                    suffix="sec"
-                    hint="Time between market scans"
+                    label="Max Holding Days"
+                    value={config.maxHoldingDays}
+                    onChange={(v) => setConfig({ ...config, maxHoldingDays: v })}
+                    min={1}
+                    max={30}
+                    suffix="days"
+                    hint="Auto-exit if exceeded"
                   />
-                  <ConfigInput
-                    label="Cooldown Period"
-                    value={config.cooldownPeriod}
-                    onChange={(v) => setConfig({ ...config, cooldownPeriod: v })}
-                    min={60}
-                    max={3600}
-                    suffix="sec"
-                    hint="Wait after trade before next"
-                  />
+                </div>
+
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-100">
+                  <div className="flex items-start gap-3">
+                    <Clock className="w-5 h-5 text-amber-500 mt-0.5" />
+                    <div className="text-sm text-amber-700">
+                      <p className="font-medium mb-1">Holding Period Impact</p>
+                      <p className="text-amber-600">
+                        Shorter holding periods (1-5 days) suit aggressive momentum strategies.
+                        Longer periods (10-14+ days) work better for mean reversion and value strategies.
+                        Max holding prevents dead positions from tying up capital.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -590,12 +671,39 @@ export default function ResearchPage() {
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <Play className="w-5 h-5 text-green-500" />
-              Test Configuration
+              Backtest Configuration
             </h3>
 
-            <p className="text-sm text-gray-500 mb-4">
-              Run a 30-day backtest with your current settings to evaluate performance before deploying to live trading.
-            </p>
+            <div className="space-y-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Test Symbol</label>
+                <select
+                  value={testSymbol}
+                  onChange={(e) => setTestSymbol(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {testSymbols.map((symbol) => (
+                    <option key={symbol} value={symbol}>
+                      {symbol}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Lookback Period</label>
+                <select
+                  value={lookbackDays}
+                  onChange={(e) => setLookbackDays(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value={90}>90 days (3 months)</option>
+                  <option value={180}>180 days (6 months)</option>
+                  <option value={365}>365 days (1 year)</option>
+                  <option value={730}>730 days (2 years)</option>
+                </select>
+              </div>
+            </div>
 
             <button
               onClick={runBacktest}
@@ -610,12 +718,12 @@ export default function ResearchPage() {
               {testing ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Testing...
+                  Running Backtest...
                 </>
               ) : (
                 <>
                   <Play className="w-5 h-5" />
-                  Run Backtest
+                  Run Historical Backtest
                 </>
               )}
             </button>
@@ -624,39 +732,77 @@ export default function ResearchPage() {
           {/* Test Results */}
           {testResults && !testResults.error && (
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Results</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <LineChart className="w-5 h-5 text-blue-500" />
+                Backtest Results
+              </h3>
 
               <div className="space-y-3">
                 <ResultRow
                   label="Total Return"
-                  value={`${(testResults.metrics.total_return * 100).toFixed(1)}%`}
+                  value={`${testResults.metrics.total_return}%`}
                   positive={testResults.metrics.total_return > 0}
                 />
                 <ResultRow
+                  label="Annual Return"
+                  value={`${testResults.metrics.annualized_return}%`}
+                  positive={testResults.metrics.annualized_return > 0}
+                />
+                <ResultRow
                   label="Sharpe Ratio"
-                  value={testResults.metrics.sharpe_ratio.toFixed(2)}
+                  value={testResults.metrics.sharpe_ratio.toString()}
                   positive={testResults.metrics.sharpe_ratio > 1}
                 />
                 <ResultRow
+                  label="Sortino Ratio"
+                  value={testResults.metrics.sortino_ratio.toString()}
+                  positive={testResults.metrics.sortino_ratio > 1}
+                />
+                <ResultRow
                   label="Max Drawdown"
-                  value={`${(testResults.metrics.max_drawdown * 100).toFixed(1)}%`}
-                  positive={testResults.metrics.max_drawdown > -0.1}
+                  value={`${testResults.metrics.max_drawdown}%`}
+                  positive={testResults.metrics.max_drawdown > -15}
                 />
                 <ResultRow
                   label="Win Rate"
-                  value={`${(testResults.metrics.win_rate * 100).toFixed(0)}%`}
-                  positive={testResults.metrics.win_rate > 0.5}
+                  value={`${testResults.metrics.win_rate}%`}
+                  positive={testResults.metrics.win_rate > 50}
                 />
                 <ResultRow
                   label="Profit Factor"
-                  value={testResults.metrics.profit_factor.toFixed(2)}
+                  value={testResults.metrics.profit_factor.toString()}
                   positive={testResults.metrics.profit_factor > 1}
                 />
 
+                <div className="pt-3 border-t border-gray-100 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Total Trades</span>
+                    <span className="font-medium">{testResults.trade_stats.total_trades}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Winning / Losing</span>
+                    <span className="font-medium">
+                      <span className="text-green-600">{testResults.trade_stats.winning_trades}</span>
+                      {" / "}
+                      <span className="text-red-600">{testResults.trade_stats.losing_trades}</span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Avg Holding</span>
+                    <span className="font-medium">{testResults.trade_stats.avg_holding_days} days</span>
+                  </div>
+                </div>
+
                 <div className="pt-3 border-t border-gray-100">
-                  <p className="text-xs text-gray-500">
-                    {testResults.trades} trades over {testResults.duration_days} days
-                  </p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">vs Buy & Hold</span>
+                    <span className={cn(
+                      "font-medium",
+                      testResults.benchmark.alpha > 0 ? "text-green-600" : "text-red-600"
+                    )}>
+                      Alpha: {testResults.benchmark.alpha > 0 ? "+" : ""}{testResults.benchmark.alpha}%
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -673,23 +819,23 @@ export default function ResearchPage() {
 
           {/* Quick Tips */}
           <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-6 text-white">
-            <h3 className="font-semibold mb-3">Configuration Tips</h3>
+            <h3 className="font-semibold mb-3">Backtesting Tips</h3>
             <ul className="text-sm text-gray-300 space-y-2">
               <li className="flex items-start gap-2">
                 <span className="text-green-400">•</span>
-                Start with moderate settings and adjust based on results
+                Sharpe &gt; 1.0 is good, &gt; 2.0 is excellent
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-green-400">•</span>
-                Lower min confidence = more signals, but lower quality
+                Win rate matters less than risk/reward ratio
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-green-400">•</span>
-                Tighter stops work in trending markets, wider in choppy
+                Alpha &gt; 0 means beating buy-and-hold
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-green-400">•</span>
-                Expect 30-50% worse performance in live vs backtest
+                <span className="text-yellow-400">•</span>
+                Expect 30-50% worse performance in live trading
               </li>
             </ul>
           </div>
@@ -767,9 +913,14 @@ function ResultRow({
     <div className="flex items-center justify-between">
       <span className="text-sm text-gray-600">{label}</span>
       <span className={cn(
-        "text-sm font-semibold",
+        "text-sm font-semibold flex items-center gap-1",
         positive ? "text-green-600" : "text-red-600"
       )}>
+        {positive ? (
+          <ArrowUpRight className="w-3 h-3" />
+        ) : (
+          <ArrowDownRight className="w-3 h-3" />
+        )}
         {value}
       </span>
     </div>

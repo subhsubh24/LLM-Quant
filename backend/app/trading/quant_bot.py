@@ -1114,7 +1114,7 @@ class BotTrade:
 
 @dataclass
 class BotPosition:
-    """Current bot position with tracking."""
+    """Current bot position with tracking and scale-out support."""
     symbol: str
     asset_class: str
     quantity: float
@@ -1125,6 +1125,9 @@ class BotPosition:
     stop_loss_price: float
     take_profit_price: float
     trailing_stop_pct: float = 0.10
+    # Scale-out tracking for partial profit taking
+    scale_out_levels: List[Dict] = field(default_factory=list)
+    scaled_out_count: int = 0
 
     @property
     def market_value(self) -> float:
@@ -1654,8 +1657,17 @@ class QuantBot:
                     self._price_cache[symbol] = (price, datetime.now())
 
     async def _check_risk_limits(self):
-        """Check and enforce stop loss / take profit for all positions."""
+        """
+        Enhanced risk management with SCALE-OUT profit taking.
+
+        Implements:
+        1. Stop loss enforcement
+        2. Full take profit at target
+        3. SCALE-OUT: Partial exits at profit milestones (locks in gains)
+        4. Trailing stop updates
+        """
         positions_to_close = []
+        positions_to_scale = []
 
         for symbol, position in self.positions.items():
             pnl_pct = position.unrealized_pnl_pct
@@ -1669,7 +1681,7 @@ class QuantBot:
                     "risk"
                 )
 
-            # Check take profit
+            # Check full take profit
             elif position.current_price >= position.take_profit_price:
                 reason = f"TAKE PROFIT triggered at {pnl_pct*100:.1f}%"
                 positions_to_close.append((symbol, reason, "take_profit"))
@@ -1678,6 +1690,31 @@ class QuantBot:
                     "risk"
                 )
 
+            # ========== SCALE-OUT LOGIC ==========
+            # Check for partial profit taking at milestones
+            elif hasattr(position, 'scale_out_levels') and position.scale_out_levels:
+                target_pnl = (position.take_profit_price - position.entry_price) / position.entry_price
+                scaled_count = getattr(position, 'scaled_out_count', 0)
+
+                for i, level in enumerate(position.scale_out_levels):
+                    # Check if we've hit this scale-out level and haven't taken it yet
+                    if i < scaled_count:
+                        continue
+
+                    level_pnl_threshold = target_pnl * level['pct']
+                    if pnl_pct >= level_pnl_threshold:
+                        # Calculate how much to take off
+                        remaining_qty = position.quantity
+                        qty_to_sell = remaining_qty * level['take_pct']
+
+                        if qty_to_sell * position.current_price >= self.min_trade_value:
+                            positions_to_scale.append((symbol, qty_to_sell, level, i))
+                            self.commentary.add(
+                                f"📈 SCALE-OUT: Taking {level['take_pct']*100:.0f}% off {symbol} at {pnl_pct*100:.1f}% profit",
+                                "trade"
+                            )
+                            break  # Only one scale-out per check cycle
+
             # Trailing stop update
             else:
                 new_stop = position.current_price * (1 - position.trailing_stop_pct)
@@ -1685,9 +1722,92 @@ class QuantBot:
                     position.stop_loss_price = new_stop
                     logger.debug(f"Trailing stop updated for {symbol}: ${new_stop:.2f}")
 
+        # Execute scale-outs first (partial exits)
+        for symbol, qty_to_sell, level, level_idx in positions_to_scale:
+            await self._partial_close_position(symbol, qty_to_sell, f"Scale-out at {level['pct']*100:.0f}% of target")
+            self.positions[symbol].scaled_out_count = level_idx + 1
+
         # Close positions that hit limits
         for symbol, reason, trigger in positions_to_close:
             await self._close_position(symbol, reason)
+
+    async def _partial_close_position(self, symbol: str, quantity: float, reason: str) -> bool:
+        """
+        Close a PARTIAL position (scale-out).
+
+        This locks in profits while letting remaining position run.
+        """
+        if symbol not in self.positions:
+            return False
+
+        position = self.positions[symbol]
+        if quantity >= position.quantity:
+            # Full close instead
+            return await self._close_position(symbol, reason)
+
+        # Calculate partial values
+        partial_value = quantity * position.current_price
+        partial_pnl = (position.current_price - position.entry_price) * quantity
+
+        # Update cash
+        self.cash += partial_value
+
+        # Update position quantity
+        position.quantity -= quantity
+
+        # Log partial trade
+        pnl_pct = (position.current_price - position.entry_price) / position.entry_price
+        trade = BotTrade(
+            id=str(uuid.uuid4())[:8],
+            timestamp=datetime.now(),
+            asset_class=position.asset_class,
+            symbol=symbol,
+            side="SELL_PARTIAL",
+            quantity=quantity,
+            price=position.current_price,
+            value=partial_value,
+            rationale=TradeRationale(
+                decision="SELL_PARTIAL",
+                confidence=1.0,
+                primary_reason=reason,
+                factors={"pnl": pnl_pct},
+                factor_weights={"pnl": 1.0},
+                rsi_value=50.0,
+                rsi_signal="NEUTRAL",
+                macd_signal="NEUTRAL",
+                bollinger_position="MIDDLE",
+                momentum_quality=0,
+                zscore=0,
+                volatility_regime="NORMAL",
+                hurst_exponent=0.5,
+                order_flow_signal=0,
+                volume_confirmation=False,
+                liquidity_score=0.8,
+                risk_assessment="Partial profit lock",
+                position_size_kelly=0,
+                expected_return=pnl_pct,
+                expected_sharpe=0,
+                max_loss_scenario="N/A",
+                expected_holding_period="partial",
+                stop_loss=0,
+                take_profit=0,
+                trailing_stop=0,
+                signals_summary=f"Scale-out: ${partial_pnl:+.2f}",
+                detailed_analysis=f"Partial close: {reason}",
+            ),
+            pnl=partial_pnl,
+        )
+        self.trade_history.append(trade)
+
+        self.commentary.add(
+            f"💰 PARTIAL SELL {symbol}: {quantity:.4f} @ ${position.current_price:,.2f} | "
+            f"P&L: ${partial_pnl:+,.2f} ({pnl_pct*100:+.1f}%) | "
+            f"Remaining: {position.quantity:.4f}",
+            "trade",
+            {"symbol": symbol, "side": "SELL_PARTIAL", "pnl": partial_pnl, "reason": reason}
+        )
+
+        return True
 
     async def _scan_stocks(self):
         """OPTIMIZED: Parallel stock scanning with concurrent API calls."""
@@ -2789,8 +2909,16 @@ class QuantBot:
         price: float,
         rationale: TradeRationale,
     ) -> bool:
-        """Execute a buy order."""
-        # Calculate position size
+        """
+        Execute a buy order with OPTIMIZED position sizing.
+
+        Implements institutional-grade position sizing:
+        1. Kelly Criterion adjusted sizing (actual win rate from learning)
+        2. Volatility-targeted position sizing
+        3. Risk-mode adjusted sizing (defensive/reduced modes)
+        4. Confidence-weighted final adjustment
+        """
+        # Calculate base position limits
         max_position_value = self.total_value * self.max_position_pct
         available = min(self.cash * 0.95, max_position_value)  # Keep 5% cash buffer
 
@@ -2798,10 +2926,57 @@ class QuantBot:
             logger.debug(f"Insufficient funds for {symbol}: ${available:.2f} < ${self.min_trade_value}")
             return False
 
-        # Size based on confidence
-        position_value = available * rationale.confidence
+        # ========== OPTIMIZED POSITION SIZING ==========
+
+        # 1. Get Kelly-optimal size from adaptive learning (uses actual win rates)
+        if self.use_adaptive_learning:
+            kelly_size = self.learning_engine.get_adaptive_kelly(asset_class, rationale.position_size_kelly)
+        else:
+            # Use static Kelly with half-Kelly for safety
+            kelly_size = rationale.position_size_kelly * 0.5
+
+        # 2. Volatility-targeted sizing from risk manager
+        # Get symbol volatility from price history
+        prices = list(self.price_history.get(symbol, [price]))
+        if len(prices) >= 10:
+            returns = np.diff(prices) / np.array(prices[:-1])
+            symbol_vol = np.std(returns) * np.sqrt(252) if len(returns) > 0 else 0.5
+        else:
+            symbol_vol = 0.5  # Default to 50% vol for unknown
+
+        vol_adjustment = self.risk_manager.get_position_size_adjustment(symbol_vol)
+
+        # 3. Risk mode adjustment
+        if self.risk_manager.risk_mode == "DEFENSIVE":
+            risk_mode_mult = 0.3  # Only 30% of normal size in defensive mode
+        elif self.risk_manager.risk_mode == "REDUCED":
+            risk_mode_mult = 0.6  # 60% of normal size
+        else:
+            risk_mode_mult = 1.0
+
+        # 4. Combine all sizing factors
+        # Base size from Kelly (capped at max_position_pct)
+        kelly_adjusted_size = min(kelly_size, self.max_position_pct)
+
+        # Apply volatility and risk mode adjustments
+        adjusted_size = kelly_adjusted_size * vol_adjustment * risk_mode_mult
+
+        # Apply confidence as final multiplier
+        confidence_adjusted_size = adjusted_size * rationale.confidence
+
+        # Calculate final position value
+        position_value = self.total_value * confidence_adjusted_size
         position_value = max(position_value, self.min_trade_value)
+        position_value = min(position_value, available)  # Cap at available
+
         quantity = position_value / price
+
+        # Log the sizing components
+        logger.info(
+            f"SIZING {symbol}: Kelly={kelly_size:.2%}, Vol={symbol_vol:.0%}, "
+            f"VolAdj={vol_adjustment:.2f}, RiskMode={risk_mode_mult:.1f}, "
+            f"Conf={rationale.confidence:.2f} → Final={position_value/self.total_value:.2%}"
+        )
 
         # Execute trade
         self.cash -= position_value
@@ -2835,6 +3010,13 @@ class QuantBot:
             rationale=rationale,
         )
         self.trade_history.append(trade)
+
+        # Set scale-out targets for profit locking
+        self.positions[symbol].scale_out_levels = [
+            {"pct": 0.5, "take_pct": 0.33},  # At 50% of target, take 33% off
+            {"pct": 0.8, "take_pct": 0.33},  # At 80% of target, take another 33%
+        ]
+        self.positions[symbol].scaled_out_count = 0
 
         self.commentary.add(
             f"✅ EXECUTED BUY: {quantity:.4f} {symbol} @ ${price:,.2f} = ${position_value:,.2f}",
