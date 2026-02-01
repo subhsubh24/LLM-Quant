@@ -2308,6 +2308,15 @@ async def get_master_bot_commentary(limit: int = 50):
     return {"commentary": bot.get_commentary(limit)}
 
 
+@router.get("/master-bot/trades")
+async def get_master_bot_trades(limit: int = 50):
+    """Get trade execution history with timestamps and details."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return {"trades": bot.get_trades(limit)}
+
+
 @router.get("/master-bot/performance")
 async def get_master_bot_performance():
     """Get performance metrics for the Master Bot."""

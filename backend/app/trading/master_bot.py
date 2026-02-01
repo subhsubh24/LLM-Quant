@@ -1459,6 +1459,7 @@ class MasterQuantBot:
                     side=side,
                     size_usd=min(5000, self.engine.cash * 0.05),
                     leverage=2.0,
+                    rationale=opp.rationale,
                 )
                 if position:
                     self._record_trade(opp, "crypto_perpetual")
@@ -1479,6 +1480,7 @@ class MasterQuantBot:
                     expiry_days=30,
                     size_usd=min(3000, self.engine.cash * 0.03),
                     is_buy=is_buy,
+                    rationale=opp.rationale,
                 )
                 if position:
                     self._record_trade(opp, "crypto_option")
@@ -1492,13 +1494,21 @@ class MasterQuantBot:
 
     def _record_trade(self, opp: Opportunity, trade_type: str):
         """Record trade for RL training and analysis."""
+        # Determine action from strategy name
+        action = "BUY"
+        if "Short" in opp.strategy or "Sell" in opp.strategy or "Put" in opp.strategy:
+            action = "SELL"
+
         self.trade_history.append({
             "timestamp": datetime.now().isoformat(),
             "symbol": opp.symbol,
+            "action": action,
             "type": trade_type,
             "strategy": opp.strategy,
-            "score": opp.score,
-            "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
+            "rationale": opp.rationale,
+            "expected_return": round(opp.expected_return, 1),
+            "score": round(opp.score, 1),
+            "ml_confidence": round(opp.ml_prediction.confidence * 100, 1) if opp.ml_prediction else 0,
             "regime": self.market_regime.value,
             "live_executed": self.live_trading_enabled,
         })
@@ -1842,6 +1852,10 @@ class MasterQuantBot:
     def get_commentary(self, limit: int = 50) -> List[Dict]:
         """Get bot commentary."""
         return self.commentary[-limit:]
+
+    def get_trades(self, limit: int = 50) -> List[Dict]:
+        """Get trade execution history."""
+        return self.trade_history[-limit:]
 
     def get_performance(self) -> Dict:
         """Get performance metrics with ML analytics."""

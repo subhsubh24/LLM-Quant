@@ -243,6 +243,10 @@ class CryptoDerivativePosition:
     take_profit: float = 0.0
     stop_loss: float = 0.0
 
+    # Trade rationale
+    rationale: str = ""
+    entry_time: str = ""
+
     def calculate_pnl(self) -> float:
         """
         Calculate current P&L including funding.
@@ -289,6 +293,8 @@ class CryptoDerivativePosition:
             "unrealized_pnl": round(safe_float(self.calculate_pnl()), 2),
             "funding_received": round(safe_float(self.funding_received), 2),
             "liquidation_price": round(safe_float(self.liquidation_price), 2),
+            "rationale": self.rationale,
+            "entry_time": self.entry_time,
             "greeks": {
                 "delta": round(safe_float(self.delta), 4),
                 "gamma": round(safe_float(self.gamma), 6),
@@ -1144,6 +1150,7 @@ class OptionsQuantBot:
         leverage: float = 1.0,
         take_profit_pct: float = 0.10,
         stop_loss_pct: float = 0.05,
+        rationale: str = "",
     ) -> Optional[CryptoDerivativePosition]:
         """
         Open a crypto perpetual futures position.
@@ -1155,6 +1162,7 @@ class OptionsQuantBot:
             leverage: Leverage multiplier (1-10x recommended)
             take_profit_pct: Take profit percentage
             stop_loss_pct: Stop loss percentage
+            rationale: Reason for opening this position
         """
         if not symbol.endswith("-PERP"):
             self._add_commentary(f"⚠️ Invalid perpetual symbol: {symbol}", "error")
@@ -1196,6 +1204,8 @@ class OptionsQuantBot:
             liquidation_price=liq_price,
             take_profit=take_profit_price,
             stop_loss=stop_loss_price,
+            rationale=rationale,
+            entry_time=datetime.now().isoformat(),
         )
 
         self.crypto_positions[position_id] = position
@@ -1240,6 +1250,7 @@ class OptionsQuantBot:
         expiry_days: int = 30,
         size_usd: float = 5000,
         is_buy: bool = True,
+        rationale: str = "",
     ) -> Optional[CryptoDerivativePosition]:
         """
         Open a crypto option position (Deribit-style).
@@ -1251,6 +1262,7 @@ class OptionsQuantBot:
             expiry_days: Days to expiration
             size_usd: Notional size in USD
             is_buy: True for long option, False for short (selling)
+            rationale: Reason for opening this position
         """
         if base_asset not in ["BTC", "ETH"]:
             self._add_commentary(f"⚠️ Crypto options only supported for BTC/ETH", "error")
@@ -1323,6 +1335,8 @@ class OptionsQuantBot:
             theta=theta * (1 if is_buy else -1),
             vega=vega * (1 if is_buy else -1),
             iv=iv,
+            rationale=rationale,
+            entry_time=datetime.now().isoformat(),
         )
 
         self.crypto_positions[position_id] = position
