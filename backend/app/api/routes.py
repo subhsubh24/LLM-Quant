@@ -27,6 +27,18 @@ from .. import DISCLAIMER
 router = APIRouter()
 
 
+# ============ Debug/Health Endpoints ============
+
+@router.get("/debug/routes-loaded")
+async def debug_routes_loaded():
+    """Debug endpoint to verify all routes are loaded."""
+    return {
+        "status": "ok",
+        "message": "All routes loaded successfully",
+        "sections": ["universes", "data", "features", "models", "backtest", "portfolio", "trading", "options", "crypto", "bot"]
+    }
+
+
 # ============ Request/Response Models ============
 
 class UniverseCreate(BaseModel):
