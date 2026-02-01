@@ -641,6 +641,151 @@ class BinanceBroker:
                     return False
         return False
 
+    # =========================================================================
+    # BINANCE.US WEBSOCKET API FOR TRADING
+    # =========================================================================
+
+    async def _ws_sign_params(self, params: Dict) -> str:
+        """Sign parameters for WebSocket API."""
+        import hmac
+        import hashlib
+
+        # Sort params alphabetically and create query string
+        sorted_params = sorted(params.items())
+        query_string = "&".join([f"{k}={v}" for k, v in sorted_params])
+
+        signature = hmac.new(
+            self.api_secret.encode(),
+            query_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        return signature
+
+    async def submit_order_ws(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "MARKET",
+        price: Optional[float] = None,
+    ) -> Optional[LiveOrder]:
+        """
+        Submit order via WebSocket API (lower latency than REST).
+
+        Uses wss://ws-api.binance.us:443/ws-api/v3 for Binance.US users.
+        """
+        import websockets
+        import uuid
+        import ssl
+
+        ws_url = "wss://ws-api.binance.us:443/ws-api/v3" if self.use_us else "wss://ws-api.binance.com:443/ws-api/v3"
+
+        try:
+            # Create SSL context
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            async with websockets.connect(ws_url, ssl=ssl_context) as ws:
+                # Build order params
+                params = {
+                    "symbol": symbol,
+                    "side": side.upper(),
+                    "type": order_type,
+                    "quantity": str(quantity),
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "apiKey": self.api_key,
+                }
+
+                if price and order_type == "LIMIT":
+                    params["price"] = str(price)
+                    params["timeInForce"] = "GTC"
+
+                # Sign the request
+                params["signature"] = await self._ws_sign_params(params)
+
+                # Create WebSocket request
+                request = {
+                    "id": str(uuid.uuid4()),
+                    "method": "order.place",
+                    "params": params
+                }
+
+                # Send order
+                await ws.send(json.dumps(request))
+
+                # Wait for response
+                response = await asyncio.wait_for(ws.recv(), timeout=10)
+                data = json.loads(response)
+
+                if data.get("status") == 200:
+                    result = data.get("result", {})
+                    logger.info(f"✅ WebSocket order placed: {result.get('orderId')}")
+                    return LiveOrder(
+                        id=str(result.get("orderId", "")),
+                        symbol=result.get("symbol", symbol),
+                        side=result.get("side", side).lower(),
+                        quantity=float(result.get("origQty", quantity)),
+                        order_type=result.get("type", order_type).lower(),
+                        limit_price=float(result.get("price") or 0),
+                        stop_price=0,
+                        status=result.get("status", "new").lower(),
+                        filled_quantity=float(result.get("executedQty") or 0),
+                        filled_price=float(result.get("price") or 0),
+                        broker=BrokerType.BINANCE,
+                        timestamp=datetime.now(),
+                    )
+                else:
+                    error = data.get("error", {})
+                    logger.error(f"WebSocket order failed: {error.get('msg', 'Unknown error')}")
+                    return None
+
+        except asyncio.TimeoutError:
+            logger.error("WebSocket order timed out")
+            return None
+        except Exception as e:
+            logger.error(f"WebSocket order error: {e}")
+            # Fallback to REST API
+            return await self.submit_spot_order(symbol, side, quantity, order_type, price)
+
+    async def get_account_ws(self) -> Optional[Dict]:
+        """Get account info via WebSocket API."""
+        import websockets
+        import uuid
+        import ssl
+
+        ws_url = "wss://ws-api.binance.us:443/ws-api/v3" if self.use_us else "wss://ws-api.binance.com:443/ws-api/v3"
+
+        try:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            async with websockets.connect(ws_url, ssl=ssl_context) as ws:
+                params = {
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "apiKey": self.api_key,
+                }
+                params["signature"] = await self._ws_sign_params(params)
+
+                request = {
+                    "id": str(uuid.uuid4()),
+                    "method": "account.status",
+                    "params": params
+                }
+
+                await ws.send(json.dumps(request))
+                response = await asyncio.wait_for(ws.recv(), timeout=10)
+                data = json.loads(response)
+
+                if data.get("status") == 200:
+                    return data.get("result", {})
+                return None
+
+        except Exception as e:
+            logger.error(f"WebSocket account error: {e}")
+            return None
+
 
 # =============================================================================
 # UNIFIED BROKER MANAGER
@@ -733,17 +878,39 @@ class BrokerManager:
         return positions
 
     async def get_live_price(self, symbol: str, asset_type: str = "stock") -> float:
-        """Get live price for a symbol."""
+        """
+        Get live price for a symbol.
+
+        For crypto: Uses WebSocket prices first (real-time), falls back to REST API.
+        For stocks: Uses Alpaca REST API.
+        """
         if asset_type == "stock" and self.alpaca and self.alpaca._connected:
             quote = await self.alpaca.get_quote(symbol)
             return quote.get("mid", 0)
-        elif asset_type == "crypto" and self.binance and self.binance._connected:
-            # Convert symbol format (e.g., "BTC" -> "BTCUSDT")
-            binance_symbol = f"{symbol}USDT" if not symbol.endswith("USDT") else symbol
-            return await self.binance.get_price(binance_symbol)
-        elif asset_type == "crypto_futures" and self.binance and self.binance._connected:
-            binance_symbol = f"{symbol.replace('-PERP', '')}USDT"
-            return await self.binance.get_futures_price(binance_symbol)
+
+        elif asset_type in ("crypto", "crypto_futures"):
+            # Try WebSocket prices first (real-time, no latency)
+            try:
+                from ..data.crypto_ws import get_crypto_ws
+                ws = get_crypto_ws()
+                if ws.is_connected:
+                    # Clean up symbol (remove -PERP suffix)
+                    clean_symbol = symbol.replace("-PERP", "").replace("USDT", "").upper()
+                    ws_price = ws.get_price(clean_symbol)
+                    if ws_price and ws_price.price > 0:
+                        return ws_price.price
+            except Exception:
+                pass
+
+            # Fallback to REST API
+            if self.binance and self.binance._connected:
+                if asset_type == "crypto":
+                    binance_symbol = f"{symbol}USDT" if not symbol.endswith("USDT") else symbol
+                    return await self.binance.get_price(binance_symbol)
+                else:  # crypto_futures
+                    binance_symbol = f"{symbol.replace('-PERP', '')}USDT"
+                    return await self.binance.get_futures_price(binance_symbol)
+
         return 0
 
     async def submit_stock_order(
@@ -770,20 +937,38 @@ class BrokerManager:
         quantity: float,
         side: str,
         is_futures: bool = False,
+        use_websocket: bool = True,
     ) -> Optional[LiveOrder]:
-        """Submit a crypto order via Binance."""
+        """
+        Submit a crypto order via Binance.
+
+        For spot orders on Binance.US, can use WebSocket API for lower latency.
+        """
         if not self.binance or not self.binance._connected:
             raise Exception("Binance not connected")
 
         binance_symbol = f"{symbol}USDT" if not symbol.endswith("USDT") else symbol
 
         if is_futures:
+            # Futures use REST API (WebSocket API not available for futures)
             return await self.binance.submit_futures_order(
                 symbol=binance_symbol,
                 side=side.upper(),
                 quantity=quantity,
             )
         else:
+            # Spot orders - try WebSocket API first for lower latency
+            if use_websocket and self.binance.use_us:
+                result = await self.binance.submit_order_ws(
+                    symbol=binance_symbol,
+                    side=side.upper(),
+                    quantity=quantity,
+                )
+                if result:
+                    return result
+                # Fallback to REST if WebSocket fails
+                logger.info("WebSocket order failed, falling back to REST API")
+
             return await self.binance.submit_spot_order(
                 symbol=binance_symbol,
                 side=side.upper(),
