@@ -3363,3 +3363,137 @@ async def get_live_trading_status():
         "capital": bot.capital,
         "mode": bot.mode,
     }
+
+
+
+# ============ Portfolio & Supabase Persistence Endpoints ============
+
+@router.get("/portfolio")
+async def get_portfolio(user_id: str = "default"):
+    """Get user portfolio with positions and P&L."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client or not client._connected:
+        return {"error": "Supabase not connected", "connected": False}
+
+    portfolio = await client.get_or_create_portfolio(user_id)
+    positions = await client.get_positions(user_id)
+
+    return {
+        "portfolio": portfolio,
+        "positions": positions,
+        "positions_count": len(positions),
+    }
+
+
+@router.get("/portfolio/positions")
+async def get_all_positions(user_id: str = "default", include_closed: bool = False):
+    """Get all positions (open or all)."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client:
+        return {"positions": [], "error": "Supabase not connected"}
+
+    positions = await client.get_positions(user_id)
+    return {"positions": positions, "count": len(positions)}
+
+
+@router.get("/portfolio/trades")
+async def get_trade_history(
+    user_id: str = "default",
+    limit: int = 100,
+    offset: int = 0,
+    symbol: str = None,
+):
+    """Get trade history with pagination."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client:
+        return {"trades": [], "error": "Supabase not connected"}
+
+    trades = await client.get_trades(user_id, limit, offset, symbol)
+    return {"trades": trades, "count": len(trades)}
+
+
+@router.get("/portfolio/pnl-history")
+async def get_pnl_history(user_id: str = "default", days: int = 30):
+    """Get daily P&L history for charting."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client:
+        return {"history": [], "error": "Supabase not connected"}
+
+    history = await client.get_pnl_history(user_id, days)
+    return {"history": history, "days": days}
+
+
+@router.get("/portfolio/price-history/{symbol}")
+async def get_price_history(symbol: str, hours: int = 24):
+    """Get price history for a symbol."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client:
+        return {"prices": [], "error": "Supabase not connected"}
+
+    prices = await client.get_price_history(symbol.upper(), hours)
+    return {"symbol": symbol.upper(), "prices": prices, "hours": hours}
+
+
+@router.post("/portfolio/save-state")
+async def save_bot_state(bot_id: str = "master_bot", user_id: str = "default"):
+    """Manually save current bot state to Supabase."""
+    from ..data.supabase_client import get_supabase_client
+    from ..trading.master_bot import get_master_bot
+
+    client = get_supabase_client()
+    if not client:
+        return {"success": False, "error": "Supabase not connected"}
+
+    bot = get_master_bot()
+
+    # Gather state to save
+    state = {
+        "is_running": bot.is_running,
+        "capital": bot.capital,
+        "mode": bot.mode.value,
+        "market_regime": bot.market_regime.value,
+        "vix_level": bot.vix_level,
+        "positions_count": len(bot.engine.positions) + len(bot.engine.crypto_positions),
+        "total_pnl": bot.engine.total_pnl,
+        "opportunities_count": len(bot.opportunities),
+        "timestamp": bot.engine.last_scan_time.isoformat() if bot.engine.last_scan_time else None,
+    }
+
+    success = await client.save_bot_state(bot_id, state, user_id)
+
+    return {"success": success, "state": state}
+
+
+@router.get("/portfolio/load-state")
+async def load_bot_state(bot_id: str = "master_bot", user_id: str = "default"):
+    """Load saved bot state from Supabase."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client:
+        return {"state": None, "error": "Supabase not connected"}
+
+    state = await client.get_bot_state(bot_id, user_id)
+    return {"state": state, "bot_id": bot_id}
+
+
+@router.get("/supabase/status")
+async def get_supabase_status():
+    """Get Supabase connection status."""
+    from ..data.supabase_client import get_supabase_client
+
+    client = get_supabase_client()
+    if not client:
+        return {"connected": False, "error": "Client not initialized"}
+
+    return client.get_status()

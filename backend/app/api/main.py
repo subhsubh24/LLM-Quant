@@ -42,6 +42,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Broker auto-init skipped: {e}")
 
+    # Initialize Supabase for portfolio persistence
+    if settings.supabase_enabled and settings.supabase_url and settings.supabase_key:
+        try:
+            from ..data.supabase_client import init_supabase
+            await init_supabase(settings.supabase_url, settings.supabase_key)
+            logger.info("Supabase initialized - portfolio persistence enabled")
+        except Exception as e:
+            logger.warning(f"Supabase init failed: {e}")
+
     yield
 
     # Shutdown

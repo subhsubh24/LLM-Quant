@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Auto-connect to brokers on startup
     auto_connect_brokers: bool = True
 
+    # ============ Supabase (Portfolio Persistence) ============
+    supabase_url: str = ""
+    supabase_key: str = ""
+    supabase_enabled: bool = True  # Enable/disable Supabase integration
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
