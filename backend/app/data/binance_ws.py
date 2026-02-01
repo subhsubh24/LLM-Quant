@@ -57,14 +57,19 @@ class BinanceWebSocket:
 
     Uses the !miniTicker@arr stream which broadcasts ALL trading pairs
     every second - giving us real-time data for hundreds of coins at once.
+
+    Tries multiple endpoints in order:
+    1. Binance.US (for US users)
+    2. Binance Global (for non-US)
+    3. Binance Testnet (fallback)
     """
 
-    # Binance WebSocket endpoints
-    WS_URL = "wss://stream.binance.com:9443/ws"
-    STREAM_URL = "wss://stream.binance.com:9443/stream"
-
-    # Map Binance symbols to our standard symbols
-    # Binance uses pairs like "BTCUSDT", we want "BTC"
+    # WebSocket endpoints to try in order
+    WS_ENDPOINTS = [
+        ("Binance.US", "wss://stream.binance.us:9443/ws"),
+        ("Binance Global", "wss://stream.binance.com:9443/ws"),
+        ("Binance Testnet", "wss://testnet.binance.vision/ws"),
+    ]
 
     def __init__(self):
         self._prices: Dict[str, LivePrice] = {}
@@ -77,6 +82,8 @@ class BinanceWebSocket:
         self._connected = False
         self._last_update: Optional[datetime] = None
         self._update_count = 0
+        self._current_endpoint: Optional[str] = None
+        self._endpoint_index = 0
 
     @property
     def is_connected(self) -> bool:
@@ -119,18 +126,35 @@ class BinanceWebSocket:
         logger.info("🛑 Binance WebSocket stopped")
 
     async def _run(self):
-        """Main WebSocket loop with reconnection logic."""
+        """Main WebSocket loop with reconnection logic. Tries multiple endpoints."""
         while self._running:
-            try:
-                await self._connect_and_stream()
-            except ConnectionClosed as e:
-                logger.warning(f"Binance WebSocket connection closed: {e}")
-            except Exception as e:
-                logger.error(f"Binance WebSocket error: {e}")
+            # Try each endpoint in order
+            connected = False
+            for i, (name, base_url) in enumerate(self.WS_ENDPOINTS):
+                if not self._running:
+                    break
 
-            if self._running:
+                try:
+                    self._endpoint_index = i
+                    await self._connect_and_stream(name, base_url)
+                    connected = True
+                    break  # Successfully connected and ran
+                except ConnectionClosed as e:
+                    logger.warning(f"{name} WebSocket connection closed: {e}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "451" in error_str:
+                        logger.warning(f"{name} blocked (HTTP 451 - regulatory). Trying next endpoint...")
+                        continue  # Try next endpoint immediately
+                    elif "403" in error_str or "401" in error_str:
+                        logger.warning(f"{name} access denied. Trying next endpoint...")
+                        continue
+                    else:
+                        logger.error(f"{name} WebSocket error: {e}")
+
+            if self._running and not connected:
                 self._connected = False
-                logger.info(f"Reconnecting in {self._reconnect_delay}s...")
+                logger.info(f"All endpoints failed. Reconnecting in {self._reconnect_delay}s...")
                 await asyncio.sleep(self._reconnect_delay)
                 # Exponential backoff with max
                 self._reconnect_delay = min(
@@ -138,12 +162,12 @@ class BinanceWebSocket:
                     self._max_reconnect_delay
                 )
 
-    async def _connect_and_stream(self):
-        """Connect to Binance WebSocket and process messages."""
+    async def _connect_and_stream(self, name: str, base_url: str):
+        """Connect to a specific WebSocket endpoint and process messages."""
         # Use the !miniTicker@arr stream for all symbols
-        url = f"{self.WS_URL}/!miniTicker@arr"
+        url = f"{base_url}/!miniTicker@arr"
 
-        logger.info(f"Connecting to Binance WebSocket: {url}")
+        logger.info(f"Connecting to {name} WebSocket: {url}")
 
         # Use SSL context that handles corporate proxy/SSL inspection
         ssl_context = _create_ssl_context()
@@ -151,8 +175,9 @@ class BinanceWebSocket:
         async with websockets.connect(url, ping_interval=20, ssl=ssl_context) as ws:
             self._ws = ws
             self._connected = True
+            self._current_endpoint = name
             self._reconnect_delay = 1  # Reset on successful connect
-            logger.info("✅ Binance WebSocket connected - streaming live prices")
+            logger.info(f"✅ {name} WebSocket connected - streaming live prices")
 
             async for message in ws:
                 if not self._running:
@@ -266,11 +291,12 @@ class BinanceWebSocket:
         return {
             "connected": self._connected,
             "running": self._running,
+            "endpoint": self._current_endpoint,
             "symbols_count": len(self._prices),
             "last_update": self._last_update.isoformat() if self._last_update else None,
             "total_updates": self._update_count,
             "data_source": "binance_websocket",
-            "is_live": True,
+            "is_live": self._connected,
         }
 
 
