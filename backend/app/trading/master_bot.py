@@ -657,9 +657,11 @@ class MasterQuantBot:
 
     CRYPTO_PERPETUALS = [
         "BTC-PERP", "ETH-PERP", "SOL-PERP", "AVAX-PERP", "LINK-PERP",
+        "DOT-PERP", "MATIC-PERP", "UNI-PERP", "AAVE-PERP", "ATOM-PERP",
+        "XRP-PERP", "ADA-PERP", "DOGE-PERP", "LTC-PERP", "BCH-PERP",
     ]
 
-    CRYPTO_OPTIONS = ["BTC", "ETH"]
+    CRYPTO_OPTIONS = ["BTC", "ETH", "SOL"]
 
     def __init__(
         self,
@@ -1159,9 +1161,12 @@ class MasterQuantBot:
         """Scan crypto perpetuals with ML enhancement."""
         opportunities = []
 
+        # Lower threshold during off-hours to be more active
+        threshold = 25 if not self.is_stock_market_open() else 35
+
         for symbol in self.CRYPTO_PERPETUALS:
             opp = await self._score_crypto_perpetual(symbol)
-            if opp and opp.score > 35:
+            if opp and opp.score > threshold:
                 opportunities.append(opp)
 
         return opportunities
@@ -1170,13 +1175,16 @@ class MasterQuantBot:
         """Scan crypto options."""
         opportunities = []
 
+        # Lower threshold during off-hours
+        threshold = 30 if not self.is_stock_market_open() else 40
+
         for base_asset in self.CRYPTO_OPTIONS:
             call_opp = await self._score_crypto_option(base_asset, "call")
-            if call_opp and call_opp.score > 40:
+            if call_opp and call_opp.score > threshold:
                 opportunities.append(call_opp)
 
             put_opp = await self._score_crypto_option(base_asset, "put")
-            if put_opp and put_opp.score > 40:
+            if put_opp and put_opp.score > threshold:
                 opportunities.append(put_opp)
 
         return opportunities
@@ -1348,10 +1356,19 @@ class MasterQuantBot:
             return
 
         executed = 0
-        max_new_positions = 3
         stock_market_open = self.is_stock_market_open()
 
-        for opp in self.opportunities[:10]:
+        # Be more aggressive with crypto during off-hours
+        if stock_market_open:
+            max_new_positions = 3
+        else:
+            max_new_positions = 5  # More crypto trades during off-hours
+            self._add_commentary(
+                f"🌙 Off-hours mode: focusing on {len([o for o in self.opportunities if o.asset_class in [AssetClass.CRYPTO_PERPETUAL, AssetClass.CRYPTO_OPTIONS]])} crypto opportunities",
+                "info"
+            )
+
+        for opp in self.opportunities[:15]:
             if executed >= max_new_positions:
                 break
 
@@ -1631,7 +1648,6 @@ class MasterQuantBot:
 
     async def _run_loop(self):
         """Main trading loop with RL training and session-aware scanning."""
-        scan_interval = 60
         position_check_interval = 30
         rl_train_interval = 10
         session_check_interval = 300  # Check session every 5 minutes
@@ -1645,6 +1661,10 @@ class MasterQuantBot:
         while self.is_running:
             try:
                 now = datetime.now()
+                stock_market_open = self.is_stock_market_open()
+
+                # Dynamic scan interval: faster during off-hours for active crypto trading
+                scan_interval = 60 if stock_market_open else 30
 
                 # Check trading session (market hours)
                 if (now - last_session_check).seconds >= session_check_interval:

@@ -17,9 +17,10 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple
+from zoneinfo import ZoneInfo
 import numpy as np
 
 
@@ -548,6 +549,28 @@ class OptionsQuantBot:
     def total_pnl_pct(self) -> float:
         return self.total_pnl / self.initial_capital
 
+    def is_stock_market_open(self) -> bool:
+        """
+        Check if US stock market is currently open.
+        Market Hours: 9:30 AM - 4:00 PM ET, Monday-Friday
+        """
+        try:
+            et = ZoneInfo("America/New_York")
+            now_et = datetime.now(et)
+
+            # Check if weekend
+            if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
+                return False
+
+            # Check market hours (9:30 AM - 4:00 PM ET)
+            market_open = time(9, 30)
+            market_close = time(16, 0)
+            current_time = now_et.time()
+
+            return market_open <= current_time <= market_close
+        except Exception:
+            return False
+
     async def start(self):
         """Start the options bot."""
         self.is_running = True
@@ -635,31 +658,41 @@ class OptionsQuantBot:
 
     async def _scan_opportunities(self):
         """Scan for new trading opportunities based on mode."""
-        # Scan more symbols in aggressive mode
-        scan_count = {
-            OptionsMode.AGGRESSIVE: 30,
-            OptionsMode.BALANCED: 20,
-            OptionsMode.CONSERVATIVE: 12,
-        }.get(self.mode, 20)
+        # Check market hours - only scan stock options when market is open
+        stock_market_open = self.is_stock_market_open()
 
-        for symbol in self.OPTIONS_UNIVERSE[:scan_count]:
-            try:
-                # Skip if already have position
-                if any(p.symbol == symbol for p in self.positions.values()):
-                    continue
+        if stock_market_open:
+            # Scan stock/ETF options during market hours
+            scan_count = {
+                OptionsMode.AGGRESSIVE: 30,
+                OptionsMode.BALANCED: 20,
+                OptionsMode.CONSERVATIVE: 12,
+            }.get(self.mode, 20)
 
-                # Analyze IV
-                iv_analysis = await self._analyze_iv(symbol)
-                self.iv_cache[symbol] = iv_analysis
+            for symbol in self.OPTIONS_UNIVERSE[:scan_count]:
+                try:
+                    # Skip if already have position
+                    if any(p.symbol == symbol for p in self.positions.values()):
+                        continue
 
-                # Get signal
-                signal = self._generate_signal(symbol, iv_analysis)
+                    # Analyze IV
+                    iv_analysis = await self._analyze_iv(symbol)
+                    self.iv_cache[symbol] = iv_analysis
 
-                if signal:
-                    await self._execute_signal(symbol, signal, iv_analysis)
+                    # Get signal
+                    signal = self._generate_signal(symbol, iv_analysis)
 
-            except Exception as e:
-                logger.debug(f"Scan failed for {symbol}: {e}")
+                    if signal:
+                        await self._execute_signal(symbol, signal, iv_analysis)
+
+                except Exception as e:
+                    logger.debug(f"Scan failed for {symbol}: {e}")
+        else:
+            # Market closed - only scan crypto derivatives (24/7)
+            self._add_commentary(
+                "🌙 Stock market closed - scanning crypto derivatives only",
+                "info"
+            )
 
     async def _analyze_iv(self, symbol: str) -> IVAnalysis:
         """
