@@ -195,6 +195,70 @@ class OptionsTrade:
         }
 
 
+@dataclass
+class CryptoDerivativePosition:
+    """
+    Represents a crypto derivative position (perpetual futures or options).
+
+    Supports Deribit-style crypto derivatives:
+    - Perpetual futures (BTC-PERP, ETH-PERP)
+    - Options (BTC-OPT, ETH-OPT)
+    """
+    id: str
+    symbol: str  # e.g., "BTC-PERP", "ETH-28MAR25-3000-C"
+    derivative_type: str  # "perpetual", "call", "put"
+    side: str  # "long" or "short"
+    entry_price: float
+    size: float  # Contract size in USD or crypto units
+    leverage: float = 1.0
+
+    # Current state
+    current_price: float = 0.0
+    unrealized_pnl: float = 0.0
+    funding_received: float = 0.0  # For perpetuals
+    liquidation_price: float = 0.0
+
+    # Greeks (for options)
+    delta: float = 0.0
+    gamma: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
+    iv: float = 0.0
+
+    # Management
+    take_profit: float = 0.0
+    stop_loss: float = 0.0
+
+    def calculate_pnl(self) -> float:
+        """Calculate current P&L including funding."""
+        price_pnl = (self.current_price - self.entry_price) * self.size
+        if self.side == "short":
+            price_pnl = -price_pnl
+        return price_pnl * self.leverage + self.funding_received
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id,
+            "symbol": self.symbol,
+            "derivative_type": self.derivative_type,
+            "side": self.side,
+            "entry_price": round(self.entry_price, 2),
+            "size": round(self.size, 4),
+            "leverage": self.leverage,
+            "current_price": round(self.current_price, 2),
+            "unrealized_pnl": round(self.calculate_pnl(), 2),
+            "funding_received": round(self.funding_received, 2),
+            "liquidation_price": round(self.liquidation_price, 2),
+            "greeks": {
+                "delta": round(self.delta, 4),
+                "gamma": round(self.gamma, 6),
+                "theta": round(self.theta, 4),
+                "vega": round(self.vega, 4),
+                "iv": round(self.iv * 100, 1),
+            },
+        }
+
+
 class OptionsRiskManager:
     """
     Options-specific risk management.
@@ -311,17 +375,42 @@ class OptionsQuantBot:
 
     # Watchlist - high-liquidity options underlyings
     OPTIONS_UNIVERSE = [
-        # Mega-cap tech (most liquid options)
-        "SPY", "QQQ", "IWM", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
-        # Commodities ETFs
-        "GLD", "SLV", "USO", "XLE",
-        # Volatility
-        "VIX",
+        # Index ETFs (most liquid options - highest priority)
+        "SPY", "QQQ", "IWM", "DIA", "XLK", "XLV", "XLF", "XLE", "XLU", "XLI",
+        # Mega-cap tech (very liquid)
+        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD", "INTC", "CRM",
+        # Commodities & Precious Metals (tangible assets)
+        "GLD", "SLV", "GDX", "USO", "UNG", "WEAT", "CORN", "SOYB",
+        # Energy & Materials
+        "XOP", "OIH", "XME", "FCX", "CLF",
+        # Volatility Products
+        "VIX", "UVXY", "VXX",
         # Financials
-        "XLF", "JPM", "BAC",
-        # Other liquid names
-        "AMD", "NFLX", "DIS", "BA", "V", "MA",
+        "JPM", "BAC", "GS", "MS", "WFC", "C",
+        # Consumer & Retail
+        "WMT", "COST", "TGT", "HD", "NKE",
+        # Healthcare & Biotech
+        "JNJ", "PFE", "MRNA", "UNH", "LLY",
+        # Other high-liquidity
+        "NFLX", "DIS", "BA", "V", "MA", "PYPL", "SQ", "COIN",
     ]
+
+    # Crypto Derivatives (Deribit-style options on BTC/ETH)
+    CRYPTO_DERIVATIVES = [
+        # Bitcoin Options (Deribit)
+        "BTC-PERP",   # Perpetual futures
+        "BTC-OPT",    # Options (calls/puts)
+        # Ethereum Options (Deribit)
+        "ETH-PERP",   # Perpetual futures
+        "ETH-OPT",    # Options (calls/puts)
+        # Solana Derivatives
+        "SOL-PERP",
+        # Altcoin perpetuals
+        "AVAX-PERP", "MATIC-PERP", "LINK-PERP", "ARB-PERP", "OP-PERP",
+    ]
+
+    # Kelly Criterion scaling for position sizing
+    KELLY_FRACTION = 0.25  # Use 1/4 Kelly for conservative sizing
 
     def __init__(
         self,
@@ -337,9 +426,12 @@ class OptionsQuantBot:
         self.options_manager = OptionsManager()
         self.risk_manager = OptionsRiskManager()
 
-        # Positions and trades
+        # Positions and trades (traditional options)
         self.positions: Dict[str, OptionsPosition] = {}
         self.trade_history: List[OptionsTrade] = []
+
+        # Crypto derivative positions
+        self.crypto_positions: Dict[str, CryptoDerivativePosition] = {}
 
         # IV data cache
         self.iv_cache: Dict[str, IVAnalysis] = {}
@@ -360,31 +452,74 @@ class OptionsQuantBot:
         logger.info(f"OptionsQuantBot initialized: ${initial_capital:,.0f}, mode={mode.value}")
 
     def _configure_mode(self):
-        """Configure parameters based on trading mode."""
+        """Configure parameters based on trading mode for maximum ROI."""
         if self.mode == OptionsMode.AGGRESSIVE:
-            self.target_delta_per_leg = 0.30      # 30 delta options
-            self.min_iv_rank = 30                  # Lower IV threshold
-            self.profit_target = 0.50              # 50% of max profit
-            self.max_positions = 15
+            # Maximum ROI mode - higher risk/reward
+            self.target_delta_per_leg = 0.35      # 35 delta options (higher premium)
+            self.min_iv_rank = 25                  # Enter on moderate IV
+            self.profit_target = 0.65              # Take 65% of max profit
+            self.loss_limit = 2.0                  # Cut at 2x credit received
+            self.max_positions = 20
+            self.min_dte = 25                      # 25-45 DTE sweet spot
+            self.max_dte = 50
+            self.roll_dte = 14                     # Roll at 14 DTE
+            self.kelly_multiplier = 1.0           # Full Kelly fraction
             self.preferred_strategies = [
-                "iron_condor", "strangle", "straddle", "vertical"
+                "iron_condor", "strangle", "straddle", "vertical", "ratio_spread"
             ]
         elif self.mode == OptionsMode.BALANCED:
-            self.target_delta_per_leg = 0.20      # 20 delta options (safer)
-            self.min_iv_rank = 40                  # Moderate IV threshold
-            self.profit_target = 0.50
-            self.max_positions = 10
+            # Balanced risk/reward
+            self.target_delta_per_leg = 0.25      # 25 delta options
+            self.min_iv_rank = 35                  # Moderate IV threshold
+            self.profit_target = 0.50              # Take 50% of max profit
+            self.loss_limit = 2.0
+            self.max_positions = 12
+            self.min_dte = 30
+            self.max_dte = 50
+            self.roll_dte = 21
+            self.kelly_multiplier = 0.75
             self.preferred_strategies = [
                 "iron_condor", "butterfly", "vertical", "calendar"
             ]
         else:  # CONSERVATIVE
-            self.target_delta_per_leg = 0.15      # 15 delta options (very safe)
-            self.min_iv_rank = 50                  # High IV only
-            self.profit_target = 0.40              # 40% of max profit
-            self.max_positions = 6
+            # Capital preservation focus
+            self.target_delta_per_leg = 0.16      # 16 delta options (very safe)
+            self.min_iv_rank = 45                  # High IV only
+            self.profit_target = 0.40              # Take 40% of max profit
+            self.loss_limit = 1.5                  # Tighter stop
+            self.max_positions = 8
+            self.min_dte = 35
+            self.max_dte = 55
+            self.roll_dte = 21
+            self.kelly_multiplier = 0.5
             self.preferred_strategies = [
-                "iron_condor", "butterfly", "covered_call"
+                "iron_condor", "butterfly", "jade_lizard"
             ]
+
+    def _calculate_kelly_size(self, win_prob: float, win_amount: float, loss_amount: float) -> float:
+        """
+        Calculate position size using Kelly Criterion.
+
+        Kelly % = (bp - q) / b
+        where:
+        - b = win_amount / loss_amount (odds)
+        - p = probability of winning
+        - q = probability of losing (1 - p)
+        """
+        if loss_amount == 0:
+            return 0
+
+        b = win_amount / loss_amount
+        p = win_prob
+        q = 1 - p
+
+        kelly = (b * p - q) / b
+
+        # Apply fraction and mode multiplier
+        kelly_adjusted = max(0, kelly * self.KELLY_FRACTION * self.kelly_multiplier)
+
+        # Cap at 5% of capital per position
+        return min(kelly_adjusted, 0.05)
 
     @property
     def total_value(self) -> float:
@@ -486,8 +621,15 @@ class OptionsQuantBot:
             await self._close_position(pos_id, reason)
 
     async def _scan_opportunities(self):
-        """Scan for new trading opportunities."""
-        for symbol in self.OPTIONS_UNIVERSE[:15]:  # Top 15 most liquid
+        """Scan for new trading opportunities based on mode."""
+        # Scan more symbols in aggressive mode
+        scan_count = {
+            OptionsMode.AGGRESSIVE: 30,
+            OptionsMode.BALANCED: 20,
+            OptionsMode.CONSERVATIVE: 12,
+        }.get(self.mode, 20)
+
+        for symbol in self.OPTIONS_UNIVERSE[:scan_count]:
             try:
                 # Skip if already have position
                 if any(p.symbol == symbol for p in self.positions.values()):
@@ -618,24 +760,26 @@ class OptionsQuantBot:
         iv_analysis: IVAnalysis
     ) -> Optional[OptionsStrategy]:
         """Create an iron condor strategy."""
+        from datetime import timedelta
+
         # Calculate strikes based on delta targets
         # Short strikes at ~20 delta, wings 5-10 points wider
+        call_lower = round(underlying_price * (1 + 0.05), 0)  # 5% OTM (short call)
+        call_upper = call_lower + 5  # Long call protection
+        put_upper = round(underlying_price * (1 - 0.05), 0)   # 5% OTM (short put)
+        put_lower = put_upper - 5  # Long put protection
 
-        call_short_strike = round(underlying_price * (1 + 0.05), 0)  # 5% OTM
-        call_long_strike = call_short_strike + 5
-        put_short_strike = round(underlying_price * (1 - 0.05), 0)   # 5% OTM
-        put_long_strike = put_short_strike - 5
-
-        expiration_days = 45  # ~45 DTE optimal for iron condors
+        # ~45 DTE optimal for iron condors
+        expiration = (datetime.now() + timedelta(days=45)).date()
 
         return self.options_manager.create_iron_condor(
             symbol=symbol,
             underlying_price=underlying_price,
-            put_short_strike=put_short_strike,
-            put_long_strike=put_long_strike,
-            call_short_strike=call_short_strike,
-            call_long_strike=call_long_strike,
-            expiration_days=expiration_days,
+            put_lower=put_lower,
+            put_upper=put_upper,
+            call_lower=call_lower,
+            call_upper=call_upper,
+            expiration=expiration,
             volatility=iv_analysis.current_iv,
         )
 
@@ -647,14 +791,17 @@ class OptionsQuantBot:
         long: bool = True
     ) -> Optional[OptionsStrategy]:
         """Create a straddle strategy."""
+        from datetime import timedelta
+
         strike = round(underlying_price, 0)  # ATM strike
-        expiration_days = 30  # ~30 DTE for straddles
+        # ~30 DTE for straddles
+        expiration = (datetime.now() + timedelta(days=30)).date()
 
         return self.options_manager.create_straddle(
             symbol=symbol,
             underlying_price=underlying_price,
             strike=strike,
-            expiration_days=expiration_days,
+            expiration=expiration,
             volatility=iv_analysis.current_iv,
             is_long=long,
         )
@@ -667,28 +814,35 @@ class OptionsQuantBot:
         bullish: bool = True
     ) -> Optional[OptionsStrategy]:
         """Create a vertical spread."""
+        from datetime import timedelta
+
+        # ~30 DTE for vertical spreads
+        expiration = (datetime.now() + timedelta(days=30)).date()
+
         if bullish:
-            long_strike = round(underlying_price * 0.98, 0)   # Slightly ITM
-            short_strike = round(underlying_price * 1.02, 0)  # Slightly OTM
+            # Bull call spread: buy lower strike, sell higher strike
+            lower_strike = round(underlying_price * 0.98, 0)   # Slightly ITM
+            upper_strike = round(underlying_price * 1.02, 0)   # Slightly OTM
 
             return self.options_manager.create_bull_call_spread(
                 symbol=symbol,
                 underlying_price=underlying_price,
-                long_strike=long_strike,
-                short_strike=short_strike,
-                expiration_days=30,
+                lower_strike=lower_strike,
+                upper_strike=upper_strike,
+                expiration=expiration,
                 volatility=iv_analysis.current_iv,
             )
         else:
-            long_strike = round(underlying_price * 1.02, 0)
-            short_strike = round(underlying_price * 0.98, 0)
+            # Bear put spread: buy higher strike, sell lower strike
+            lower_strike = round(underlying_price * 0.98, 0)
+            upper_strike = round(underlying_price * 1.02, 0)
 
             return self.options_manager.create_bear_put_spread(
                 symbol=symbol,
                 underlying_price=underlying_price,
-                long_strike=long_strike,
-                short_strike=short_strike,
-                expiration_days=30,
+                lower_strike=lower_strike,
+                upper_strike=upper_strike,
+                expiration=expiration,
                 volatility=iv_analysis.current_iv,
             )
 
@@ -700,9 +854,24 @@ class OptionsQuantBot:
         iv_analysis: IVAnalysis,
         rationale: str
     ):
-        """Open a new options position."""
-        # Check risk limits
-        buying_power_required = abs(strategy.max_loss) if strategy.max_loss else 1000
+        """Open a new options position with Kelly Criterion sizing."""
+        # Calculate optimal position size using Kelly Criterion
+        max_profit = abs(strategy.max_profit) if strategy.max_profit else 0
+        max_loss = abs(strategy.max_loss) if strategy.max_loss else 1000
+
+        # Estimate win probability based on IV rank (higher IV rank = higher win prob for premium sellers)
+        win_prob = min(0.75, 0.50 + (iv_analysis.iv_rank / 200))  # 50-75% based on IV rank
+
+        kelly_pct = self._calculate_kelly_size(win_prob, max_profit, max_loss)
+        optimal_allocation = self.initial_capital * kelly_pct
+
+        # Calculate contracts to trade based on Kelly sizing
+        buying_power_per_contract = max_loss if max_loss > 0 else 1000
+        num_contracts = max(1, int(optimal_allocation / buying_power_per_contract))
+
+        # Scale buying power required by number of contracts
+        buying_power_required = buying_power_per_contract * num_contracts
+
         can_open, reason = self.risk_manager.can_open_position(
             strategy, buying_power_required, self.cash
         )
@@ -723,9 +892,11 @@ class OptionsQuantBot:
             entry_underlying_price=current_price,
             current_iv=iv_analysis.current_iv,
             current_underlying_price=current_price,
-            max_profit=strategy.max_profit or 0,
-            max_loss=strategy.max_loss or 0,
+            max_profit=(strategy.max_profit or 0) * num_contracts,
+            max_loss=(strategy.max_loss or 0) * num_contracts,
             profit_target_pct=self.profit_target,
+            loss_limit_pct=self.loss_limit,
+            days_to_expiry_close=self.roll_dte,
         )
 
         # Update Greeks
@@ -755,11 +926,14 @@ class OptionsQuantBot:
         self.trade_history.append(trade)
 
         self._add_commentary(
-            f"✅ OPENED {strategy_name} on {symbol}: "
+            f"✅ OPENED {strategy_name} on {symbol} ({num_contracts} contracts): "
             f"Max Profit ${position.max_profit:,.0f} / Max Loss ${position.max_loss:,.0f} | "
-            f"IV: {iv_analysis.current_iv*100:.1f}%",
+            f"IV: {iv_analysis.current_iv*100:.1f}% | Kelly: {kelly_pct*100:.1f}%",
             "trade"
         )
+
+        # Update portfolio-level Greeks
+        self.risk_manager.update_portfolio_greeks(list(self.positions.values()))
 
     async def _close_position(self, position_id: str, reason: str):
         """Close an options position."""
@@ -846,18 +1020,144 @@ class OptionsQuantBot:
         if len(self.commentary) > 100:
             self.commentary = self.commentary[-100:]
 
+    # ======================
+    # CRYPTO DERIVATIVES
+    # ======================
+
+    async def _get_crypto_price(self, symbol: str) -> float:
+        """Get current crypto price."""
+        # Base crypto prices (would be from live feed in production)
+        base_prices = {
+            "BTC": 95000, "ETH": 3200, "SOL": 180,
+            "AVAX": 35, "MATIC": 0.85, "LINK": 22,
+            "ARB": 1.20, "OP": 2.50,
+        }
+        # Extract base asset from derivative symbol
+        base = symbol.split("-")[0]
+        price = base_prices.get(base, 100)
+        # Add small random movement
+        return price * (1 + np.random.uniform(-0.02, 0.02))
+
+    async def open_crypto_perpetual(
+        self,
+        symbol: str,
+        side: str,
+        size_usd: float,
+        leverage: float = 1.0,
+        take_profit_pct: float = 0.10,
+        stop_loss_pct: float = 0.05,
+    ) -> Optional[CryptoDerivativePosition]:
+        """
+        Open a crypto perpetual futures position.
+
+        Args:
+            symbol: e.g., "BTC-PERP", "ETH-PERP"
+            side: "long" or "short"
+            size_usd: Position size in USD
+            leverage: Leverage multiplier (1-10x recommended)
+            take_profit_pct: Take profit percentage
+            stop_loss_pct: Stop loss percentage
+        """
+        if not symbol.endswith("-PERP"):
+            self._add_commentary(f"⚠️ Invalid perpetual symbol: {symbol}", "error")
+            return None
+
+        # Get current price
+        current_price = await self._get_crypto_price(symbol)
+
+        # Calculate position
+        position_id = str(uuid.uuid4())[:8]
+        margin_required = size_usd / leverage
+
+        if margin_required > self.cash:
+            self._add_commentary(
+                f"⚠️ Insufficient margin for {symbol}: need ${margin_required:,.0f}, have ${self.cash:,.0f}",
+                "risk"
+            )
+            return None
+
+        # Calculate liquidation price
+        if side == "long":
+            liq_price = current_price * (1 - 0.9 / leverage)
+            take_profit_price = current_price * (1 + take_profit_pct)
+            stop_loss_price = current_price * (1 - stop_loss_pct)
+        else:
+            liq_price = current_price * (1 + 0.9 / leverage)
+            take_profit_price = current_price * (1 - take_profit_pct)
+            stop_loss_price = current_price * (1 + stop_loss_pct)
+
+        position = CryptoDerivativePosition(
+            id=position_id,
+            symbol=symbol,
+            derivative_type="perpetual",
+            side=side,
+            entry_price=current_price,
+            size=size_usd,
+            leverage=leverage,
+            current_price=current_price,
+            liquidation_price=liq_price,
+            take_profit=take_profit_price,
+            stop_loss=stop_loss_price,
+        )
+
+        self.crypto_positions[position_id] = position
+        self.cash -= margin_required
+
+        self._add_commentary(
+            f"✅ OPENED {side.upper()} {symbol} @ ${current_price:,.0f} | "
+            f"Size: ${size_usd:,.0f} | Leverage: {leverage}x | "
+            f"Liq: ${liq_price:,.0f}",
+            "trade"
+        )
+
+        return position
+
+    async def close_crypto_perpetual(self, position_id: str, reason: str = "Manual close"):
+        """Close a crypto perpetual position."""
+        if position_id not in self.crypto_positions:
+            return
+
+        position = self.crypto_positions[position_id]
+        position.current_price = await self._get_crypto_price(position.symbol)
+        pnl = position.calculate_pnl()
+
+        # Return margin + P&L
+        margin = position.size / position.leverage
+        self.cash += margin + pnl
+
+        emoji = "💰" if pnl >= 0 else "📉"
+        self._add_commentary(
+            f"{emoji} CLOSED {position.side.upper()} {position.symbol}: "
+            f"P&L ${pnl:+,.2f} | {reason}",
+            "trade"
+        )
+
+        del self.crypto_positions[position_id]
+
+    def get_crypto_positions(self) -> List[Dict]:
+        """Get all crypto derivative positions."""
+        return [p.to_dict() for p in self.crypto_positions.values()]
+
+    # ======================
+    # STATUS & GETTERS
+    # ======================
+
     def get_status(self) -> Dict:
         """Get current bot status."""
+        crypto_pnl = sum(p.calculate_pnl() for p in self.crypto_positions.values())
+
         return {
             "is_running": self.is_running,
             "mode": self.mode.value,
-            "asset_class": "options",
+            "asset_class": "options_and_derivatives",
             "initial_capital": self.initial_capital,
             "cash": round(self.cash, 2),
-            "total_value": round(self.total_value, 2),
-            "total_pnl": round(self.total_pnl, 2),
-            "total_pnl_pct": round(self.total_pnl_pct * 100, 2),
-            "positions_count": len(self.positions),
+            "total_value": round(self.total_value + crypto_pnl, 2),
+            "total_pnl": round(self.total_pnl + crypto_pnl, 2),
+            "total_pnl_pct": round((self.total_pnl + crypto_pnl) / self.initial_capital * 100, 2),
+            "positions_count": len(self.positions) + len(self.crypto_positions),
+            "options_positions": len(self.positions),
+            "crypto_positions": len(self.crypto_positions),
             "trades_count": len(self.trade_history),
             "last_scan": self.last_scan_time.isoformat() if self.last_scan_time else None,
             "risk_summary": self.risk_manager.get_risk_summary(),
@@ -866,6 +1166,10 @@ class OptionsQuantBot:
                 "target_delta": self.target_delta_per_leg,
                 "min_iv_rank": self.min_iv_rank,
                 "profit_target": f"{self.profit_target*100:.0f}%",
+            },
+            "crypto_derivatives": {
+                "supported": self.CRYPTO_DERIVATIVES,
+                "active_perpetuals": len([p for p in self.crypto_positions.values() if p.derivative_type == "perpetual"]),
             },
         }
 

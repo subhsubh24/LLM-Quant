@@ -2334,6 +2334,85 @@ async def trigger_options_scan():
     return {"status": "scan_completed", "positions": len(bot.positions)}
 
 
+# ============ Crypto Derivatives Endpoints ============
+
+@router.get("/options-bot/crypto/positions")
+async def get_crypto_positions():
+    """Get all crypto derivative positions (perpetuals, options)."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return {"crypto_positions": bot.get_crypto_positions()}
+
+
+class CryptoPerpRequest(BaseModel):
+    """Request model for opening crypto perpetual."""
+    symbol: str = "BTC-PERP"
+    side: str = "long"  # "long" or "short"
+    size_usd: float = 10000
+    leverage: float = 1.0
+    take_profit_pct: float = 0.10
+    stop_loss_pct: float = 0.05
+
+
+@router.post("/options-bot/crypto/perpetual/open")
+async def open_crypto_perpetual(request: CryptoPerpRequest):
+    """
+    Open a crypto perpetual futures position.
+
+    Supports: BTC-PERP, ETH-PERP, SOL-PERP, and other major perpetuals.
+    """
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+
+    if request.leverage > 10:
+        raise HTTPException(status_code=400, detail="Max leverage is 10x for risk management")
+
+    if request.side not in ["long", "short"]:
+        raise HTTPException(status_code=400, detail="Side must be 'long' or 'short'")
+
+    position = await bot.open_crypto_perpetual(
+        symbol=request.symbol,
+        side=request.side,
+        size_usd=request.size_usd,
+        leverage=request.leverage,
+        take_profit_pct=request.take_profit_pct,
+        stop_loss_pct=request.stop_loss_pct,
+    )
+
+    if position is None:
+        raise HTTPException(status_code=400, detail="Failed to open position - check margin")
+
+    return {"status": "opened", "position": position.to_dict()}
+
+
+@router.post("/options-bot/crypto/perpetual/close/{position_id}")
+async def close_crypto_perpetual(position_id: str, reason: str = "Manual close"):
+    """Close a crypto perpetual position."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+
+    if position_id not in bot.crypto_positions:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    await bot.close_crypto_perpetual(position_id, reason)
+    return {"status": "closed", "position_id": position_id}
+
+
+@router.get("/options-bot/crypto/supported")
+async def get_supported_crypto_derivatives():
+    """Get list of supported crypto derivatives."""
+    from ..trading.options_bot import OptionsQuantBot
+
+    return {
+        "perpetuals": [d for d in OptionsQuantBot.CRYPTO_DERIVATIVES if d.endswith("-PERP")],
+        "options": [d for d in OptionsQuantBot.CRYPTO_DERIVATIVES if d.endswith("-OPT")],
+        "all": OptionsQuantBot.CRYPTO_DERIVATIVES,
+    }
+
+
 # ============ Strategy Backtesting Endpoints ============
 
 class StrategyBacktestRequest(BaseModel):
