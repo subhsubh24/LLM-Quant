@@ -13,7 +13,7 @@ import httpx
 import logging
 
 from ..config import get_settings
-from .binance_ws import get_binance_ws, LivePrice
+from .crypto_ws import get_crypto_ws, LivePrice
 
 logger = logging.getLogger(__name__)
 
@@ -520,8 +520,9 @@ class CryptoMarketService:
         self._last_batch_fetch: Optional[datetime] = None
         self._batch_cache: Dict[str, CryptoQuote] = {}  # Cache for CoinGecko fallback
         self._batch_cache_ttl = 60  # seconds (increased - CoinGecko has strict rate limits)
-        # Binance WebSocket is the PRIMARY data source for truly live prices
-        self._binance_ws = get_binance_ws()
+        # Multi-provider WebSocket is the PRIMARY data source for truly live prices
+        # Tries: Coinbase -> Kraken -> Binance.US -> Binance Global
+        self._crypto_ws = get_crypto_ws()
 
     async def get_quote(self, symbol: str) -> Optional[CryptoQuote]:
         """
@@ -533,8 +534,8 @@ class CryptoMarketService:
         symbol = symbol.upper()
 
         # PRIMARY SOURCE: Binance WebSocket (truly live data)
-        if self._binance_ws.is_connected:
-            live_price = self._binance_ws.get_price(symbol)
+        if self._crypto_ws.is_connected:
+            live_price = self._crypto_ws.get_price(symbol)
             if live_price:
                 return self._live_price_to_quote(live_price)
 
@@ -582,9 +583,9 @@ class CryptoMarketService:
         symbols = [s.upper() for s in symbols]
 
         # PRIMARY SOURCE: Binance WebSocket (truly live data)
-        if self._binance_ws.is_connected:
+        if self._crypto_ws.is_connected:
             for symbol in symbols:
-                live_price = self._binance_ws.get_price(symbol)
+                live_price = self._crypto_ws.get_price(symbol)
                 if live_price:
                     quotes[symbol] = self._live_price_to_quote(live_price)
 
@@ -963,7 +964,7 @@ class CryptoMarketService:
 
     def get_data_source_status(self) -> Dict[str, Any]:
         """Get status of all data sources."""
-        ws_status = self._binance_ws.get_status()
+        ws_status = self._crypto_ws.get_status()
         return {
             "primary_source": "binance_websocket",
             "fallback_source": "coingecko_api",

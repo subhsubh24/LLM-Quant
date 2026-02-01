@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 from .. import __version__, DISCLAIMER
 from ..config import get_settings
 from ..db.database import init_db
-from ..data.binance_ws import start_binance_ws, stop_binance_ws
+from ..data.crypto_ws import start_crypto_ws, stop_crypto_ws
 from .routes import router
 
 
@@ -24,16 +24,17 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
-    # Start Binance WebSocket for real-time crypto prices
-    await start_binance_ws()
-    logger.info("✅ Binance WebSocket started - LIVE crypto prices enabled")
+    # Start multi-provider WebSocket for real-time crypto prices
+    # Tries: Coinbase -> Kraken -> Binance.US -> Binance Global
+    await start_crypto_ws()
+    logger.info("✅ Crypto WebSocket started - LIVE prices enabled")
 
     yield
 
     # Shutdown
     logger.info("Shutting down QuantLab API...")
-    await stop_binance_ws()
-    logger.info("Binance WebSocket stopped")
+    await stop_crypto_ws()
+    logger.info("Crypto WebSocket stopped")
 
 
 app = FastAPI(
