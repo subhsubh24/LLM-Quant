@@ -2166,6 +2166,33 @@ async def get_bot_data_health():
     return health
 
 
+@router.get("/bot/learning")
+async def get_bot_learning_insights():
+    """
+    Get reinforcement learning insights and adaptation status.
+
+    Returns comprehensive RL metrics:
+    - learning_status: Whether bot has enough data to adapt
+    - factor_performance: Which factors predict profitable trades
+    - adapted_weights: How weights have changed from learning
+    - asset_win_rates: Real win rates from actual trades
+    - regime_insights: Performance in different market regimes
+    - top_factors: Best performing factors (high win rate)
+    - weak_factors: Worst performing factors (low win rate)
+
+    The bot learns from every completed trade and adapts its:
+    1. Factor weights (increases weight for predictive factors)
+    2. Kelly sizing (adjusts position size based on actual win rate)
+    3. Strategy selection (Thompson Sampling for regime-based selection)
+    """
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    insights = bot.get_learning_insights()
+
+    return insights
+
+
 @router.post("/bot/config")
 async def update_bot_config(
     max_positions: Optional[int] = None,

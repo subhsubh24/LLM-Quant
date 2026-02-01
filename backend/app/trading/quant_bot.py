@@ -951,6 +951,12 @@ from ..signals.engine import SignalEngine, StockSignal, PortfolioSignals, get_si
 from ..data.live import get_live_market_service
 from ..data.crypto import get_crypto_service
 from .orders import OrderSide
+from .adaptive_learning import (
+    AdaptiveLearningEngine,
+    get_learning_engine,
+    TradeOutcome,
+    MarketRegime,
+)
 
 
 class TradingMode(Enum):
@@ -1280,10 +1286,16 @@ class QuantBot:
             max_drawdown_trigger=0.15 if mode == TradingMode.AGGRESSIVE else 0.10,
         )
 
+        # ========== REINFORCEMENT LEARNING ENGINE ==========
+        # Adaptive learning for factor weights, Kelly sizing, and strategy selection
+        self.learning_engine = get_learning_engine()
+        self.use_adaptive_learning = True  # Enable RL feedback loops
+
         # Mode-specific settings
         self._configure_mode()
 
         logger.info(f"QuantBot CITADEL-LEVEL initialized: ${initial_capital:,.2f} capital, {mode.value} mode, {asset_class.value} assets")
+        logger.info(f"🧠 Reinforcement Learning: {'ENABLED' if self.use_adaptive_learning else 'DISABLED'}")
 
     def _get_scan_interval(self) -> float:
         """
@@ -1474,6 +1486,32 @@ class QuantBot:
             f"   Correlation Limit: {self.risk_manager.max_correlation:.0%} | Sector Limit: {self.risk_manager.max_sector_concentration:.0%}",
             "info"
         )
+        self.commentary.add(
+            f"",
+            "info"
+        )
+        self.commentary.add(
+            f"🧠 REINFORCEMENT LEARNING:",
+            "info"
+        )
+        self.commentary.add(
+            f"   Status: {'ENABLED' if self.use_adaptive_learning else 'DISABLED'}",
+            "info"
+        )
+        if self.use_adaptive_learning:
+            learning_summary = self.learning_engine.get_learning_summary()
+            self.commentary.add(
+                f"   {learning_summary['learning_status']}",
+                "info"
+            )
+            self.commentary.add(
+                f"   Algorithms: Online Gradient Descent | Thompson Sampling | Adaptive Kelly",
+                "info"
+            )
+            self.commentary.add(
+                f"   Feedback: Factors adapt to win rates | Kelly sizes to actual P&L",
+                "info"
+            )
         self.commentary.add(
             f"═══════════════════════════════════════════════════════════════",
             "market"
@@ -2287,6 +2325,19 @@ class QuantBot:
                 "liquidity_premium": 0.02,  # Prefer liquid names
             }
 
+        # ========== REINFORCEMENT LEARNING: ADAPTIVE WEIGHTS ==========
+        if self.use_adaptive_learning:
+            # Get weights adapted by learning from trade outcomes
+            weights = self.learning_engine.get_adapted_weights("crypto", weights)
+
+            # Detect current market regime
+            if len(prices) >= 20:
+                regime = self.learning_engine.detect_regime(prices, volatility)
+            else:
+                regime = MarketRegime.UNKNOWN
+        else:
+            regime = MarketRegime.UNKNOWN
+
         composite = sum(factors.get(k, 0) * weights.get(k, 0) for k in factors)
 
         # Risk-adjusted composite: reduce signal in defensive mode
@@ -2303,8 +2354,12 @@ class QuantBot:
             factor_agreement = sum(1 for v in factors.values() if v > 0.1) / len(factors)
             confidence = min(0.4 + composite * 0.8 + factor_agreement * 0.3, 0.95)
 
-            # Kelly-optimal position size
-            kelly_size = QuantMath.kelly_criterion(self.estimated_win_rate, self.win_loss_ratio)
+            # ========== REINFORCEMENT LEARNING: ADAPTIVE KELLY ==========
+            if self.use_adaptive_learning:
+                # Use Kelly adjusted by actual win rates from learning
+                kelly_size = self.learning_engine.get_adaptive_kelly("crypto", 0.05)
+            else:
+                kelly_size = QuantMath.kelly_criterion(self.estimated_win_rate, self.win_loss_ratio)
 
             # Primary reason determination
             sorted_factors = sorted(factors.items(), key=lambda x: x[1] * weights.get(x[0], 0), reverse=True)
@@ -2852,6 +2907,50 @@ class QuantBot:
         )
         self.trade_history.append(trade)
 
+        # ========== REINFORCEMENT LEARNING: RECORD OUTCOME ==========
+        if self.use_adaptive_learning:
+            try:
+                # Calculate holding period
+                holding_hours = (datetime.now() - position.entry_time).total_seconds() / 3600
+
+                # Get entry factors and weights from the entry rationale
+                entry_factors = position.entry_rationale.factors if position.entry_rationale else {}
+                entry_weights = position.entry_rationale.factor_weights if position.entry_rationale else {}
+
+                # Detect regime (or use stored regime)
+                regime = self.learning_engine.current_regime
+
+                # Create trade outcome for learning
+                outcome = TradeOutcome(
+                    symbol=symbol,
+                    asset_class=position.asset_class,
+                    entry_time=position.entry_time,
+                    exit_time=datetime.now(),
+                    entry_price=position.entry_price,
+                    exit_price=position.current_price,
+                    pnl=pnl,
+                    pnl_pct=position.unrealized_pnl_pct,
+                    holding_period_hours=holding_hours,
+                    factors_at_entry=entry_factors,
+                    factor_weights_at_entry=entry_weights,
+                    regime_at_entry=regime,
+                    signal_strength=position.entry_rationale.confidence if position.entry_rationale else 0.5,
+                    was_profitable=pnl > 0,
+                )
+
+                # Record for learning - this triggers weight adaptation
+                self.learning_engine.record_trade_outcome(outcome)
+
+                # Log learning update
+                learning_summary = self.learning_engine.get_learning_summary()
+                self.commentary.add(
+                    f"🧠 LEARNED: {learning_summary['learning_status']} | "
+                    f"Win rates: Crypto {learning_summary['asset_win_rates'].get('crypto', {}).get('win_rate', 50):.0f}%",
+                    "info"
+                )
+            except Exception as e:
+                logger.error(f"Failed to record trade outcome for learning: {e}")
+
         pnl_emoji = "💰" if pnl >= 0 else "📉"
         self.commentary.add(
             f"{pnl_emoji} SOLD {symbol}: {position.quantity:.4f} @ ${position.current_price:,.2f} | P&L: ${pnl:+,.2f} ({position.unrealized_pnl_pct*100:+.1f}%)",
@@ -2995,6 +3094,51 @@ class QuantBot:
             health["message"] = "❌ ALL APIs FAILED - no trading possible"
 
         return health
+
+    def get_learning_insights(self) -> Dict[str, Any]:
+        """
+        Get reinforcement learning insights and adaptation status.
+
+        Returns:
+            Learning summary including:
+            - Factor performance (which factors predict well)
+            - Adapted weights (how weights have changed from learning)
+            - Asset win rates (real win rates from trades)
+            - Regime detection
+        """
+        if not self.use_adaptive_learning:
+            return {
+                "enabled": False,
+                "message": "Reinforcement learning is disabled",
+            }
+
+        summary = self.learning_engine.get_learning_summary()
+        factor_insights = self.learning_engine.get_factor_insights()
+        regime_insights = self.learning_engine.get_regime_insights()
+
+        return {
+            "enabled": True,
+            "learning_status": summary["learning_status"],
+            "total_trades_learned": summary["total_trades_learned"],
+            "last_update": summary["last_update"],
+            "current_regime": summary["current_regime"],
+
+            # Win rates from actual trades
+            "asset_win_rates": summary["asset_win_rates"],
+
+            # Factor performance rankings
+            "factor_performance": factor_insights,
+
+            # Adapted weights (how learning has changed the weights)
+            "adapted_weights": summary["adapted_weights"],
+
+            # Regime-strategy insights
+            "regime_insights": regime_insights,
+
+            # Top/bottom performing factors
+            "top_factors": [f for f in factor_insights if f.get("rating") == "🟢"][:3],
+            "weak_factors": [f for f in factor_insights if f.get("rating") == "🔴"][:3],
+        }
 
     def get_performance(self) -> Dict[str, Any]:
         """Calculate institutional-grade performance metrics with safe float handling."""
