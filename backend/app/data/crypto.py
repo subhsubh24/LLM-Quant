@@ -514,12 +514,12 @@ class CryptoMarketService:
     def __init__(self):
         self.settings = get_settings()
         self.cache: Dict[str, Any] = {}
-        self.cache_ttl = 30  # seconds - only used for CoinGecko fallback
+        self.cache_ttl = 60  # seconds - for CoinGecko fallback (increased to avoid rate limits)
         self.base_url = "https://api.coingecko.com/api/v3"
         self.use_mock_fallback = False  # DISABLE mock fallback - error on API failure
         self._last_batch_fetch: Optional[datetime] = None
         self._batch_cache: Dict[str, CryptoQuote] = {}  # Cache for CoinGecko fallback
-        self._batch_cache_ttl = 30  # seconds
+        self._batch_cache_ttl = 60  # seconds (increased - CoinGecko has strict rate limits)
         # Binance WebSocket is the PRIMARY data source for truly live prices
         self._binance_ws = get_binance_ws()
 
@@ -528,7 +528,7 @@ class CryptoMarketService:
         Get real-time quote for a cryptocurrency.
 
         PRIMARY: Binance WebSocket (truly live, sub-second updates)
-        FALLBACK: CoinGecko REST API (only if WebSocket unavailable)
+        FALLBACK: Batch cache from CoinGecko (no individual API calls)
         """
         symbol = symbol.upper()
 
@@ -538,35 +538,37 @@ class CryptoMarketService:
             if live_price:
                 return self._live_price_to_quote(live_price)
 
-        # FALLBACK: CoinGecko REST API (only if WebSocket not connected)
-        logger.debug(f"WebSocket not available for {symbol}, falling back to CoinGecko")
+        # FALLBACK 1: Check batch cache (from get_quotes_batch)
+        # This prevents individual API calls that cause rate limits
+        if symbol in self._batch_cache and self._last_batch_fetch:
+            age = (datetime.now() - self._last_batch_fetch).total_seconds()
+            if age < self._batch_cache_ttl:
+                quote = self._batch_cache[symbol]
+                quote.data_age_seconds = age
+                return quote
 
+        # FALLBACK 2: Check individual cache
         cache_key = f"crypto_quote_{symbol}"
-
-        # Check cache for fallback
         cached = self._get_cached_with_age(cache_key)
         if cached:
             quote, age_seconds = cached
             quote.data_age_seconds = age_seconds
             return quote
 
-        # Convert symbol to CoinGecko ID
-        coin_id = self.SYMBOL_TO_ID.get(symbol)
-        if not coin_id:
-            coin_id = symbol.lower()
-
-        try:
-            async with httpx.AsyncClient() as client:
-                quote = await self._fetch_coingecko_quote(client, coin_id, symbol)
-                if quote:
-                    self._set_cached(cache_key, quote)
-                    logger.debug(f"✓ Price for {symbol}: ${quote.price} from CoinGecko (fallback)")
+        # FALLBACK 3: Return from batch cache even if slightly stale (up to 5 min)
+        # This prevents hammering the API with individual requests
+        if symbol in self._batch_cache:
+            quote = self._batch_cache[symbol]
+            if self._last_batch_fetch:
+                age = (datetime.now() - self._last_batch_fetch).total_seconds()
+                if age < 300:  # Accept up to 5 min old data
+                    quote.data_age_seconds = age
+                    logger.debug(f"Using stale cache for {symbol} ({age:.0f}s old)")
                     return quote
-        except Exception as e:
-            logger.error(f"CoinGecko API failed for {symbol}: {e}")
 
-        # NO MOCK FALLBACK - return None and log error
-        logger.error(f"❌ NO DATA for {symbol} - WebSocket disconnected, API unavailable")
+        # DON'T make individual API calls - they cause rate limits
+        # The batch fetch in the scan loop will refresh the cache
+        logger.debug(f"No cached data for {symbol} - waiting for next batch refresh")
         return None
 
     async def get_quotes_batch(self, symbols: List[str]) -> Dict[str, CryptoQuote]:
