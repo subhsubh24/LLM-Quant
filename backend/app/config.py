@@ -71,11 +71,6 @@ class Settings(BaseSettings):
     supabase_key: str = ""
     supabase_enabled: bool = True  # Enable/disable Supabase integration
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
-
     @property
     def has_llm_key(self) -> bool:
         """Check if LLM API key is configured."""
