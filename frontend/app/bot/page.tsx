@@ -205,7 +205,7 @@ export default function BotPage() {
   const formatPct = (val: number) => `${val >= 0 ? "+" : ""}${val.toFixed(2)}%`;
 
   return (
-    <div className="ml-64 min-h-screen bg-gray-50/50 p-8">
+    <div className="min-h-screen p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
