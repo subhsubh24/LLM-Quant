@@ -2981,3 +2981,385 @@ async def get_strategy_presets():
             }
         },
     }
+
+
+# ============ Live Broker Management Endpoints ============
+
+
+class BrokerCredentialsRequest(BaseModel):
+    """Request model for setting broker credentials."""
+    broker: str  # "alpaca" or "binance"
+    api_key: str
+    api_secret: str
+    is_paper: bool = True  # Paper/testnet mode by default for safety
+
+
+class LiveOrderRequest(BaseModel):
+    """Request model for live order submission."""
+    symbol: str
+    side: str  # "buy" or "sell"
+    quantity: float
+    order_type: str = "market"
+    limit_price: Optional[float] = None
+
+
+@router.post("/broker/credentials")
+async def set_broker_credentials(request: BrokerCredentialsRequest):
+    """
+    Set API credentials for a broker (Alpaca or Binance).
+
+    IMPORTANT: Start with paper/testnet mode to verify everything works!
+
+    For Alpaca (stocks/options):
+    - Get API keys at: https://alpaca.markets
+    - Paper trading is free and uses real market data
+    - Set is_paper=false only when ready for live trading
+
+    For Binance (crypto):
+    - Get API keys at: https://www.binance.com/en/my/settings/api-management
+    - Testnet available at: https://testnet.binancefuture.com
+    - Set is_paper=false only when ready for live trading
+    """
+    from ..trading.live_brokers import get_broker_manager, BrokerType
+
+    manager = get_broker_manager()
+
+    if request.broker.lower() == "alpaca":
+        broker_type = BrokerType.ALPACA
+    elif request.broker.lower() == "binance":
+        broker_type = BrokerType.BINANCE
+    else:
+        raise HTTPException(status_code=400, detail="Invalid broker. Use 'alpaca' or 'binance'")
+
+    manager.set_credentials(
+        broker=broker_type,
+        api_key=request.api_key,
+        api_secret=request.api_secret,
+        is_paper=request.is_paper,
+    )
+
+    return {
+        "status": "credentials_set",
+        "broker": request.broker,
+        "mode": "paper" if request.is_paper else "LIVE",
+        "message": f"Credentials saved for {request.broker}. Use /broker/connect to connect.",
+    }
+
+
+@router.post("/broker/connect")
+async def connect_brokers():
+    """
+    Connect to all configured brokers.
+
+    Must set credentials first via /broker/credentials.
+    Returns connection status for each broker.
+    """
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+
+    if not manager.credentials:
+        raise HTTPException(
+            status_code=400,
+            detail="No credentials configured. Use /broker/credentials first."
+        )
+
+    results = await manager.connect_all()
+
+    return {
+        "status": "connected",
+        "results": results,
+        "is_live_trading": manager.is_live,
+        "warning": "LIVE TRADING ENABLED - Real money at risk!" if manager.is_live else None,
+    }
+
+
+@router.post("/broker/disconnect")
+async def disconnect_brokers():
+    """Disconnect from all brokers."""
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+    await manager.disconnect_all()
+
+    return {"status": "disconnected", "message": "All broker connections closed"}
+
+
+@router.get("/broker/status")
+async def get_broker_status():
+    """
+    Get connection status for all brokers.
+
+    Shows:
+    - Which brokers are configured
+    - Connection status
+    - Trading mode (paper/live)
+    """
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+    return manager.get_status()
+
+
+@router.get("/broker/account")
+async def get_broker_accounts():
+    """
+    Get account information from all connected brokers.
+
+    Returns balances, buying power, and account status.
+    """
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+    accounts = {}
+
+    if manager.alpaca and manager.alpaca._connected:
+        try:
+            alpaca_account = await manager.alpaca.get_account()
+            accounts["alpaca"] = {
+                "equity": float(alpaca_account.get("equity", 0)),
+                "cash": float(alpaca_account.get("cash", 0)),
+                "buying_power": float(alpaca_account.get("buying_power", 0)),
+                "portfolio_value": float(alpaca_account.get("portfolio_value", 0)),
+                "status": alpaca_account.get("status"),
+            }
+        except Exception as e:
+            accounts["alpaca"] = {"error": str(e)}
+
+    if manager.binance and manager.binance._connected:
+        try:
+            # Spot account
+            spot_account = await manager.binance.get_account()
+            balances = {
+                b["asset"]: float(b["free"])
+                for b in spot_account.get("balances", [])
+                if float(b["free"]) > 0
+            }
+
+            # Futures account
+            try:
+                futures_account = await manager.binance.get_futures_account()
+                futures_balance = float(futures_account.get("totalWalletBalance", 0))
+                futures_unrealized = float(futures_account.get("totalUnrealizedProfit", 0))
+            except:
+                futures_balance = 0
+                futures_unrealized = 0
+
+            accounts["binance"] = {
+                "spot_balances": balances,
+                "futures_balance": futures_balance,
+                "futures_unrealized_pnl": futures_unrealized,
+            }
+        except Exception as e:
+            accounts["binance"] = {"error": str(e)}
+
+    if not accounts:
+        raise HTTPException(status_code=400, detail="No brokers connected")
+
+    return {"accounts": accounts}
+
+
+@router.get("/broker/positions")
+async def get_live_positions():
+    """
+    Get all live positions from connected brokers.
+
+    Returns positions from both Alpaca (stocks) and Binance (crypto).
+    """
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+    positions = await manager.get_all_positions()
+
+    return {
+        "positions": [
+            {
+                "symbol": p.symbol,
+                "quantity": p.quantity,
+                "side": p.side,
+                "entry_price": p.entry_price,
+                "current_price": p.current_price,
+                "unrealized_pnl": p.unrealized_pnl,
+                "market_value": p.market_value,
+                "broker": p.broker.value,
+            }
+            for p in positions
+        ],
+        "total_positions": len(positions),
+    }
+
+
+@router.get("/broker/price/{symbol}")
+async def get_live_price(symbol: str, asset_type: str = "stock"):
+    """
+    Get live price for a symbol.
+
+    asset_type: 'stock' (Alpaca), 'crypto' (Binance spot), 'crypto_futures' (Binance perps)
+    """
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+    price = await manager.get_live_price(symbol.upper(), asset_type)
+
+    if price == 0:
+        raise HTTPException(status_code=404, detail=f"Price not found for {symbol}")
+
+    return {
+        "symbol": symbol.upper(),
+        "price": price,
+        "asset_type": asset_type,
+    }
+
+
+@router.post("/broker/order/stock")
+async def submit_live_stock_order(request: LiveOrderRequest):
+    """
+    Submit a live stock order via Alpaca.
+
+    WARNING: This executes a REAL trade if connected in live mode!
+    """
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+
+    if not manager.alpaca or not manager.alpaca._connected:
+        raise HTTPException(status_code=400, detail="Alpaca not connected")
+
+    try:
+        order = await manager.submit_stock_order(
+            symbol=request.symbol.upper(),
+            quantity=request.quantity,
+            side=request.side.lower(),
+            order_type=request.order_type.lower(),
+        )
+
+        return {
+            "status": "order_submitted",
+            "order_id": order.id,
+            "symbol": order.symbol,
+            "side": order.side,
+            "quantity": order.quantity,
+            "order_type": order.order_type,
+            "order_status": order.status,
+            "is_live": not manager.credentials[manager.alpaca._connected and BrokerType.ALPACA].is_paper if BrokerType.ALPACA in manager.credentials else False,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Order failed: {str(e)}")
+
+
+@router.post("/broker/order/crypto")
+async def submit_live_crypto_order(request: LiveOrderRequest, is_futures: bool = False):
+    """
+    Submit a live crypto order via Binance.
+
+    WARNING: This executes a REAL trade if connected in live mode!
+
+    Set is_futures=true for perpetual futures, false for spot.
+    """
+    from ..trading.live_brokers import get_broker_manager, BrokerType
+
+    manager = get_broker_manager()
+
+    if not manager.binance or not manager.binance._connected:
+        raise HTTPException(status_code=400, detail="Binance not connected")
+
+    try:
+        order = await manager.submit_crypto_order(
+            symbol=request.symbol.upper(),
+            quantity=request.quantity,
+            side=request.side.lower(),
+            is_futures=is_futures,
+        )
+
+        return {
+            "status": "order_submitted",
+            "order_id": order.id,
+            "symbol": order.symbol,
+            "side": order.side,
+            "quantity": order.quantity,
+            "order_type": order.order_type,
+            "order_status": order.status,
+            "is_futures": is_futures,
+            "is_live": not manager.credentials[BrokerType.BINANCE].is_paper if BrokerType.BINANCE in manager.credentials else False,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Order failed: {str(e)}")
+
+
+# ============ Live Trading Master Bot Endpoints ============
+
+
+@router.post("/master-bot/enable-live-trading")
+async def enable_live_trading():
+    """
+    Enable live trading mode for the Master Bot.
+
+    IMPORTANT: Must configure and connect brokers first!
+
+    This switches the bot from paper trading to live trading.
+    All subsequent trades will be executed on real exchanges.
+    """
+    from ..trading.master_bot import get_master_bot
+    from ..trading.live_brokers import get_broker_manager
+
+    manager = get_broker_manager()
+    bot = get_master_bot()
+
+    # Verify brokers are connected
+    status = manager.get_status()
+    if not status["alpaca"]["connected"] and not status["binance"]["connected"]:
+        raise HTTPException(
+            status_code=400,
+            detail="No brokers connected. Configure and connect brokers first."
+        )
+
+    # Set live trading mode on bot
+    bot.live_trading_enabled = True
+    bot.broker_manager = manager
+
+    return {
+        "status": "live_trading_enabled",
+        "broker_status": status,
+        "warning": "LIVE TRADING MODE - Real money will be used for trades!",
+        "connected_brokers": [
+            k for k, v in status.items()
+            if isinstance(v, dict) and v.get("connected")
+        ],
+    }
+
+
+@router.post("/master-bot/disable-live-trading")
+async def disable_live_trading():
+    """Switch Master Bot back to paper trading mode."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    bot.live_trading_enabled = False
+    bot.broker_manager = None
+
+    return {
+        "status": "paper_trading_mode",
+        "message": "Switched back to paper trading. No real trades will be executed.",
+    }
+
+
+@router.get("/master-bot/live-status")
+async def get_live_trading_status():
+    """
+    Get the live trading status of the Master Bot.
+
+    Shows whether live trading is enabled and broker connections.
+    """
+    from ..trading.master_bot import get_master_bot
+    from ..trading.live_brokers import get_broker_manager
+
+    bot = get_master_bot()
+    manager = get_broker_manager()
+
+    return {
+        "live_trading_enabled": getattr(bot, 'live_trading_enabled', False),
+        "broker_status": manager.get_status(),
+        "bot_running": bot.is_running,
+        "capital": bot.capital,
+        "mode": bot.mode,
+    }

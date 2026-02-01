@@ -701,6 +701,10 @@ class MasterQuantBot:
         # Commentary for UI
         self.commentary: List[Dict] = []
 
+        # Live trading integration
+        self.live_trading_enabled = False
+        self.broker_manager = None  # Set via enable_live_trading endpoint
+
         # Initialize with some synthetic price history for models
         self._initialize_price_history()
 
@@ -1201,6 +1205,15 @@ class MasterQuantBot:
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
         """Execute a single opportunity."""
         try:
+            # If live trading is enabled, execute on real exchanges
+            if self.live_trading_enabled and self.broker_manager:
+                live_success = await self._execute_live_trade(opp)
+                if live_success:
+                    self._record_trade(opp, f"live_{opp.asset_class.value}")
+                    return True
+                # Fall through to paper trading if live fails
+
+            # Paper trading execution
             if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
                 iv_analysis = self.engine.iv_cache.get(opp.symbol)
                 if not iv_analysis:
@@ -1260,7 +1273,88 @@ class MasterQuantBot:
             "score": opp.score,
             "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
             "regime": self.market_regime.value,
+            "live_executed": self.live_trading_enabled,
         })
+
+    async def _execute_live_trade(self, opp: Opportunity) -> bool:
+        """Execute a trade on live exchanges via broker manager."""
+        if not self.live_trading_enabled or not self.broker_manager:
+            return False
+
+        try:
+            symbol = opp.symbol
+            side = "buy" if "Long" in opp.strategy or "Buy" in opp.strategy or "Call" in opp.strategy else "sell"
+            position_size = min(5000, self.initial_capital * 0.05)  # 5% max per position
+
+            if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
+                # For options, we trade the underlying for now
+                # TODO: Integrate with options broker when available
+                underlying = symbol.replace("-CALL", "").replace("-PUT", "").split("-")[0]
+                if self.broker_manager.alpaca and self.broker_manager.alpaca._connected:
+                    quote = await self.broker_manager.alpaca.get_quote(underlying)
+                    price = quote.get("mid", 0)
+                    if price > 0:
+                        quantity = int(position_size / price)
+                        if quantity > 0:
+                            order = await self.broker_manager.submit_stock_order(
+                                symbol=underlying,
+                                quantity=quantity,
+                                side=side,
+                            )
+                            self._add_commentary(
+                                f"📈 LIVE ORDER: {order.side.upper()} {order.quantity} {order.symbol} "
+                                f"@ {order.order_type} | Status: {order.status}",
+                                "execution"
+                            )
+                            return True
+
+            elif opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
+                crypto_symbol = symbol.replace("-PERP", "")
+                if self.broker_manager.binance and self.broker_manager.binance._connected:
+                    price = await self.broker_manager.get_live_price(crypto_symbol, "crypto_futures")
+                    if price > 0:
+                        quantity = position_size / price
+                        order = await self.broker_manager.submit_crypto_order(
+                            symbol=crypto_symbol,
+                            quantity=quantity,
+                            side=side,
+                            is_futures=True,
+                        )
+                        self._add_commentary(
+                            f"🔥 LIVE FUTURES ORDER: {order.side.upper()} {order.quantity:.6f} {order.symbol} "
+                            f"@ {order.order_type} | Status: {order.status}",
+                            "execution"
+                        )
+                        return True
+
+            elif opp.asset_class == AssetClass.CRYPTO_OPTIONS:
+                # Crypto options executed as spot for now
+                base = symbol.split("-")[0]
+                if self.broker_manager.binance and self.broker_manager.binance._connected:
+                    price = await self.broker_manager.get_live_price(base, "crypto")
+                    if price > 0:
+                        quantity = position_size / price
+                        order = await self.broker_manager.submit_crypto_order(
+                            symbol=base,
+                            quantity=quantity,
+                            side=side,
+                            is_futures=False,
+                        )
+                        self._add_commentary(
+                            f"💰 LIVE SPOT ORDER: {order.side.upper()} {order.quantity:.6f} {order.symbol} "
+                            f"@ {order.order_type} | Status: {order.status}",
+                            "execution"
+                        )
+                        return True
+
+        except Exception as e:
+            logger.error(f"Live trade execution failed: {e}")
+            self._add_commentary(
+                f"⚠️ LIVE TRADE FAILED: {opp.symbol} - {str(e)}",
+                "error"
+            )
+
+        return False
 
     def _has_position(self, symbol: str) -> bool:
         """Check if already have a position in this symbol."""
@@ -1426,6 +1520,11 @@ class MasterQuantBot:
 
         self.engine._add_commentary(message, category)
 
+    @property
+    def capital(self) -> float:
+        """Get current capital (for API compatibility)."""
+        return self.initial_capital
+
     def get_status(self) -> Dict:
         """Get comprehensive bot status with ML metrics."""
         engine_status = self.engine.get_status()
@@ -1461,6 +1560,8 @@ class MasterQuantBot:
             "last_scan": self.last_full_scan.isoformat() if self.last_full_scan else None,
             "opportunities_count": len(self.opportunities),
             "risk_summary": engine_status["risk_summary"],
+            "live_trading_enabled": self.live_trading_enabled,
+            "broker_connected": self.broker_manager is not None,
         }
 
     def get_opportunities(self, limit: int = 20) -> List[Dict]:

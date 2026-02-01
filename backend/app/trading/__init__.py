@@ -37,6 +37,12 @@ from .quant_analytics import (
     FactorModel, PortfolioOptimizer, SignalGenerator,
     WalkForwardOptimizer, create_analytics_suite,
 )
+from .live_brokers import (
+    BrokerType, TradingMode as LiveTradingMode, BrokerCredentials,
+    LivePosition, LiveOrder,
+    AlpacaBroker, BinanceBroker, BrokerManager,
+    get_broker_manager,
+)
 
 __all__ = [
     "Order", "OrderType", "OrderSide", "OrderStatus", "TimeInForce",
@@ -64,4 +70,9 @@ __all__ = [
     "GaussianCopula", "StudentTCopula", "ExtremeValueAnalyzer",
     "FactorModel", "PortfolioOptimizer", "SignalGenerator",
     "WalkForwardOptimizer", "create_analytics_suite",
+    # Live Brokers
+    "BrokerType", "LiveTradingMode", "BrokerCredentials",
+    "LivePosition", "LiveOrder",
+    "AlpacaBroker", "BinanceBroker", "BrokerManager",
+    "get_broker_manager",
 ]
