@@ -1784,6 +1784,9 @@ class QuantBot:
         analysis_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
 
         # ===== STAGE 3: PROCESS RESULTS =====
+        live_count = 0
+        mock_count = 0
+
         for result in analysis_results:
             if isinstance(result, Exception) or result is None:
                 continue
@@ -1793,6 +1796,12 @@ class QuantBot:
             quote = result["quote"]
             signal = result["signal"]
             rationale = result["rationale"]
+
+            # Track data source for transparency
+            if hasattr(quote, 'is_live') and quote.is_live:
+                live_count += 1
+            else:
+                mock_count += 1
 
             # Track movers
             if result["is_mover"]:
@@ -1851,14 +1860,22 @@ class QuantBot:
                     "analysis"
                 )
 
-        # Scan summary with latency reporting
+        # Scan summary with latency reporting and data source transparency
         import random
         show_summary_chance = 0.30 if self.mode == TradingMode.AGGRESSIVE else 0.20
         if random.random() < show_summary_chance:
             avg_momentum = sum([m[1] for m in movers]) / len(movers) if movers else 0
+            # Data source indicator
+            if mock_count > 0 and live_count == 0:
+                data_status = "⚠️ MOCK DATA"
+            elif mock_count > live_count:
+                data_status = f"⚠️ {live_count} LIVE / {mock_count} mock"
+            else:
+                data_status = f"✓ {live_count} LIVE"
+
             self.commentary.add(
                 f"⚡ Scan: {scanned} coins in {scan_latency_ms:.0f}ms | "
-                f"{len(opportunities)} signals | Latency: {scan_latency_ms/max(scanned,1):.1f}ms/coin",
+                f"{len(opportunities)} signals | {data_status}",
                 "info"
             )
 
@@ -2936,6 +2953,64 @@ class QuantBot:
         if hasattr(self, 'commentary'):
             return self.commentary.get_recent(limit)
         return _commentary.get_recent(limit)
+
+    async def get_data_health(self) -> Dict[str, Any]:
+        """
+        Check the health and freshness of market data sources.
+        Returns detailed status of API connectivity and data freshness.
+        """
+        health = {
+            "timestamp": datetime.now().isoformat(),
+            "crypto": {"status": "unknown", "source": "unknown", "sample_price": None},
+            "stocks": {"status": "unknown", "source": "unknown", "sample_price": None},
+            "overall": "unknown",
+        }
+
+        # Test crypto data source
+        try:
+            btc_quote = await self.crypto_service.get_quote("BTC")
+            if btc_quote:
+                health["crypto"] = {
+                    "status": "live" if btc_quote.is_live else "mock",
+                    "source": btc_quote.data_source,
+                    "sample_price": btc_quote.price,
+                    "data_age_seconds": round(btc_quote.data_age_seconds, 1),
+                    "cache_ttl": self.crypto_service.cache_ttl,
+                    "is_live": btc_quote.is_live,
+                }
+        except Exception as e:
+            health["crypto"] = {"status": "error", "error": str(e)}
+
+        # Test stock data source (only if market relevant)
+        try:
+            aapl_quote = await self.market_service.get_quote("AAPL")
+            if aapl_quote:
+                health["stocks"] = {
+                    "status": "live" if aapl_quote.is_live else "mock",
+                    "source": aapl_quote.data_source,
+                    "sample_price": aapl_quote.price,
+                    "data_age_seconds": round(aapl_quote.data_age_seconds, 1),
+                    "cache_ttl": self.market_service.cache_ttl,
+                    "is_live": aapl_quote.is_live,
+                }
+        except Exception as e:
+            health["stocks"] = {"status": "error", "error": str(e)}
+
+        # Overall status
+        crypto_live = health["crypto"].get("is_live", False)
+        stocks_live = health["stocks"].get("is_live", False)
+
+        if crypto_live and stocks_live:
+            health["overall"] = "all_live"
+            health["message"] = "✓ All data sources are LIVE"
+        elif crypto_live or stocks_live:
+            health["overall"] = "partial_live"
+            health["message"] = f"⚠️ Partial: Crypto={'LIVE' if crypto_live else 'MOCK'}, Stocks={'LIVE' if stocks_live else 'MOCK'}"
+        else:
+            health["overall"] = "all_mock"
+            health["message"] = "⚠️ All data sources are using MOCK data - APIs unavailable"
+
+        return health
 
     def get_performance(self) -> Dict[str, Any]:
         """Calculate institutional-grade performance metrics with safe float handling."""

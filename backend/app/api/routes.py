@@ -2146,6 +2146,26 @@ async def get_bot_commentary(limit: int = 50):
     }
 
 
+@router.get("/bot/data-health")
+async def get_bot_data_health():
+    """
+    Check health and freshness of market data sources.
+
+    Returns:
+    - crypto: CoinGecko API status (live/mock)
+    - stocks: yfinance/Finnhub status (live/mock)
+    - overall: Combined status with message
+
+    Use this to verify if prices are real-time or simulated fallback data.
+    """
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    health = await bot.get_data_health()
+
+    return health
+
+
 @router.post("/bot/config")
 async def update_bot_config(
     max_positions: Optional[int] = None,

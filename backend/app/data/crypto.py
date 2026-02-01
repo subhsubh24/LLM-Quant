@@ -34,10 +34,17 @@ class CryptoQuote:
     ath: float  # All-time high
     ath_change_percent: float
     timestamp: datetime
+    # Data source tracking
+    is_live: bool = True  # True if from API, False if mock
+    data_source: str = "coingecko"  # coingecko, mock
+    data_age_seconds: float = 0.0  # Age since fetch
 
     def to_dict(self) -> Dict:
         d = asdict(self)
         d['timestamp'] = self.timestamp.isoformat()
+        d['is_live'] = self.is_live
+        d['data_source'] = self.data_source
+        d['data_age_seconds'] = self.data_age_seconds
         return d
 
 
@@ -512,9 +519,12 @@ class CryptoMarketService:
         """Get real-time quote for a cryptocurrency."""
         symbol = symbol.upper()
         cache_key = f"crypto_quote_{symbol}"
-        cached = self._get_cached(cache_key)
+        cached = self._get_cached_with_age(cache_key)
         if cached:
-            return cached
+            quote, age_seconds = cached
+            # Update data age
+            quote.data_age_seconds = age_seconds
+            return quote
 
         # Convert symbol to CoinGecko ID
         coin_id = self.SYMBOL_TO_ID.get(symbol)
@@ -527,11 +537,13 @@ class CryptoMarketService:
                 quote = await self._fetch_coingecko_quote(client, coin_id, symbol)
                 if quote:
                     self._set_cached(cache_key, quote)
+                    logger.debug(f"✓ LIVE price for {symbol}: ${quote.price} from CoinGecko")
                     return quote
         except Exception as e:
-            logger.debug(f"CoinGecko API failed: {e}")
+            logger.debug(f"CoinGecko API failed for {symbol}: {e}")
 
         # Fallback to mock data
+        logger.warning(f"⚠️ Using MOCK data for {symbol} - API unavailable")
         quote = self._get_mock_quote(symbol)
         if quote:
             self._set_cached(cache_key, quote)
@@ -663,6 +675,9 @@ class CryptoMarketService:
                 ath=market.get("ath", {}).get("usd", 0) or 0,
                 ath_change_percent=market.get("ath_change_percentage", {}).get("usd", 0) or 0,
                 timestamp=datetime.now(),
+                is_live=True,
+                data_source="coingecko",
+                data_age_seconds=0.0,
             )
         except Exception as e:
             logger.debug(f"CoinGecko quote failed for {coin_id}: {e}")
@@ -705,6 +720,9 @@ class CryptoMarketService:
             ath=price * random.uniform(1.5, 3),
             ath_change_percent=random.uniform(-80, -10),
             timestamp=datetime.now(),
+            is_live=False,  # MOCK DATA - NOT LIVE
+            data_source="mock_fallback",
+            data_age_seconds=0.0,
         )
 
     def _get_cached(self, key: str) -> Optional[Any]:
@@ -713,6 +731,15 @@ class CryptoMarketService:
             entry = self.cache[key]
             if datetime.now() - entry["time"] < timedelta(seconds=self.cache_ttl):
                 return entry["data"]
+        return None
+
+    def _get_cached_with_age(self, key: str) -> Optional[tuple]:
+        """Get value from cache with age in seconds. Returns (data, age_seconds) or None."""
+        if key in self.cache:
+            entry = self.cache[key]
+            age = datetime.now() - entry["time"]
+            if age < timedelta(seconds=self.cache_ttl):
+                return (entry["data"], age.total_seconds())
         return None
 
     def _set_cached(self, key: str, data: Any):

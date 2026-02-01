@@ -37,10 +37,17 @@ class Quote:
     prev_close: float
     volume: int
     timestamp: datetime
+    # Data source tracking
+    is_live: bool = True  # True if from API, False if mock
+    data_source: str = "yfinance"  # yfinance, finnhub, mock
+    data_age_seconds: float = 0.0  # Age since fetch
 
     def to_dict(self) -> Dict:
         d = asdict(self)
         d['timestamp'] = self.timestamp.isoformat()
+        d['is_live'] = self.is_live
+        d['data_source'] = self.data_source
+        d['data_age_seconds'] = self.data_age_seconds
         return d
 
 
@@ -161,6 +168,9 @@ class LiveMarketService:
                 prev_close=round(prev_close, 2),
                 volume=volume,
                 timestamp=datetime.now(),
+                is_live=True,
+                data_source="yfinance",
+                data_age_seconds=0.0,
             )
         except Exception as e:
             logger.debug(f"yfinance quote failed for {symbol}: {e}")
@@ -169,9 +179,11 @@ class LiveMarketService:
     async def get_quote(self, symbol: str) -> Optional[Quote]:
         """Get real-time quote for a symbol."""
         cache_key = f"quote_{symbol}"
-        cached = self._get_cached(cache_key)
+        cached = self._get_cached_with_age(cache_key)
         if cached:
-            return cached
+            quote, age_seconds = cached
+            quote.data_age_seconds = age_seconds
+            return quote
 
         try:
             # Use yfinance in thread pool (it's synchronous)
@@ -184,6 +196,7 @@ class LiveMarketService:
 
             if quote:
                 self._set_cached(cache_key, quote)
+                logger.debug(f"✓ LIVE price for {symbol}: ${quote.price} from yfinance")
                 return quote
 
             # Fallback to Finnhub API
@@ -192,9 +205,11 @@ class LiveMarketService:
                     quote = await self._fetch_finnhub_quote(client, symbol)
                     if quote:
                         self._set_cached(cache_key, quote)
+                        logger.debug(f"✓ LIVE price for {symbol}: ${quote.price} from Finnhub")
                         return quote
 
             # Final fallback: use mock data so UI works
+            logger.warning(f"⚠️ Using MOCK data for {symbol} - API unavailable")
             quote = self._get_mock_quote(symbol)
             if quote:
                 self._set_cached(cache_key, quote)
@@ -232,6 +247,9 @@ class LiveMarketService:
             prev_close=round(prev_close, 2),
             volume=random.randint(1000000, 50000000),
             timestamp=datetime.now(),
+            is_live=False,  # MOCK DATA - NOT LIVE
+            data_source="mock_fallback",
+            data_age_seconds=0.0,
         )
 
     async def get_quotes_batch(self, symbols: List[str]) -> Dict[str, Quote]:
@@ -405,6 +423,9 @@ class LiveMarketService:
                 prev_close=data["pc"],
                 volume=0,  # Finnhub quote doesn't include volume
                 timestamp=datetime.now(),
+                is_live=True,
+                data_source="finnhub",
+                data_age_seconds=0.0,
             )
         except Exception as e:
             logger.debug(f"Finnhub quote failed for {symbol}: {e}")
@@ -493,6 +514,15 @@ class LiveMarketService:
             entry = self.cache[key]
             if datetime.now() - entry["time"] < timedelta(seconds=self.cache_ttl):
                 return entry["data"]
+        return None
+
+    def _get_cached_with_age(self, key: str) -> Optional[tuple]:
+        """Get value from cache with age in seconds. Returns (data, age_seconds) or None."""
+        if key in self.cache:
+            entry = self.cache[key]
+            age = datetime.now() - entry["time"]
+            if age < timedelta(seconds=self.cache_ttl):
+                return (entry["data"], age.total_seconds())
         return None
 
     def _set_cached(self, key: str, data: Any):
