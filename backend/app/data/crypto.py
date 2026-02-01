@@ -515,12 +515,13 @@ class CryptoMarketService:
     def __init__(self):
         self.settings = get_settings()
         self.cache: Dict[str, Any] = {}
-        self.cache_ttl = 60  # seconds - for CoinGecko fallback (increased to avoid rate limits)
+        self.cache_ttl = 120  # seconds - for CoinGecko fallback (2 min to avoid rate limits)
         self.base_url = "https://api.coingecko.com/api/v3"
         self.use_mock_fallback = False  # DISABLE mock fallback - error on API failure
         self._last_batch_fetch: Optional[datetime] = None
         self._batch_cache: Dict[str, CryptoQuote] = {}  # Cache for CoinGecko fallback
-        self._batch_cache_ttl = 60  # seconds (increased - CoinGecko has strict rate limits)
+        self._batch_cache_ttl = 120  # seconds (2 min - CoinGecko free tier is ~10 req/min)
+        self._min_api_interval = 10  # Minimum seconds between CoinGecko API calls
         # Multi-provider WebSocket is the PRIMARY data source for truly live prices
         # Tries: Coinbase -> Kraken -> Binance.US -> Binance Global
         self._crypto_ws = get_crypto_ws()
@@ -646,6 +647,17 @@ class CryptoMarketService:
         if not coin_ids:
             logger.error("No valid CoinGecko IDs found for symbols")
             return quotes
+
+        # Rate limiting: Don't hit CoinGecko API too frequently
+        if self._last_batch_fetch:
+            seconds_since_last = (datetime.now() - self._last_batch_fetch).total_seconds()
+            if seconds_since_last < self._min_api_interval:
+                # Too soon - use cached data for missing symbols
+                for symbol in missing_symbols:
+                    if symbol in self._batch_cache:
+                        quotes[symbol] = self._batch_cache[symbol]
+                logger.debug(f"Rate limit protection: using cache ({seconds_since_last:.0f}s since last API call)")
+                return quotes
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
