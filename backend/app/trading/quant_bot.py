@@ -728,6 +728,14 @@ class QuantBot:
         self.price_history: Dict[str, deque] = {}
         self.max_history_length = 100  # Store last 100 price points per asset
 
+        # Price cache for reducing API calls (symbol -> (price, timestamp))
+        self._price_cache: Dict[str, Tuple[float, datetime]] = {}
+        self._cache_ttl_seconds = 0.5  # Cache valid for 500ms (ultra-fast refresh)
+
+        # Batch processing settings
+        self._batch_size = 50  # Process coins in batches of 50
+        self._max_concurrent_requests = 20  # Limit concurrent API calls
+
         # Historical win rate estimates for Kelly sizing
         self.estimated_win_rate = 0.52  # Slight edge assumption
         self.win_loss_ratio = 1.5  # Target 1.5:1 reward/risk
@@ -765,6 +773,29 @@ class QuantBot:
             self.min_confidence = 0.65
             self.volatility_target = 0.15  # 15% vol target
 
+    def _get_cached_price(self, symbol: str) -> Optional[float]:
+        """Get price from cache if still valid."""
+        if symbol in self._price_cache:
+            price, timestamp = self._price_cache[symbol]
+            age = (datetime.now() - timestamp).total_seconds()
+            if age < self._cache_ttl_seconds:
+                return price
+        return None
+
+    def _cache_price(self, symbol: str, price: float):
+        """Cache a price with current timestamp."""
+        self._price_cache[symbol] = (price, datetime.now())
+
+    def _clear_stale_cache(self):
+        """Remove stale entries from price cache."""
+        now = datetime.now()
+        stale = [
+            sym for sym, (_, ts) in self._price_cache.items()
+            if (now - ts).total_seconds() > self._cache_ttl_seconds * 10
+        ]
+        for sym in stale:
+            del self._price_cache[sym]
+
     @property
     def total_value(self) -> float:
         """Total portfolio value."""
@@ -788,7 +819,7 @@ class QuantBot:
         self.commentary.clear()
 
         self.commentary.add(
-            f"🚀 QUANTBOT v2.0 ACTIVATED - State-of-the-Art Quant Engine",
+            f"🚀 QUANTBOT v2.1 ACTIVATED - Ultra-Fast Parallel Pipeline",
             "market"
         )
         self.commentary.add(
@@ -796,7 +827,11 @@ class QuantBot:
             "market"
         )
         self.commentary.add(
-            f"⚡ ULTRA-FAST: Scanning every {self.scan_interval_seconds}s | Universe: {len(self.CRYPTO_UNIVERSE)} cryptos + {len(self.STOCK_UNIVERSE)} stocks",
+            f"⚡ OPTIMIZED PIPELINE: {self.scan_interval_seconds}s intervals | {self._max_concurrent_requests} parallel requests | {self._batch_size} coins/batch",
+            "info"
+        )
+        self.commentary.add(
+            f"🌐 Universe: {len(self.CRYPTO_UNIVERSE)} cryptos + {len(self.STOCK_UNIVERSE)} stocks | Cache TTL: {self._cache_ttl_seconds*1000:.0f}ms",
             "info"
         )
         self.commentary.add(
@@ -826,16 +861,22 @@ class QuantBot:
 
     async def _run_trading_cycle(self, cycle_count: int = 0):
         """Execute one complete trading cycle with smart market detection."""
-        self.last_scan_time = datetime.now()
+        cycle_start = datetime.now()
+        self.last_scan_time = cycle_start
+
+        # Clear stale cache periodically (every 100 cycles)
+        if cycle_count % 100 == 0:
+            self._clear_stale_cache()
 
         # Check market status
         market_status = get_market_status()
         market_open = market_status["is_open"]
 
-        # Log cycle start every 10 cycles
+        # Log cycle start every 10 cycles with timing info
         if cycle_count % 10 == 1:
+            cache_size = len(self._price_cache)
             self.commentary.add(
-                f"📊 Cycle #{cycle_count} | Portfolio: ${self.total_value:,.2f} | P&L: ${self.total_pnl:+,.2f} ({self.total_pnl_pct*100:+.2f}%)",
+                f"📊 Cycle #{cycle_count} | Portfolio: ${self.total_value:,.2f} | P&L: ${self.total_pnl:+,.2f} ({self.total_pnl_pct*100:+.2f}%) | Cache: {cache_size} prices",
                 "info"
             )
 
@@ -875,19 +916,34 @@ class QuantBot:
         self.market_status = market_status
 
     async def _update_positions(self):
-        """Update all position prices."""
-        for symbol, position in self.positions.items():
+        """Update all position prices - OPTIMIZED with parallel async."""
+        if not self.positions:
+            return
+
+        async def fetch_price(symbol: str, position):
             try:
                 if position.asset_class == "stocks":
                     quote = await self.market_service.get_quote(symbol)
-                    if quote:
-                        position.current_price = quote.price
-                else:  # crypto
+                else:
                     quote = await self.crypto_service.get_quote(symbol)
-                    if quote:
-                        position.current_price = quote.price
+                if quote:
+                    return symbol, quote.price
             except Exception as e:
-                logger.warning(f"Failed to update price for {symbol}: {e}")
+                logger.debug(f"Price fetch failed for {symbol}: {e}")
+            return symbol, None
+
+        # Parallel fetch all position prices
+        tasks = [fetch_price(sym, pos) for sym, pos in self.positions.items()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Update positions with fetched prices
+        for result in results:
+            if isinstance(result, tuple) and result[1] is not None:
+                symbol, price = result
+                if symbol in self.positions:
+                    self.positions[symbol].current_price = price
+                    # Also cache the price
+                    self._price_cache[symbol] = (price, datetime.now())
 
     async def _check_risk_limits(self):
         """Check and enforce stop loss / take profit for all positions."""
@@ -926,99 +982,188 @@ class QuantBot:
             await self._close_position(symbol, reason)
 
     async def _scan_stocks(self):
-        """Scan stock universe for trading opportunities."""
-        logger.debug(f"Scanning {len(self.STOCK_UNIVERSE)} stocks...")
+        """OPTIMIZED: Parallel stock scanning with concurrent API calls."""
+        scan_start = datetime.now()
 
-        # Get current prices for all stocks
-        prices_dict = {}
-        for symbol in self.STOCK_UNIVERSE:
+        # Parallel fetch all stock quotes
+        async def fetch_stock_quote(symbol: str):
             try:
                 quote = await self.market_service.get_quote(symbol)
-                if quote:
-                    prices_dict[symbol] = quote.price
+                return symbol, quote
             except Exception:
-                pass
+                return symbol, None
+
+        # Fetch all in parallel
+        tasks = [fetch_stock_quote(s) for s in self.STOCK_UNIVERSE]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        prices_dict = {}
+        for result in results:
+            if isinstance(result, tuple) and result[1] is not None:
+                symbol, quote = result
+                prices_dict[symbol] = quote.price
+                self._price_cache[symbol] = (quote.price, datetime.now())
 
         if not prices_dict:
             return
 
-        # Generate signals
-        for symbol, price in prices_dict.items():
+        # Parallel analysis
+        async def analyze_stock_task(symbol: str, price: float):
             try:
-                signal, rationale = await self._analyze_stock(symbol, price)
-                if signal and rationale.confidence >= 0.5:
-                    self.pending_signals.append({
-                        "asset_class": "stocks",
-                        "symbol": symbol,
-                        "price": price,
-                        "signal": signal,
-                        "rationale": rationale,
-                    })
-            except Exception as e:
-                logger.debug(f"Analysis failed for {symbol}: {e}")
+                return symbol, price, await self._analyze_stock(symbol, price)
+            except Exception:
+                return symbol, price, (None, None)
+
+        analysis_tasks = [analyze_stock_task(sym, price) for sym, price in prices_dict.items()]
+        analysis_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+
+        for result in analysis_results:
+            if isinstance(result, Exception):
+                continue
+            symbol, price, (signal, rationale) = result
+            if signal and rationale and rationale.confidence >= 0.5:
+                self.pending_signals.append({
+                    "asset_class": "stocks",
+                    "symbol": symbol,
+                    "price": price,
+                    "signal": signal,
+                    "rationale": rationale,
+                })
+
+        scan_latency = (datetime.now() - scan_start).total_seconds() * 1000
+        logger.debug(f"Stock scan: {len(prices_dict)} stocks in {scan_latency:.0f}ms")
 
     async def _scan_crypto(self):
-        """Scan crypto universe for trading opportunities."""
+        """
+        OPTIMIZED: Ultra-fast parallel crypto scanning pipeline.
+        Uses asyncio.gather for concurrent fetching and analysis.
+        """
+        scan_start = datetime.now()
         scanned = 0
         opportunities = []
-        movers = []  # Track big movers
+        movers = []
+        all_quotes = {}
 
-        # Batch fetch all quotes for efficiency
-        try:
-            quotes = await self.crypto_service.get_quotes_batch(self.CRYPTO_UNIVERSE)
-        except Exception as e:
-            logger.warning(f"Batch crypto fetch failed, falling back to individual: {e}")
-            quotes = {}
+        # ===== STAGE 1: PARALLEL BATCH FETCH =====
+        # Split universe into batches for controlled parallelism
+        batches = [
+            self.CRYPTO_UNIVERSE[i:i + self._batch_size]
+            for i in range(0, len(self.CRYPTO_UNIVERSE), self._batch_size)
+        ]
 
-        for symbol in self.CRYPTO_UNIVERSE:
+        async def fetch_batch(symbols: List[str]) -> Dict:
+            """Fetch a batch of quotes concurrently."""
+            results = {}
             try:
-                # Use batch result or fetch individually
-                quote = quotes.get(symbol) if quotes else None
-                if not quote:
-                    quote = await self.crypto_service.get_quote(symbol)
+                batch_quotes = await self.crypto_service.get_quotes_batch(symbols)
+                if batch_quotes:
+                    results.update(batch_quotes)
+            except Exception:
+                # Fallback: parallel individual fetches with semaphore
+                sem = asyncio.Semaphore(self._max_concurrent_requests)
+                async def fetch_single(sym):
+                    async with sem:
+                        try:
+                            return sym, await self.crypto_service.get_quote(sym)
+                        except:
+                            return sym, None
 
-                if quote:
-                    scanned += 1
-                    signal, rationale = await self._analyze_crypto(symbol, quote)
+                tasks = [fetch_single(s) for s in symbols]
+                for sym, quote in await asyncio.gather(*tasks, return_exceptions=True):
+                    if not isinstance(quote, Exception) and quote:
+                        results[sym] = quote
+            return results
 
-                    # Track big movers for summary
-                    if abs(quote.change_percent_24h) > 5:
-                        movers.append((symbol, quote.change_percent_24h, quote.price))
+        # Fetch all batches in parallel
+        batch_results = await asyncio.gather(*[fetch_batch(b) for b in batches], return_exceptions=True)
+        for result in batch_results:
+            if isinstance(result, dict):
+                all_quotes.update(result)
 
-                    if signal and rationale.confidence >= self.min_confidence:
-                        opportunities.append(symbol)
+        # ===== STAGE 2: PARALLEL ANALYSIS =====
+        async def analyze_coin(symbol: str, quote) -> Optional[Dict]:
+            """Analyze a single coin and return signal data if found."""
+            try:
+                # Update price cache
+                self._price_cache[symbol] = (quote.price, datetime.now())
 
-                        # Build detailed signal commentary
-                        tech_summary = f"RSI:{rationale.rsi_value:.0f} MACD:{rationale.macd_signal[:4]} BB:{rationale.bollinger_position[:3]}"
-                        stat_summary = f"Z:{rationale.zscore:.1f} H:{rationale.hurst_exponent:.2f}"
+                # Run analysis
+                signal, rationale = await self._analyze_crypto(symbol, quote)
 
-                        self.commentary.add(
-                            f"🎯 SIGNAL: {signal} {symbol} @ ${quote.price:,.4f}",
-                            "signal",
-                            {"symbol": symbol, "signal": signal, "confidence": rationale.confidence}
-                        )
-                        self.commentary.add(
-                            f"   ├─ Confidence: {rationale.confidence*100:.0f}% | {rationale.primary_reason}",
-                            "signal"
-                        )
-                        self.commentary.add(
-                            f"   ├─ Technical: {tech_summary} | Stats: {stat_summary}",
-                            "signal"
-                        )
-                        self.commentary.add(
-                            f"   └─ Risk: Stop {rationale.stop_loss*100:.1f}% | Target {rationale.take_profit*100:.1f}% | Kelly: {rationale.position_size_kelly*100:.0f}%",
-                            "signal"
-                        )
-
-                        self.pending_signals.append({
-                            "asset_class": "crypto",
-                            "symbol": symbol,
-                            "price": quote.price,
-                            "signal": signal,
-                            "rationale": rationale,
-                        })
+                return {
+                    "symbol": symbol,
+                    "quote": quote,
+                    "signal": signal,
+                    "rationale": rationale,
+                    "is_mover": abs(quote.change_percent_24h) > 5,
+                }
             except Exception as e:
-                logger.debug(f"Crypto analysis failed for {symbol}: {e}")
+                logger.debug(f"Analysis failed for {symbol}: {e}")
+                return None
+
+        # Run all analyses in parallel with semaphore for control
+        analysis_sem = asyncio.Semaphore(self._max_concurrent_requests)
+        async def bounded_analyze(symbol: str, quote):
+            async with analysis_sem:
+                return await analyze_coin(symbol, quote)
+
+        analysis_tasks = [
+            bounded_analyze(sym, quote)
+            for sym, quote in all_quotes.items()
+        ]
+        analysis_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+
+        # ===== STAGE 3: PROCESS RESULTS =====
+        for result in analysis_results:
+            if isinstance(result, Exception) or result is None:
+                continue
+
+            scanned += 1
+            symbol = result["symbol"]
+            quote = result["quote"]
+            signal = result["signal"]
+            rationale = result["rationale"]
+
+            # Track movers
+            if result["is_mover"]:
+                movers.append((symbol, quote.change_percent_24h, quote.price))
+
+            # Process signals
+            if signal and rationale and rationale.confidence >= self.min_confidence:
+                opportunities.append(symbol)
+
+                # Build detailed signal commentary
+                tech_summary = f"RSI:{rationale.rsi_value:.0f} MACD:{rationale.macd_signal[:4]} BB:{rationale.bollinger_position[:3]}"
+                stat_summary = f"Z:{rationale.zscore:.1f} H:{rationale.hurst_exponent:.2f}"
+
+                self.commentary.add(
+                    f"🎯 SIGNAL: {signal} {symbol} @ ${quote.price:,.4f}",
+                    "signal",
+                    {"symbol": symbol, "signal": signal, "confidence": rationale.confidence}
+                )
+                self.commentary.add(
+                    f"   ├─ Confidence: {rationale.confidence*100:.0f}% | {rationale.primary_reason}",
+                    "signal"
+                )
+                self.commentary.add(
+                    f"   ├─ Technical: {tech_summary} | Stats: {stat_summary}",
+                    "signal"
+                )
+                self.commentary.add(
+                    f"   └─ Risk: Stop {rationale.stop_loss*100:.1f}% | Target {rationale.take_profit*100:.1f}% | Kelly: {rationale.position_size_kelly*100:.0f}%",
+                    "signal"
+                )
+
+                self.pending_signals.append({
+                    "asset_class": "crypto",
+                    "symbol": symbol,
+                    "price": quote.price,
+                    "signal": signal,
+                    "rationale": rationale,
+                })
+
+        # Calculate scan latency
+        scan_latency_ms = (datetime.now() - scan_start).total_seconds() * 1000
 
         # Report big movers with detailed analysis
         if movers:
@@ -1036,15 +1181,14 @@ class QuantBot:
                     "analysis"
                 )
 
-        # Scan summary - show more frequently for fast mode
+        # Scan summary with latency reporting
         import random
-        show_summary_chance = 0.25 if self.mode == TradingMode.AGGRESSIVE else 0.15
+        show_summary_chance = 0.30 if self.mode == TradingMode.AGGRESSIVE else 0.20
         if random.random() < show_summary_chance:
-            # Calculate average RSI of scanned coins
             avg_momentum = sum([m[1] for m in movers]) / len(movers) if movers else 0
             self.commentary.add(
-                f"📡 Scan Complete: {scanned}/{len(self.CRYPTO_UNIVERSE)} cryptos analyzed | "
-                f"{len(opportunities)} signals | Avg momentum: {avg_momentum:+.1f}%",
+                f"⚡ Scan: {scanned} coins in {scan_latency_ms:.0f}ms | "
+                f"{len(opportunities)} signals | Latency: {scan_latency_ms/max(scanned,1):.1f}ms/coin",
                 "info"
             )
 
