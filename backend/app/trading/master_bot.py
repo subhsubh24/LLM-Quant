@@ -49,12 +49,14 @@ Academic References:
 
 import asyncio
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
+from zoneinfo import ZoneInfo
 
 from .options_bot import (
     OptionsQuantBot,
@@ -741,6 +743,188 @@ class MasterQuantBot:
             self.analytics.update_price_history(symbol, prices)
 
     # ===================
+    # MARKET HOURS & SESSION MANAGEMENT
+    # ===================
+
+    def is_stock_market_open(self) -> bool:
+        """
+        Check if US stock market is currently open.
+
+        Market Hours: 9:30 AM - 4:00 PM ET, Monday-Friday
+        Excludes weekends and major holidays.
+        """
+        try:
+            et = ZoneInfo("America/New_York")
+            now_et = datetime.now(et)
+
+            # Check if weekend
+            if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
+                return False
+
+            # Check market hours (9:30 AM - 4:00 PM ET)
+            market_open = time(9, 30)
+            market_close = time(16, 0)
+            current_time = now_et.time()
+
+            return market_open <= current_time <= market_close
+        except Exception:
+            # Fallback - assume market is open during typical hours
+            now = datetime.now()
+            return 5 <= now.weekday() < 5 and 9 <= now.hour < 16
+
+    def get_trading_session_info(self) -> Dict:
+        """Get current trading session information."""
+        try:
+            et = ZoneInfo("America/New_York")
+            now_et = datetime.now(et)
+
+            stock_market_open = self.is_stock_market_open()
+
+            if stock_market_open:
+                session = "US_MARKET_HOURS"
+                next_close = now_et.replace(hour=16, minute=0, second=0)
+                time_remaining = (next_close - now_et).seconds // 60
+            else:
+                session = "AFTER_HOURS"
+                # Calculate next open
+                if now_et.weekday() == 4 and now_et.hour >= 16:  # Friday after close
+                    days_until_open = 3
+                elif now_et.weekday() == 5:  # Saturday
+                    days_until_open = 2
+                elif now_et.weekday() == 6:  # Sunday
+                    days_until_open = 1
+                elif now_et.hour >= 16:  # After close
+                    days_until_open = 1
+                else:  # Before open
+                    days_until_open = 0
+
+                next_open = (now_et + timedelta(days=days_until_open)).replace(
+                    hour=9, minute=30, second=0
+                )
+                time_remaining = (next_open - now_et).seconds // 60
+
+            return {
+                "session": session,
+                "stock_market_open": stock_market_open,
+                "crypto_available": True,  # Crypto is always available
+                "time_et": now_et.strftime("%H:%M ET"),
+                "minutes_remaining": time_remaining,
+            }
+        except Exception as e:
+            return {
+                "session": "UNKNOWN",
+                "stock_market_open": False,
+                "crypto_available": True,
+                "time_et": "N/A",
+                "error": str(e),
+            }
+
+    async def _perform_pre_trade_analysis(self) -> Dict:
+        """
+        Perform comprehensive pre-trade analysis before initial buys.
+
+        This runs when the bot starts to assess:
+        - Current market regime
+        - Volatility environment
+        - Best opportunities across asset classes
+        - Risk parameters
+        """
+        self._add_commentary(
+            "📊 INITIATING PRE-TRADE ANALYSIS | Assessing market conditions...",
+            "analysis"
+        )
+
+        analysis_results = {
+            "timestamp": datetime.now().isoformat(),
+            "session_info": self.get_trading_session_info(),
+            "market_regime": None,
+            "vix_level": None,
+            "opportunities_analyzed": 0,
+            "recommendations": [],
+        }
+
+        # 1. Assess market regime
+        await self._assess_market_regime()
+        analysis_results["market_regime"] = self.market_regime.value
+        analysis_results["vix_level"] = round(self.vix_level, 1)
+
+        # 2. Determine which markets to scan based on session
+        session_info = analysis_results["session_info"]
+
+        if session_info["stock_market_open"]:
+            self._add_commentary(
+                "🔔 US MARKET OPEN | Scanning ALL asset classes: Stocks, ETFs, Commodities, Crypto",
+                "system"
+            )
+            analysis_results["tradeable_assets"] = ["stocks", "etfs", "commodities", "crypto"]
+        else:
+            self._add_commentary(
+                "🌙 AFTER HOURS | Stock market closed - focusing on CRYPTO only (24/7)",
+                "system"
+            )
+            analysis_results["tradeable_assets"] = ["crypto"]
+
+        # 3. Scan available markets
+        opportunities = await self._scan_markets_by_session()
+        analysis_results["opportunities_analyzed"] = len(opportunities)
+
+        # 4. Generate recommendations
+        top_opportunities = opportunities[:5] if opportunities else []
+        for opp in top_opportunities:
+            analysis_results["recommendations"].append({
+                "symbol": opp.symbol,
+                "asset_class": opp.asset_class.value,
+                "strategy": opp.strategy,
+                "score": round(opp.score, 1),
+                "expected_return": f"{opp.expected_return:.1%}",
+                "ml_confidence": round(opp.bayesian_confidence, 2) if opp.bayesian_confidence else 0,
+            })
+
+        # 5. Summary commentary
+        self._add_commentary(
+            f"✅ PRE-TRADE ANALYSIS COMPLETE | "
+            f"Regime: {self.market_regime.value} | VIX: {self.vix_level:.1f} | "
+            f"Opportunities: {len(opportunities)} | "
+            f"Top Pick: {top_opportunities[0].symbol if top_opportunities else 'None'} "
+            f"(Score: {top_opportunities[0].score:.0f})" if top_opportunities else "",
+            "analysis"
+        )
+
+        return analysis_results
+
+    async def _scan_markets_by_session(self) -> List['Opportunity']:
+        """Scan markets based on current trading session."""
+        opportunities = []
+        session_info = self.get_trading_session_info()
+
+        if session_info["stock_market_open"]:
+            # Full market scan
+            stock_opps = await self._scan_stock_options()
+            opportunities.extend(stock_opps)
+
+            etf_opps = await self._scan_etf_options()
+            opportunities.extend(etf_opps)
+
+            commodity_opps = await self._scan_commodity_options()
+            opportunities.extend(commodity_opps)
+
+        # Crypto is always available (24/7)
+        crypto_perp_opps = await self._scan_crypto_perpetuals()
+        opportunities.extend(crypto_perp_opps)
+
+        crypto_opt_opps = await self._scan_crypto_options()
+        opportunities.extend(crypto_opt_opps)
+
+        # Re-rank with ML
+        for opp in opportunities:
+            opp.score = self._compute_ml_score(opp)
+
+        opportunities.sort(key=lambda x: x.score, reverse=True)
+        self.opportunities = opportunities
+
+        return opportunities
+
+    # ===================
     # MARKET ANALYSIS (ML-Enhanced)
     # ===================
 
@@ -1373,19 +1557,29 @@ class MasterQuantBot:
     # ===================
 
     async def start(self):
-        """Start the Master Quant Bot."""
+        """Start the Master Quant Bot with pre-trade analysis."""
         if self.is_running:
             return
 
         self.is_running = True
         await self.engine.start()
 
+        # Get trading session info
+        session_info = self.get_trading_session_info()
+
         self._add_commentary(
-            "🚀 MASTER QUANT BOT STARTED | "
-            "ML Models Active: DQN, PPO, LSTM, Transformer, HMM, VAE, GARCH | "
-            "Scanning all markets...",
+            f"🚀 MASTER QUANT BOT STARTED | "
+            f"ML Models Active: DQN, PPO, LSTM, Transformer, HMM, VAE, GARCH | "
+            f"Session: {session_info['session']} | Time: {session_info['time_et']}",
             "system"
         )
+
+        # Perform pre-trade analysis before any trading
+        self._add_commentary(
+            "⏳ Running pre-trade analysis before initial positions...",
+            "analysis"
+        )
+        await self._perform_pre_trade_analysis()
 
         self._task = asyncio.create_task(self._run_loop())
 
@@ -1410,23 +1604,47 @@ class MasterQuantBot:
         )
 
     async def _run_loop(self):
-        """Main trading loop with RL training."""
+        """Main trading loop with RL training and session-aware scanning."""
         scan_interval = 60
         position_check_interval = 30
         rl_train_interval = 10
+        session_check_interval = 300  # Check session every 5 minutes
 
         last_scan = datetime.min
         last_position_check = datetime.min
         last_rl_train = datetime.min
+        last_session_check = datetime.min
+        last_session_state = None
 
         while self.is_running:
             try:
                 now = datetime.now()
 
-                # Full market scan
+                # Check trading session (market hours)
+                if (now - last_session_check).seconds >= session_check_interval:
+                    session_info = self.get_trading_session_info()
+                    current_session = session_info["stock_market_open"]
+
+                    # Log session changes
+                    if last_session_state is not None and current_session != last_session_state:
+                        if current_session:
+                            self._add_commentary(
+                                "🔔 US MARKET NOW OPEN | Expanding scan to stocks, ETFs, commodities + crypto",
+                                "system"
+                            )
+                        else:
+                            self._add_commentary(
+                                "🌙 US MARKET CLOSED | Focusing on crypto markets (24/7)",
+                                "system"
+                            )
+
+                    last_session_state = current_session
+                    last_session_check = now
+
+                # Full market scan (session-aware)
                 if (now - last_scan).seconds >= scan_interval:
                     await self._assess_market_regime()
-                    await self._scan_all_markets()
+                    await self._scan_markets_by_session()
                     await self._execute_best_opportunities()
                     last_scan = now
 

@@ -14,12 +14,25 @@ This is for PAPER TRADING / EDUCATIONAL purposes only.
 
 import asyncio
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
+
+
+def safe_float(value: float, default: float = 0.0) -> float:
+    """Ensure a float is JSON-serializable (not NaN, Inf, -Inf)."""
+    if value is None:
+        return default
+    try:
+        if math.isnan(value) or math.isinf(value):
+            return default
+    except (TypeError, ValueError):
+        return default
+    return value
 
 from .options import (
     OptionType,
@@ -147,17 +160,17 @@ class OptionsPosition:
             "symbol": self.symbol,
             "strategy_name": self.strategy_name,
             "entry_time": self.entry_time.isoformat(),
-            "entry_iv": round(self.entry_iv * 100, 1),
-            "entry_price": round(self.entry_underlying_price, 2),
-            "current_price": round(self.current_underlying_price, 2),
-            "current_pnl": round(self.current_pnl, 2),
+            "entry_iv": round(safe_float(self.entry_iv * 100), 1),
+            "entry_price": round(safe_float(self.entry_underlying_price), 2),
+            "current_price": round(safe_float(self.current_underlying_price), 2),
+            "current_pnl": round(safe_float(self.current_pnl), 2),
             "days_in_trade": self.days_in_trade,
-            "max_profit": round(self.max_profit, 2),
-            "max_loss": round(self.max_loss, 2),
+            "max_profit": round(safe_float(self.max_profit), 2),
+            "max_loss": round(safe_float(self.max_loss), 2),
             "greeks": {
-                "delta": round(self.current_delta, 2),
-                "theta": round(self.current_theta, 2),
-                "vega": round(self.current_vega, 2),
+                "delta": round(safe_float(self.current_delta), 2),
+                "theta": round(safe_float(self.current_theta), 2),
+                "vega": round(safe_float(self.current_vega), 2),
             },
             "legs_count": len(self.strategy.legs),
             "strategy_details": self.strategy.to_dict() if self.strategy else None,
@@ -187,11 +200,11 @@ class OptionsTrade:
             "strategy_name": self.strategy_name,
             "action": self.action,
             "legs": self.legs,
-            "net_premium": round(self.net_premium, 2),
-            "pnl": round(self.pnl, 2),
+            "net_premium": round(safe_float(self.net_premium), 2),
+            "pnl": round(safe_float(self.pnl), 2),
             "rationale": self.rationale,
-            "iv_at_trade": round(self.iv_at_trade * 100, 1),
-            "underlying_at_trade": round(self.underlying_at_trade, 2),
+            "iv_at_trade": round(safe_float(self.iv_at_trade * 100), 1),
+            "underlying_at_trade": round(safe_float(self.underlying_at_trade), 2),
         }
 
 
@@ -242,19 +255,19 @@ class CryptoDerivativePosition:
             "symbol": self.symbol,
             "derivative_type": self.derivative_type,
             "side": self.side,
-            "entry_price": round(self.entry_price, 2),
-            "size": round(self.size, 4),
-            "leverage": self.leverage,
-            "current_price": round(self.current_price, 2),
-            "unrealized_pnl": round(self.calculate_pnl(), 2),
-            "funding_received": round(self.funding_received, 2),
-            "liquidation_price": round(self.liquidation_price, 2),
+            "entry_price": round(safe_float(self.entry_price), 2),
+            "size": round(safe_float(self.size), 4),
+            "leverage": safe_float(self.leverage, 1.0),
+            "current_price": round(safe_float(self.current_price), 2),
+            "unrealized_pnl": round(safe_float(self.calculate_pnl()), 2),
+            "funding_received": round(safe_float(self.funding_received), 2),
+            "liquidation_price": round(safe_float(self.liquidation_price), 2),
             "greeks": {
-                "delta": round(self.delta, 4),
-                "gamma": round(self.gamma, 6),
-                "theta": round(self.theta, 4),
-                "vega": round(self.vega, 4),
-                "iv": round(self.iv * 100, 1),
+                "delta": round(safe_float(self.delta), 4),
+                "gamma": round(safe_float(self.gamma), 6),
+                "theta": round(safe_float(self.theta), 4),
+                "vega": round(safe_float(self.vega), 4),
+                "iv": round(safe_float(self.iv * 100), 1),
             },
         }
 
