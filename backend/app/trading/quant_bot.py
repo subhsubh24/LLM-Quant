@@ -265,9 +265,24 @@ class QuantBot:
         "DIS", "NFLX", "CMCSA",
     ]
 
-    # Crypto universe
+    # Crypto universe - Top 50+ cryptocurrencies by market cap
     CRYPTO_UNIVERSE = [
-        "BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT", "MATIC"
+        # Top 10
+        "BTC", "ETH", "BNB", "XRP", "SOL", "ADA", "DOGE", "TRX", "AVAX", "LINK",
+        # 11-20
+        "DOT", "MATIC", "SHIB", "TON", "LTC", "BCH", "UNI", "ATOM", "XLM", "ICP",
+        # 21-30
+        "ETC", "FIL", "APT", "NEAR", "IMX", "HBAR", "OP", "INJ", "VET", "MKR",
+        # 31-40
+        "ARB", "GRT", "AAVE", "ALGO", "RUNE", "FTM", "SAND", "MANA", "AXS", "SNX",
+        # 41-50
+        "LDO", "CRV", "EGLD", "THETA", "XTZ", "FLOW", "KAVA", "NEO", "IOTA", "ZEC",
+        # 51-60 - More altcoins
+        "CAKE", "1INCH", "COMP", "ENJ", "BAT", "CELO", "ZRX", "YFI", "SUSHI", "KSM",
+        # 61-70 - DeFi & Layer 2
+        "GMX", "DYDX", "STX", "SUI", "SEI", "TIA", "JUP", "PYTH", "WIF", "BONK",
+        # 71-80 - Meme & New
+        "PEPE", "FLOKI", "RNDR", "FET", "AGIX", "OCEAN", "TAO", "AR", "HNT", "QNT",
     ]
 
     def __init__(
@@ -523,26 +538,34 @@ class QuantBot:
         """Scan crypto universe for trading opportunities."""
         scanned = 0
         opportunities = []
+        movers = []  # Track big movers
+
+        # Batch fetch all quotes for efficiency
+        try:
+            quotes = await self.crypto_service.get_quotes_batch(self.CRYPTO_UNIVERSE)
+        except Exception as e:
+            logger.warning(f"Batch crypto fetch failed, falling back to individual: {e}")
+            quotes = {}
 
         for symbol in self.CRYPTO_UNIVERSE:
             try:
-                quote = await self.crypto_service.get_quote(symbol)
+                # Use batch result or fetch individually
+                quote = quotes.get(symbol) if quotes else None
+                if not quote:
+                    quote = await self.crypto_service.get_quote(symbol)
+
                 if quote:
                     scanned += 1
                     signal, rationale = await self._analyze_crypto(symbol, quote)
 
-                    # Log interesting price movements
-                    if abs(quote.change_percent_24h) > 3:
-                        self.commentary.add(
-                            f"👀 {symbol}: ${quote.price:,.2f} ({quote.change_percent_24h:+.1f}% 24h) | MCap Rank #{quote.market_cap_rank}",
-                            "analysis",
-                            {"symbol": symbol, "price": quote.price, "change": quote.change_percent_24h}
-                        )
+                    # Track big movers for summary
+                    if abs(quote.change_percent_24h) > 5:
+                        movers.append((symbol, quote.change_percent_24h, quote.price))
 
                     if signal and rationale.confidence >= 0.5:
                         opportunities.append(symbol)
                         self.commentary.add(
-                            f"🎯 SIGNAL: {signal} {symbol} | Confidence: {rationale.confidence*100:.0f}% | {rationale.primary_reason}",
+                            f"🎯 SIGNAL: {signal} {symbol} @ ${quote.price:,.2f} | Confidence: {rationale.confidence*100:.0f}% | {rationale.primary_reason}",
                             "signal",
                             {"symbol": symbol, "signal": signal, "confidence": rationale.confidence}
                         )
@@ -556,11 +579,20 @@ class QuantBot:
             except Exception as e:
                 logger.debug(f"Crypto analysis failed for {symbol}: {e}")
 
-        if not opportunities and scanned > 0:
-            # Occasionally report no opportunities
-            import random
-            if random.random() < 0.1:  # 10% of the time
-                self.commentary.add(f"🔍 Scanned {scanned} cryptos - no high-confidence signals this cycle", "analysis")
+        # Report big movers
+        if movers:
+            movers.sort(key=lambda x: abs(x[1]), reverse=True)
+            top_movers = movers[:3]
+            mover_str = " | ".join([f"{s}: {c:+.1f}%" for s, c, _ in top_movers])
+            self.commentary.add(f"🔥 Top movers: {mover_str}", "analysis")
+
+        # Scan summary
+        import random
+        if random.random() < 0.15:  # 15% of the time
+            self.commentary.add(
+                f"📡 Scanned {scanned}/{len(self.CRYPTO_UNIVERSE)} cryptos | {len(movers)} big movers | {len(opportunities)} signals",
+                "info"
+            )
 
     async def _analyze_stock(self, symbol: str, price: float) -> Tuple[Optional[str], Optional[TradeRationale]]:
         """
