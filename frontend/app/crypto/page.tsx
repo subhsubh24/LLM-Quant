@@ -6,12 +6,13 @@ import {
   TrendingDown,
   Activity,
   RefreshCw,
-  DollarSign,
-  BarChart3,
   Zap,
   Globe,
   ArrowUpRight,
   ArrowDownRight,
+  Bitcoin,
+  Sparkles,
+  ShoppingCart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -72,7 +73,7 @@ export default function CryptoPage() {
       if (overviewRes.ok) {
         const data = await overviewRes.json();
         setOverview(data);
-        if (data.top_cryptos?.length > 0) {
+        if (data.top_cryptos?.length > 0 && !selectedCrypto) {
           setSelectedCrypto(data.top_cryptos[0]);
         }
       }
@@ -86,11 +87,11 @@ export default function CryptoPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedCrypto]);
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000); // Refresh every 30s
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -109,11 +110,11 @@ export default function CryptoPage() {
     }
   };
 
-  const formatNumber = (num: number, decimals: number = 2) => {
+  const formatNumber = (num: number) => {
     if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
     if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
     if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
-    return `$${num.toFixed(decimals)}`;
+    return `$${num.toFixed(2)}`;
   };
 
   const formatPrice = (price: number) => {
@@ -124,76 +125,112 @@ export default function CryptoPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-2">
+    <div className="ml-64 min-h-screen bg-gray-50/50 p-8">
       {/* Header */}
-      <header className="terminal-panel mb-2 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Globe className="w-5 h-5 text-yellow-500" />
-          <h1 className="text-lg font-bold text-yellow-500 font-mono">CRYPTO TERMINAL</h1>
-          <span className="status-live text-xs px-2 py-0.5 rounded">LIVE</span>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Cryptocurrency</h1>
+          <p className="text-gray-500 mt-1">24/7 real-time crypto market data and trading</p>
         </div>
-        <div className="flex items-center gap-4 text-xs">
-          <div>
-            <span className="text-muted-foreground">Total MCap: </span>
-            <span className="font-mono">{overview ? formatNumber(overview.total_market_cap) : "--"}</span>
-          </div>
-          <div>
-            <span className="text-muted-foreground">BTC Dom: </span>
-            <span className="font-mono text-yellow-500">{overview?.btc_dominance || "--"}%</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl border border-gray-200">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-600">Total MCap:</span>
+              <span className="font-semibold text-gray-900">{overview ? formatNumber(overview.total_market_cap) : "--"}</span>
+            </div>
+            <div className="w-px h-4 bg-gray-200" />
+            <div className="flex items-center gap-2">
+              <Bitcoin className="w-4 h-4 text-orange-500" />
+              <span className="text-sm text-gray-600">BTC:</span>
+              <span className="font-semibold text-orange-600">{overview?.btc_dominance || "--"}%</span>
+            </div>
           </div>
           <button
             onClick={fetchData}
-            disabled={loading}
-            className="p-1.5 rounded hover:bg-secondary"
+            className="p-2.5 bg-white rounded-xl hover:bg-gray-50 border border-gray-200"
           >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            <RefreshCw className={cn("w-5 h-5 text-gray-500", loading && "animate-spin")} />
           </button>
         </div>
-      </header>
+      </div>
 
-      <div className="grid grid-cols-12 gap-2">
-        {/* Main Watchlist */}
-        <div className="col-span-12 lg:col-span-8 terminal-panel">
-          <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-yellow-500 font-mono">TOP CRYPTOCURRENCIES</h2>
+      {/* 24/7 Trading Banner */}
+      <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-orange-50 to-yellow-50 border border-orange-100 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
+            <Bitcoin className="w-5 h-5 text-orange-600" />
+          </div>
+          <div>
+            <span className="font-semibold text-orange-700">Crypto Markets</span>
+            <div className="flex items-center gap-2 text-sm text-orange-600">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                LIVE
+              </span>
+              <span>•</span>
+              <span>24/7 Trading Available</span>
+            </div>
+          </div>
+        </div>
+        <span className="px-3 py-1.5 bg-orange-100 text-orange-700 text-sm font-medium rounded-full">
+          Paper Trading
+        </span>
+      </div>
+
+      <div className="grid grid-cols-12 gap-6">
+        {/* Main Crypto List */}
+        <div className="col-span-8 bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-gray-400" />
+              Top Cryptocurrencies
+            </h2>
+            <span className="text-sm text-gray-500">{overview?.top_cryptos?.length || 0} coins</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="data-table">
-              <thead>
+            <table className="w-full">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th>#</th>
-                  <th>Name</th>
-                  <th className="text-right">Price</th>
-                  <th className="text-right">24h %</th>
-                  <th className="text-right">24h High</th>
-                  <th className="text-right">24h Low</th>
-                  <th className="text-right">Volume (24h)</th>
-                  <th className="text-right">Market Cap</th>
+                  <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">#</th>
+                  <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Name</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Price</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">24h Change</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">24h High</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">24h Low</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Market Cap</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-100">
                 {overview?.top_cryptos?.map((crypto) => (
                   <tr
                     key={crypto.symbol}
                     className={cn(
-                      "cursor-pointer hover:bg-secondary/50",
-                      selectedCrypto?.symbol === crypto.symbol && "bg-secondary"
+                      "hover:bg-gray-50 cursor-pointer transition-colors",
+                      selectedCrypto?.symbol === crypto.symbol && "bg-blue-50"
                     )}
                     onClick={() => setSelectedCrypto(crypto)}
                   >
-                    <td className="text-muted-foreground">{crypto.market_cap_rank}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{crypto.symbol}</span>
-                        <span className="text-muted-foreground text-xs">{crypto.name}</span>
+                    <td className="py-4 px-6 text-gray-500 text-sm">{crypto.market_cap_rank}</td>
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center">
+                          <Bitcoin className="w-5 h-5 text-orange-600" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-900">{crypto.symbol}</div>
+                          <div className="text-xs text-gray-500">{crypto.name}</div>
+                        </div>
                       </div>
                     </td>
-                    <td className="text-right font-mono">{formatPrice(crypto.price)}</td>
-                    <td className={cn(
-                      "text-right font-mono",
-                      crypto.change_percent_24h >= 0 ? "text-positive" : "text-negative"
-                    )}>
-                      <span className="flex items-center justify-end gap-1">
+                    <td className="py-4 px-6 text-right font-mono text-gray-900 font-medium">
+                      {formatPrice(crypto.price)}
+                    </td>
+                    <td className="py-4 px-6 text-right">
+                      <span className={cn(
+                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-medium",
+                        crypto.change_percent_24h >= 0 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                      )}>
                         {crypto.change_percent_24h >= 0 ? (
                           <ArrowUpRight className="w-3 h-3" />
                         ) : (
@@ -202,10 +239,15 @@ export default function CryptoPage() {
                         {Math.abs(crypto.change_percent_24h).toFixed(2)}%
                       </span>
                     </td>
-                    <td className="text-right font-mono text-muted-foreground">{formatPrice(crypto.high_24h)}</td>
-                    <td className="text-right font-mono text-muted-foreground">{formatPrice(crypto.low_24h)}</td>
-                    <td className="text-right font-mono">{formatNumber(crypto.volume_24h)}</td>
-                    <td className="text-right font-mono">{formatNumber(crypto.market_cap)}</td>
+                    <td className="py-4 px-6 text-right font-mono text-gray-500 text-sm">
+                      {formatPrice(crypto.high_24h)}
+                    </td>
+                    <td className="py-4 px-6 text-right font-mono text-gray-500 text-sm">
+                      {formatPrice(crypto.low_24h)}
+                    </td>
+                    <td className="py-4 px-6 text-right font-mono text-gray-900">
+                      {formatNumber(crypto.market_cap)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -214,162 +256,219 @@ export default function CryptoPage() {
         </div>
 
         {/* Right Sidebar */}
-        <div className="col-span-12 lg:col-span-4 space-y-2">
+        <div className="col-span-4 space-y-6">
           {/* Selected Crypto Detail */}
           {selectedCrypto && (
-            <div className="terminal-panel p-3">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h2 className="text-lg font-bold text-yellow-500">{selectedCrypto.symbol}</h2>
-                  <p className="text-xs text-muted-foreground">{selectedCrypto.name}</p>
-                </div>
-                <div className="text-right">
-                  <div className="text-xl font-mono">{formatPrice(selectedCrypto.price)}</div>
-                  <div className={cn(
-                    "text-sm font-mono",
-                    selectedCrypto.change_percent_24h >= 0 ? "text-positive" : "text-negative"
-                  )}>
-                    {selectedCrypto.change_percent_24h >= 0 ? "+" : ""}
-                    {selectedCrypto.change_percent_24h.toFixed(2)}%
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              <div className="p-6 bg-gradient-to-br from-orange-50 to-yellow-50">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-orange-100 flex items-center justify-center shadow-lg shadow-orange-200/50">
+                      <Bitcoin className="w-7 h-7 text-orange-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900">{selectedCrypto.symbol}</h3>
+                      <p className="text-sm text-gray-500">{selectedCrypto.name}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-gray-900">{formatPrice(selectedCrypto.price)}</div>
+                    <div className={cn(
+                      "flex items-center justify-end gap-1 text-sm font-medium",
+                      selectedCrypto.change_percent_24h >= 0 ? "text-green-600" : "text-red-600"
+                    )}>
+                      {selectedCrypto.change_percent_24h >= 0 ? (
+                        <ArrowUpRight className="w-4 h-4" />
+                      ) : (
+                        <ArrowDownRight className="w-4 h-4" />
+                      )}
+                      {selectedCrypto.change_percent_24h >= 0 ? "+" : ""}
+                      {selectedCrypto.change_percent_24h.toFixed(2)}%
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">24h High</div>
-                  <div className="font-mono">{formatPrice(selectedCrypto.high_24h)}</div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">24h Low</div>
-                  <div className="font-mono">{formatPrice(selectedCrypto.low_24h)}</div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">All-Time High</div>
-                  <div className="font-mono">{formatPrice(selectedCrypto.ath)}</div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">From ATH</div>
-                  <div className="font-mono text-negative">{selectedCrypto.ath_change_percent.toFixed(1)}%</div>
+              <div className="p-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-gray-50">
+                    <div className="text-sm text-gray-500 mb-1">24h High</div>
+                    <div className="font-semibold text-gray-900">{formatPrice(selectedCrypto.high_24h)}</div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-gray-50">
+                    <div className="text-sm text-gray-500 mb-1">24h Low</div>
+                    <div className="font-semibold text-gray-900">{formatPrice(selectedCrypto.low_24h)}</div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-gray-50">
+                    <div className="text-sm text-gray-500 mb-1">All-Time High</div>
+                    <div className="font-semibold text-gray-900">{formatPrice(selectedCrypto.ath)}</div>
+                  </div>
+                  <div className="p-4 rounded-xl bg-gray-50">
+                    <div className="text-sm text-gray-500 mb-1">From ATH</div>
+                    <div className="font-semibold text-red-600">{selectedCrypto.ath_change_percent.toFixed(1)}%</div>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {/* Quick Order */}
-          <div className="terminal-panel p-3">
-            <h2 className="text-sm font-semibold text-yellow-500 font-mono mb-3">QUICK ORDER</h2>
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-gray-400" />
+                Quick Order
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => setOrderSide("buy")}
                   className={cn(
-                    "py-2 rounded font-mono text-sm",
+                    "py-3 rounded-xl font-semibold transition-all",
                     orderSide === "buy"
-                      ? "bg-positive text-white"
-                      : "bg-secondary text-muted-foreground"
+                      ? "bg-green-500 text-white shadow-lg shadow-green-500/30"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   )}
                 >
-                  BUY
+                  Buy
                 </button>
                 <button
                   onClick={() => setOrderSide("sell")}
                   className={cn(
-                    "py-2 rounded font-mono text-sm",
+                    "py-3 rounded-xl font-semibold transition-all",
                     orderSide === "sell"
-                      ? "bg-negative text-white"
-                      : "bg-secondary text-muted-foreground"
+                      ? "bg-red-500 text-white shadow-lg shadow-red-500/30"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                   )}
                 >
-                  SELL
+                  Sell
                 </button>
               </div>
-              <select
-                value={orderSymbol}
-                onChange={(e) => setOrderSymbol(e.target.value)}
-                className="command-input w-full"
-              >
-                {overview?.top_cryptos?.map((c) => (
-                  <option key={c.symbol} value={c.symbol}>
-                    {c.symbol} - {c.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                value={orderQuantity}
-                onChange={(e) => setOrderQuantity(e.target.value)}
-                className="command-input w-full"
-                placeholder="Quantity"
-                step="0.001"
-              />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Asset</label>
+                <select
+                  value={orderSymbol}
+                  onChange={(e) => setOrderSymbol(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  {overview?.top_cryptos?.map((c) => (
+                    <option key={c.symbol} value={c.symbol}>
+                      {c.symbol} - {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
+                <input
+                  type="number"
+                  value={orderQuantity}
+                  onChange={(e) => setOrderQuantity(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="0.01"
+                  step="0.001"
+                />
+              </div>
               <button
                 onClick={placeOrder}
                 className={cn(
-                  "w-full py-2 rounded font-mono text-sm text-white",
-                  orderSide === "buy" ? "bg-positive" : "bg-negative"
+                  "w-full py-4 rounded-xl font-semibold text-white shadow-lg transition-all",
+                  orderSide === "buy"
+                    ? "bg-green-500 hover:bg-green-600 shadow-green-500/30"
+                    : "bg-red-500 hover:bg-red-600 shadow-red-500/30"
                 )}
               >
-                {orderSide === "buy" ? "BUY" : "SELL"} {orderSymbol}
+                {orderSide === "buy" ? "Buy" : "Sell"} {orderSymbol}
               </button>
+              <p className="text-xs text-gray-400 text-center">Paper trading only • No real money</p>
             </div>
-            <p className="text-xs text-muted-foreground mt-2 text-center">Paper trading only</p>
           </div>
 
           {/* Trading Signals */}
-          <div className="terminal-panel p-3">
-            <h2 className="text-sm font-semibold text-yellow-500 font-mono mb-3">
-              <Zap className="w-4 h-4 inline mr-1" />
-              SIGNALS
-            </h2>
-            <div className="space-y-1 max-h-[200px] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-yellow-500" />
+                AI Signals
+              </h3>
+            </div>
+            <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
               {signals.slice(0, 8).map((signal) => (
                 <div
                   key={signal.symbol}
-                  className="flex items-center justify-between p-2 rounded bg-secondary/30 text-xs"
+                  className="flex items-center justify-between p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors"
                 >
-                  <div>
-                    <span className="font-semibold">{signal.symbol}</span>
-                    <span className={cn(
-                      "ml-2",
-                      signal.change_24h >= 0 ? "text-positive" : "text-negative"
-                    )}>
-                      {signal.change_24h >= 0 ? "+" : ""}{signal.change_24h.toFixed(1)}%
-                    </span>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
+                      <Bitcoin className="w-4 h-4 text-orange-600" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-900 text-sm">{signal.symbol}</div>
+                      <div className={cn(
+                        "text-xs",
+                        signal.change_24h >= 0 ? "text-green-600" : "text-red-600"
+                      )}>
+                        {signal.change_24h >= 0 ? "+" : ""}{signal.change_24h.toFixed(1)}%
+                      </div>
+                    </div>
                   </div>
                   <span className={cn(
-                    "px-2 py-0.5 rounded text-xs font-mono",
-                    signal.action.includes("BUY") && "bg-positive/20 text-positive",
-                    signal.action.includes("SELL") && "bg-negative/20 text-negative",
-                    signal.action === "HOLD" && "bg-secondary text-muted-foreground"
+                    "px-3 py-1.5 rounded-full text-xs font-semibold",
+                    signal.action.includes("BUY") && "bg-green-100 text-green-700",
+                    signal.action.includes("SELL") && "bg-red-100 text-red-700",
+                    signal.action === "HOLD" && "bg-gray-100 text-gray-600"
                   )}>
                     {signal.action}
                   </span>
                 </div>
               ))}
+              {signals.length === 0 && (
+                <div className="py-8 text-center text-gray-500 text-sm">
+                  Loading signals...
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Gainers & Losers */}
-          <div className="terminal-panel p-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <h3 className="text-xs font-semibold text-positive mb-2">TOP GAINERS</h3>
-                {overview?.top_gainers?.slice(0, 3).map((c) => (
-                  <div key={c.symbol} className="flex justify-between text-xs py-1">
-                    <span>{c.symbol}</span>
-                    <span className="text-positive font-mono">+{c.change_percent_24h.toFixed(1)}%</span>
+          {/* Top Movers */}
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900">Top Movers</h3>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-sm font-medium text-green-600 mb-3 flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4" />
+                    Gainers
+                  </h4>
+                  <div className="space-y-2">
+                    {overview?.top_gainers?.slice(0, 3).map((c) => (
+                      <div key={c.symbol} className="flex justify-between items-center">
+                        <span className="text-sm font-medium text-gray-900">{c.symbol}</span>
+                        <span className="text-sm font-mono text-green-600">
+                          +{c.change_percent_24h.toFixed(1)}%
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <div>
-                <h3 className="text-xs font-semibold text-negative mb-2">TOP LOSERS</h3>
-                {overview?.top_losers?.slice(0, 3).map((c) => (
-                  <div key={c.symbol} className="flex justify-between text-xs py-1">
-                    <span>{c.symbol}</span>
-                    <span className="text-negative font-mono">{c.change_percent_24h.toFixed(1)}%</span>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-red-600 mb-3 flex items-center gap-2">
+                    <TrendingDown className="w-4 h-4" />
+                    Losers
+                  </h4>
+                  <div className="space-y-2">
+                    {overview?.top_losers?.slice(0, 3).map((c) => (
+                      <div key={c.symbol} className="flex justify-between items-center">
+                        <span className="text-sm font-medium text-gray-900">{c.symbol}</span>
+                        <span className="text-sm font-mono text-red-600">
+                          {c.change_percent_24h.toFixed(1)}%
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </div>
               </div>
             </div>
           </div>
@@ -377,11 +476,9 @@ export default function CryptoPage() {
       </div>
 
       {/* Footer */}
-      <footer className="terminal-panel mt-2 px-4 py-2">
-        <p className="text-xs text-muted-foreground text-center">
-          PAPER TRADING ONLY | Cryptocurrency is highly volatile | Data from CoinGecko
-        </p>
-      </footer>
+      <div className="mt-8 text-center text-sm text-gray-400">
+        Paper trading only • Cryptocurrency is highly volatile • Data from CoinGecko
+      </div>
     </div>
   );
 }

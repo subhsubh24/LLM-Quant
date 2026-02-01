@@ -6,9 +6,15 @@ import {
   TrendingDown,
   RefreshCw,
   Clock,
-  Zap,
   Search,
   ExternalLink,
+  ArrowUpRight,
+  ArrowDownRight,
+  Activity,
+  Globe,
+  BarChart3,
+  Newspaper,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,12 +58,11 @@ interface MarketOverview {
   timestamp: string;
 }
 
-export default function TerminalDashboard() {
+export default function DashboardPage() {
   const [marketOverview, setMarketOverview] = useState<MarketOverview | null>(null);
   const [watchlist, setWatchlist] = useState<Quote[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [searchSymbol, setSearchSymbol] = useState("");
 
@@ -66,28 +71,22 @@ export default function TerminalDashboard() {
       const [overviewRes, watchlistRes, newsRes] = await Promise.all([
         fetch(`${API_BASE}/api/market/overview`),
         fetch(`${API_BASE}/api/market/watchlist`),
-        fetch(`${API_BASE}/api/market/news?limit=15`),
+        fetch(`${API_BASE}/api/market/news?limit=10`),
       ]);
 
-      if (overviewRes.ok) {
-        const data = await overviewRes.json();
-        setMarketOverview(data);
-      }
-
+      if (overviewRes.ok) setMarketOverview(await overviewRes.json());
       if (watchlistRes.ok) {
         const data = await watchlistRes.json();
         setWatchlist(data.watchlist.filter((q: any) => !q.error));
       }
-
       if (newsRes.ok) {
         const data = await newsRes.json();
         setNews(data.news || []);
       }
 
       setLastUpdate(new Date());
-      setError(null);
     } catch (err) {
-      setError("Failed to connect to market data service");
+      console.error("Failed to fetch data:", err);
     } finally {
       setLoading(false);
     }
@@ -95,7 +94,6 @@ export default function TerminalDashboard() {
 
   useEffect(() => {
     fetchData();
-    // Auto-refresh every 30 seconds
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
@@ -103,12 +101,10 @@ export default function TerminalDashboard() {
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchSymbol.trim()) return;
-
     try {
       const res = await fetch(`${API_BASE}/api/market/quote/${searchSymbol.toUpperCase()}`);
       if (res.ok) {
         const quote = await res.json();
-        // Add to watchlist if not already there
         if (!watchlist.find(q => q.symbol === quote.symbol)) {
           setWatchlist(prev => [quote, ...prev]);
         }
@@ -119,150 +115,146 @@ export default function TerminalDashboard() {
     setSearchSymbol("");
   };
 
-  const formatPrice = (price: number) => {
-    return price?.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }) || "—";
-  };
+  const formatPrice = (price: number) =>
+    price?.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "—";
 
-  const formatChange = (change: number, percent: number) => {
-    const sign = change >= 0 ? "+" : "";
-    return `${sign}${change?.toFixed(2)} (${sign}${percent?.toFixed(2)}%)`;
-  };
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  };
+  const formatTime = (date: Date) =>
+    date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
   const formatNewsTime = (isoString: string) => {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
+    const diffMs = Date.now() - new Date(isoString).getTime();
     const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-
     if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+    return new Date(isoString).toLocaleDateString();
   };
 
   return (
-    <div className="min-h-screen bg-background p-2">
-      {/* Header Bar */}
-      <header className="terminal-panel mb-2 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-bold text-bloomberg-orange font-mono">QUANTLAB TERMINAL</h1>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <div className={cn(
-              "status-dot",
-              marketOverview?.market_status === "open" ? "status-live bg-positive" : "bg-muted-foreground"
-            )} />
-            <span className="uppercase">
-              {marketOverview?.market_status || "CONNECTING..."}
-            </span>
-          </div>
+    <div className="ml-64 min-h-screen bg-gray-50/50 p-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Dashboard</h1>
+          <p className="text-gray-500 mt-1">Real-time market overview and analytics</p>
         </div>
-
         <div className="flex items-center gap-4">
-          <form onSubmit={handleSearch} className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-muted-foreground" />
+          <form onSubmit={handleSearch} className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
               value={searchSymbol}
               onChange={(e) => setSearchSymbol(e.target.value.toUpperCase())}
-              placeholder="SYMBOL"
-              className="command-input w-24 text-xs"
+              placeholder="Search symbol..."
+              className="pl-10 pr-4 py-2.5 bg-white rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-48"
             />
           </form>
-
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Clock className="w-3 h-3" />
-            <span className="font-mono">{formatTime(lastUpdate)}</span>
+          <div className="flex items-center gap-2 text-sm text-gray-500 bg-white px-4 py-2.5 rounded-xl border border-gray-200">
+            <Clock className="w-4 h-4" />
+            <span>{formatTime(lastUpdate)}</span>
           </div>
-
           <button
             onClick={fetchData}
-            className="p-1.5 rounded hover:bg-secondary transition-colors"
-            title="Refresh"
+            className="p-2.5 bg-white rounded-xl hover:bg-gray-50 border border-gray-200"
           >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            <RefreshCw className={cn("w-5 h-5 text-gray-500", loading && "animate-spin")} />
           </button>
         </div>
-      </header>
+      </div>
 
-      {error && (
-        <div className="terminal-panel mb-2 px-4 py-2 border-destructive bg-destructive/10">
-          <p className="text-sm text-destructive">{error}</p>
+      {/* Market Status */}
+      <div className={cn(
+        "mb-6 p-4 rounded-2xl flex items-center justify-between",
+        marketOverview?.market_status === "open"
+          ? "bg-green-50 border border-green-100"
+          : "bg-orange-50 border border-orange-100"
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "w-3 h-3 rounded-full",
+            marketOverview?.market_status === "open" ? "bg-green-500 animate-pulse" : "bg-orange-500"
+          )} />
+          <span className={cn(
+            "font-semibold",
+            marketOverview?.market_status === "open" ? "text-green-700" : "text-orange-700"
+          )}>
+            Market {marketOverview?.market_status === "open" ? "Open" : "Closed"}
+          </span>
         </div>
-      )}
+        <span className="text-sm text-gray-600">NYSE/NASDAQ Regular Hours</span>
+      </div>
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-12 gap-2">
-        {/* Market Indices */}
-        <div className="col-span-12 terminal-panel p-3">
-          <div className="flex items-center gap-6 overflow-x-auto">
-            {marketOverview?.indices.map((index) => (
-              <div key={index.symbol} className="flex-shrink-0 index-box min-w-[140px]">
-                <div className="text-xs text-muted-foreground mb-1">{index.name}</div>
-                <div className="font-mono font-semibold">{formatPrice(index.price)}</div>
-                <div className={cn(
-                  "text-xs font-mono",
-                  index.change >= 0 ? "text-positive" : "text-negative"
-                )}>
-                  {formatChange(index.change, index.change_percent)}
-                </div>
-              </div>
-            ))}
-            {!marketOverview && loading && (
-              <div className="text-sm text-muted-foreground">Loading market data...</div>
-            )}
+      {/* Market Indices */}
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        {marketOverview?.indices.slice(0, 5).map((index) => (
+          <div key={index.symbol} className="bg-white rounded-2xl p-5 shadow-sm">
+            <div className="text-sm text-gray-500 mb-1">{index.name}</div>
+            <div className="text-2xl font-bold text-gray-900 tracking-tight">
+              {formatPrice(index.price)}
+            </div>
+            <div className={cn(
+              "flex items-center gap-1 text-sm mt-1",
+              index.change >= 0 ? "text-green-600" : "text-red-600"
+            )}>
+              {index.change >= 0 ? (
+                <ArrowUpRight className="w-4 h-4" />
+              ) : (
+                <ArrowDownRight className="w-4 h-4" />
+              )}
+              {index.change >= 0 ? "+" : ""}{index.change_percent?.toFixed(2)}%
+            </div>
           </div>
-        </div>
+        ))}
+      </div>
 
+      <div className="grid grid-cols-12 gap-6">
         {/* Watchlist */}
-        <div className="col-span-12 lg:col-span-5 terminal-panel">
-          <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-bloomberg-orange">WATCHLIST</h2>
-            <span className="text-xs text-muted-foreground">{watchlist.length} symbols</span>
+        <div className="col-span-6 bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-gray-400" />
+              Watchlist
+              <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 text-sm rounded-full">
+                {watchlist.length}
+              </span>
+            </h2>
           </div>
           <div className="max-h-[400px] overflow-y-auto">
-            <table className="data-table">
-              <thead>
+            <table className="w-full">
+              <thead className="bg-gray-50 sticky top-0">
                 <tr>
-                  <th>SYMBOL</th>
-                  <th className="text-right">LAST</th>
-                  <th className="text-right">CHG</th>
-                  <th className="text-right">CHG%</th>
+                  <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Symbol</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Price</th>
+                  <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Change</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-100">
                 {watchlist.map((quote) => (
-                  <tr key={quote.symbol}>
-                    <td className="font-semibold">{quote.symbol}</td>
-                    <td className="text-right tabular-nums">{formatPrice(quote.price)}</td>
-                    <td className={cn(
-                      "text-right tabular-nums",
-                      quote.change >= 0 ? "text-positive" : "text-negative"
-                    )}>
-                      {quote.change >= 0 ? "+" : ""}{quote.change?.toFixed(2)}
+                  <tr key={quote.symbol} className="hover:bg-gray-50">
+                    <td className="py-4 px-6">
+                      <span className="font-semibold text-gray-900">{quote.symbol}</span>
                     </td>
-                    <td className={cn(
-                      "text-right tabular-nums",
-                      quote.change_percent >= 0 ? "text-positive" : "text-negative"
-                    )}>
-                      {quote.change_percent >= 0 ? "+" : ""}{quote.change_percent?.toFixed(2)}%
+                    <td className="py-4 px-6 text-right font-mono text-gray-900">
+                      ${formatPrice(quote.price)}
+                    </td>
+                    <td className="py-4 px-6 text-right">
+                      <span className={cn(
+                        "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-medium",
+                        quote.change >= 0 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                      )}>
+                        {quote.change >= 0 ? (
+                          <ArrowUpRight className="w-3 h-3" />
+                        ) : (
+                          <ArrowDownRight className="w-3 h-3" />
+                        )}
+                        {quote.change >= 0 ? "+" : ""}{quote.change_percent?.toFixed(2)}%
+                      </span>
                     </td>
                   </tr>
                 ))}
-                {watchlist.length === 0 && !loading && (
+                {watchlist.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="text-center text-muted-foreground py-4">
-                      No data available
+                    <td colSpan={3} className="py-12 text-center text-gray-500">
+                      No stocks in watchlist
                     </td>
                   </tr>
                 )}
@@ -272,159 +264,139 @@ export default function TerminalDashboard() {
         </div>
 
         {/* Sector Performance */}
-        <div className="col-span-12 lg:col-span-3 terminal-panel">
-          <div className="px-3 py-2 border-b border-border">
-            <h2 className="text-sm font-semibold text-bloomberg-orange">SECTORS</h2>
+        <div className="col-span-3 bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-gray-400" />
+              Sectors
+            </h2>
           </div>
-          <div className="p-2 space-y-1 max-h-[400px] overflow-y-auto">
+          <div className="p-4 space-y-2 max-h-[400px] overflow-y-auto">
             {marketOverview?.sectors.map((sector) => (
               <div
                 key={sector.symbol}
                 className={cn(
-                  "flex items-center justify-between px-2 py-1.5 rounded text-sm",
-                  sector.change_percent >= 0 ? "sector-positive-1" : "sector-negative-1"
+                  "flex items-center justify-between p-3 rounded-xl",
+                  sector.change_percent >= 0 ? "bg-green-50" : "bg-red-50"
                 )}
               >
-                <span className="truncate">{sector.name}</span>
+                <span className="text-sm text-gray-700">{sector.name}</span>
                 <span className={cn(
-                  "font-mono font-medium tabular-nums",
-                  sector.change_percent >= 0 ? "text-positive" : "text-negative"
+                  "font-mono text-sm font-medium",
+                  sector.change_percent >= 0 ? "text-green-600" : "text-red-600"
                 )}>
                   {sector.change_percent >= 0 ? "+" : ""}{sector.change_percent?.toFixed(2)}%
                 </span>
               </div>
             ))}
-            {!marketOverview && loading && (
-              <div className="text-sm text-muted-foreground text-center py-4">Loading...</div>
-            )}
           </div>
         </div>
 
         {/* News Feed */}
-        <div className="col-span-12 lg:col-span-4 terminal-panel">
-          <div className="px-3 py-2 border-b border-border flex items-center gap-2">
-            <Zap className="w-4 h-4 text-bloomberg-orange" />
-            <h2 className="text-sm font-semibold text-bloomberg-orange">MARKET NEWS</h2>
+        <div className="col-span-3 bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Newspaper className="w-5 h-5 text-gray-400" />
+              Market News
+            </h2>
           </div>
-          <div className="max-h-[400px] overflow-y-auto divide-y divide-border/50">
+          <div className="max-h-[400px] overflow-y-auto divide-y divide-gray-100">
             {news.map((item) => (
               <a
                 key={item.id}
                 href={item.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block px-3 py-2 hover:bg-secondary/30 transition-colors group"
+                className="block p-4 hover:bg-gray-50 group"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="news-headline group-hover:text-primary">
-                    {item.headline}
-                  </p>
-                  <ExternalLink className="w-3 h-3 flex-shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                </div>
-                <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                <p className="text-sm font-medium text-gray-900 line-clamp-2 group-hover:text-blue-600">
+                  {item.headline}
+                </p>
+                <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
                   <span>{item.source}</span>
-                  <span>|</span>
+                  <span>•</span>
                   <span>{formatNewsTime(item.published)}</span>
-                  {item.related_symbols.length > 0 && (
-                    <>
-                      <span>|</span>
-                      <span className="text-bloomberg-blue">
-                        {item.related_symbols.slice(0, 3).join(", ")}
-                      </span>
-                    </>
-                  )}
                 </div>
               </a>
             ))}
-            {news.length === 0 && !loading && (
-              <div className="px-3 py-4 text-sm text-muted-foreground text-center">
-                No news available. Add a Finnhub API key for live news.
+            {news.length === 0 && (
+              <div className="p-12 text-center">
+                <Newspaper className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500 text-sm">No news available</p>
+                <p className="text-gray-400 text-xs mt-1">Add Finnhub API key for live news</p>
               </div>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Quick Stats */}
-        <div className="col-span-12 terminal-panel p-3">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            <QuickStat
-              label="Top Gainer"
-              value={watchlist.length > 0 ?
-                [...watchlist].sort((a, b) => b.change_percent - a.change_percent)[0]?.symbol : "—"}
-              subValue={watchlist.length > 0 ?
-                `+${[...watchlist].sort((a, b) => b.change_percent - a.change_percent)[0]?.change_percent?.toFixed(2)}%` : ""}
-              positive
-            />
-            <QuickStat
-              label="Top Loser"
-              value={watchlist.length > 0 ?
-                [...watchlist].sort((a, b) => a.change_percent - b.change_percent)[0]?.symbol : "—"}
-              subValue={watchlist.length > 0 ?
-                `${[...watchlist].sort((a, b) => a.change_percent - b.change_percent)[0]?.change_percent?.toFixed(2)}%` : ""}
-            />
-            <QuickStat
-              label="VIX"
-              value={marketOverview?.indices.find(i => i.symbol === "^VIX")?.price?.toFixed(2) || "—"}
-              subValue={marketOverview?.indices.find(i => i.symbol === "^VIX")?.change_percent?.toFixed(2) + "%" || ""}
-            />
-            <QuickStat
-              label="Market Status"
-              value={marketOverview?.market_status?.toUpperCase() || "—"}
-              subValue=""
-            />
-            <QuickStat
-              label="Advancing"
-              value={watchlist.filter(q => q.change >= 0).length.toString()}
-              subValue={`of ${watchlist.length}`}
-              positive
-            />
-            <QuickStat
-              label="Declining"
-              value={watchlist.filter(q => q.change < 0).length.toString()}
-              subValue={`of ${watchlist.length}`}
-            />
+      {/* Quick Stats */}
+      <div className="grid grid-cols-4 gap-4 mt-6">
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Top Gainer</span>
+            <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-green-600" />
+            </div>
           </div>
+          <div className="text-2xl font-bold text-gray-900">
+            {watchlist.length > 0 ?
+              [...watchlist].sort((a, b) => b.change_percent - a.change_percent)[0]?.symbol : "—"}
+          </div>
+          <div className="text-sm text-green-600 mt-1">
+            {watchlist.length > 0 &&
+              `+${[...watchlist].sort((a, b) => b.change_percent - a.change_percent)[0]?.change_percent?.toFixed(2)}%`}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Top Loser</span>
+            <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
+              <TrendingDown className="w-5 h-5 text-red-600" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-900">
+            {watchlist.length > 0 ?
+              [...watchlist].sort((a, b) => a.change_percent - b.change_percent)[0]?.symbol : "—"}
+          </div>
+          <div className="text-sm text-red-600 mt-1">
+            {watchlist.length > 0 &&
+              `${[...watchlist].sort((a, b) => a.change_percent - b.change_percent)[0]?.change_percent?.toFixed(2)}%`}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Advancing</span>
+            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+              <ArrowUpRight className="w-5 h-5 text-blue-600" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-900">
+            {watchlist.filter(q => q.change >= 0).length}
+          </div>
+          <div className="text-sm text-gray-500 mt-1">of {watchlist.length} stocks</div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Declining</span>
+            <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+              <ArrowDownRight className="w-5 h-5 text-orange-600" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-900">
+            {watchlist.filter(q => q.change < 0).length}
+          </div>
+          <div className="text-sm text-gray-500 mt-1">of {watchlist.length} stocks</div>
         </div>
       </div>
 
       {/* Footer */}
-      <footer className="terminal-panel mt-2 px-4 py-2">
-        <p className="text-xs text-muted-foreground text-center">
-          QUANTLAB TERMINAL | Data delayed 15 min | For educational purposes only | Not financial advice
-        </p>
-      </footer>
-    </div>
-  );
-}
-
-function QuickStat({
-  label,
-  value,
-  subValue,
-  positive,
-}: {
-  label: string;
-  value: string;
-  subValue: string;
-  positive?: boolean;
-}) {
-  return (
-    <div className="text-center">
-      <div className="text-xs text-muted-foreground mb-1">{label}</div>
-      <div className={cn(
-        "font-mono font-semibold",
-        positive ? "text-positive" : subValue.startsWith("-") ? "text-negative" : ""
-      )}>
-        {value}
+      <div className="mt-8 text-center text-sm text-gray-400">
+        Data delayed 15 min • For educational purposes only • Not financial advice
       </div>
-      {subValue && (
-        <div className={cn(
-          "text-xs font-mono",
-          positive ? "text-positive" : subValue.startsWith("-") ? "text-negative" : "text-muted-foreground"
-        )}>
-          {subValue}
-        </div>
-      )}
     </div>
   );
 }

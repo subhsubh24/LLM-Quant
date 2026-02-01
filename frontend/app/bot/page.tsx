@@ -17,15 +17,32 @@ import {
   BarChart3,
   Zap,
   Settings,
+  ArrowUpRight,
+  ArrowDownRight,
+  Pause,
+  ChevronRight,
+  Sparkles,
+  Bitcoin,
+  Building,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+interface MarketStatus {
+  is_open: boolean;
+  status: string;
+  message: string;
+  current_time_et: string;
+  next_open?: string;
+}
+
 interface BotStatus {
   is_running: boolean;
   mode: string;
   asset_class: string;
+  active_trading_mode: string;
+  market_status: MarketStatus;
   initial_capital: number;
   cash: number;
   total_value: number;
@@ -99,7 +116,6 @@ export default function BotPage() {
   const [starting, setStarting] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState<BotTrade | null>(null);
 
-  // Config state
   const [capital, setCapital] = useState("10000");
   const [mode, setMode] = useState("balanced");
   const [assetClass, setAssetClass] = useState("both");
@@ -113,9 +129,7 @@ export default function BotPage() {
         fetch(`${API_BASE}/api/bot/performance`),
       ]);
 
-      if (statusRes.ok) {
-        setStatus(await statusRes.json());
-      }
+      if (statusRes.ok) setStatus(await statusRes.json());
       if (positionsRes.ok) {
         const data = await positionsRes.json();
         setPositions(data.positions || []);
@@ -124,9 +138,7 @@ export default function BotPage() {
         const data = await tradesRes.json();
         setTrades(data.trades || []);
       }
-      if (perfRes.ok) {
-        setPerformance(await perfRes.json());
-      }
+      if (perfRes.ok) setPerformance(await perfRes.json());
     } catch (err) {
       console.error("Failed to fetch bot data:", err);
     } finally {
@@ -136,7 +148,7 @@ export default function BotPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Refresh every 5s
+    const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -147,9 +159,7 @@ export default function BotPage() {
         `${API_BASE}/api/bot/start?capital=${capital}&mode=${mode}&asset_class=${assetClass}`,
         { method: "POST" }
       );
-      if (res.ok) {
-        await fetchData();
-      }
+      if (res.ok) await fetchData();
     } catch (err) {
       console.error("Failed to start bot:", err);
     } finally {
@@ -176,363 +186,432 @@ export default function BotPage() {
   };
 
   const formatCurrency = (val: number) =>
-    `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);
 
-  const formatPct = (val: number) =>
-    `${val >= 0 ? "+" : ""}${val.toFixed(2)}%`;
+  const formatPct = (val: number) => `${val >= 0 ? "+" : ""}${val.toFixed(2)}%`;
 
   return (
-    <div className="min-h-screen bg-background p-2">
+    <div className="ml-64 min-h-screen bg-gray-50/50 p-8">
       {/* Header */}
-      <header className="terminal-panel mb-2 px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Bot className="w-5 h-5 text-bloomberg-orange" />
-          <h1 className="text-lg font-bold text-bloomberg-orange font-mono">
-            QUANT BOT
-          </h1>
-          <span
-            className={cn(
-              "text-xs px-2 py-0.5 rounded font-mono",
-              status?.is_running
-                ? "bg-positive/20 text-positive"
-                : "bg-muted text-muted-foreground"
-            )}
-          >
-            {status?.is_running ? "RUNNING" : "STOPPED"}
-          </span>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Quant Bot</h1>
+          <p className="text-gray-500 mt-1">Autonomous HFT trading with multi-factor signals</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <button
             onClick={triggerScan}
             disabled={!status?.is_running}
-            className="px-3 py-1.5 rounded bg-secondary text-sm font-mono hover:bg-secondary/80 disabled:opacity-50"
+            className="px-4 py-2 bg-white rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm border border-gray-200 disabled:opacity-50 flex items-center gap-2"
           >
-            <Zap className="w-4 h-4 inline mr-1" />
-            SCAN NOW
+            <Zap className="w-4 h-4" />
+            Scan Now
           </button>
           <button
             onClick={fetchData}
-            className="p-1.5 rounded hover:bg-secondary"
+            className="p-2 bg-white rounded-xl hover:bg-gray-50 shadow-sm border border-gray-200"
           >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            <RefreshCw className={cn("w-5 h-5 text-gray-500", loading && "animate-spin")} />
           </button>
         </div>
-      </header>
+      </div>
 
-      <div className="grid grid-cols-12 gap-2">
+      {/* Market Status Banner */}
+      {status?.market_status && (
+        <div className={cn(
+          "mb-6 p-4 rounded-2xl flex items-center justify-between",
+          status.market_status.is_open
+            ? "bg-green-50 border border-green-100"
+            : "bg-orange-50 border border-orange-100"
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "w-3 h-3 rounded-full",
+              status.market_status.is_open ? "bg-green-500 animate-pulse" : "bg-orange-500"
+            )} />
+            <div>
+              <span className={cn(
+                "font-semibold",
+                status.market_status.is_open ? "text-green-700" : "text-orange-700"
+              )}>
+                {status.market_status.status}
+              </span>
+              <span className="text-gray-600 ml-2">{status.market_status.message}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              {status.market_status.is_open ? (
+                <Building className="w-4 h-4 text-green-600" />
+              ) : (
+                <Bitcoin className="w-4 h-4 text-orange-600" />
+              )}
+              <span className="font-medium text-gray-700">
+                Active: {status.active_trading_mode}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Portfolio Value</span>
+            <div className={cn(
+              "w-10 h-10 rounded-xl flex items-center justify-center",
+              "bg-blue-50"
+            )}>
+              <DollarSign className="w-5 h-5 text-blue-600" />
+            </div>
+          </div>
+          <div className="text-3xl font-bold text-gray-900 tracking-tight">
+            {formatCurrency(status?.total_value || 0)}
+          </div>
+          <div className={cn(
+            "text-sm mt-1 flex items-center gap-1",
+            (status?.total_pnl || 0) >= 0 ? "text-green-600" : "text-red-600"
+          )}>
+            {(status?.total_pnl || 0) >= 0 ? (
+              <ArrowUpRight className="w-4 h-4" />
+            ) : (
+              <ArrowDownRight className="w-4 h-4" />
+            )}
+            {formatPct(status?.total_pnl_pct || 0)} all time
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Total P&L</span>
+            <div className={cn(
+              "w-10 h-10 rounded-xl flex items-center justify-center",
+              (status?.total_pnl || 0) >= 0 ? "bg-green-50" : "bg-red-50"
+            )}>
+              {(status?.total_pnl || 0) >= 0 ? (
+                <TrendingUp className="w-5 h-5 text-green-600" />
+              ) : (
+                <TrendingDown className="w-5 h-5 text-red-600" />
+              )}
+            </div>
+          </div>
+          <div className={cn(
+            "text-3xl font-bold tracking-tight",
+            (status?.total_pnl || 0) >= 0 ? "text-green-600" : "text-red-600"
+          )}>
+            {formatCurrency(status?.total_pnl || 0)}
+          </div>
+          <div className="text-sm text-gray-500 mt-1">
+            From {formatCurrency(status?.initial_capital || 0)}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Win Rate</span>
+            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
+              <Target className="w-5 h-5 text-purple-600" />
+            </div>
+          </div>
+          <div className="text-3xl font-bold text-gray-900 tracking-tight">
+            {performance?.win_rate?.toFixed(1) || 0}%
+          </div>
+          <div className="text-sm text-gray-500 mt-1">
+            {status?.trades_count || 0} total trades
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-sm font-medium text-gray-500">Sharpe Ratio</span>
+            <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-orange-600" />
+            </div>
+          </div>
+          <div className="text-3xl font-bold text-gray-900 tracking-tight">
+            {performance?.sharpe_ratio?.toFixed(2) || "0.00"}
+          </div>
+          <div className="text-sm text-gray-500 mt-1">
+            Max DD: {performance?.max_drawdown?.toFixed(2) || 0}%
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-12 gap-6">
         {/* Control Panel */}
-        <div className="col-span-12 lg:col-span-3 space-y-2">
-          {/* Start/Stop Controls */}
-          <div className="terminal-panel p-3">
-            <h2 className="text-sm font-semibold text-bloomberg-orange font-mono mb-3">
-              <Settings className="w-4 h-4 inline mr-1" />
-              BOT CONTROLS
-            </h2>
+        <div className="col-span-3">
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Settings className="w-5 h-5 text-gray-400" />
+                Bot Controls
+              </h2>
+            </div>
+            <div className="p-6">
+              {!status?.is_running ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Starting Capital
+                    </label>
+                    <input
+                      type="number"
+                      value={capital}
+                      onChange={(e) => setCapital(e.target.value)}
+                      className="input-field"
+                      placeholder="10000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Trading Mode
+                    </label>
+                    <select
+                      value={mode}
+                      onChange={(e) => setMode(e.target.value)}
+                      className="select-field"
+                    >
+                      <option value="aggressive">Aggressive (HFT)</option>
+                      <option value="balanced">Balanced (1-5 Days)</option>
+                      <option value="conservative">Conservative</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Asset Class
+                    </label>
+                    <select
+                      value={assetClass}
+                      onChange={(e) => setAssetClass(e.target.value)}
+                      className="select-field"
+                    >
+                      <option value="both">Stocks + Crypto (24/7)</option>
+                      <option value="stocks">Stocks Only</option>
+                      <option value="crypto">Crypto Only (24/7)</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={startBot}
+                    disabled={starting}
+                    className="w-full py-3 rounded-xl bg-gray-900 text-white font-semibold hover:bg-gray-800 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <Play className="w-5 h-5" />
+                    {starting ? "Starting..." : "Start Trading"}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-xl bg-green-50 border border-green-100">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      <span className="font-semibold text-green-700">Bot Active</span>
+                    </div>
+                    <div className="space-y-1 text-sm text-green-600">
+                      <div className="flex justify-between">
+                        <span>Mode:</span>
+                        <span className="font-medium capitalize">{status.mode}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Assets:</span>
+                        <span className="font-medium capitalize">{status.asset_class}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Interval:</span>
+                        <span className="font-medium">{status.scan_interval_seconds}s</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={stopBot}
+                    className="w-full py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 flex items-center justify-center gap-2"
+                  >
+                    <Square className="w-5 h-5" />
+                    Stop Trading
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
-            {!status?.is_running ? (
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Starting Capital
-                  </label>
-                  <input
-                    type="number"
-                    value={capital}
-                    onChange={(e) => setCapital(e.target.value)}
-                    className="command-input w-full"
-                    placeholder="10000"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Trading Mode
-                  </label>
-                  <select
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value)}
-                    className="command-input w-full"
-                  >
-                    <option value="aggressive">Aggressive (Day Trading)</option>
-                    <option value="balanced">Balanced (1-5 Days)</option>
-                    <option value="conservative">Conservative (1-4 Weeks)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Asset Class
-                  </label>
-                  <select
-                    value={assetClass}
-                    onChange={(e) => setAssetClass(e.target.value)}
-                    className="command-input w-full"
-                  >
-                    <option value="both">Stocks & Crypto</option>
-                    <option value="stocks">Stocks Only</option>
-                    <option value="crypto">Crypto Only</option>
-                  </select>
-                </div>
-                <button
-                  onClick={startBot}
-                  disabled={starting}
-                  className="w-full py-2 rounded bg-positive text-white font-mono text-sm hover:bg-positive/90 disabled:opacity-50"
-                >
-                  <Play className="w-4 h-4 inline mr-1" />
-                  {starting ? "STARTING..." : "START BOT"}
-                </button>
+          {/* Cash Balance */}
+          <div className="bg-white rounded-2xl shadow-sm p-6 mt-4">
+            <h3 className="text-sm font-medium text-gray-500 mb-4">Cash Available</h3>
+            <div className="text-2xl font-bold text-gray-900">
+              {formatCurrency(status?.cash || 0)}
+            </div>
+            <div className="mt-4 h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full"
+                style={{
+                  width: `${((status?.cash || 0) / (status?.total_value || 1)) * 100}%`,
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-gray-500 mt-2">
+              <span>Invested</span>
+              <span>Cash</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Positions & Trades */}
+        <div className="col-span-9 space-y-6">
+          {/* Active Positions */}
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Target className="w-5 h-5 text-gray-400" />
+                Active Positions
+                <span className="ml-2 px-2 py-0.5 bg-gray-100 text-gray-600 text-sm rounded-full">
+                  {positions.length}
+                </span>
+              </h2>
+            </div>
+            {positions.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Asset</th>
+                      <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Quantity</th>
+                      <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Entry</th>
+                      <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Current</th>
+                      <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">P&L</th>
+                      <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider py-3 px-6">Stop / Target</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {positions.map((pos) => (
+                      <tr key={pos.symbol} className="hover:bg-gray-50">
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "w-10 h-10 rounded-xl flex items-center justify-center",
+                              pos.asset_class === "crypto" ? "bg-orange-100" : "bg-blue-100"
+                            )}>
+                              {pos.asset_class === "crypto" ? (
+                                <Bitcoin className="w-5 h-5 text-orange-600" />
+                              ) : (
+                                <Building className="w-5 h-5 text-blue-600" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-gray-900">{pos.symbol}</div>
+                              <div className="text-xs text-gray-500 capitalize">{pos.asset_class}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-right font-mono text-gray-900">
+                          {pos.quantity.toFixed(4)}
+                        </td>
+                        <td className="py-4 px-6 text-right font-mono text-gray-500">
+                          {formatCurrency(pos.entry_price)}
+                        </td>
+                        <td className="py-4 px-6 text-right font-mono text-gray-900">
+                          {formatCurrency(pos.current_price)}
+                        </td>
+                        <td className="py-4 px-6 text-right">
+                          <div className={cn(
+                            "font-semibold",
+                            pos.unrealized_pnl >= 0 ? "text-green-600" : "text-red-600"
+                          )}>
+                            {formatCurrency(pos.unrealized_pnl)}
+                          </div>
+                          <div className={cn(
+                            "text-xs",
+                            pos.unrealized_pnl >= 0 ? "text-green-500" : "text-red-500"
+                          )}>
+                            {formatPct(pos.unrealized_pnl_pct)}
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 text-right text-sm">
+                          <span className="text-red-500">{formatCurrency(pos.stop_loss_price)}</span>
+                          <span className="text-gray-400 mx-1">/</span>
+                          <span className="text-green-500">{formatCurrency(pos.take_profit_price)}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="p-2 rounded bg-secondary/30 text-xs">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-muted-foreground">Mode:</span>
-                    <span className="font-mono uppercase">{status.mode}</span>
-                  </div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-muted-foreground">Assets:</span>
-                    <span className="font-mono uppercase">{status.asset_class}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Scan Interval:</span>
-                    <span className="font-mono">{status.scan_interval_seconds}s</span>
-                  </div>
+              <div className="p-12 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+                  <Target className="w-8 h-8 text-gray-400" />
                 </div>
-                <button
-                  onClick={stopBot}
-                  className="w-full py-2 rounded bg-negative text-white font-mono text-sm hover:bg-negative/90"
-                >
-                  <Square className="w-4 h-4 inline mr-1" />
-                  STOP BOT
-                </button>
+                <h3 className="text-lg font-medium text-gray-900 mb-1">No Active Positions</h3>
+                <p className="text-gray-500 text-sm">Start the bot to begin trading automatically</p>
               </div>
             )}
           </div>
 
-          {/* Portfolio Summary */}
-          <div className="terminal-panel p-3">
-            <h2 className="text-sm font-semibold text-bloomberg-orange font-mono mb-3">
-              <DollarSign className="w-4 h-4 inline mr-1" />
-              PORTFOLIO
-            </h2>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Initial:</span>
-                <span className="font-mono">{formatCurrency(status?.initial_capital || 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Current:</span>
-                <span className="font-mono">{formatCurrency(status?.total_value || 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Cash:</span>
-                <span className="font-mono">{formatCurrency(status?.cash || 0)}</span>
-              </div>
-              <div className="border-t border-border pt-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">P&L:</span>
-                  <span
-                    className={cn(
-                      "font-mono",
-                      (status?.total_pnl || 0) >= 0 ? "text-positive" : "text-negative"
-                    )}
-                  >
-                    {formatCurrency(status?.total_pnl || 0)} ({formatPct(status?.total_pnl_pct || 0)})
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Performance Metrics */}
-          {performance && !performance.error && (
-            <div className="terminal-panel p-3">
-              <h2 className="text-sm font-semibold text-bloomberg-orange font-mono mb-3">
-                <BarChart3 className="w-4 h-4 inline mr-1" />
-                PERFORMANCE
-              </h2>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">Return</div>
-                  <div
-                    className={cn(
-                      "font-mono text-sm",
-                      performance.total_return >= 0 ? "text-positive" : "text-negative"
-                    )}
-                  >
-                    {formatPct(performance.total_return)}
-                  </div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">Sharpe</div>
-                  <div className="font-mono text-sm">{performance.sharpe_ratio.toFixed(2)}</div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">Win Rate</div>
-                  <div className="font-mono text-sm">{performance.win_rate.toFixed(1)}%</div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground">Max DD</div>
-                  <div className="font-mono text-sm text-negative">
-                    {performance.max_drawdown.toFixed(2)}%
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Main Content */}
-        <div className="col-span-12 lg:col-span-9 space-y-2">
-          {/* Positions */}
-          <div className="terminal-panel">
-            <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-bloomberg-orange font-mono">
-                <Target className="w-4 h-4 inline mr-1" />
-                ACTIVE POSITIONS ({positions.length})
-              </h2>
-            </div>
-            <div className="overflow-x-auto">
-              {positions.length > 0 ? (
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Symbol</th>
-                      <th>Type</th>
-                      <th className="text-right">Qty</th>
-                      <th className="text-right">Entry</th>
-                      <th className="text-right">Current</th>
-                      <th className="text-right">P&L</th>
-                      <th className="text-right">Stop</th>
-                      <th className="text-right">Target</th>
-                      <th>Holding</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {positions.map((pos) => (
-                      <tr key={pos.symbol}>
-                        <td className="font-semibold">{pos.symbol}</td>
-                        <td>
-                          <span
-                            className={cn(
-                              "text-xs px-1.5 py-0.5 rounded",
-                              pos.asset_class === "crypto"
-                                ? "bg-yellow-500/20 text-yellow-500"
-                                : "bg-blue-500/20 text-blue-500"
-                            )}
-                          >
-                            {pos.asset_class.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="text-right font-mono">{pos.quantity.toFixed(4)}</td>
-                        <td className="text-right font-mono">${pos.entry_price.toFixed(2)}</td>
-                        <td className="text-right font-mono">${pos.current_price.toFixed(2)}</td>
-                        <td
-                          className={cn(
-                            "text-right font-mono",
-                            pos.unrealized_pnl >= 0 ? "text-positive" : "text-negative"
-                          )}
-                        >
-                          {formatCurrency(pos.unrealized_pnl)}
-                          <br />
-                          <span className="text-xs">{formatPct(pos.unrealized_pnl_pct)}</span>
-                        </td>
-                        <td className="text-right font-mono text-negative">
-                          ${pos.stop_loss_price.toFixed(2)}
-                        </td>
-                        <td className="text-right font-mono text-positive">
-                          ${pos.take_profit_price.toFixed(2)}
-                        </td>
-                        <td className="text-xs text-muted-foreground">{pos.holding_period}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="p-8 text-center text-muted-foreground">
-                  No active positions
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* Recent Trades */}
-          <div className="terminal-panel">
-            <div className="px-3 py-2 border-b border-border">
-              <h2 className="text-sm font-semibold text-bloomberg-orange font-mono">
-                <Activity className="w-4 h-4 inline mr-1" />
-                RECENT TRADES
+          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Activity className="w-5 h-5 text-gray-400" />
+                Recent Trades
               </h2>
             </div>
-            <div className="overflow-x-auto max-h-[400px]">
-              {trades.length > 0 ? (
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Symbol</th>
-                      <th>Side</th>
-                      <th className="text-right">Qty</th>
-                      <th className="text-right">Price</th>
-                      <th className="text-right">Value</th>
-                      <th className="text-right">P&L</th>
-                      <th>Reason</th>
-                      <th>Confidence</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trades.map((trade) => (
-                      <tr
-                        key={trade.id}
-                        className="cursor-pointer hover:bg-secondary/50"
-                        onClick={() => setSelectedTrade(trade)}
-                      >
-                        <td className="text-xs text-muted-foreground">
-                          {new Date(trade.timestamp).toLocaleTimeString()}
-                        </td>
-                        <td className="font-semibold">{trade.symbol}</td>
-                        <td>
-                          <span
-                            className={cn(
-                              "text-xs px-1.5 py-0.5 rounded font-mono",
-                              trade.side === "BUY"
-                                ? "bg-positive/20 text-positive"
-                                : "bg-negative/20 text-negative"
-                            )}
-                          >
+            {trades.length > 0 ? (
+              <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                {trades.map((trade) => (
+                  <div
+                    key={trade.id}
+                    className="p-4 hover:bg-gray-50 cursor-pointer flex items-center justify-between"
+                    onClick={() => setSelectedTrade(trade)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center",
+                        trade.side === "BUY" ? "bg-green-100" : "bg-red-100"
+                      )}>
+                        {trade.side === "BUY" ? (
+                          <ArrowUpRight className="w-5 h-5 text-green-600" />
+                        ) : (
+                          <ArrowDownRight className="w-5 h-5 text-red-600" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-gray-900">{trade.symbol}</span>
+                          <span className={cn(
+                            "px-2 py-0.5 text-xs font-medium rounded-full",
+                            trade.side === "BUY" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                          )}>
                             {trade.side}
                           </span>
-                        </td>
-                        <td className="text-right font-mono">{trade.quantity.toFixed(4)}</td>
-                        <td className="text-right font-mono">${trade.price.toFixed(2)}</td>
-                        <td className="text-right font-mono">${trade.value.toFixed(2)}</td>
-                        <td
-                          className={cn(
-                            "text-right font-mono",
-                            trade.pnl >= 0 ? "text-positive" : "text-negative"
-                          )}
-                        >
-                          {trade.pnl !== 0 ? formatCurrency(trade.pnl) : "-"}
-                        </td>
-                        <td className="text-xs max-w-[200px] truncate">
+                        </div>
+                        <div className="text-sm text-gray-500 truncate max-w-md">
                           {trade.rationale.primary_reason}
-                        </td>
-                        <td>
-                          <div className="w-16 h-2 bg-secondary rounded overflow-hidden">
-                            <div
-                              className="h-full bg-bloomberg-orange"
-                              style={{ width: `${trade.rationale.confidence * 100}%` }}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="p-8 text-center text-muted-foreground">
-                  No trades yet
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-gray-900">{formatCurrency(trade.value)}</div>
+                      {trade.pnl !== 0 && (
+                        <div className={cn(
+                          "text-sm",
+                          trade.pnl >= 0 ? "text-green-600" : "text-red-600"
+                        )}>
+                          {formatCurrency(trade.pnl)}
+                        </div>
+                      )}
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-12 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+                  <Activity className="w-8 h-8 text-gray-400" />
                 </div>
-              )}
-            </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-1">No Trades Yet</h3>
+                <p className="text-gray-500 text-sm">Trades will appear here once the bot executes them</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -540,123 +619,97 @@ export default function BotPage() {
       {/* Trade Detail Modal */}
       {selectedTrade && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
           onClick={() => setSelectedTrade(null)}
         >
           <div
-            className="terminal-panel w-full max-w-2xl max-h-[80vh] overflow-y-auto m-4"
+            className="bg-white rounded-3xl w-full max-w-xl max-h-[80vh] overflow-y-auto m-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-              <h3 className="text-lg font-bold text-bloomberg-orange font-mono">
-                TRADE RATIONALE
-              </h3>
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-12 h-12 rounded-xl flex items-center justify-center",
+                  selectedTrade.side === "BUY" ? "bg-green-100" : "bg-red-100"
+                )}>
+                  {selectedTrade.side === "BUY" ? (
+                    <ArrowUpRight className="w-6 h-6 text-green-600" />
+                  ) : (
+                    <ArrowDownRight className="w-6 h-6 text-red-600" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">{selectedTrade.symbol}</h3>
+                  <p className="text-sm text-gray-500">{selectedTrade.side} • {formatCurrency(selectedTrade.value)}</p>
+                </div>
+              </div>
               <button
                 onClick={() => setSelectedTrade(null)}
-                className="text-muted-foreground hover:text-foreground"
+                className="p-2 hover:bg-gray-100 rounded-xl"
               >
-                &times;
+                <span className="text-2xl text-gray-400">&times;</span>
               </button>
             </div>
-            <div className="p-4 space-y-4">
-              {/* Trade Summary */}
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground text-xs">Symbol</div>
-                  <div className="font-mono font-bold">{selectedTrade.symbol}</div>
+            <div className="p-6 space-y-6">
+              <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-5 h-5 text-blue-600" />
+                  <span className="font-semibold text-blue-700">AI Rationale</span>
                 </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground text-xs">Action</div>
-                  <div
-                    className={cn(
-                      "font-mono font-bold",
-                      selectedTrade.side === "BUY" ? "text-positive" : "text-negative"
-                    )}
-                  >
-                    {selectedTrade.side}
-                  </div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-muted-foreground text-xs">Value</div>
-                  <div className="font-mono">${selectedTrade.value.toFixed(2)}</div>
-                </div>
+                <p className="text-blue-800">{selectedTrade.rationale.primary_reason}</p>
               </div>
 
-              {/* Primary Reason */}
-              <div className="p-3 rounded bg-bloomberg-orange/10 border border-bloomberg-orange/30">
-                <div className="text-xs text-bloomberg-orange mb-1">PRIMARY REASON</div>
-                <div className="font-medium">{selectedTrade.rationale.primary_reason}</div>
-              </div>
-
-              {/* Factors */}
               <div>
-                <div className="text-xs text-muted-foreground mb-2">FACTOR SCORES</div>
-                <div className="grid grid-cols-2 gap-2">
+                <h4 className="text-sm font-medium text-gray-500 mb-3">Factor Scores</h4>
+                <div className="space-y-2">
                   {Object.entries(selectedTrade.rationale.factors).map(([key, value]) => (
-                    <div key={key} className="flex items-center gap-2 text-sm">
-                      <span className="text-muted-foreground capitalize">
-                        {key.replace(/_/g, " ")}:
-                      </span>
-                      <span
-                        className={cn(
-                          "font-mono",
-                          value > 0 ? "text-positive" : value < 0 ? "text-negative" : ""
-                        )}
-                      >
-                        {value > 0 ? "+" : ""}
-                        {value.toFixed(3)}
-                      </span>
+                    <div key={key} className="flex items-center justify-between">
+                      <span className="text-gray-600 capitalize">{key.replace(/_/g, " ")}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full rounded-full",
+                              value > 0 ? "bg-green-500" : "bg-red-500"
+                            )}
+                            style={{ width: `${Math.abs(value) * 100}%` }}
+                          />
+                        </div>
+                        <span className={cn(
+                          "font-mono text-sm w-12 text-right",
+                          value > 0 ? "text-green-600" : "text-red-600"
+                        )}>
+                          {value > 0 ? "+" : ""}{value.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Signal Summary */}
-              <div className="p-2 rounded bg-secondary/30 text-sm">
-                <div className="text-xs text-muted-foreground mb-1">SIGNALS</div>
-                <div className="font-mono">{selectedTrade.rationale.signals_summary}</div>
-              </div>
-
-              {/* Risk */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-xs text-muted-foreground mb-1">RISK ASSESSMENT</div>
-                  <div>{selectedTrade.rationale.risk_assessment}</div>
-                </div>
-                <div className="p-2 rounded bg-secondary/30">
-                  <div className="text-xs text-muted-foreground mb-1">EXPECTED</div>
-                  <div>Return: {selectedTrade.rationale.expected_return}</div>
-                  <div>Period: {selectedTrade.rationale.expected_holding_period}</div>
-                </div>
-              </div>
-
-              {/* Confidence Bar */}
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-muted-foreground">CONFIDENCE</span>
-                  <span className="font-mono">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-gray-50">
+                  <div className="text-sm text-gray-500 mb-1">Confidence</div>
+                  <div className="text-2xl font-bold text-gray-900">
                     {(selectedTrade.rationale.confidence * 100).toFixed(0)}%
-                  </span>
+                  </div>
                 </div>
-                <div className="w-full h-3 bg-secondary rounded overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-negative via-yellow-500 to-positive"
-                    style={{ width: `${selectedTrade.rationale.confidence * 100}%` }}
-                  />
+                <div className="p-4 rounded-xl bg-gray-50">
+                  <div className="text-sm text-gray-500 mb-1">Expected Return</div>
+                  <div className="text-2xl font-bold text-green-600">
+                    {selectedTrade.rationale.expected_return}
+                  </div>
                 </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-gray-50">
+                <div className="text-sm text-gray-500 mb-1">Risk Assessment</div>
+                <p className="text-gray-700">{selectedTrade.rationale.risk_assessment}</p>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Footer */}
-      <footer className="terminal-panel mt-2 px-4 py-2">
-        <p className="text-xs text-muted-foreground text-center">
-          AUTONOMOUS PAPER TRADING | Renaissance Technologies-Style Multi-Factor Signals | NOT
-          FINANCIAL ADVICE
-        </p>
-      </footer>
     </div>
   );
 }

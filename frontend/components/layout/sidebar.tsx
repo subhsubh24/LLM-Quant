@@ -8,28 +8,25 @@ import {
   TrendingUp,
   BarChart3,
   GraduationCap,
-  Terminal,
+  Cpu,
   Brain,
   Layers,
   Bitcoin,
-  Globe,
-  Coins,
+  Sparkles,
+  Wallet,
+  Activity,
+  Bot,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const stocksNavigation = [
-  { name: "Terminal", href: "/dashboard", icon: Terminal },
+const navigation = [
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Trading", href: "/trading", icon: TrendingUp },
-  { name: "Options", href: "/options", icon: Layers },
-  { name: "Quant Bot", href: "/bot", icon: Brain },
-];
-
-const cryptoNavigation = [
   { name: "Crypto", href: "/crypto", icon: Bitcoin },
-];
-
-const commonNavigation = [
-  { name: "AI Insights", href: "/insights", icon: Brain },
+  { name: "Quant Bot", href: "/bot", icon: Bot },
+  { name: "Options", href: "/options", icon: Layers },
+  { name: "AI Insights", href: "/insights", icon: Sparkles },
   { name: "Research", href: "/research", icon: FlaskConical },
   { name: "Analytics", href: "/performance", icon: BarChart3 },
   { name: "Learn", href: "/learn", icon: GraduationCap },
@@ -38,94 +35,87 @@ const commonNavigation = [
 export function Sidebar() {
   const pathname = usePathname();
 
-  const NavLink = ({ item }: { item: { name: string; href: string; icon: any } }) => {
-    const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-    return (
-      <Link
-        href={item.href}
-        className={cn(
-          "flex items-center gap-2 px-3 py-2 rounded text-xs font-medium font-mono uppercase tracking-wide transition-colors",
-          isActive
-            ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-        )}
-      >
-        <item.icon className="w-4 h-4" />
-        {item.name}
-      </Link>
-    );
-  };
-
   return (
-    <aside className="w-56 border-r border-border bg-card flex flex-col">
+    <aside className="fixed left-0 top-0 h-screen w-64 bg-white border-r border-gray-100 flex flex-col z-40">
       {/* Logo */}
-      <div className="h-12 flex items-center px-4 border-b border-border">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded bg-bloomberg-orange flex items-center justify-center">
-            <span className="text-background font-bold text-xs font-mono">QL</span>
+      <div className="h-16 flex items-center px-6">
+        <Link href="/dashboard" className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <Activity className="w-5 h-5 text-white" />
           </div>
-          <span className="font-bold text-sm font-mono text-bloomberg-orange">QUANTLAB</span>
+          <div>
+            <span className="font-semibold text-gray-900 text-lg">QuantLab</span>
+            <span className="block text-[10px] text-gray-400 font-medium -mt-0.5">HFT Trading</span>
+          </div>
         </Link>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 space-y-3 overflow-y-auto">
-        {/* Stocks Section */}
-        <div>
-          <div className="px-3 py-1.5 text-[10px] font-semibold text-bloomberg-orange font-mono tracking-wider flex items-center gap-1.5">
-            <TrendingUp className="w-3 h-3" />
-            STOCKS
-          </div>
-          <div className="space-y-0.5">
-            {stocksNavigation.map((item) => (
-              <NavLink key={item.name} item={item} />
-            ))}
-          </div>
-        </div>
-
-        {/* Crypto Section */}
-        <div>
-          <div className="px-3 py-1.5 text-[10px] font-semibold text-yellow-500 font-mono tracking-wider flex items-center gap-1.5">
-            <Bitcoin className="w-3 h-3" />
-            CRYPTO
-          </div>
-          <div className="space-y-0.5">
-            {cryptoNavigation.map((item) => (
-              <NavLink key={item.name} item={item} />
-            ))}
-          </div>
-        </div>
-
-        {/* Common Section */}
-        <div>
-          <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground font-mono tracking-wider flex items-center gap-1.5">
-            <Globe className="w-3 h-3" />
-            TOOLS
-          </div>
-          <div className="space-y-0.5">
-            {commonNavigation.map((item) => (
-              <NavLink key={item.name} item={item} />
-            ))}
-          </div>
+      <nav className="flex-1 px-3 py-4 overflow-y-auto">
+        <div className="space-y-1">
+          {navigation.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all",
+                  isActive
+                    ? "bg-gray-900 text-white shadow-lg"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                )}
+              >
+                <item.icon className={cn("w-5 h-5", isActive ? "text-white" : "text-gray-400")} />
+                <span className="text-sm">{item.name}</span>
+                {item.name === "Quant Bot" && (
+                  <span className={cn(
+                    "ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                    isActive ? "bg-white/20 text-white" : "bg-green-50 text-green-600"
+                  )}>
+                    LIVE
+                  </span>
+                )}
+                {item.name === "Crypto" && (
+                  <span className={cn(
+                    "ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                    isActive ? "bg-white/20 text-white" : "bg-orange-50 text-orange-600"
+                  )}>
+                    24/7
+                  </span>
+                )}
+              </Link>
+            );
+          })}
         </div>
       </nav>
 
-      {/* Status */}
-      <div className="p-3 border-t border-border">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <div className="w-2 h-2 rounded-full bg-positive animate-pulse" />
-          <span className="font-mono">CONNECTED</span>
+      {/* Market Status */}
+      <div className="px-4 py-3">
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-2 h-2 rounded-full bg-green-500 shadow-lg shadow-green-500/50 animate-pulse" />
+            <span className="text-xs font-semibold text-gray-600">MARKETS LIVE</span>
+          </div>
+          <p className="text-[11px] text-gray-500 leading-relaxed">
+            Paper trading mode active. Real-time market data connected.
+          </p>
         </div>
       </div>
 
-      {/* Disclaimer */}
-      <div className="px-3 pb-3">
-        <div className="p-2 rounded bg-secondary/50 border border-border">
-          <p className="text-[10px] text-muted-foreground leading-tight font-mono">
-            PAPER TRADING ONLY
-            <br />
-            NOT FINANCIAL ADVICE
-          </p>
+      {/* User Profile */}
+      <div className="px-4 py-4 border-t border-gray-100">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+            <span className="text-white font-semibold text-sm">Q</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 truncate">Quant Trader</p>
+            <p className="text-xs text-gray-500">Paper Account</p>
+          </div>
+          <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <Settings className="w-4 h-4 text-gray-400" />
+          </button>
         </div>
       </div>
     </aside>

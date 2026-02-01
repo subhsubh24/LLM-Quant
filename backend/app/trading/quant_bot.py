@@ -14,15 +14,71 @@ Paper trading only - for educational purposes.
 import asyncio
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from enum import Enum
 import numpy as np
 import pandas as pd
 import logging
 import uuid
+import pytz
 
 logger = logging.getLogger(__name__)
 import json
+
+
+def is_market_open() -> bool:
+    """Check if US stock market is currently open."""
+    eastern = pytz.timezone('US/Eastern')
+    now = datetime.now(eastern)
+
+    # Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday
+    market_open = time(9, 30)
+    market_close = time(16, 0)
+
+    # Check if it's a weekday
+    if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+
+    current_time = now.time()
+    return market_open <= current_time <= market_close
+
+
+def get_market_status() -> Dict[str, Any]:
+    """Get detailed market status information."""
+    eastern = pytz.timezone('US/Eastern')
+    now = datetime.now(eastern)
+    is_open = is_market_open()
+
+    if is_open:
+        market_close = now.replace(hour=16, minute=0, second=0)
+        time_to_close = (market_close - now).total_seconds() / 3600
+        return {
+            "is_open": True,
+            "status": "OPEN",
+            "message": f"Market open - {time_to_close:.1f}h until close",
+            "current_time_et": now.strftime("%H:%M ET"),
+        }
+    else:
+        # Calculate next open
+        next_open = now.replace(hour=9, minute=30, second=0)
+        if now.time() > time(16, 0) or now.weekday() >= 5:
+            days_ahead = 1
+            if now.weekday() == 4:  # Friday after close
+                days_ahead = 3
+            elif now.weekday() == 5:  # Saturday
+                days_ahead = 2
+            elif now.weekday() == 6:  # Sunday
+                days_ahead = 1
+            next_open = next_open + timedelta(days=days_ahead)
+
+        time_to_open = (next_open - now).total_seconds() / 3600
+        return {
+            "is_open": False,
+            "status": "CLOSED",
+            "message": f"Market closed - {time_to_open:.1f}h until open",
+            "current_time_et": now.strftime("%H:%M ET"),
+            "next_open": next_open.strftime("%Y-%m-%d %H:%M ET"),
+        }
 
 from ..config import get_settings
 from ..signals.engine import SignalEngine, StockSignal, PortfolioSignals, get_signal_engine
@@ -285,9 +341,13 @@ class QuantBot:
         logger.info("QuantBot STOPPED")
 
     async def _run_trading_cycle(self):
-        """Execute one complete trading cycle."""
+        """Execute one complete trading cycle with smart market detection."""
         logger.debug("Running trading cycle...")
         self.last_scan_time = datetime.now()
+
+        # Check market status
+        market_status = get_market_status()
+        market_open = market_status["is_open"]
 
         # 1. Update all positions with current prices
         await self._update_positions()
@@ -295,18 +355,38 @@ class QuantBot:
         # 2. Check risk limits (stop loss, take profit)
         await self._check_risk_limits()
 
-        # 3. Scan for new opportunities
-        if self.asset_class in [AssetClass.STOCKS, AssetClass.BOTH]:
-            await self._scan_stocks()
+        # 3. Scan for new opportunities based on market hours
+        # If market is closed AND we're set to trade both, focus on crypto
+        if self.asset_class == AssetClass.STOCKS:
+            if market_open:
+                await self._scan_stocks()
+            else:
+                logger.info(f"Stock market CLOSED - {market_status['message']}")
 
-        if self.asset_class in [AssetClass.CRYPTO, AssetClass.BOTH]:
+        elif self.asset_class == AssetClass.CRYPTO:
+            # Crypto trades 24/7
             await self._scan_crypto()
+
+        elif self.asset_class == AssetClass.BOTH:
+            # Smart switching: trade stocks when open, crypto always (more aggressively when stocks closed)
+            if market_open:
+                await self._scan_stocks()
+                await self._scan_crypto()
+            else:
+                # Market closed - focus entirely on crypto (24/7 market)
+                logger.info(f"Stock market CLOSED - Switching to CRYPTO ONLY mode")
+                await self._scan_crypto()
+                # Do a more aggressive crypto scan when stocks are closed
+                await self._scan_crypto()  # Double scan for more opportunities
 
         # 4. Execute pending signals
         await self._execute_signals()
 
         # 5. Update equity curve
         self.equity_curve.append((datetime.now(), self.total_value))
+
+        # 6. Store market status
+        self.market_status = market_status
 
     async def _update_positions(self):
         """Update all position prices."""
@@ -799,11 +879,24 @@ class QuantBot:
         return True
 
     def get_status(self) -> Dict[str, Any]:
-        """Get current bot status."""
+        """Get current bot status with market information."""
+        market_status = get_market_status()
+
+        # Determine active trading mode
+        if self.asset_class == AssetClass.BOTH:
+            if market_status["is_open"]:
+                active_mode = "STOCKS + CRYPTO"
+            else:
+                active_mode = "CRYPTO ONLY (Market Closed)"
+        else:
+            active_mode = self.asset_class.value.upper()
+
         return {
             "is_running": self.is_running,
             "mode": self.mode.value,
             "asset_class": self.asset_class.value,
+            "active_trading_mode": active_mode,
+            "market_status": market_status,
             "initial_capital": self.initial_capital,
             "cash": round(self.cash, 2),
             "total_value": round(self.total_value, 2),
