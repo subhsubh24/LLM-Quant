@@ -92,12 +92,12 @@ class IVAnalysis:
     def to_dict(self) -> Dict:
         return {
             "symbol": self.symbol,
-            "current_iv": round(self.current_iv * 100, 1),
-            "iv_rank": round(self.iv_rank, 1),
-            "iv_percentile": round(self.iv_percentile, 1),
-            "iv_30_day_avg": round(self.iv_30_day_avg * 100, 1),
+            "current_iv": round(safe_float(self.current_iv * 100), 1),
+            "iv_rank": round(safe_float(self.iv_rank), 1),
+            "iv_percentile": round(safe_float(self.iv_percentile), 1),
+            "iv_30_day_avg": round(safe_float(self.iv_30_day_avg * 100), 1),
             "iv_trend": self.iv_trend,
-            "hv_iv_spread": round(self.hv_iv_spread * 100, 1),
+            "hv_iv_spread": round(safe_float(self.hv_iv_spread * 100), 1),
             "is_high_iv": self.is_high_iv,
             "premium_selling_favorable": self.premium_selling_favorable,
         }

@@ -966,10 +966,11 @@ class TransformerPredictor:
             x = self.layer_norms[i][0].forward(x + attn_out)
 
             # Feed-forward with residual
-            ff_out = x
+            # Flatten to (batch*seq, d_model), pass through both ff_layers, then reshape back
+            ff_out = x.reshape(-1, self.d_model)
             for ff_layer in self.ff_layers[i]:
-                ff_out = ff_layer.forward(ff_out.reshape(-1, self.d_model))
-                ff_out = ff_out.reshape(batch_size, seq_len, self.d_model)
+                ff_out = ff_layer.forward(ff_out)
+            ff_out = ff_out.reshape(batch_size, seq_len, self.d_model)
             x = self.layer_norms[i][1].forward(x + ff_out)
 
         # Take last position for prediction
@@ -980,7 +981,14 @@ class TransformerPredictor:
 
     def predict(self, x: np.ndarray) -> float:
         """Predict next return."""
-        return float(self.forward(x).flatten()[0])
+        try:
+            result = float(self.forward(x).flatten()[0])
+            # Handle NaN/Inf
+            if np.isnan(result) or np.isinf(result):
+                return 0.0
+            return result
+        except Exception:
+            return 0.0
 
 
 # =============================================================================

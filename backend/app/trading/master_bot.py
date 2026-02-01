@@ -408,21 +408,29 @@ class QuantAnalyticsEngine:
         # LSTM prediction (if we have history)
         lstm_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
-            self.lstm.reset_state()
-            returns = self.return_history[symbol][-60:]
-            # Reshape for LSTM: (seq_len, features)
-            lstm_input = returns.reshape(-1, 1)
-            lstm_input = np.pad(lstm_input, ((0, 0), (0, 15)), mode='constant')
-            lstm_out = self.lstm.forward(lstm_input)
-            lstm_pred = float(lstm_out[0, -1, 0])
+            try:
+                self.lstm.reset_state()
+                returns = self.return_history[symbol][-60:]
+                # Reshape for LSTM: (seq_len, features)
+                lstm_input = returns.reshape(-1, 1)
+                lstm_input = np.pad(lstm_input, ((0, 0), (0, 15)), mode='constant')
+                lstm_out = self.lstm.forward(lstm_input)
+                lstm_pred = float(lstm_out[0, -1, 0])
+                if np.isnan(lstm_pred) or np.isinf(lstm_pred):
+                    lstm_pred = 0.0
+            except Exception:
+                lstm_pred = 0.0
 
         # Transformer prediction
         transformer_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
-            returns = self.return_history[symbol][-60:]
-            transformer_input = returns.reshape(-1, 1)
-            transformer_input = np.pad(transformer_input, ((0, 0), (0, 15)), mode='constant')
-            transformer_pred = self.transformer.predict(transformer_input)
+            try:
+                returns = self.return_history[symbol][-60:]
+                transformer_input = returns.reshape(-1, 1)
+                transformer_input = np.pad(transformer_input, ((0, 0), (0, 15)), mode='constant')
+                transformer_pred = self.transformer.predict(transformer_input)
+            except Exception:
+                transformer_pred = 0.0
 
         # Regime detection
         regime = "Unknown"
