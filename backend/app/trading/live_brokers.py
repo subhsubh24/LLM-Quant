@@ -306,18 +306,26 @@ class BinanceBroker:
     FUTURES_BASE_URL = "https://fapi.binance.com"
     TESTNET_SPOT_URL = "https://testnet.binance.vision"
     TESTNET_FUTURES_URL = "https://testnet.binancefuture.com"
+    # Binance.US endpoints (for US users)
+    US_SPOT_URL = "https://api.binance.us"
 
     def __init__(
         self,
         api_key: str,
         api_secret: str,
         testnet: bool = True,
+        use_us: bool = False,
     ):
         self.api_key = api_key
         self.api_secret = api_secret
         self.testnet = testnet
+        self.use_us = use_us
 
-        if testnet:
+        if use_us:
+            # Binance.US (no testnet available)
+            self.spot_url = self.US_SPOT_URL
+            self.futures_url = None  # Binance.US doesn't support futures
+        elif testnet:
             self.spot_url = self.TESTNET_SPOT_URL
             self.futures_url = self.TESTNET_FUTURES_URL
         else:
@@ -327,7 +335,8 @@ class BinanceBroker:
         self._session = None
         self._connected = False
 
-        logger.info(f"BinanceBroker initialized: {'TESTNET' if testnet else 'LIVE'} mode")
+        mode = "US" if use_us else ("TESTNET" if testnet else "LIVE")
+        logger.info(f"BinanceBroker initialized: {mode} mode")
 
     def _sign(self, params: Dict) -> str:
         """Sign request parameters."""
@@ -662,6 +671,7 @@ class BrokerManager:
         api_key: str,
         api_secret: str,
         is_paper: bool = True,
+        additional_config: Dict[str, Any] = None,
     ):
         """Set credentials for a broker."""
         self.credentials[broker] = BrokerCredentials(
@@ -669,6 +679,7 @@ class BrokerManager:
             api_key=api_key,
             api_secret=api_secret,
             is_paper=is_paper,
+            additional_config=additional_config or {},
         )
         logger.info(f"Credentials set for {broker.value}: {'PAPER' if is_paper else 'LIVE'}")
 
@@ -687,10 +698,12 @@ class BrokerManager:
 
         if BrokerType.BINANCE in self.credentials:
             creds = self.credentials[BrokerType.BINANCE]
+            use_us = creds.additional_config.get("use_us", False)
             self.binance = BinanceBroker(
                 api_key=creds.api_key,
                 api_secret=creds.api_secret,
                 testnet=creds.is_paper,
+                use_us=use_us,
             )
             results["binance"] = await self.binance.connect()
 
@@ -840,13 +853,16 @@ async def auto_initialize_brokers() -> Dict[str, Any]:
     # Setup Binance if keys are configured
     if settings.has_binance_keys:
         try:
+            use_us = getattr(settings, 'binance_us_mode', False)
             manager.set_credentials(
                 broker=BrokerType.BINANCE,
                 api_key=settings.binance_api_key,
                 api_secret=settings.binance_api_secret,
                 is_paper=settings.binance_testnet_mode,
+                additional_config={"use_us": use_us},
             )
-            logger.info(f"Binance credentials configured (testnet={settings.binance_testnet_mode})")
+            mode_str = "US" if use_us else f"testnet={settings.binance_testnet_mode}"
+            logger.info(f"Binance credentials configured ({mode_str})")
             results["binance"] = "configured"
         except Exception as e:
             logger.error(f"Failed to configure Binance: {e}")

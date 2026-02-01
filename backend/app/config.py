@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_api_secret: str = ""
     binance_testnet_mode: bool = True  # True = testnet, False = live
+    binance_us_mode: bool = False  # True = use Binance.US (for US users)
 
     # Auto-connect to brokers on startup
     auto_connect_brokers: bool = True
