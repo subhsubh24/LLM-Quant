@@ -16,6 +16,10 @@ from .quant_bot import (
     QuantBot, TradingMode, AssetClass, BotTrade, BotPosition,
     TradeRationale, get_quant_bot, run_bot
 )
+from .options_bot import (
+    OptionsQuantBot, OptionsMode, OptionsPosition, OptionsTrade,
+    IVAnalysis, OptionsRiskManager, get_options_bot, create_options_bot
+)
 
 __all__ = [
     "Order", "OrderType", "OrderSide", "OrderStatus", "TimeInForce",
@@ -26,4 +30,7 @@ __all__ = [
     "BlackScholes", "OptionsManager", "get_options_manager",
     "QuantBot", "TradingMode", "AssetClass", "BotTrade", "BotPosition",
     "TradeRationale", "get_quant_bot", "run_bot",
+    # Options Bot
+    "OptionsQuantBot", "OptionsMode", "OptionsPosition", "OptionsTrade",
+    "IVAnalysis", "OptionsRiskManager", "get_options_bot", "create_options_bot",
 ]

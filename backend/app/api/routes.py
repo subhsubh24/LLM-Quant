@@ -2225,6 +2225,115 @@ async def update_bot_config(
     }
 
 
+# ============ Options Quant Bot Endpoints ============
+
+@router.post("/options-bot/start")
+async def start_options_bot(
+    capital: float = 100000,
+    mode: str = "balanced"
+):
+    """
+    Start the Options Quant Bot.
+
+    Modes:
+    - aggressive: Higher delta targets, more trades, tighter strikes
+    - balanced: Mix of strategies, moderate risk
+    - conservative: Wide spreads, theta-focused, lower frequency
+    """
+    from ..trading.options_bot import create_options_bot
+
+    bot = create_options_bot(capital=capital, mode=mode)
+    await bot.start()
+
+    return {
+        "status": "started",
+        "capital": capital,
+        "mode": mode,
+        "message": f"Options Bot started with ${capital:,.0f} in {mode} mode",
+    }
+
+
+@router.post("/options-bot/stop")
+async def stop_options_bot():
+    """Stop the Options Quant Bot."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    await bot.stop()
+    return {"status": "stopped"}
+
+
+@router.get("/options-bot/status")
+async def get_options_bot_status():
+    """Get current Options Bot status including Greeks exposure."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return bot.get_status()
+
+
+@router.get("/options-bot/positions")
+async def get_options_bot_positions():
+    """Get all current options positions with Greeks and P&L."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return {"positions": bot.get_positions()}
+
+
+@router.get("/options-bot/trades")
+async def get_options_bot_trades(limit: int = 50):
+    """Get recent options trades with full rationale."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return {"trades": bot.get_trades(limit)}
+
+
+@router.get("/options-bot/performance")
+async def get_options_bot_performance():
+    """Get performance metrics for the Options Bot."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return bot.get_performance()
+
+
+@router.get("/options-bot/commentary")
+async def get_options_bot_commentary(limit: int = 50):
+    """Get bot's real-time thinking/commentary."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return {"commentary": bot.get_commentary(limit)}
+
+
+@router.get("/options-bot/iv-analysis")
+async def get_iv_analysis():
+    """
+    Get IV (Implied Volatility) analysis for watched symbols.
+
+    Returns IV Rank, IV Percentile, and premium selling conditions.
+    """
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    return {"iv_analysis": bot.get_iv_analysis()}
+
+
+@router.post("/options-bot/scan")
+async def trigger_options_scan():
+    """Manually trigger a market scan for options opportunities."""
+    from ..trading.options_bot import get_options_bot
+
+    bot = get_options_bot()
+    if not bot.is_running:
+        raise HTTPException(status_code=400, detail="Options bot is not running")
+
+    await bot._scan_opportunities()
+    return {"status": "scan_completed", "positions": len(bot.positions)}
+
+
 # ============ Strategy Backtesting Endpoints ============
 
 class StrategyBacktestRequest(BaseModel):
