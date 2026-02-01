@@ -11,21 +11,49 @@ import {
   Terminal,
   Brain,
   Layers,
+  Bitcoin,
+  Globe,
+  Coins,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const navigation = [
+const stocksNavigation = [
   { name: "Terminal", href: "/dashboard", icon: Terminal },
-  { name: "AI Insights", href: "/insights", icon: Brain },
-  { name: "Research", href: "/research", icon: FlaskConical },
   { name: "Trading", href: "/trading", icon: TrendingUp },
   { name: "Options", href: "/options", icon: Layers },
+];
+
+const cryptoNavigation = [
+  { name: "Crypto", href: "/crypto", icon: Bitcoin },
+];
+
+const commonNavigation = [
+  { name: "AI Insights", href: "/insights", icon: Brain },
+  { name: "Research", href: "/research", icon: FlaskConical },
   { name: "Analytics", href: "/performance", icon: BarChart3 },
   { name: "Learn", href: "/learn", icon: GraduationCap },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+
+  const NavLink = ({ item }: { item: { name: string; href: string; icon: any } }) => {
+    const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+    return (
+      <Link
+        href={item.href}
+        className={cn(
+          "flex items-center gap-2 px-3 py-2 rounded text-xs font-medium font-mono uppercase tracking-wide transition-colors",
+          isActive
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+        )}
+      >
+        <item.icon className="w-4 h-4" />
+        {item.name}
+      </Link>
+    );
+  };
 
   return (
     <aside className="w-56 border-r border-border bg-card flex flex-col">
@@ -40,25 +68,45 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {navigation.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded text-xs font-medium font-mono uppercase tracking-wide transition-colors",
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <item.icon className="w-4 h-4" />
-              {item.name}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 px-2 py-3 space-y-3 overflow-y-auto">
+        {/* Stocks Section */}
+        <div>
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-bloomberg-orange font-mono tracking-wider flex items-center gap-1.5">
+            <TrendingUp className="w-3 h-3" />
+            STOCKS
+          </div>
+          <div className="space-y-0.5">
+            {stocksNavigation.map((item) => (
+              <NavLink key={item.name} item={item} />
+            ))}
+          </div>
+        </div>
+
+        {/* Crypto Section */}
+        <div>
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-yellow-500 font-mono tracking-wider flex items-center gap-1.5">
+            <Bitcoin className="w-3 h-3" />
+            CRYPTO
+          </div>
+          <div className="space-y-0.5">
+            {cryptoNavigation.map((item) => (
+              <NavLink key={item.name} item={item} />
+            ))}
+          </div>
+        </div>
+
+        {/* Common Section */}
+        <div>
+          <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground font-mono tracking-wider flex items-center gap-1.5">
+            <Globe className="w-3 h-3" />
+            TOOLS
+          </div>
+          <div className="space-y-0.5">
+            {commonNavigation.map((item) => (
+              <NavLink key={item.name} item={item} />
+            ))}
+          </div>
+        </div>
       </nav>
 
       {/* Status */}

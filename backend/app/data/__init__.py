@@ -3,6 +3,8 @@
 from .providers import DataProvider, StooqProvider, YFinanceProvider, get_data_provider
 from .universe import UniverseManager, DEFAULT_UNIVERSE
 from .cache import DataCache
+from .live import LiveMarketService, get_live_market_service, Quote
+from .crypto import CryptoMarketService, get_crypto_service, CryptoQuote
 
 __all__ = [
     "DataProvider",
@@ -12,4 +14,10 @@ __all__ = [
     "UniverseManager",
     "DEFAULT_UNIVERSE",
     "DataCache",
+    "LiveMarketService",
+    "get_live_market_service",
+    "Quote",
+    "CryptoMarketService",
+    "get_crypto_service",
+    "CryptoQuote",
 ]

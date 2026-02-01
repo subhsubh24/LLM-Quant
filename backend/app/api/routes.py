@@ -1691,3 +1691,252 @@ async def explain_greeks():
             "interpretation": "Usually small impact except for long-dated options",
         },
     }
+
+
+# ============ Cryptocurrency Endpoints ============
+
+@router.get("/crypto/quote/{symbol}")
+async def get_crypto_quote(symbol: str):
+    """Get real-time cryptocurrency quote."""
+    from ..data.crypto import get_crypto_service
+
+    service = get_crypto_service()
+    quote = await service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Crypto quote not found for {symbol}")
+
+    return quote.to_dict()
+
+
+@router.post("/crypto/quotes")
+async def get_crypto_quotes(symbols: List[str]):
+    """Get quotes for multiple cryptocurrencies."""
+    from ..data.crypto import get_crypto_service
+
+    service = get_crypto_service()
+    quotes = await service.get_quotes_batch([s.upper() for s in symbols])
+
+    return {
+        symbol: quote.to_dict()
+        for symbol, quote in quotes.items()
+    }
+
+
+@router.get("/crypto/overview")
+async def get_crypto_overview():
+    """Get cryptocurrency market overview."""
+    from ..data.crypto import get_crypto_service
+
+    service = get_crypto_service()
+    overview = await service.get_market_overview()
+
+    return overview
+
+
+@router.get("/crypto/watchlist")
+async def get_crypto_watchlist():
+    """Get data for default crypto watchlist."""
+    from ..data.crypto import get_crypto_service
+
+    watchlist = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "DOT", "AVAX", "LINK"]
+
+    service = get_crypto_service()
+    quotes = await service.get_quotes_batch(watchlist)
+
+    return {
+        "watchlist": [
+            quotes[s].to_dict() if s in quotes else {"symbol": s, "error": "unavailable"}
+            for s in watchlist
+        ],
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/crypto/history/{symbol}")
+async def get_crypto_history(symbol: str, days: int = 30):
+    """Get price history for a cryptocurrency."""
+    from ..data.crypto import get_crypto_service
+
+    service = get_crypto_service()
+    history = await service.get_price_history(symbol.upper(), days)
+
+    return history
+
+
+@router.get("/crypto/signals")
+async def generate_crypto_signals():
+    """Generate trading signals for top cryptocurrencies."""
+    from ..data.crypto import get_crypto_service
+    import random
+
+    service = get_crypto_service()
+    overview = await service.get_market_overview()
+
+    # Simple momentum-based signals
+    signals = []
+    for crypto in overview.get("top_cryptos", []):
+        change = crypto.get("change_percent_24h", 0)
+
+        # Generate signal based on momentum
+        if change > 5:
+            action = "STRONG_BUY"
+            score = min(1.0, 0.6 + change / 20)
+        elif change > 2:
+            action = "BUY"
+            score = 0.5 + change / 20
+        elif change < -5:
+            action = "STRONG_SELL"
+            score = max(-1.0, -0.6 + change / 20)
+        elif change < -2:
+            action = "SELL"
+            score = -0.5 + change / 20
+        else:
+            action = "HOLD"
+            score = change / 10
+
+        signals.append({
+            "symbol": crypto["symbol"],
+            "name": crypto["name"],
+            "price": crypto["price"],
+            "change_24h": change,
+            "action": action,
+            "signal_score": round(score, 3),
+            "volume_24h": crypto.get("volume_24h", 0),
+            "market_cap": crypto.get("market_cap", 0),
+        })
+
+    # Sort by absolute signal strength
+    signals.sort(key=lambda x: abs(x["signal_score"]), reverse=True)
+
+    return {
+        "signals": signals,
+        "timestamp": datetime.now().isoformat(),
+        "market_sentiment": "bullish" if sum(s["signal_score"] for s in signals) > 0 else "bearish",
+    }
+
+
+@router.post("/crypto/order")
+async def create_crypto_order(
+    symbol: str,
+    side: str,
+    quantity: float,
+    order_type: str = "market",
+    limit_price: Optional[float] = None,
+):
+    """Create a crypto order (paper trading)."""
+    from ..trading import get_order_manager, OrderSide
+    from ..data.crypto import get_crypto_service
+
+    # Get current price
+    service = get_crypto_service()
+    quote = await service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Crypto not found: {symbol}")
+
+    manager = get_order_manager()
+    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+    if order_type == "market":
+        order = manager.create_market_order(
+            symbol=f"CRYPTO:{symbol.upper()}",
+            side=order_side,
+            quantity=quantity,
+        )
+    else:
+        if not limit_price:
+            raise HTTPException(status_code=400, detail="Limit price required for limit orders")
+        order = manager.create_limit_order(
+            symbol=f"CRYPTO:{symbol.upper()}",
+            side=order_side,
+            quantity=quantity,
+            limit_price=limit_price,
+        )
+
+    return {
+        "order": order.to_dict(),
+        "current_price": quote.price,
+        "estimated_value": quantity * quote.price,
+    }
+
+
+@router.get("/crypto/portfolio")
+async def get_crypto_portfolio():
+    """Get crypto portfolio (paper trading)."""
+    from ..trading import get_auto_trader
+
+    trader = get_auto_trader()
+
+    # Filter for crypto positions
+    crypto_positions = {
+        k.replace("CRYPTO:", ""): v.to_dict()
+        for k, v in trader.portfolio.positions.items()
+        if k.startswith("CRYPTO:")
+    }
+
+    return {
+        "positions": crypto_positions,
+        "count": len(crypto_positions),
+    }
+
+
+@router.get("/ai/analyze-crypto/{symbol}")
+async def analyze_crypto(symbol: str):
+    """Get AI-powered analysis for a cryptocurrency."""
+    from ..llm.analyst import get_quant_analyst
+    from ..data.crypto import get_crypto_service
+
+    service = get_crypto_service()
+    quote = await service.get_quote(symbol.upper())
+
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Crypto not found: {symbol}")
+
+    analyst = get_quant_analyst()
+
+    # Build crypto-specific context
+    crypto_context = f"""
+    Cryptocurrency: {quote.name} ({quote.symbol})
+    Current Price: ${quote.price:,.2f}
+    24h Change: {quote.change_percent_24h:+.2f}%
+    24h High/Low: ${quote.high_24h:,.2f} / ${quote.low_24h:,.2f}
+    24h Volume: ${quote.volume_24h:,.0f}
+    Market Cap: ${quote.market_cap:,.0f} (Rank #{quote.market_cap_rank})
+    All-Time High: ${quote.ath:,.2f} ({quote.ath_change_percent:+.2f}% from ATH)
+    """
+
+    analysis = await analyst.analyze_stock(
+        symbol=quote.symbol,
+        quote=quote.to_dict(),
+        news=[],  # Would add crypto news here
+        context=f"This is a cryptocurrency analysis. {crypto_context}"
+    )
+
+    return analysis
+
+
+@router.get("/ai/crypto-market-commentary")
+async def get_crypto_market_commentary():
+    """Get AI-generated crypto market commentary."""
+    from ..llm.analyst import get_quant_analyst
+    from ..data.crypto import get_crypto_service
+
+    service = get_crypto_service()
+    overview = await service.get_market_overview()
+
+    analyst = get_quant_analyst()
+
+    # Build crypto market context
+    context = {
+        "asset_class": "cryptocurrency",
+        "total_market_cap": overview.get("total_market_cap", 0),
+        "btc_dominance": overview.get("btc_dominance", 0),
+        "top_cryptos": overview.get("top_cryptos", [])[:5],
+        "top_gainers": overview.get("top_gainers", [])[:3],
+        "top_losers": overview.get("top_losers", [])[:3],
+    }
+
+    commentary = await analyst.generate_market_commentary(context)
+
+    return commentary
