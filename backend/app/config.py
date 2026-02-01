@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./quantlab.db"
 
-    # LLM Integration (optional)
-    openai_api_key: str = ""
+    # LLM Integration - Anthropic Claude (primary)
+    anthropic_api_key: str = ""
 
     # Market Data API Keys (optional but recommended for live data)
     finnhub_api_key: str = ""  # Free tier: 60 calls/min
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     @property
     def has_llm_key(self) -> bool:
         """Check if LLM API key is configured."""
-        return bool(self.openai_api_key and len(self.openai_api_key) > 10)
+        return bool(self.anthropic_api_key and len(self.anthropic_api_key) > 10)
 
     @property
     def transaction_cost_decimal(self) -> float:

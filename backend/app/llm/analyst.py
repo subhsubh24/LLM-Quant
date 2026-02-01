@@ -1,6 +1,7 @@
 """
 AI-powered market analyst for real-time insights and learning.
 Provides professional-grade analysis like a senior quant would deliver.
+Uses Anthropic Claude for AI capabilities.
 """
 
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ class AnalysisRequest:
 class QuantAnalyst:
     """
     AI-powered quant analyst providing institutional-grade insights.
-    Uses GPT-4 for deep analysis and learning support.
+    Uses Claude for deep analysis and learning support.
     """
 
     SYSTEM_PROMPT = """You are a senior quantitative researcher at a top hedge fund, now mentoring an aspiring quant.
@@ -50,14 +51,34 @@ Be concise but thorough. A busy trader should be able to scan and get key points
         self._client = None
 
     def _get_client(self):
-        """Lazy load OpenAI client."""
+        """Lazy load Anthropic client."""
         if self._client is None and self.settings.has_llm_key:
             try:
-                from openai import OpenAI
-                self._client = OpenAI(api_key=self.settings.openai_api_key)
+                import anthropic
+                self._client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
             except Exception as e:
-                logger.warning(f"Failed to initialize OpenAI client: {e}")
+                logger.warning(f"Failed to initialize Anthropic client: {e}")
         return self._client
+
+    def _call_claude(self, prompt: str, max_tokens: int = 1500) -> Optional[str]:
+        """Make a call to Claude API."""
+        client = self._get_client()
+        if not client:
+            return None
+
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=max_tokens,
+                system=self.SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.content[0].text
+        except Exception as e:
+            logger.error(f"Claude API call failed: {e}")
+            return None
 
     async def analyze_stock(
         self,
@@ -67,10 +88,6 @@ Be concise but thorough. A busy trader should be able to scan and get key points
         news: Optional[List[Dict]] = None
     ) -> Dict[str, Any]:
         """Generate comprehensive stock analysis."""
-        client = self._get_client()
-        if not client:
-            return self._template_stock_analysis(symbol, quote)
-
         prompt = f"""Analyze {symbol} for a quant trader. Current data:
 
 **Current Quote:**
@@ -90,24 +107,16 @@ Provide analysis covering:
 
 Be specific with numbers. This is for education, not advice."""
 
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1500
-            )
+        response = self._call_claude(prompt, max_tokens=1500)
+
+        if response:
             return {
                 "symbol": symbol,
-                "analysis": response.choices[0].message.content,
+                "analysis": response,
                 "generated_at": datetime.now().isoformat(),
-                "model": "gpt-4o"
+                "model": "claude-sonnet-4"
             }
-        except Exception as e:
-            logger.error(f"Stock analysis failed: {e}")
-            return self._template_stock_analysis(symbol, quote)
+        return self._template_stock_analysis(symbol, quote)
 
     async def generate_market_commentary(
         self,
@@ -115,10 +124,6 @@ Be specific with numbers. This is for education, not advice."""
         top_movers: List[Dict] = None
     ) -> Dict[str, Any]:
         """Generate professional market commentary."""
-        client = self._get_client()
-        if not client:
-            return self._template_market_commentary(overview)
-
         indices = overview.get('indices', [])
         sectors = overview.get('sectors', [])
 
@@ -141,23 +146,15 @@ Write a brief but insightful commentary covering:
 
 Write like you're briefing a trading desk at 7am. Concise, actionable."""
 
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1000
-            )
+        response = self._call_claude(prompt, max_tokens=1000)
+
+        if response:
             return {
-                "commentary": response.choices[0].message.content,
+                "commentary": response,
                 "generated_at": datetime.now().isoformat(),
                 "market_status": overview.get('market_status', 'unknown')
             }
-        except Exception as e:
-            logger.error(f"Market commentary failed: {e}")
-            return self._template_market_commentary(overview)
+        return self._template_market_commentary(overview)
 
     async def critique_strategy(
         self,
@@ -165,10 +162,6 @@ Write like you're briefing a trading desk at 7am. Concise, actionable."""
         backtest_results: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """Provide rigorous critique of a trading strategy."""
-        client = self._get_client()
-        if not client:
-            return {"error": "LLM not available for strategy critique"}
-
         prompt = f"""I want to trade this strategy:
 
 {strategy_description}
@@ -186,22 +179,14 @@ As a senior quant, ruthlessly critique this:
 
 Be brutally honest. Better to kill a bad idea now than lose money later."""
 
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1500
-            )
+        response = self._call_claude(prompt, max_tokens=1500)
+
+        if response:
             return {
-                "critique": response.choices[0].message.content,
+                "critique": response,
                 "generated_at": datetime.now().isoformat()
             }
-        except Exception as e:
-            logger.error(f"Strategy critique failed: {e}")
-            return {"error": str(e)}
+        return {"error": "LLM not available for strategy critique"}
 
     async def get_learning_path(
         self,
@@ -210,10 +195,6 @@ Be brutally honest. Better to kill a bad idea now than lose money later."""
         goals: str = "become a quant"
     ) -> Dict[str, Any]:
         """Generate personalized quant learning path."""
-        client = self._get_client()
-        if not client:
-            return self._template_learning_path()
-
         prompt = f"""Create a personalized 12-month learning path for someone who wants to: {goals}
 
 Current level: {current_level}
@@ -243,23 +224,15 @@ Structure the path as:
 
 Be specific. No vague advice like "learn statistics" - instead say "Complete chapters 1-8 of Casella & Berger, focusing on MLE and hypothesis testing."""
 
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=2000
-            )
+        response = self._call_claude(prompt, max_tokens=2000)
+
+        if response:
             return {
-                "learning_path": response.choices[0].message.content,
+                "learning_path": response,
                 "generated_at": datetime.now().isoformat(),
                 "estimated_duration": "12 months"
             }
-        except Exception as e:
-            logger.error(f"Learning path generation failed: {e}")
-            return self._template_learning_path()
+        return self._template_learning_path()
 
     async def explain_concept(
         self,
@@ -267,10 +240,6 @@ Be specific. No vague advice like "learn statistics" - instead say "Complete cha
         context: str = ""
     ) -> Dict[str, Any]:
         """Deep dive explanation of a quant concept."""
-        client = self._get_client()
-        if not client:
-            return {"error": "LLM not available"}
-
         prompt = f"""Explain this quant concept thoroughly: {concept}
 
 {f"Context: {context}" if context else ""}
@@ -286,23 +255,15 @@ Cover:
 
 Make it rigorous enough for a quant interview, but clear enough for a motivated learner."""
 
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=2000
-            )
+        response = self._call_claude(prompt, max_tokens=2000)
+
+        if response:
             return {
                 "concept": concept,
-                "explanation": response.choices[0].message.content,
+                "explanation": response,
                 "generated_at": datetime.now().isoformat()
             }
-        except Exception as e:
-            logger.error(f"Concept explanation failed: {e}")
-            return {"error": str(e)}
+        return {"error": "LLM not available"}
 
     async def analyze_portfolio(
         self,
@@ -311,10 +272,6 @@ Make it rigorous enough for a quant interview, but clear enough for a motivated 
         returns_history: Optional[List[float]] = None
     ) -> Dict[str, Any]:
         """Comprehensive portfolio analysis and recommendations."""
-        client = self._get_client()
-        if not client:
-            return self._template_portfolio_analysis(positions)
-
         positions_str = "\n".join([
             f"- {p.get('ticker')}: ${p.get('market_value', 0):,.0f} ({p.get('weight', 0)*100:.1f}%) | P&L: {p.get('unrealized_pnl', 0):+,.0f}"
             for p in positions
@@ -338,24 +295,94 @@ Provide institutional-grade analysis:
 
 Be specific with numbers and recommendations."""
 
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1500
-            )
+        response = self._call_claude(prompt, max_tokens=1500)
+
+        if response:
             return {
-                "analysis": response.choices[0].message.content,
+                "analysis": response,
                 "generated_at": datetime.now().isoformat(),
                 "portfolio_value": total_value,
                 "n_positions": len(positions)
             }
-        except Exception as e:
-            logger.error(f"Portfolio analysis failed: {e}")
-            return self._template_portfolio_analysis(positions)
+        return self._template_portfolio_analysis(positions)
+
+    async def analyze_crypto(
+        self,
+        symbol: str,
+        quote: Dict
+    ) -> Dict[str, Any]:
+        """Generate cryptocurrency analysis."""
+        prompt = f"""Analyze {symbol} for a crypto trader. Current data:
+
+**Current Quote:**
+- Price: ${quote.get('price', 0):.2f}
+- 24h Change: {quote.get('change_percent_24h', 0):.2f}%
+- 24h High: ${quote.get('high_24h', 0):.2f}
+- 24h Low: ${quote.get('low_24h', 0):.2f}
+- Market Cap: ${quote.get('market_cap', 0):,.0f}
+- Volume 24h: ${quote.get('volume_24h', 0):,.0f}
+
+Provide analysis covering:
+1. **Technical Setup** - Key support/resistance levels, trend analysis
+2. **Market Context** - How is this performing vs BTC and overall crypto market?
+3. **On-Chain Metrics** - What would you want to check (exchange flows, whale activity)?
+4. **Risk Assessment** - Volatility considerations, correlation with BTC
+5. **Trading Ideas** - Potential entry/exit zones
+
+Be specific with numbers. This is for education, not advice."""
+
+        response = self._call_claude(prompt, max_tokens=1500)
+
+        if response:
+            return {
+                "symbol": symbol,
+                "analysis": response,
+                "generated_at": datetime.now().isoformat(),
+                "model": "claude-sonnet-4"
+            }
+        return {
+            "symbol": symbol,
+            "analysis": f"## {symbol} Quick Analysis\n\n**Current Price:** ${quote.get('price', 0):.2f}\n\n*Configure Anthropic API key for detailed AI analysis.*",
+            "generated_at": datetime.now().isoformat(),
+            "model": "template"
+        }
+
+    async def generate_crypto_commentary(
+        self,
+        overview: Dict
+    ) -> Dict[str, Any]:
+        """Generate crypto market commentary."""
+        top_cryptos = overview.get('top_cryptos', [])[:5]
+
+        prompt = f"""Generate crypto market commentary.
+
+**Market Data:**
+- Total Market Cap: ${overview.get('total_market_cap', 0):,.0f}
+- BTC Dominance: {overview.get('btc_dominance', 0)}%
+
+**Top Cryptocurrencies:**
+{chr(10).join([f"- {c.get('symbol')}: ${c.get('price', 0):,.2f} ({c.get('change_percent_24h', 0):+.2f}%)" for c in top_cryptos])}
+
+Write a brief market commentary covering:
+1. **Market Sentiment** - Risk-on or risk-off for crypto?
+2. **BTC Analysis** - Bitcoin's current position and significance
+3. **Alt Season?** - Are altcoins outperforming BTC?
+4. **Key Levels** - Important price levels to watch
+5. **Today's Focus** - What should traders be watching?
+
+Be concise and actionable."""
+
+        response = self._call_claude(prompt, max_tokens=1000)
+
+        if response:
+            return {
+                "commentary": response,
+                "generated_at": datetime.now().isoformat()
+            }
+        return {
+            "commentary": "## Crypto Market Overview\n\nReview the market data displayed on your terminal.\n\n*Configure Anthropic API key for AI-generated commentary.*",
+            "generated_at": datetime.now().isoformat()
+        }
 
     def _template_stock_analysis(self, symbol: str, quote: Dict) -> Dict[str, Any]:
         """Fallback template analysis."""
@@ -370,7 +397,7 @@ Be specific with numbers and recommendations."""
 - Check recent volume for confirmation
 - Review earnings calendar for upcoming catalysts
 
-*Enable OpenAI API for detailed AI analysis.*""",
+*Configure Anthropic API key for detailed AI analysis.*""",
             "generated_at": datetime.now().isoformat(),
             "model": "template"
         }
@@ -387,7 +414,7 @@ Key factors to consider:
 - Sector rotation shows where capital is flowing
 - Index breadth (advancers vs decliners) shows market health
 
-*Enable OpenAI API for AI-generated commentary.*""",
+*Configure Anthropic API key for AI-generated commentary.*""",
             "generated_at": datetime.now().isoformat(),
             "market_status": overview.get('market_status', 'unknown')
         }
@@ -404,7 +431,7 @@ Key factors to consider:
 - Check sector diversification
 - Monitor correlation between holdings
 
-*Enable OpenAI API for detailed AI analysis.*""",
+*Configure Anthropic API key for detailed AI analysis.*""",
             "generated_at": datetime.now().isoformat(),
             "n_positions": len(positions)
         }
@@ -434,7 +461,7 @@ Key factors to consider:
 - Interview prep: 150 practice problems
 - Project: Full trading system with paper trading
 
-*Enable OpenAI API for personalized learning paths.*""",
+*Configure Anthropic API key for personalized learning paths.*""",
             "generated_at": datetime.now().isoformat(),
             "estimated_duration": "12 months"
         }
