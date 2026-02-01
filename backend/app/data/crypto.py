@@ -514,22 +514,35 @@ class CryptoMarketService:
         self.cache: Dict[str, Any] = {}
         self.cache_ttl = 30  # seconds (crypto moves fast!)
         self.base_url = "https://api.coingecko.com/api/v3"
+        self.use_mock_fallback = False  # DISABLE mock fallback - error on API failure
+        self._last_batch_fetch: Optional[datetime] = None
+        self._batch_cache: Dict[str, CryptoQuote] = {}  # Cache for batch fetched data
+        self._batch_cache_ttl = 30  # seconds
 
     async def get_quote(self, symbol: str) -> Optional[CryptoQuote]:
-        """Get real-time quote for a cryptocurrency."""
+        """Get real-time quote for a cryptocurrency. NO MOCK FALLBACK."""
         symbol = symbol.upper()
         cache_key = f"crypto_quote_{symbol}"
+
+        # Check regular cache first
         cached = self._get_cached_with_age(cache_key)
         if cached:
             quote, age_seconds = cached
-            # Update data age
             quote.data_age_seconds = age_seconds
             return quote
+
+        # Check batch cache (from bulk fetch)
+        if symbol in self._batch_cache:
+            quote = self._batch_cache[symbol]
+            if self._last_batch_fetch:
+                age = (datetime.now() - self._last_batch_fetch).total_seconds()
+                if age < self._batch_cache_ttl:
+                    quote.data_age_seconds = age
+                    return quote
 
         # Convert symbol to CoinGecko ID
         coin_id = self.SYMBOL_TO_ID.get(symbol)
         if not coin_id:
-            # Try using symbol as ID directly
             coin_id = symbol.lower()
 
         try:
@@ -540,25 +553,164 @@ class CryptoMarketService:
                     logger.debug(f"✓ LIVE price for {symbol}: ${quote.price} from CoinGecko")
                     return quote
         except Exception as e:
-            logger.debug(f"CoinGecko API failed for {symbol}: {e}")
+            logger.error(f"CoinGecko API failed for {symbol}: {e}")
 
-        # Fallback to mock data
-        logger.warning(f"⚠️ Using MOCK data for {symbol} - API unavailable")
-        quote = self._get_mock_quote(symbol)
-        if quote:
-            self._set_cached(cache_key, quote)
-        return quote
+        # NO MOCK FALLBACK - return None and log error
+        logger.error(f"❌ NO DATA for {symbol} - API unavailable, no mock fallback")
+        return None
 
     async def get_quotes_batch(self, symbols: List[str]) -> Dict[str, CryptoQuote]:
-        """Get quotes for multiple cryptocurrencies."""
-        tasks = [self.get_quote(s) for s in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        """
+        Get quotes for multiple cryptocurrencies using CoinGecko's efficient batch API.
+        Uses /simple/price endpoint which can fetch 250+ coins in ONE request.
+        """
         quotes = {}
-        for symbol, result in zip(symbols, results):
-            if isinstance(result, CryptoQuote):
-                quotes[symbol.upper()] = result
+        symbols = [s.upper() for s in symbols]
+
+        # Check cache first - return cached if still fresh
+        all_cached = True
+        for symbol in symbols:
+            cache_key = f"crypto_quote_{symbol}"
+            cached = self._get_cached_with_age(cache_key)
+            if cached:
+                quote, age = cached
+                quote.data_age_seconds = age
+                quotes[symbol] = quote
+            elif symbol in self._batch_cache and self._last_batch_fetch:
+                age = (datetime.now() - self._last_batch_fetch).total_seconds()
+                if age < self._batch_cache_ttl:
+                    quote = self._batch_cache[symbol]
+                    quote.data_age_seconds = age
+                    quotes[symbol] = quote
+                else:
+                    all_cached = False
+            else:
+                all_cached = False
+
+        if all_cached and len(quotes) == len(symbols):
+            return quotes
+
+        # Fetch fresh data using batch API
+        # Convert symbols to CoinGecko IDs
+        coin_ids = []
+        symbol_to_id_map = {}
+        for symbol in symbols:
+            coin_id = self.SYMBOL_TO_ID.get(symbol)
+            if coin_id:
+                coin_ids.append(coin_id)
+                symbol_to_id_map[coin_id] = symbol
+
+        if not coin_ids:
+            logger.error("No valid CoinGecko IDs found for symbols")
+            return quotes
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                # CoinGecko /simple/price can handle many coins at once
+                # Split into batches of 250 (CoinGecko limit)
+                batch_size = 250
+                for i in range(0, len(coin_ids), batch_size):
+                    batch_ids = coin_ids[i:i + batch_size]
+                    ids_param = ",".join(batch_ids)
+
+                    url = f"{self.base_url}/simple/price"
+                    params = {
+                        "ids": ids_param,
+                        "vs_currencies": "usd",
+                        "include_24hr_change": "true",
+                        "include_24hr_vol": "true",
+                        "include_market_cap": "true",
+                    }
+
+                    response = await client.get(url, params=params)
+
+                    if response.status_code == 429:
+                        logger.error(f"CoinGecko rate limited (429) - waiting and retrying...")
+                        await asyncio.sleep(60)  # Wait 60 seconds for rate limit reset
+                        response = await client.get(url, params=params)
+
+                    response.raise_for_status()
+                    data = response.json()
+
+                    # Process response
+                    for coin_id, price_data in data.items():
+                        symbol = symbol_to_id_map.get(coin_id)
+                        if symbol and price_data:
+                            quote = self._create_quote_from_simple_price(
+                                symbol, coin_id, price_data
+                            )
+                            if quote:
+                                quotes[symbol] = quote
+                                self._batch_cache[symbol] = quote
+                                cache_key = f"crypto_quote_{symbol}"
+                                self._set_cached(cache_key, quote)
+
+                    self._last_batch_fetch = datetime.now()
+                    logger.info(f"✓ Batch fetched {len(data)} coins from CoinGecko /simple/price")
+
+                    # Small delay between batches to be nice to the API
+                    if i + batch_size < len(coin_ids):
+                        await asyncio.sleep(0.5)
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.error(f"❌ CoinGecko RATE LIMITED (429) - reduce request frequency!")
+            else:
+                logger.error(f"❌ CoinGecko API error: {e}")
+        except Exception as e:
+            logger.error(f"❌ Batch fetch failed: {e}")
+
         return quotes
+
+    def _create_quote_from_simple_price(
+        self, symbol: str, coin_id: str, data: Dict
+    ) -> Optional[CryptoQuote]:
+        """Create a CryptoQuote from /simple/price response."""
+        try:
+            price = data.get("usd", 0)
+            if not price:
+                return None
+
+            change_24h = data.get("usd_24h_change", 0) or 0
+            volume = data.get("usd_24h_vol", 0) or 0
+            market_cap = data.get("usd_market_cap", 0) or 0
+
+            # Get name from mapping
+            name = self.TOP_CRYPTOS.get(coin_id, (symbol, symbol))[1]
+
+            # Estimate rank from market cap (rough)
+            if market_cap > 100_000_000_000:
+                rank = 1
+            elif market_cap > 10_000_000_000:
+                rank = 10
+            elif market_cap > 1_000_000_000:
+                rank = 50
+            else:
+                rank = 100
+
+            return CryptoQuote(
+                symbol=symbol,
+                name=name,
+                price=price,
+                change_24h=price * change_24h / 100,
+                change_percent_24h=change_24h,
+                high_24h=price * 1.02,  # Estimate
+                low_24h=price * 0.98,   # Estimate
+                volume_24h=volume,
+                market_cap=market_cap,
+                market_cap_rank=rank,
+                circulating_supply=market_cap / price if price > 0 else 0,
+                total_supply=None,
+                ath=price * 1.5,  # Estimate
+                ath_change_percent=-30,  # Estimate
+                timestamp=datetime.now(),
+                is_live=True,
+                data_source="coingecko_batch",
+                data_age_seconds=0.0,
+            )
+        except Exception as e:
+            logger.debug(f"Failed to create quote for {symbol}: {e}")
+            return None
 
     async def get_market_overview(self) -> Dict[str, Any]:
         """Get crypto market overview."""

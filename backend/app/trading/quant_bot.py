@@ -1714,41 +1714,24 @@ class QuantBot:
         movers = []
         all_quotes = {}
 
-        # ===== STAGE 1: PARALLEL BATCH FETCH =====
-        # Split universe into batches for controlled parallelism
-        batches = [
-            self.CRYPTO_UNIVERSE[i:i + self._batch_size]
-            for i in range(0, len(self.CRYPTO_UNIVERSE), self._batch_size)
-        ]
-
-        async def fetch_batch(symbols: List[str]) -> Dict:
-            """Fetch a batch of quotes concurrently."""
-            results = {}
-            try:
-                batch_quotes = await self.crypto_service.get_quotes_batch(symbols)
-                if batch_quotes:
-                    results.update(batch_quotes)
-            except Exception:
-                # Fallback: parallel individual fetches with semaphore
-                sem = asyncio.Semaphore(self._max_concurrent_requests)
-                async def fetch_single(sym):
-                    async with sem:
-                        try:
-                            return sym, await self.crypto_service.get_quote(sym)
-                        except:
-                            return sym, None
-
-                tasks = [fetch_single(s) for s in symbols]
-                for sym, quote in await asyncio.gather(*tasks, return_exceptions=True):
-                    if not isinstance(quote, Exception) and quote:
-                        results[sym] = quote
-            return results
-
-        # Fetch all batches in parallel
-        batch_results = await asyncio.gather(*[fetch_batch(b) for b in batches], return_exceptions=True)
-        for result in batch_results:
-            if isinstance(result, dict):
-                all_quotes.update(result)
+        # ===== STAGE 1: EFFICIENT BATCH FETCH =====
+        # Use CoinGecko's /simple/price endpoint - fetches ALL coins in 1 request
+        # This respects rate limits (no more 429 errors!)
+        try:
+            all_quotes = await self.crypto_service.get_quotes_batch(self.CRYPTO_UNIVERSE)
+            if not all_quotes:
+                self.commentary.add(
+                    f"❌ CoinGecko API unavailable - no crypto data fetched",
+                    "error"
+                )
+                return
+        except Exception as e:
+            self.commentary.add(
+                f"❌ Crypto fetch failed: {str(e)[:50]}",
+                "error"
+            )
+            logger.error(f"Crypto batch fetch failed: {e}")
+            return
 
         # ===== STAGE 2: PARALLEL ANALYSIS =====
         async def analyze_coin(symbol: str, quote) -> Optional[Dict]:
@@ -1785,7 +1768,6 @@ class QuantBot:
 
         # ===== STAGE 3: PROCESS RESULTS =====
         live_count = 0
-        mock_count = 0
 
         for result in analysis_results:
             if isinstance(result, Exception) or result is None:
@@ -1797,11 +1779,9 @@ class QuantBot:
             signal = result["signal"]
             rationale = result["rationale"]
 
-            # Track data source for transparency
+            # All data should be live (no mock fallback)
             if hasattr(quote, 'is_live') and quote.is_live:
                 live_count += 1
-            else:
-                mock_count += 1
 
             # Track movers
             if result["is_mover"]:
@@ -1860,18 +1840,13 @@ class QuantBot:
                     "analysis"
                 )
 
-        # Scan summary with latency reporting and data source transparency
+        # Scan summary with latency reporting
         import random
         show_summary_chance = 0.30 if self.mode == TradingMode.AGGRESSIVE else 0.20
         if random.random() < show_summary_chance:
             avg_momentum = sum([m[1] for m in movers]) / len(movers) if movers else 0
-            # Data source indicator
-            if mock_count > 0 and live_count == 0:
-                data_status = "⚠️ MOCK DATA"
-            elif mock_count > live_count:
-                data_status = f"⚠️ {live_count} LIVE / {mock_count} mock"
-            else:
-                data_status = f"✓ {live_count} LIVE"
+            # All data is LIVE (no mock fallback)
+            data_status = f"✓ {live_count} LIVE"
 
             self.commentary.add(
                 f"⚡ Scan: {scanned} coins in {scan_latency_ms:.0f}ms | "
@@ -2958,9 +2933,11 @@ class QuantBot:
         """
         Check the health and freshness of market data sources.
         Returns detailed status of API connectivity and data freshness.
+        MOCK FALLBACK IS DISABLED - APIs must work or errors are raised.
         """
         health = {
             "timestamp": datetime.now().isoformat(),
+            "mock_fallback_enabled": False,  # Mock fallback is DISABLED
             "crypto": {"status": "unknown", "source": "unknown", "sample_price": None},
             "stocks": {"status": "unknown", "source": "unknown", "sample_price": None},
             "overall": "unknown",
@@ -2971,44 +2948,51 @@ class QuantBot:
             btc_quote = await self.crypto_service.get_quote("BTC")
             if btc_quote:
                 health["crypto"] = {
-                    "status": "live" if btc_quote.is_live else "mock",
+                    "status": "live",
                     "source": btc_quote.data_source,
                     "sample_price": btc_quote.price,
                     "data_age_seconds": round(btc_quote.data_age_seconds, 1),
                     "cache_ttl": self.crypto_service.cache_ttl,
-                    "is_live": btc_quote.is_live,
+                    "is_live": True,
                 }
+            else:
+                health["crypto"] = {"status": "error", "error": "No data returned - API may be rate limited"}
         except Exception as e:
             health["crypto"] = {"status": "error", "error": str(e)}
 
-        # Test stock data source (only if market relevant)
+        # Test stock data source
         try:
             aapl_quote = await self.market_service.get_quote("AAPL")
             if aapl_quote:
                 health["stocks"] = {
-                    "status": "live" if aapl_quote.is_live else "mock",
+                    "status": "live" if aapl_quote.is_live else "error",
                     "source": aapl_quote.data_source,
                     "sample_price": aapl_quote.price,
                     "data_age_seconds": round(aapl_quote.data_age_seconds, 1),
                     "cache_ttl": self.market_service.cache_ttl,
                     "is_live": aapl_quote.is_live,
                 }
+            else:
+                health["stocks"] = {"status": "error", "error": "No data returned"}
         except Exception as e:
             health["stocks"] = {"status": "error", "error": str(e)}
 
         # Overall status
-        crypto_live = health["crypto"].get("is_live", False)
-        stocks_live = health["stocks"].get("is_live", False)
+        crypto_ok = health["crypto"].get("status") == "live"
+        stocks_ok = health["stocks"].get("status") == "live"
 
-        if crypto_live and stocks_live:
+        if crypto_ok and stocks_ok:
             health["overall"] = "all_live"
-            health["message"] = "✓ All data sources are LIVE"
-        elif crypto_live or stocks_live:
-            health["overall"] = "partial_live"
-            health["message"] = f"⚠️ Partial: Crypto={'LIVE' if crypto_live else 'MOCK'}, Stocks={'LIVE' if stocks_live else 'MOCK'}"
+            health["message"] = "✓ All data sources are LIVE (no mock fallback)"
+        elif crypto_ok:
+            health["overall"] = "crypto_only"
+            health["message"] = f"⚠️ Crypto LIVE, Stocks ERROR: {health['stocks'].get('error', 'unknown')}"
+        elif stocks_ok:
+            health["overall"] = "stocks_only"
+            health["message"] = f"⚠️ Stocks LIVE, Crypto ERROR: {health['crypto'].get('error', 'unknown')}"
         else:
-            health["overall"] = "all_mock"
-            health["message"] = "⚠️ All data sources are using MOCK data - APIs unavailable"
+            health["overall"] = "all_error"
+            health["message"] = "❌ ALL APIs FAILED - no trading possible"
 
         return health
 
