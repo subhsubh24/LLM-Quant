@@ -387,7 +387,16 @@ class LiveMarketService:
             news = []
             for item in raw_news[:20]:
                 try:
-                    published = datetime.fromtimestamp(item.get("providerPublishTime", 0))
+                    # Handle timestamp - validate it's a reasonable date
+                    timestamp = item.get("providerPublishTime", 0)
+                    published = datetime.now()  # Default fallback
+                    if timestamp and isinstance(timestamp, (int, float)) and timestamp > 946684800:  # Jan 1, 2000
+                        try:
+                            parsed_date = datetime.fromtimestamp(timestamp)
+                            if 2000 <= parsed_date.year <= 2100:
+                                published = parsed_date
+                        except (ValueError, OSError):
+                            pass
                     news.append(NewsItem(
                         id=str(item.get("uuid", "")),
                         headline=item.get("title", ""),
@@ -446,12 +455,17 @@ class LiveMarketService:
             news = []
             for item in data[:50]:
                 try:
-                    # Handle timestamp - default to current time if invalid
+                    # Handle timestamp - validate it's a reasonable date (after year 2000)
                     timestamp = item.get("datetime", 0)
-                    if timestamp and timestamp > 0:
-                        published = datetime.fromtimestamp(timestamp)
-                    else:
-                        published = datetime.now()
+                    published = datetime.now()  # Default fallback
+                    if timestamp and isinstance(timestamp, (int, float)) and timestamp > 946684800:  # Jan 1, 2000
+                        try:
+                            parsed_date = datetime.fromtimestamp(timestamp)
+                            # Extra validation: must be between 2000 and 2100
+                            if 2000 <= parsed_date.year <= 2100:
+                                published = parsed_date
+                        except (ValueError, OSError):
+                            pass  # Keep default
 
                     news.append(NewsItem(
                         id=str(item.get("id", "")),
@@ -485,12 +499,17 @@ class LiveMarketService:
             news = []
             for item in data[:20]:
                 try:
-                    # Handle timestamp - default to current time if invalid
+                    # Handle timestamp - validate it's a reasonable date (after year 2000)
                     timestamp = item.get("datetime", 0)
-                    if timestamp and timestamp > 0:
-                        published = datetime.fromtimestamp(timestamp)
-                    else:
-                        published = datetime.now()
+                    published = datetime.now()  # Default fallback
+                    if timestamp and isinstance(timestamp, (int, float)) and timestamp > 946684800:  # Jan 1, 2000
+                        try:
+                            parsed_date = datetime.fromtimestamp(timestamp)
+                            # Extra validation: must be between 2000 and 2100
+                            if 2000 <= parsed_date.year <= 2100:
+                                published = parsed_date
+                        except (ValueError, OSError):
+                            pass  # Keep default
 
                     news.append(NewsItem(
                         id=str(item.get("id", "")),
