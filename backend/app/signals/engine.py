@@ -17,7 +17,9 @@ from datetime import datetime, date, timedelta
 from enum import Enum
 import numpy as np
 import pandas as pd
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from ..config import get_settings
 

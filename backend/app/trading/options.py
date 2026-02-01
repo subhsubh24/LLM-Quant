@@ -19,7 +19,9 @@ import numpy as np
 from scipy.stats import norm
 from scipy.optimize import brentq
 import uuid
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OptionType(Enum):

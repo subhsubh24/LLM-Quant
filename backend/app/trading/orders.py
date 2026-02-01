@@ -18,7 +18,9 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from enum import Enum
 import uuid
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OrderType(Enum):

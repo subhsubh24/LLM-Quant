@@ -13,10 +13,12 @@ Works with or without an LLM API key - falls back to templates.
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
-from loguru import logger
+import logging
 import json
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

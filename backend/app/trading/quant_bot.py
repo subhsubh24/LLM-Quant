@@ -18,8 +18,10 @@ from datetime import datetime, timedelta
 from enum import Enum
 import numpy as np
 import pandas as pd
-from loguru import logger
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 import json
 
 from ..config import get_settings

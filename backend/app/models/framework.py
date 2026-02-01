@@ -13,8 +13,10 @@ from typing import List, Dict, Optional, Tuple, Any, Iterator
 from datetime import date, timedelta
 import numpy as np
 import pandas as pd
-from loguru import logger
+import logging
 import json
+
+logger = logging.getLogger(__name__)
 from hashlib import sha256
 
 from .estimators import BaseRanker, EnsembleRanker

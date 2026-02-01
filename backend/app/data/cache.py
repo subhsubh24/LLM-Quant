@@ -11,9 +11,11 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List, Dict
 import pandas as pd
 from sqlmodel import Session, select, and_
-from loguru import logger
+import logging
 
 from ..db.models import StockPrice
+
+logger = logging.getLogger(__name__)
 from ..config import get_settings
 from .providers import DataProvider, get_data_provider
 

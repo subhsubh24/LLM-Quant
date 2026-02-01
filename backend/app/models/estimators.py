@@ -22,7 +22,9 @@ from sklearn.linear_model import Ridge, ElasticNet
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class BaseRanker(ABC):

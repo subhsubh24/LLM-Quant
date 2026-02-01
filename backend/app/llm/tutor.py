@@ -6,7 +6,9 @@ Provides structured lessons, glossary, and contextual help.
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

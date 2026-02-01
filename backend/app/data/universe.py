@@ -8,9 +8,11 @@ We provide a default liquid universe for demo purposes.
 from typing import List, Optional, Dict
 from dataclasses import dataclass
 from sqlmodel import Session, select
-from loguru import logger
+import logging
 
 from ..db.models import Universe, UniverseTicker
+
+logger = logging.getLogger(__name__)
 
 
 # Default universe: 50 liquid US large-cap stocks

@@ -9,9 +9,11 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor
 import httpx
-from loguru import logger
+import logging
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 # Import yfinance
 try:

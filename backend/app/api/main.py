@@ -5,7 +5,9 @@ FastAPI application entry point.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .. import __version__, DISCLAIMER
 from ..config import get_settings

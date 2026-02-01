@@ -15,7 +15,9 @@ import pandas as pd
 import numpy as np
 from hashlib import sha256
 import json
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .core import (
     compute_returns,

@@ -8,10 +8,12 @@ documenting hypothesis, methodology, results, and next steps.
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from loguru import logger
+import logging
 import json
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

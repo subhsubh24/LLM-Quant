@@ -17,9 +17,11 @@ from datetime import datetime, date, timedelta
 from enum import Enum
 import numpy as np
 import pandas as pd
-from loguru import logger
+import logging
 
 from ..signals.engine import SignalEngine, PortfolioSignals, StockSignal, get_signal_engine
+
+logger = logging.getLogger(__name__)
 from .orders import OrderManager, Order, OrderSide, OrderType, BracketOrder, get_order_manager
 from ..config import get_settings
 

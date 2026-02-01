@@ -7,8 +7,10 @@ Uses Anthropic Claude for AI capabilities.
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from datetime import datetime, date
-from loguru import logger
+import logging
 import json
+
+logger = logging.getLogger(__name__)
 
 from ..config import get_settings
 

@@ -13,8 +13,10 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
-from loguru import logger
+import logging
 import json
+
+logger = logging.getLogger(__name__)
 from hashlib import sha256
 
 

@@ -13,9 +13,11 @@ from datetime import date, datetime, timedelta
 from typing import Optional, Dict, List
 import pandas as pd
 import numpy as np
-from loguru import logger
+import logging
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class DataProvider(ABC):

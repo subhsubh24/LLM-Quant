@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import date, datetime, timedelta
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 import numpy as np
 import pandas as pd
 
