@@ -41,7 +41,7 @@ from .live_brokers import (
     BrokerType, TradingMode as LiveTradingMode, BrokerCredentials,
     LivePosition, LiveOrder,
     AlpacaBroker, BinanceBroker, BrokerManager,
-    get_broker_manager,
+    get_broker_manager, auto_initialize_brokers,
 )
 
 __all__ = [
@@ -74,5 +74,5 @@ __all__ = [
     "BrokerType", "LiveTradingMode", "BrokerCredentials",
     "LivePosition", "LiveOrder",
     "AlpacaBroker", "BinanceBroker", "BrokerManager",
-    "get_broker_manager",
+    "get_broker_manager", "auto_initialize_brokers",
 ]

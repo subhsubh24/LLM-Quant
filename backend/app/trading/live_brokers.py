@@ -807,3 +807,59 @@ def get_broker_manager() -> BrokerManager:
     if _broker_manager is None:
         _broker_manager = BrokerManager()
     return _broker_manager
+
+
+async def auto_initialize_brokers() -> Dict[str, Any]:
+    """
+    Auto-initialize brokers from environment config.
+
+    Called on app startup if AUTO_CONNECT_BROKERS=true.
+    Uses paper/testnet mode by default for safety.
+    """
+    from ..config import get_settings
+
+    settings = get_settings()
+    manager = get_broker_manager()
+    results = {"alpaca": None, "binance": None, "errors": []}
+
+    # Setup Alpaca if keys are configured
+    if settings.has_alpaca_keys:
+        try:
+            manager.set_credentials(
+                broker=BrokerType.ALPACA,
+                api_key=settings.alpaca_api_key,
+                api_secret=settings.alpaca_api_secret,
+                is_paper=settings.alpaca_paper_mode,
+            )
+            logger.info(f"Alpaca credentials configured (paper={settings.alpaca_paper_mode})")
+            results["alpaca"] = "configured"
+        except Exception as e:
+            logger.error(f"Failed to configure Alpaca: {e}")
+            results["errors"].append(f"Alpaca config error: {e}")
+
+    # Setup Binance if keys are configured
+    if settings.has_binance_keys:
+        try:
+            manager.set_credentials(
+                broker=BrokerType.BINANCE,
+                api_key=settings.binance_api_key,
+                api_secret=settings.binance_api_secret,
+                is_paper=settings.binance_testnet_mode,
+            )
+            logger.info(f"Binance credentials configured (testnet={settings.binance_testnet_mode})")
+            results["binance"] = "configured"
+        except Exception as e:
+            logger.error(f"Failed to configure Binance: {e}")
+            results["errors"].append(f"Binance config error: {e}")
+
+    # Auto-connect if configured
+    if settings.auto_connect_brokers and manager.credentials:
+        try:
+            connect_results = await manager.connect_all()
+            results["connection"] = connect_results
+            logger.info(f"Broker auto-connect results: {connect_results}")
+        except Exception as e:
+            logger.error(f"Broker auto-connect failed: {e}")
+            results["errors"].append(f"Auto-connect error: {e}")
+
+    return results

@@ -54,6 +54,22 @@ interface MasterBotStatus {
     vega_utilization: number;
     buying_power_used_pct: number;
   };
+  ml_metrics?: {
+    rl_training_steps: number;
+    dqn_epsilon: number;
+    episode_reward: number;
+    total_episodes: number;
+    hmm_fitted: boolean;
+    garch_fitted: boolean;
+  };
+  live_trading_enabled?: boolean;
+  broker_connected?: boolean;
+}
+
+interface BrokerStatus {
+  alpaca: { configured: boolean; connected: boolean; mode: string };
+  binance: { configured: boolean; connected: boolean; mode: string };
+  is_live_trading: boolean;
 }
 
 interface Opportunity {
@@ -117,6 +133,7 @@ interface BotPerformance {
 
 export default function MasterQuantBotPage() {
   const [status, setStatus] = useState<MasterBotStatus | null>(null);
+  const [brokerStatus, setBrokerStatus] = useState<BrokerStatus | null>(null);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [optionsPositions, setOptionsPositions] = useState<OptionsPosition[]>([]);
   const [cryptoPositions, setCryptoPositions] = useState<CryptoPosition[]>([]);
@@ -130,12 +147,13 @@ export default function MasterQuantBotPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, oppsRes, posRes, commentaryRes, perfRes] = await Promise.all([
+      const [statusRes, oppsRes, posRes, commentaryRes, perfRes, brokerRes] = await Promise.all([
         fetch(`${API_BASE}/api/master-bot/status`),
         fetch(`${API_BASE}/api/master-bot/opportunities?limit=10`),
         fetch(`${API_BASE}/api/master-bot/positions`),
         fetch(`${API_BASE}/api/master-bot/commentary?limit=20`),
         fetch(`${API_BASE}/api/master-bot/performance`),
+        fetch(`${API_BASE}/api/broker/status`),
       ]);
 
       if (statusRes.ok) setStatus(await statusRes.json());
@@ -153,6 +171,7 @@ export default function MasterQuantBotPage() {
         setCommentary(data.commentary || []);
       }
       if (perfRes.ok) setPerformance(await perfRes.json());
+      if (brokerRes.ok) setBrokerStatus(await brokerRes.json());
     } catch (err) {
       console.error("Failed to fetch bot data:", err);
     } finally {
@@ -253,6 +272,46 @@ export default function MasterQuantBotPage() {
 
   return (
     <div className="space-y-6">
+      {/* Broker Status Banner */}
+      {brokerStatus && (
+        <div className="bg-gray-900/50 rounded-lg border border-gray-800 px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-400">Live Data Feeds:</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  "w-2 h-2 rounded-full",
+                  brokerStatus.alpaca?.connected ? "bg-green-400 animate-pulse" : "bg-gray-600"
+                )} />
+                <span className={cn(
+                  "text-sm",
+                  brokerStatus.alpaca?.connected ? "text-green-400" : "text-gray-500"
+                )}>
+                  Alpaca {brokerStatus.alpaca?.connected ? "(Live)" : "(Offline)"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  "w-2 h-2 rounded-full",
+                  brokerStatus.binance?.connected ? "bg-green-400 animate-pulse" : "bg-gray-600"
+                )} />
+                <span className={cn(
+                  "text-sm",
+                  brokerStatus.binance?.connected ? "text-green-400" : "text-gray-500"
+                )}>
+                  Binance {brokerStatus.binance?.connected ? "(Live)" : "(Offline)"}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="text-xs text-gray-500">
+            {brokerStatus.alpaca?.connected || brokerStatus.binance?.connected
+              ? "Using LIVE market data"
+              : "Using simulated data"}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -351,9 +410,17 @@ export default function MasterQuantBotPage() {
               </button>
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-4">
-            The bot will scan stocks, ETFs, commodities, and crypto to find the best trading opportunities.
-          </p>
+          <div className="mt-4 p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg">
+            <div className="flex items-center gap-2 text-cyan-400 text-sm mb-1">
+              <Shield className="w-4 h-4" />
+              <span className="font-medium">Paper Trading Mode</span>
+            </div>
+            <p className="text-xs text-gray-400">
+              {brokerStatus?.alpaca?.connected || brokerStatus?.binance?.connected
+                ? "Using LIVE market data with simulated trades. No real money at risk."
+                : "Using simulated data. Connect Alpaca/Binance for live prices."}
+            </p>
+          </div>
         </div>
       )}
 

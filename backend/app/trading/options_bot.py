@@ -995,9 +995,19 @@ class OptionsQuantBot:
         return pnl
 
     async def _get_underlying_price(self, symbol: str) -> float:
-        """Get current underlying price."""
-        # In production, would use live data service
-        # For now, return simulated prices
+        """Get current underlying price - uses LIVE data from Alpaca when available."""
+        # Try to get live price from Alpaca broker
+        try:
+            from .live_brokers import get_broker_manager
+            manager = get_broker_manager()
+            if manager.alpaca and manager.alpaca._connected:
+                live_price = await manager.get_live_price(symbol.upper(), "stock")
+                if live_price > 0:
+                    return live_price
+        except Exception as e:
+            logger.debug(f"Live price unavailable for {symbol}: {e}")
+
+        # Fallback to base prices (simulated)
         base_prices = {
             "SPY": 480, "QQQ": 420, "IWM": 200, "AAPL": 185, "MSFT": 420,
             "GOOGL": 155, "AMZN": 185, "NVDA": 880, "META": 500, "TSLA": 250,
@@ -1005,8 +1015,8 @@ class OptionsQuantBot:
             "XLF": 40, "JPM": 195, "BAC": 35, "AMD": 165, "NFLX": 610,
             "DIS": 110, "BA": 180, "V": 280, "MA": 460,
         }
-        base = base_prices.get(symbol, 100)
-        # Add small random movement
+        base = base_prices.get(symbol.upper(), 100)
+        # Add small random movement for simulation
         return base * (1 + np.random.uniform(-0.01, 0.01))
 
     def _add_commentary(self, message: str, category: str):
@@ -1025,17 +1035,33 @@ class OptionsQuantBot:
     # ======================
 
     async def _get_crypto_price(self, symbol: str) -> float:
-        """Get current crypto price."""
-        # Base crypto prices (would be from live feed in production)
+        """Get current crypto price - uses LIVE data from Binance when available."""
+        # Extract base asset from derivative symbol
+        base = symbol.split("-")[0].upper()
+
+        # Try to get live price from Binance broker
+        try:
+            from .live_brokers import get_broker_manager
+            manager = get_broker_manager()
+            if manager.binance and manager.binance._connected:
+                # Use futures price for perpetuals, spot otherwise
+                if "-PERP" in symbol:
+                    live_price = await manager.get_live_price(base, "crypto_futures")
+                else:
+                    live_price = await manager.get_live_price(base, "crypto")
+                if live_price > 0:
+                    return live_price
+        except Exception as e:
+            logger.debug(f"Live price unavailable for {symbol}: {e}")
+
+        # Fallback to base prices (simulated)
         base_prices = {
             "BTC": 95000, "ETH": 3200, "SOL": 180,
             "AVAX": 35, "MATIC": 0.85, "LINK": 22,
             "ARB": 1.20, "OP": 2.50,
         }
-        # Extract base asset from derivative symbol
-        base = symbol.split("-")[0]
         price = base_prices.get(base, 100)
-        # Add small random movement
+        # Add small random movement for simulation
         return price * (1 + np.random.uniform(-0.02, 0.02))
 
     async def open_crypto_perpetual(

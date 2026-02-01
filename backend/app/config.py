@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
 
+    # ============ Live Broker Settings ============
+    # Alpaca (US Stocks/ETFs) - Paper Trading
+    alpaca_api_key: str = ""
+    alpaca_api_secret: str = ""
+    alpaca_paper_mode: bool = True  # True = paper trading, False = live
+
+    # Binance (Crypto) - Testnet
+    binance_api_key: str = ""
+    binance_api_secret: str = ""
+    binance_testnet_mode: bool = True  # True = testnet, False = live
+
+    # Auto-connect to brokers on startup
+    auto_connect_brokers: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -64,6 +78,16 @@ class Settings(BaseSettings):
     def slippage_decimal(self) -> float:
         """Slippage as decimal (not basis points)."""
         return self.default_slippage_bps / 10000.0
+
+    @property
+    def has_alpaca_keys(self) -> bool:
+        """Check if Alpaca API keys are configured."""
+        return bool(self.alpaca_api_key and self.alpaca_api_secret)
+
+    @property
+    def has_binance_keys(self) -> bool:
+        """Check if Binance API keys are configured."""
+        return bool(self.binance_api_key and self.binance_api_secret)
 
 
 @lru_cache
