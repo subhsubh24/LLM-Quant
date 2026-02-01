@@ -107,11 +107,19 @@ interface BotPerformance {
   current_value: number;
 }
 
+interface CommentaryEntry {
+  timestamp: string;
+  message: string;
+  category: string;
+  data: Record<string, any>;
+}
+
 export default function BotPage() {
   const [status, setStatus] = useState<BotStatus | null>(null);
   const [positions, setPositions] = useState<BotPosition[]>([]);
   const [trades, setTrades] = useState<BotTrade[]>([]);
   const [performance, setPerformance] = useState<BotPerformance | null>(null);
+  const [commentary, setCommentary] = useState<CommentaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState<BotTrade | null>(null);
@@ -122,11 +130,12 @@ export default function BotPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, positionsRes, tradesRes, perfRes] = await Promise.all([
+      const [statusRes, positionsRes, tradesRes, perfRes, commentaryRes] = await Promise.all([
         fetch(`${API_BASE}/api/bot/status`),
         fetch(`${API_BASE}/api/bot/positions`),
         fetch(`${API_BASE}/api/bot/trades?limit=20`),
         fetch(`${API_BASE}/api/bot/performance`),
+        fetch(`${API_BASE}/api/bot/commentary?limit=30`),
       ]);
 
       if (statusRes.ok) setStatus(await statusRes.json());
@@ -139,6 +148,10 @@ export default function BotPage() {
         setTrades(data.trades || []);
       }
       if (perfRes.ok) setPerformance(await perfRes.json());
+      if (commentaryRes.ok) {
+        const data = await commentaryRes.json();
+        setCommentary(data.commentary || []);
+      }
     } catch (err) {
       console.error("Failed to fetch bot data:", err);
     } finally {
@@ -148,7 +161,8 @@ export default function BotPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    // Fast refresh for real-time updates
+    const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -451,6 +465,51 @@ export default function BotPage() {
             <div className="flex justify-between text-xs text-gray-500 mt-2">
               <span>Invested</span>
               <span>Cash</span>
+            </div>
+          </div>
+
+          {/* Live Commentary */}
+          <div className="bg-white rounded-2xl shadow-sm mt-4 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-500" />
+                Bot Thinking
+              </h3>
+              {status?.is_running && (
+                <span className="flex items-center gap-1 text-xs text-green-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  LIVE
+                </span>
+              )}
+            </div>
+            <div className="max-h-[300px] overflow-y-auto">
+              {commentary.length > 0 ? (
+                <div className="divide-y divide-gray-50">
+                  {[...commentary].reverse().map((entry, idx) => (
+                    <div
+                      key={idx}
+                      className={cn(
+                        "p-3 text-xs",
+                        entry.category === "trade" && "bg-blue-50",
+                        entry.category === "signal" && "bg-green-50",
+                        entry.category === "risk" && "bg-red-50",
+                        entry.category === "market" && "bg-orange-50"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-gray-800 leading-relaxed">{entry.message}</span>
+                        <span className="text-gray-400 whitespace-nowrap">
+                          {new Date(entry.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'})}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-6 text-center text-gray-400 text-sm">
+                  {status?.is_running ? "Waiting for bot activity..." : "Start the bot to see live commentary"}
+                </div>
+              )}
             </div>
           </div>
         </div>

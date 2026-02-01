@@ -23,7 +23,40 @@ import uuid
 import pytz
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s', datefmt='%H:%M:%S')
 import json
+
+
+# Commentary buffer for real-time UI updates
+class BotCommentary:
+    """Stores real-time bot thoughts and commentary."""
+    def __init__(self, max_entries: int = 100):
+        self.entries: List[Dict[str, Any]] = []
+        self.max_entries = max_entries
+
+    def add(self, message: str, category: str = "info", data: Dict = None):
+        """Add a commentary entry."""
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "message": message,
+            "category": category,  # info, analysis, signal, trade, risk, market
+            "data": data or {}
+        }
+        self.entries.append(entry)
+        if len(self.entries) > self.max_entries:
+            self.entries = self.entries[-self.max_entries:]
+        # Also log to console
+        logger.info(f"[{category.upper()}] {message}")
+
+    def get_recent(self, limit: int = 50) -> List[Dict]:
+        return self.entries[-limit:]
+
+    def clear(self):
+        self.entries = []
+
+
+# Global commentary instance
+_commentary = BotCommentary()
 
 
 def is_market_open() -> bool:
@@ -280,13 +313,13 @@ class QuantBot:
         logger.info(f"QuantBot initialized: ${initial_capital:,.2f} capital, {mode.value} mode, {asset_class.value} assets")
 
     def _get_scan_interval(self) -> int:
-        """Get scan interval based on mode."""
+        """Get scan interval based on mode - fast for real-time trading."""
         if self.mode == TradingMode.AGGRESSIVE:
-            return 60  # 1 minute for day trading
+            return 3  # 3 seconds for HFT-style
         elif self.mode == TradingMode.BALANCED:
-            return 300  # 5 minutes
+            return 5  # 5 seconds
         else:
-            return 900  # 15 minutes for conservative
+            return 10  # 10 seconds for conservative
 
     def _configure_mode(self):
         """Configure bot based on trading mode."""
@@ -325,29 +358,48 @@ class QuantBot:
     async def start(self):
         """Start the autonomous trading bot."""
         self.is_running = True
-        logger.info("QuantBot STARTED - Autonomous trading enabled")
+        self.commentary = _commentary
+        self.commentary.clear()
 
+        self.commentary.add(
+            f"🚀 QuantBot ACTIVATED | Capital: ${self.initial_capital:,.2f} | Mode: {self.mode.value.upper()} | Assets: {self.asset_class.value.upper()}",
+            "market"
+        )
+        self.commentary.add(
+            f"⚡ Scan frequency: every {self.scan_interval_seconds} seconds | Max positions: {self.max_positions}",
+            "info"
+        )
+
+        cycle_count = 0
         while self.is_running:
             try:
-                await self._run_trading_cycle()
+                cycle_count += 1
+                await self._run_trading_cycle(cycle_count)
                 await asyncio.sleep(self.scan_interval_seconds)
             except Exception as e:
+                self.commentary.add(f"⚠️ Cycle error: {str(e)[:100]}", "risk")
                 logger.error(f"Trading cycle error: {e}")
-                await asyncio.sleep(30)  # Wait before retry
+                await asyncio.sleep(5)  # Quick retry
 
     def stop(self):
         """Stop the autonomous trading bot."""
         self.is_running = False
         logger.info("QuantBot STOPPED")
 
-    async def _run_trading_cycle(self):
+    async def _run_trading_cycle(self, cycle_count: int = 0):
         """Execute one complete trading cycle with smart market detection."""
-        logger.debug("Running trading cycle...")
         self.last_scan_time = datetime.now()
 
         # Check market status
         market_status = get_market_status()
         market_open = market_status["is_open"]
+
+        # Log cycle start every 10 cycles
+        if cycle_count % 10 == 1:
+            self.commentary.add(
+                f"📊 Cycle #{cycle_count} | Portfolio: ${self.total_value:,.2f} | P&L: ${self.total_pnl:+,.2f} ({self.total_pnl_pct*100:+.2f}%)",
+                "info"
+            )
 
         # 1. Update all positions with current prices
         await self._update_positions()
@@ -356,28 +408,24 @@ class QuantBot:
         await self._check_risk_limits()
 
         # 3. Scan for new opportunities based on market hours
-        # If market is closed AND we're set to trade both, focus on crypto
         if self.asset_class == AssetClass.STOCKS:
             if market_open:
                 await self._scan_stocks()
             else:
-                logger.info(f"Stock market CLOSED - {market_status['message']}")
+                if cycle_count % 20 == 1:
+                    self.commentary.add(f"🏛️ Stock market CLOSED - {market_status['message']}", "market")
 
         elif self.asset_class == AssetClass.CRYPTO:
-            # Crypto trades 24/7
             await self._scan_crypto()
 
         elif self.asset_class == AssetClass.BOTH:
-            # Smart switching: trade stocks when open, crypto always (more aggressively when stocks closed)
             if market_open:
                 await self._scan_stocks()
                 await self._scan_crypto()
             else:
-                # Market closed - focus entirely on crypto (24/7 market)
-                logger.info(f"Stock market CLOSED - Switching to CRYPTO ONLY mode")
+                if cycle_count % 20 == 1:
+                    self.commentary.add(f"🌙 Market CLOSED → CRYPTO ONLY mode active", "market")
                 await self._scan_crypto()
-                # Do a more aggressive crypto scan when stocks are closed
-                await self._scan_crypto()  # Double scan for more opportunities
 
         # 4. Execute pending signals
         await self._execute_signals()
@@ -414,11 +462,19 @@ class QuantBot:
             if position.current_price <= position.stop_loss_price:
                 reason = f"STOP LOSS triggered at {pnl_pct*100:.1f}%"
                 positions_to_close.append((symbol, reason, "stop_loss"))
+                self.commentary.add(
+                    f"🛑 STOP LOSS: {symbol} hit ${position.stop_loss_price:.2f} - Closing position",
+                    "risk"
+                )
 
             # Check take profit
             elif position.current_price >= position.take_profit_price:
                 reason = f"TAKE PROFIT triggered at {pnl_pct*100:.1f}%"
                 positions_to_close.append((symbol, reason, "take_profit"))
+                self.commentary.add(
+                    f"🎉 TAKE PROFIT: {symbol} hit ${position.take_profit_price:.2f} - Locking gains!",
+                    "risk"
+                )
 
             # Trailing stop update
             else:
@@ -465,14 +521,31 @@ class QuantBot:
 
     async def _scan_crypto(self):
         """Scan crypto universe for trading opportunities."""
-        logger.debug(f"Scanning {len(self.CRYPTO_UNIVERSE)} cryptos...")
+        scanned = 0
+        opportunities = []
 
         for symbol in self.CRYPTO_UNIVERSE:
             try:
                 quote = await self.crypto_service.get_quote(symbol)
                 if quote:
+                    scanned += 1
                     signal, rationale = await self._analyze_crypto(symbol, quote)
+
+                    # Log interesting price movements
+                    if abs(quote.change_percent_24h) > 3:
+                        self.commentary.add(
+                            f"👀 {symbol}: ${quote.price:,.2f} ({quote.change_percent_24h:+.1f}% 24h) | MCap Rank #{quote.market_cap_rank}",
+                            "analysis",
+                            {"symbol": symbol, "price": quote.price, "change": quote.change_percent_24h}
+                        )
+
                     if signal and rationale.confidence >= 0.5:
+                        opportunities.append(symbol)
+                        self.commentary.add(
+                            f"🎯 SIGNAL: {signal} {symbol} | Confidence: {rationale.confidence*100:.0f}% | {rationale.primary_reason}",
+                            "signal",
+                            {"symbol": symbol, "signal": signal, "confidence": rationale.confidence}
+                        )
                         self.pending_signals.append({
                             "asset_class": "crypto",
                             "symbol": symbol,
@@ -482,6 +555,12 @@ class QuantBot:
                         })
             except Exception as e:
                 logger.debug(f"Crypto analysis failed for {symbol}: {e}")
+
+        if not opportunities and scanned > 0:
+            # Occasionally report no opportunities
+            import random
+            if random.random() < 0.1:  # 10% of the time
+                self.commentary.add(f"🔍 Scanned {scanned} cryptos - no high-confidence signals this cycle", "analysis")
 
     async def _analyze_stock(self, symbol: str, price: float) -> Tuple[Optional[str], Optional[TradeRationale]]:
         """
@@ -829,7 +908,15 @@ class QuantBot:
         )
         self.trade_history.append(trade)
 
-        logger.info(f"BUY {symbol}: {quantity:.4f} @ ${price:.2f} = ${position_value:.2f} | {rationale.primary_reason}")
+        self.commentary.add(
+            f"✅ EXECUTED BUY: {quantity:.4f} {symbol} @ ${price:,.2f} = ${position_value:,.2f}",
+            "trade",
+            {"symbol": symbol, "side": "BUY", "quantity": quantity, "price": price, "value": position_value}
+        )
+        self.commentary.add(
+            f"📝 Rationale: {rationale.primary_reason} | Stop: ${stop_loss_price:,.2f} | Target: ${take_profit_price:,.2f}",
+            "trade"
+        )
 
         return True
 
@@ -874,7 +961,13 @@ class QuantBot:
         )
         self.trade_history.append(trade)
 
-        logger.info(f"SELL {symbol}: {position.quantity:.4f} @ ${position.current_price:.2f} | P&L: ${pnl:.2f} | {reason}")
+        pnl_emoji = "💰" if pnl >= 0 else "📉"
+        self.commentary.add(
+            f"{pnl_emoji} SOLD {symbol}: {position.quantity:.4f} @ ${position.current_price:,.2f} | P&L: ${pnl:+,.2f} ({position.unrealized_pnl_pct*100:+.1f}%)",
+            "trade",
+            {"symbol": symbol, "side": "SELL", "pnl": pnl, "reason": reason}
+        )
+        self.commentary.add(f"📝 Reason: {reason}", "trade")
 
         return True
 
@@ -915,6 +1008,12 @@ class QuantBot:
     def get_trades(self, limit: int = 50) -> List[Dict]:
         """Get recent trade history."""
         return [t.to_dict() for t in self.trade_history[-limit:]]
+
+    def get_commentary(self, limit: int = 50) -> List[Dict]:
+        """Get recent bot commentary/thoughts."""
+        if hasattr(self, 'commentary'):
+            return self.commentary.get_recent(limit)
+        return _commentary.get_recent(limit)
 
     def get_performance(self) -> Dict[str, Any]:
         """Calculate performance metrics."""

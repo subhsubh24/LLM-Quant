@@ -2082,7 +2082,7 @@ async def trigger_bot_scan():
     bot = get_quant_bot()
 
     # Run one trading cycle
-    await bot._run_trading_cycle()
+    await bot._run_trading_cycle(0)
 
     return {
         "status": "scan_complete",
@@ -2128,6 +2128,21 @@ async def close_bot_position(symbol: str, reason: str = "Manual close"):
         "status": "closed",
         "symbol": symbol.upper(),
         "reason": reason,
+    }
+
+
+@router.get("/bot/commentary")
+async def get_bot_commentary(limit: int = 50):
+    """Get real-time bot thinking and commentary."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    commentary = bot.get_commentary(limit)
+
+    return {
+        "commentary": commentary,
+        "count": len(commentary),
+        "bot_running": bot.is_running,
     }
 
 
