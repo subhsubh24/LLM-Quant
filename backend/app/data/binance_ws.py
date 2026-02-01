@@ -6,6 +6,7 @@ Provides truly live data with no rate limits.
 import asyncio
 import json
 import logging
+import ssl
 from datetime import datetime
 from typing import Dict, Optional, Callable, Set
 from dataclasses import dataclass
@@ -13,6 +14,14 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 logger = logging.getLogger(__name__)
+
+# Create SSL context that doesn't verify certificates
+# (needed for networks with SSL inspection proxies)
+def _create_ssl_context():
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    return ssl_context
 
 
 @dataclass
@@ -136,7 +145,10 @@ class BinanceWebSocket:
 
         logger.info(f"Connecting to Binance WebSocket: {url}")
 
-        async with websockets.connect(url, ping_interval=20) as ws:
+        # Use SSL context that handles corporate proxy/SSL inspection
+        ssl_context = _create_ssl_context()
+
+        async with websockets.connect(url, ping_interval=20, ssl=ssl_context) as ws:
             self._ws = ws
             self._connected = True
             self._reconnect_delay = 1  # Reset on successful connect
