@@ -101,10 +101,30 @@ interface BotPerformance {
   cagr: number;
   volatility: number;
   sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
   max_drawdown: number;
+  var_95: number;
   win_rate: number;
+  profit_factor: number;
   total_trades: number;
   current_value: number;
+}
+
+interface DataHealth {
+  overall: string;
+  message: string;
+  crypto: { status: string; source: string; is_realtime?: boolean };
+  stocks: { status: string; source: string };
+  websocket: { connected: boolean; symbols_count: number };
+}
+
+interface InstitutionalMetrics {
+  risk_mode: string;
+  current_var_pct: number;
+  current_drawdown_pct: number;
+  var_limit_pct: number;
+  crypto_market_momentum: number;
 }
 
 interface CommentaryEntry {
@@ -120,6 +140,8 @@ export default function BotPage() {
   const [trades, setTrades] = useState<BotTrade[]>([]);
   const [performance, setPerformance] = useState<BotPerformance | null>(null);
   const [commentary, setCommentary] = useState<CommentaryEntry[]>([]);
+  const [dataHealth, setDataHealth] = useState<DataHealth | null>(null);
+  const [institutionalMetrics, setInstitutionalMetrics] = useState<InstitutionalMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [selectedTrade, setSelectedTrade] = useState<BotTrade | null>(null);
@@ -130,15 +152,23 @@ export default function BotPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, positionsRes, tradesRes, perfRes, commentaryRes] = await Promise.all([
+      const [statusRes, positionsRes, tradesRes, perfRes, commentaryRes, healthRes] = await Promise.all([
         fetch(`${API_BASE}/api/bot/status`),
         fetch(`${API_BASE}/api/bot/positions`),
         fetch(`${API_BASE}/api/bot/trades?limit=20`),
         fetch(`${API_BASE}/api/bot/performance`),
         fetch(`${API_BASE}/api/bot/commentary?limit=30`),
+        fetch(`${API_BASE}/api/bot/data-health`),
       ]);
 
-      if (statusRes.ok) setStatus(await statusRes.json());
+      if (statusRes.ok) {
+        const data = await statusRes.json();
+        setStatus(data);
+        // Extract institutional metrics from status
+        if (data.institutional_metrics) {
+          setInstitutionalMetrics(data.institutional_metrics);
+        }
+      }
       if (positionsRes.ok) {
         const data = await positionsRes.json();
         setPositions(data.positions || []);
@@ -152,6 +182,7 @@ export default function BotPage() {
         const data = await commentaryRes.json();
         setCommentary(data.commentary || []);
       }
+      if (healthRes.ok) setDataHealth(await healthRes.json());
     } catch (err) {
       console.error("Failed to fetch bot data:", err);
     } finally {
@@ -265,6 +296,114 @@ export default function BotPage() {
               </span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Data Health & Institutional Risk */}
+      {dataHealth && (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          {/* Data Health */}
+          <div className={cn(
+            "p-4 rounded-2xl flex items-center justify-between",
+            dataHealth.overall === "all_live" ? "bg-green-50 border border-green-100" :
+            dataHealth.overall === "all_error" ? "bg-red-50 border border-red-100" :
+            "bg-yellow-50 border border-yellow-100"
+          )}>
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-10 h-10 rounded-xl flex items-center justify-center",
+                dataHealth.overall === "all_live" ? "bg-green-100" :
+                dataHealth.overall === "all_error" ? "bg-red-100" : "bg-yellow-100"
+              )}>
+                <Activity className={cn(
+                  "w-5 h-5",
+                  dataHealth.overall === "all_live" ? "text-green-600" :
+                  dataHealth.overall === "all_error" ? "text-red-600" : "text-yellow-600"
+                )} />
+              </div>
+              <div>
+                <span className={cn(
+                  "font-semibold text-sm",
+                  dataHealth.overall === "all_live" ? "text-green-700" :
+                  dataHealth.overall === "all_error" ? "text-red-700" : "text-yellow-700"
+                )}>
+                  Data Health
+                </span>
+                <p className="text-xs text-gray-600 mt-0.5">{dataHealth.message}</p>
+              </div>
+            </div>
+            <div className="text-right text-xs space-y-1">
+              <div className="flex items-center justify-end gap-2">
+                <span className="text-gray-500">Crypto:</span>
+                <span className={cn(
+                  "font-medium",
+                  dataHealth.crypto?.status === "live" ? "text-green-600" : "text-red-600"
+                )}>
+                  {dataHealth.crypto?.is_realtime ? "REALTIME" : dataHealth.crypto?.status?.toUpperCase()}
+                </span>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <span className="text-gray-500">Stocks:</span>
+                <span className={cn(
+                  "font-medium",
+                  dataHealth.stocks?.status === "live" ? "text-green-600" : "text-red-600"
+                )}>
+                  {dataHealth.stocks?.status?.toUpperCase()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Institutional Risk Metrics */}
+          {institutionalMetrics && (
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-semibold text-sm text-gray-700">Institutional Risk</span>
+                <span className={cn(
+                  "px-2 py-0.5 text-xs font-medium rounded-full",
+                  institutionalMetrics.risk_mode === "NORMAL" ? "bg-green-100 text-green-700" :
+                  institutionalMetrics.risk_mode === "REDUCED" ? "bg-yellow-100 text-yellow-700" :
+                  "bg-red-100 text-red-700"
+                )}>
+                  {institutionalMetrics.risk_mode}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-4 text-center">
+                <div>
+                  <div className="text-lg font-bold text-gray-900">
+                    {institutionalMetrics.current_var_pct?.toFixed(1)}%
+                  </div>
+                  <div className="text-xs text-gray-500">VaR 95%</div>
+                </div>
+                <div>
+                  <div className={cn(
+                    "text-lg font-bold",
+                    Math.abs(institutionalMetrics.current_drawdown_pct) < 5 ? "text-green-600" :
+                    Math.abs(institutionalMetrics.current_drawdown_pct) < 10 ? "text-yellow-600" : "text-red-600"
+                  )}>
+                    {institutionalMetrics.current_drawdown_pct?.toFixed(1)}%
+                  </div>
+                  <div className="text-xs text-gray-500">Drawdown</div>
+                </div>
+                <div>
+                  <div className="text-lg font-bold text-gray-900">
+                    {institutionalMetrics.var_limit_pct?.toFixed(1)}%
+                  </div>
+                  <div className="text-xs text-gray-500">VaR Limit</div>
+                </div>
+                <div>
+                  <div className={cn(
+                    "text-lg font-bold",
+                    institutionalMetrics.crypto_market_momentum > 0 ? "text-green-600" : "text-red-600"
+                  )}>
+                    {institutionalMetrics.crypto_market_momentum > 0 ? "+" : ""}
+                    {institutionalMetrics.crypto_market_momentum?.toFixed(1)}%
+                  </div>
+                  <div className="text-xs text-gray-500">Market Mom</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
