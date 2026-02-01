@@ -680,7 +680,9 @@ class CryptoMarketService:
                     response = await client.get(url, params=params)
 
                     if response.status_code == 429:
-                        logger.warning(f"CoinGecko rate limited (429) - using cached data if available")
+                        logger.warning(f"CoinGecko rate limited (429) - backing off for {self._batch_cache_ttl}s")
+                        # Mark as "just fetched" to prevent immediate retry
+                        self._last_batch_fetch = datetime.now()
                         # Use cached data for missing symbols
                         for symbol in missing_symbols:
                             if symbol in self._batch_cache:
@@ -712,7 +714,8 @@ class CryptoMarketService:
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                logger.warning(f"CoinGecko RATE LIMITED - using cached data for missing symbols")
+                logger.warning(f"CoinGecko RATE LIMITED - backing off for {self._batch_cache_ttl}s")
+                self._last_batch_fetch = datetime.now()  # Prevent immediate retry
                 for symbol in missing_symbols:
                     if symbol in self._batch_cache:
                         quotes[symbol] = self._batch_cache[symbol]
