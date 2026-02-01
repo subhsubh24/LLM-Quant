@@ -1940,3 +1940,210 @@ async def get_crypto_market_commentary():
     commentary = await analyst.generate_market_commentary(context)
 
     return commentary
+
+
+# ============ Autonomous Trading Bot Endpoints ============
+
+@router.get("/bot/status")
+async def get_bot_status():
+    """Get the autonomous trading bot status."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    return bot.get_status()
+
+
+@router.post("/bot/start")
+async def start_bot(
+    capital: float = 10000.0,
+    mode: str = "balanced",
+    asset_class: str = "both",
+    background_tasks: BackgroundTasks = None,
+):
+    """Start the autonomous trading bot."""
+    from ..trading import get_quant_bot, TradingMode, AssetClass, QuantBot
+
+    global _bot
+
+    # Parse mode
+    trading_mode = TradingMode.BALANCED
+    if mode == "aggressive":
+        trading_mode = TradingMode.AGGRESSIVE
+    elif mode == "conservative":
+        trading_mode = TradingMode.CONSERVATIVE
+
+    # Parse asset class
+    asset = AssetClass.BOTH
+    if asset_class == "stocks":
+        asset = AssetClass.STOCKS
+    elif asset_class == "crypto":
+        asset = AssetClass.CRYPTO
+
+    # Create new bot with specified settings
+    from ..trading import quant_bot
+    quant_bot._bot = QuantBot(
+        initial_capital=capital,
+        mode=trading_mode,
+        asset_class=asset,
+    )
+
+    bot = get_quant_bot()
+
+    # Start in background
+    if background_tasks:
+        background_tasks.add_task(bot.start)
+        return {
+            "status": "started",
+            "message": f"Bot started with ${capital:,.2f} in {mode} mode trading {asset_class}",
+            "config": bot.get_status(),
+        }
+
+    return {
+        "status": "ready",
+        "message": "Bot initialized but not started (use background_tasks to auto-start)",
+        "config": bot.get_status(),
+    }
+
+
+@router.post("/bot/stop")
+async def stop_bot():
+    """Stop the autonomous trading bot."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    bot.stop()
+
+    return {
+        "status": "stopped",
+        "message": "Autonomous trading bot stopped",
+        "final_value": bot.total_value,
+        "total_pnl": bot.total_pnl,
+    }
+
+
+@router.get("/bot/positions")
+async def get_bot_positions():
+    """Get all bot positions with entry rationale."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    positions = bot.get_positions()
+
+    return {
+        "positions": positions,
+        "count": len(positions),
+        "total_value": sum(p.get("market_value", 0) for p in positions),
+    }
+
+
+@router.get("/bot/trades")
+async def get_bot_trades(limit: int = 50):
+    """Get bot trade history with full rationale."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    trades = bot.get_trades(limit)
+
+    return {
+        "trades": trades,
+        "count": len(trades),
+        "total_trades": len(bot.trade_history),
+    }
+
+
+@router.get("/bot/performance")
+async def get_bot_performance():
+    """Get comprehensive bot performance metrics."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+    return bot.get_performance()
+
+
+@router.post("/bot/scan")
+async def trigger_bot_scan():
+    """Manually trigger a market scan cycle."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+
+    # Run one trading cycle
+    await bot._run_trading_cycle()
+
+    return {
+        "status": "scan_complete",
+        "last_scan": bot.last_scan_time.isoformat() if bot.last_scan_time else None,
+        "positions": len(bot.positions),
+        "pending_signals": len(bot.pending_signals),
+    }
+
+
+@router.get("/bot/equity-curve")
+async def get_bot_equity_curve():
+    """Get bot equity curve for charting."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+
+    return {
+        "equity_curve": [
+            {"timestamp": ts.isoformat(), "value": value}
+            for ts, value in bot.equity_curve
+        ],
+        "initial_capital": bot.initial_capital,
+        "current_value": bot.total_value,
+    }
+
+
+@router.post("/bot/close-position/{symbol}")
+async def close_bot_position(symbol: str, reason: str = "Manual close"):
+    """Manually close a bot position."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+
+    if symbol.upper() not in bot.positions:
+        raise HTTPException(status_code=404, detail=f"Position not found: {symbol}")
+
+    success = await bot._close_position(symbol.upper(), reason)
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to close position")
+
+    return {
+        "status": "closed",
+        "symbol": symbol.upper(),
+        "reason": reason,
+    }
+
+
+@router.post("/bot/config")
+async def update_bot_config(
+    max_positions: Optional[int] = None,
+    max_position_pct: Optional[float] = None,
+    stop_loss_pct: Optional[float] = None,
+    take_profit_pct: Optional[float] = None,
+):
+    """Update bot configuration."""
+    from ..trading import get_quant_bot
+
+    bot = get_quant_bot()
+
+    if max_positions is not None:
+        bot.max_positions = max_positions
+    if max_position_pct is not None:
+        bot.max_position_pct = max_position_pct
+    if stop_loss_pct is not None:
+        bot.stop_loss_pct = stop_loss_pct
+    if take_profit_pct is not None:
+        bot.take_profit_pct = take_profit_pct
+
+    return {
+        "status": "updated",
+        "config": {
+            "max_positions": bot.max_positions,
+            "max_position_pct": bot.max_position_pct,
+            "stop_loss_pct": bot.stop_loss_pct,
+            "take_profit_pct": bot.take_profit_pct,
+        }
+    }

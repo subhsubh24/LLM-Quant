@@ -1,4 +1,4 @@
-"""Trading system with order management, automation, and options."""
+"""Trading system with order management, automation, options, and autonomous bot."""
 
 from .orders import (
     Order, OrderType, OrderSide, OrderStatus, TimeInForce,
@@ -12,6 +12,10 @@ from .options import (
     OptionType, OptionStyle, Greeks, OptionContract, OptionsStrategy,
     BlackScholes, OptionsManager, get_options_manager
 )
+from .quant_bot import (
+    QuantBot, TradingMode, AssetClass, BotTrade, BotPosition,
+    TradeRationale, get_quant_bot, run_bot
+)
 
 __all__ = [
     "Order", "OrderType", "OrderSide", "OrderStatus", "TimeInForce",
@@ -20,4 +24,6 @@ __all__ = [
     "RebalanceFrequency", "get_auto_trader",
     "OptionType", "OptionStyle", "Greeks", "OptionContract", "OptionsStrategy",
     "BlackScholes", "OptionsManager", "get_options_manager",
+    "QuantBot", "TradingMode", "AssetClass", "BotTrade", "BotPosition",
+    "TradeRationale", "get_quant_bot", "run_bot",
 ]

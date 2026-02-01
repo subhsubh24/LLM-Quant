@@ -21,6 +21,7 @@ const stocksNavigation = [
   { name: "Terminal", href: "/dashboard", icon: Terminal },
   { name: "Trading", href: "/trading", icon: TrendingUp },
   { name: "Options", href: "/options", icon: Layers },
+  { name: "Quant Bot", href: "/bot", icon: Brain },
 ];
 
 const cryptoNavigation = [
