@@ -244,11 +244,37 @@ class CryptoDerivativePosition:
     stop_loss: float = 0.0
 
     def calculate_pnl(self) -> float:
-        """Calculate current P&L including funding."""
-        price_pnl = (self.current_price - self.entry_price) * self.size
-        if self.side == "short":
-            price_pnl = -price_pnl
-        return price_pnl * self.leverage + self.funding_received
+        """
+        Calculate current P&L including funding.
+
+        For perpetuals where size is in USD notional:
+        - P&L = (price_change_percent) * notional_size
+        - Leverage only affects margin required, not absolute P&L
+
+        For options where size is in contracts:
+        - P&L = (current_price - entry_price) * contracts
+        """
+        if self.entry_price <= 0:
+            return self.funding_received
+
+        if self.derivative_type == "perpetual":
+            # Perpetual: size is USD notional, calculate percentage return
+            # Example: Short $500 at $100, price drops to $95
+            #   price_change_pct = -5%
+            #   pnl = -5% * $500 = -$25
+            #   For short: pnl = -(-$25) = +$25 profit
+            price_change_pct = (self.current_price - self.entry_price) / self.entry_price
+            price_pnl = price_change_pct * self.size
+            if self.side == "short":
+                price_pnl = -price_pnl
+            # Note: leverage does NOT multiply P&L - it only affects margin required
+            return price_pnl + self.funding_received
+        else:
+            # Options: size is number of contracts, entry_price is option premium
+            price_pnl = (self.current_price - self.entry_price) * self.size
+            if self.side == "short":
+                price_pnl = -price_pnl
+            return price_pnl + self.funding_received
 
     def to_dict(self) -> Dict:
         return {
@@ -1344,7 +1370,17 @@ class OptionsQuantBot:
 
     def get_status(self) -> Dict:
         """Get current bot status."""
+        # Calculate crypto positions value (margin deployed + unrealized P&L)
+        crypto_margin_deployed = sum(
+            p.size / p.leverage for p in self.crypto_positions.values()
+        )
         crypto_pnl = sum(p.calculate_pnl() for p in self.crypto_positions.values())
+        crypto_total_value = crypto_margin_deployed + crypto_pnl
+
+        # Total portfolio value = cash + options positions + crypto positions
+        # Note: cash already has margin deducted, so we add back the full position value
+        portfolio_value = self.total_value + crypto_total_value
+        portfolio_pnl = portfolio_value - self.initial_capital
 
         return {
             "is_running": self.is_running,
@@ -1352,12 +1388,14 @@ class OptionsQuantBot:
             "asset_class": "options_and_derivatives",
             "initial_capital": self.initial_capital,
             "cash": round(self.cash, 2),
-            "total_value": round(self.total_value + crypto_pnl, 2),
-            "total_pnl": round(self.total_pnl + crypto_pnl, 2),
-            "total_pnl_pct": round((self.total_pnl + crypto_pnl) / self.initial_capital * 100, 2),
+            "total_value": round(portfolio_value, 2),
+            "total_pnl": round(portfolio_pnl, 2),
+            "total_pnl_pct": round(portfolio_pnl / self.initial_capital * 100, 2) if self.initial_capital > 0 else 0,
             "positions_count": len(self.positions) + len(self.crypto_positions),
             "options_positions": len(self.positions),
             "crypto_positions": len(self.crypto_positions),
+            "capital_deployed": round(crypto_margin_deployed, 2),
+            "capital_deployed_pct": round(crypto_margin_deployed / self.initial_capital * 100, 2) if self.initial_capital > 0 else 0,
             "trades_count": len(self.trade_history),
             "last_scan": self.last_scan_time.isoformat() if self.last_scan_time else None,
             "risk_summary": self.risk_manager.get_risk_summary(),
