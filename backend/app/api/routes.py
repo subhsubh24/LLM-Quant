@@ -2331,6 +2331,99 @@ async def trigger_master_bot_scan():
     }
 
 
+@router.get("/master-bot/ml-analysis/{symbol}")
+async def get_ml_analysis(symbol: str):
+    """
+    Get detailed ML analysis for a specific symbol.
+
+    Returns:
+    - ML prediction (DQN, PPO, LSTM, Transformer ensemble)
+    - Market regime detection (HMM, VAE)
+    - Risk metrics (VaR, CVaR, GARCH volatility forecast)
+    - Factor exposures (market, size, value, momentum, etc.)
+    - Bayesian Sharpe ratio with uncertainty
+    """
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    analysis = bot.get_ml_analysis(symbol.upper())
+
+    return {
+        "status": "success",
+        "analysis": analysis,
+    }
+
+
+@router.get("/master-bot/portfolio-optimization")
+async def get_portfolio_optimization(
+    method: str = "risk_parity",
+    symbols: str = "SPY,QQQ,IWM,GLD,TLT",
+):
+    """
+    Get optimal portfolio allocation using advanced optimization.
+
+    Methods:
+    - mean_variance: Classic Markowitz optimization
+    - risk_parity: Equal risk contribution
+    - cvar: Minimize Conditional Value at Risk (tail risk)
+    - max_diversification: Maximum diversification ratio
+    """
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+
+    weights = bot.analytics.optimize_portfolio(symbol_list, method=method)
+
+    return {
+        "status": "success",
+        "method": method,
+        "allocation": {k: round(v * 100, 2) for k, v in weights.items()},
+        "total": round(sum(weights.values()) * 100, 2),
+    }
+
+
+@router.get("/master-bot/ml-metrics")
+async def get_ml_metrics():
+    """
+    Get ML model training metrics and performance.
+
+    Returns:
+    - DQN training metrics (epsilon, losses)
+    - PPO training metrics (policy loss, value loss)
+    - Episode rewards
+    - Model fit status (HMM, GARCH)
+    """
+    from ..trading.master_bot import get_master_bot
+    import numpy as np
+
+    bot = get_master_bot()
+    analytics = bot.analytics
+
+    return {
+        "status": "success",
+        "dqn": {
+            "epsilon": round(analytics.dqn.epsilon, 4),
+            "training_steps": analytics.training_step,
+            "recent_losses": [round(l, 6) for l in analytics.dqn.losses[-20:]] if analytics.dqn.losses else [],
+            "buffer_size": len(analytics.dqn.replay_buffer),
+        },
+        "ppo": {
+            "policy_losses": [round(l, 4) for l in analytics.ppo.policy_losses[-10:]] if analytics.ppo.policy_losses else [],
+            "value_losses": [round(l, 4) for l in analytics.ppo.value_losses[-10:]] if analytics.ppo.value_losses else [],
+        },
+        "episodes": {
+            "total": len(analytics.episode_rewards),
+            "recent_rewards": [round(r, 2) for r in analytics.episode_rewards[-10:]] if analytics.episode_rewards else [],
+            "avg_reward": round(float(np.mean(analytics.episode_rewards[-50:])), 2) if analytics.episode_rewards else 0,
+        },
+        "models_fitted": {
+            "hmm": analytics.hmm_fitted,
+            "garch": analytics.garch_fitted,
+        },
+    }
+
+
 # ============ Options Bot (Legacy - use Master Bot instead) ============
 
 @router.post("/options-bot/start")
