@@ -2227,6 +2227,112 @@ async def update_bot_config(
 
 # ============ Options Quant Bot Endpoints ============
 
+# ============ Master Quant Bot (Unified Trading) ============
+
+@router.post("/master-bot/start")
+async def start_master_bot(
+    capital: float = 100000,
+    mode: str = "balanced"
+):
+    """
+    Start the Master Quant Bot - unified trading across ALL asset classes.
+
+    The bot will automatically:
+    - Scan all markets (stocks, ETFs, commodities, crypto)
+    - Score opportunities using expected return, IV, and risk/reward
+    - Execute the best trades across options, perpetuals, and crypto options
+    - Manage positions with automatic stop-loss and take-profit
+
+    Modes:
+    - aggressive: Higher risk tolerance, more trades, tighter profit targets
+    - balanced: Mix of strategies, moderate risk
+    - conservative: Capital preservation focus, wider stops
+    """
+    from ..trading.master_bot import create_master_bot
+
+    bot = create_master_bot(capital=capital, mode=mode)
+    await bot.start()
+
+    return {
+        "status": "started",
+        "capital": capital,
+        "mode": mode,
+        "message": f"Master Bot started - scanning ALL markets with ${capital:,.0f}",
+        "asset_classes": ["stock_options", "etf_options", "commodity_options", "crypto_perpetual", "crypto_options"],
+    }
+
+
+@router.post("/master-bot/stop")
+async def stop_master_bot():
+    """Stop the Master Quant Bot."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    await bot.stop()
+    return {"status": "stopped", "message": "Master Bot stopped - all trading halted"}
+
+
+@router.get("/master-bot/status")
+async def get_master_bot_status():
+    """Get comprehensive Master Bot status including all asset classes."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return bot.get_status()
+
+
+@router.get("/master-bot/opportunities")
+async def get_master_bot_opportunities(limit: int = 20):
+    """Get top ranked trading opportunities across all markets."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return {"opportunities": bot.get_opportunities(limit)}
+
+
+@router.get("/master-bot/positions")
+async def get_master_bot_positions():
+    """Get all positions across all asset classes."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return bot.get_all_positions()
+
+
+@router.get("/master-bot/commentary")
+async def get_master_bot_commentary(limit: int = 50):
+    """Get the bot's real-time thinking and decisions."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return {"commentary": bot.get_commentary(limit)}
+
+
+@router.get("/master-bot/performance")
+async def get_master_bot_performance():
+    """Get performance metrics for the Master Bot."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return bot.get_performance()
+
+
+@router.post("/master-bot/scan")
+async def trigger_master_bot_scan():
+    """Manually trigger a full market scan."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    opportunities = await bot._scan_all_markets()
+    return {
+        "status": "scan_completed",
+        "opportunities_found": len(opportunities),
+        "top_5": [opp.to_dict() for opp in opportunities[:5]],
+    }
+
+
+# ============ Options Bot (Legacy - use Master Bot instead) ============
+
 @router.post("/options-bot/start")
 async def start_options_bot(
     capital: float = 100000,

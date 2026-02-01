@@ -18,7 +18,12 @@ from .quant_bot import (
 )
 from .options_bot import (
     OptionsQuantBot, OptionsMode, OptionsPosition, OptionsTrade,
-    IVAnalysis, OptionsRiskManager, get_options_bot, create_options_bot
+    IVAnalysis, OptionsRiskManager, get_options_bot, create_options_bot,
+    CryptoDerivativePosition,
+)
+from .master_bot import (
+    MasterQuantBot, MarketRegime, Opportunity,
+    get_master_bot, create_master_bot,
 )
 
 __all__ = [
@@ -33,4 +38,8 @@ __all__ = [
     # Options Bot
     "OptionsQuantBot", "OptionsMode", "OptionsPosition", "OptionsTrade",
     "IVAnalysis", "OptionsRiskManager", "get_options_bot", "create_options_bot",
+    "CryptoDerivativePosition",
+    # Master Bot (unified)
+    "MasterQuantBot", "MarketRegime", "Opportunity",
+    "get_master_bot", "create_master_bot",
 ]
