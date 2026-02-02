@@ -1160,6 +1160,74 @@ class OptionsQuantBot:
 
         del self.crypto_positions[position_id]
 
+    async def open_crypto_spot(
+        self,
+        symbol: str,
+        side: str,
+        size_usd: float,
+        take_profit_pct: float = 0.10,
+        stop_loss_pct: float = 0.05,
+    ) -> Optional[CryptoDerivativePosition]:
+        """
+        Open a crypto spot position (buy/sell actual crypto).
+
+        Args:
+            symbol: e.g., "BTC", "ETH", "SOL"
+            side: "buy" or "sell"
+            size_usd: Position size in USD
+            take_profit_pct: Take profit percentage
+            stop_loss_pct: Stop loss percentage
+        """
+        # Get current price
+        current_price = await self._get_crypto_price(symbol)
+        if current_price <= 0:
+            self._add_commentary(f"⚠️ Could not get price for {symbol}", "error")
+            return None
+
+        if size_usd > self.cash:
+            self._add_commentary(
+                f"⚠️ Insufficient funds for {symbol}: need ${size_usd:,.0f}, have ${self.cash:,.0f}",
+                "risk"
+            )
+            return None
+
+        # Calculate position
+        position_id = str(uuid.uuid4())[:8]
+        quantity = size_usd / current_price
+
+        # Calculate take profit and stop loss prices
+        if side == "buy":
+            take_profit_price = current_price * (1 + take_profit_pct)
+            stop_loss_price = current_price * (1 - stop_loss_pct)
+        else:  # sell (shorting spot - would need borrowed crypto)
+            take_profit_price = current_price * (1 - take_profit_pct)
+            stop_loss_price = current_price * (1 + stop_loss_pct)
+
+        position = CryptoDerivativePosition(
+            id=position_id,
+            symbol=symbol,
+            derivative_type="spot",
+            side=side,
+            entry_price=current_price,
+            size=size_usd,
+            leverage=1.0,  # No leverage for spot
+            current_price=current_price,
+            liquidation_price=0,  # No liquidation for spot
+            take_profit=take_profit_price,
+            stop_loss=stop_loss_price,
+        )
+
+        self.crypto_positions[position_id] = position
+        self.cash -= size_usd
+
+        self._add_commentary(
+            f"✅ SPOT {side.upper()} {quantity:.6f} {symbol} @ ${current_price:,.2f} | "
+            f"Value: ${size_usd:,.0f} | TP: ${take_profit_price:,.2f} | SL: ${stop_loss_price:,.2f}",
+            "trade"
+        )
+
+        return position
+
     async def open_crypto_option(
         self,
         base_asset: str,  # "BTC" or "ETH"

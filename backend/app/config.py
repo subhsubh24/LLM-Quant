@@ -51,10 +51,11 @@ class Settings(BaseSettings):
     alpaca_api_secret: str = ""
     alpaca_paper_mode: bool = True  # True = paper trading, False = live
 
-    # Binance (Crypto) - Testnet
+    # Binance (Crypto)
     binance_api_key: str = ""
     binance_api_secret: str = ""
     binance_testnet_mode: bool = True  # True = testnet, False = live
+    binance_us_mode: bool = True  # True = Binance.US, False = Binance Global (non-US)
 
     # Auto-connect to brokers on startup
     auto_connect_brokers: bool = True

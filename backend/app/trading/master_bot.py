@@ -99,6 +99,7 @@ class AssetClass(Enum):
     COMMODITY_OPTIONS = "commodity_options"
     CRYPTO_PERPETUAL = "crypto_perpetual"
     CRYPTO_OPTIONS = "crypto_options"
+    CRYPTO_SPOT = "crypto_spot"  # Direct crypto spot trading
 
 
 class MarketRegime(Enum):
@@ -674,6 +675,16 @@ class MasterQuantBot:
         "ADA", "DOT", "MATIC", "LTC",
     ]
 
+    # Crypto spot trading - direct buy/sell (works on Binance.US)
+    CRYPTO_SPOT = [
+        # Blue chips - always liquid
+        "BTC", "ETH", "SOL", "BNB", "XRP",
+        # Major alts
+        "AVAX", "LINK", "DOGE", "ADA", "DOT", "MATIC", "LTC", "ATOM",
+        # DeFi & emerging
+        "UNI", "AAVE", "MKR", "CRV", "FET", "RNDR", "INJ", "SUI",
+    ]
+
     def __init__(
         self,
         initial_capital: float = 100000.0,
@@ -700,12 +711,14 @@ class MasterQuantBot:
         self.last_full_scan: Optional[datetime] = None
 
         # Dynamic allocation (optimized via portfolio optimization)
+        # Total allocation can exceed 100% since positions use leverage/margin
         self.allocation_limits = {
-            AssetClass.STOCK_OPTIONS: 0.30,
-            AssetClass.ETF_OPTIONS: 0.35,
-            AssetClass.COMMODITY_OPTIONS: 0.15,
+            AssetClass.STOCK_OPTIONS: 0.25,
+            AssetClass.ETF_OPTIONS: 0.25,
+            AssetClass.COMMODITY_OPTIONS: 0.10,
             AssetClass.CRYPTO_PERPETUAL: 0.15,
             AssetClass.CRYPTO_OPTIONS: 0.10,
+            AssetClass.CRYPTO_SPOT: 0.15,  # Direct crypto spot buys
         }
 
         self.current_allocations: Dict[AssetClass, float] = {
@@ -853,6 +866,10 @@ class MasterQuantBot:
         # 5. Scan Crypto Options
         crypto_opt_opps = await self._scan_crypto_options()
         opportunities.extend(crypto_opt_opps)
+
+        # 6. Scan Crypto Spot (direct buy/sell)
+        crypto_spot_opps = await self._scan_crypto_spot()
+        opportunities.extend(crypto_spot_opps)
 
         # Re-rank using ML composite score
         for opp in opportunities:
@@ -1013,6 +1030,74 @@ class MasterQuantBot:
                 opportunities.append(put_opp)
 
         return opportunities
+
+    async def _scan_crypto_spot(self) -> List[Opportunity]:
+        """Scan crypto spot market for buy/sell opportunities."""
+        opportunities = []
+
+        for symbol in self.CRYPTO_SPOT:
+            opp = await self._score_crypto_spot(symbol)
+            # Lower threshold (30) for spot - we want more activity
+            if opp and opp.score > 30:
+                opportunities.append(opp)
+
+        return opportunities
+
+    async def _score_crypto_spot(self, symbol: str) -> Optional[Opportunity]:
+        """Score crypto spot opportunity using ML signals."""
+        try:
+            # Get ML prediction
+            ml_pred = self.analytics.get_ml_prediction(symbol)
+
+            # Determine direction based on ML
+            if ml_pred.action == 2:  # Buy signal
+                strategy = "Spot Long"
+                direction = "bullish"
+            elif ml_pred.action == 0:  # Sell signal
+                strategy = "Spot Short"  # Or just don't buy
+                direction = "bearish"
+            else:
+                # Hold signal - still create opportunity but lower score
+                strategy = "Spot Long"
+                direction = "neutral"
+
+            # Get risk metrics
+            risk = self.analytics.compute_risk_metrics(symbol)
+
+            # Score based on ML confidence and risk metrics
+            base_score = ml_pred.confidence * 100
+
+            # Adjust for regime
+            if self.market_regime == MarketRegime.BULL_MARKET and direction == "bullish":
+                base_score *= 1.2
+            elif self.market_regime == MarketRegime.BEAR_MARKET and direction == "bearish":
+                base_score *= 1.1
+
+            # Penalize high volatility for spot (we prefer stable entries)
+            if risk.volatility_forecast > 0.5:
+                base_score *= 0.8
+
+            # Estimate P&L
+            position_size = self.initial_capital * 0.02  # 2% position
+            expected_return = ml_pred.lstm_pred * 100 if ml_pred.lstm_pred else 5
+            max_profit = position_size * 0.10  # 10% upside
+            max_loss = position_size * 0.05   # 5% stop loss
+
+            return Opportunity(
+                symbol=symbol,
+                asset_class=AssetClass.CRYPTO_SPOT,
+                strategy=strategy,
+                score=base_score,
+                expected_return=expected_return,
+                probability=ml_pred.confidence,
+                max_profit=max_profit,
+                max_loss=max_loss,
+                rationale=f"ML Signal: {ml_pred.action_name} (conf: {ml_pred.confidence:.1%}) | "
+                         f"Regime: {ml_pred.regime}",
+            )
+        except Exception as e:
+            logger.debug(f"Error scoring {symbol} spot: {e}")
+            return None
 
     # ===================
     # OPPORTUNITY SCORING
@@ -1299,6 +1384,20 @@ class MasterQuantBot:
                 )
                 if position:
                     self._record_trade(opp, "crypto_option")
+                return position is not None
+
+            elif opp.asset_class == AssetClass.CRYPTO_SPOT:
+                # Crypto spot buy/sell
+                side = "buy" if "Long" in opp.strategy else "sell"
+                size_usd = min(2000, self.engine.cash * 0.02)  # 2% position
+
+                position = await self.engine.open_crypto_spot(
+                    symbol=opp.symbol,
+                    side=side,
+                    size_usd=size_usd,
+                )
+                if position:
+                    self._record_trade(opp, "crypto_spot")
                 return position is not None
 
         except Exception as e:
