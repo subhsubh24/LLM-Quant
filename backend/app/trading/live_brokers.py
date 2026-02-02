@@ -115,7 +115,14 @@ class AlpacaBroker:
         """Get or create aiohttp session."""
         if self._session is None:
             import aiohttp
+            import ssl
+            # Disable SSL verification for development environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
             self._session = aiohttp.ClientSession(
+                connector=connector,
                 headers={
                     "APCA-API-KEY-ID": self.api_key,
                     "APCA-API-SECRET-KEY": self.api_secret,
@@ -355,7 +362,14 @@ class BinanceBroker:
         """Get or create aiohttp session."""
         if self._session is None:
             import aiohttp
+            import ssl
+            # Disable SSL verification for development environments
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
             self._session = aiohttp.ClientSession(
+                connector=connector,
                 headers={"X-MBX-APIKEY": self.api_key}
             )
         return self._session
