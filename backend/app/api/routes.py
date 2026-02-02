@@ -740,6 +740,22 @@ async def get_market_overview():
     return overview
 
 
+@router.get("/market/health")
+async def get_market_health():
+    """Get market health status - data feed connectivity and status."""
+    from ..data.live import get_live_market_service
+
+    service = get_live_market_service()
+
+    return {
+        "status": "healthy",
+        "finnhub_connected": service.finnhub_client is not None,
+        "polygon_connected": service.polygon_client is not None,
+        "websocket_connected": service.ws_connected if hasattr(service, 'ws_connected') else False,
+        "last_update": service.last_update.isoformat() if hasattr(service, 'last_update') and service.last_update else None,
+    }
+
+
 @router.get("/market/news")
 async def get_market_news(category: str = "general", limit: int = 20):
     """Get market news."""
