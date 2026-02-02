@@ -1285,7 +1285,7 @@ class ModelPreTrainer:
         features: np.ndarray,
         labels: np.ndarray,
         rewards: np.ndarray,
-        epochs: int = 25,
+        epochs: int = 40,
         batch_size: int = 256,
         validation_split: float = 0.2
     ) -> TrainingMetrics:
@@ -1296,9 +1296,9 @@ class ModelPreTrainer:
             logger.error("No training data provided")
             return self.training_metrics
 
-        # Cap training data at 500K samples for practical training time
-        # This is still plenty of data to learn patterns from 1,489 symbols
-        max_samples = 500000
+        # Cap training data for ~1 hour training time
+        # 1M samples provides excellent coverage across 1,489 symbols
+        max_samples = 1000000
         if len(features) > max_samples:
             logger.info(f"Sampling {max_samples:,} from {len(features):,} samples for efficient training...")
             sample_idx = np.random.choice(len(features), max_samples, replace=False)
@@ -1322,7 +1322,7 @@ class ModelPreTrainer:
 
         # Early stopping setup
         best_val_accuracy = 0
-        patience = 5  # Stop if no improvement for 5 epochs
+        patience = 8  # Stop if no improvement for 8 epochs (more thorough)
         patience_counter = 0
 
         for epoch in range(epochs):
@@ -2146,7 +2146,7 @@ def get_alpha_manager() -> AlphaSourceManager:
 
 async def run_full_training_pipeline(
     days_of_data: int = 180,
-    training_epochs: int = 25  # Reduced from 100 - sufficient with large dataset
+    training_epochs: int = 40  # Balanced for ~1 hour training with early stopping
 ) -> Dict:
     """
     Run the complete pre-training pipeline:
