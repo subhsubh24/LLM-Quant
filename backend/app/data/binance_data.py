@@ -60,7 +60,7 @@ class BinanceDataFetcher:
         "APT": "APTUSDT",
         "ARB": "ARBUSDT",
         "OP": "OPUSDT",
-        "INJ": "INJUSDT",
+        # "INJ": "INJUSDT",  # Not available on Binance.US
         "SUI": "SUIUSDT",
         "SEI": "SEIUSDT",
         "FTM": "FTMUSDT",

@@ -797,10 +797,10 @@ class MasterQuantBot:
 
             fetcher = get_binance_fetcher()
 
-            # Crypto symbols to fetch real data for
+            # Crypto symbols to fetch real data for (verified on Binance.US)
             crypto_symbols = [
                 "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX",
-                "LINK", "DOT", "MATIC", "LTC", "ATOM", "UNI", "FET", "INJ",
+                "LINK", "DOT", "MATIC", "LTC", "ATOM", "UNI", "FET",
                 "AAVE", "MKR", "CRV", "NEAR", "APT", "ARB", "OP", "SUI",
             ]
 
