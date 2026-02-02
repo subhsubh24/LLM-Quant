@@ -2298,12 +2298,32 @@ async def get_master_bot_status():
 
 
 @router.get("/master-bot/opportunities")
-async def get_master_bot_opportunities(limit: int = 20):
-    """Get top ranked trading opportunities across all markets."""
+async def get_master_bot_opportunities(limit: int = 20, include_llm_summary: bool = True):
+    """Get top ranked trading opportunities across all markets.
+
+    Args:
+        limit: Maximum number of opportunities to return
+        include_llm_summary: If True, include LLM-generated summaries for top opportunities
+    """
     from ..trading.master_bot import get_master_bot
+    from ..llm.analyst import get_quant_analyst
 
     bot = get_master_bot()
-    return {"opportunities": bot.get_opportunities(limit)}
+    opportunities = bot.get_opportunities(limit)
+
+    # Add LLM summaries for top opportunities if requested
+    if include_llm_summary and opportunities:
+        try:
+            analyst = get_quant_analyst()
+            opportunities = await analyst.summarize_opportunities_batch(
+                opportunities,
+                limit=5  # Only summarize top 5 to manage API costs
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate LLM summaries: {e}")
+            # Return opportunities without summaries on error
+
+    return {"opportunities": opportunities}
 
 
 @router.get("/master-bot/positions")

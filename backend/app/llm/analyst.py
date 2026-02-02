@@ -468,6 +468,88 @@ Key factors to consider:
             "estimated_duration": "12 months"
         }
 
+    async def summarize_opportunity(
+        self,
+        opportunity: Dict[str, Any]
+    ) -> str:
+        """Generate a human-readable LLM summary for a trading opportunity."""
+        prompt = f"""Summarize this trading opportunity in 2-3 plain English sentences for a retail trader.
+Be concise, actionable, and avoid jargon. Explain WHY this opportunity exists and what the expected outcome is.
+
+**Opportunity Details:**
+- Asset: {opportunity.get('symbol', 'Unknown')}
+- Asset Class: {opportunity.get('asset_class', 'Unknown')}
+- Strategy: {opportunity.get('strategy', 'Unknown')}
+- Expected Return: {opportunity.get('expected_return', 0):.1f}%
+- Probability of Profit: {opportunity.get('probability_of_profit', 0):.0f}%
+- Max Profit: ${opportunity.get('max_profit', 0):,.0f}
+- Max Loss: ${opportunity.get('max_loss', 0):,.0f}
+- Risk/Reward: {opportunity.get('risk_reward_ratio', 0):.1f}x
+- IV Rank: {opportunity.get('iv_rank', 0):.0f}%
+- ML Confidence: {opportunity.get('ml_prediction', {}).get('confidence', 0):.0f}%
+- Market Regime: {opportunity.get('ml_prediction', {}).get('regime', 'Unknown')}
+- Technical Rationale: {opportunity.get('rationale', 'None')}
+
+Write a brief, plain-English summary (2-3 sentences) explaining:
+1. What the trade is and why now is a good time
+2. The risk/reward profile in simple terms"""
+
+        response = self._call_claude(prompt, max_tokens=200)
+
+        if response:
+            return response.strip()
+
+        # Fallback summary if LLM unavailable
+        return self._template_opportunity_summary(opportunity)
+
+    async def summarize_opportunities_batch(
+        self,
+        opportunities: List[Dict[str, Any]],
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Generate LLM summaries for a batch of opportunities."""
+        import asyncio
+
+        # Only summarize top opportunities to avoid API costs
+        top_opps = opportunities[:limit]
+
+        # Generate summaries concurrently
+        tasks = [self.summarize_opportunity(opp) for opp in top_opps]
+        summaries = await asyncio.gather(*tasks)
+
+        # Attach summaries to opportunities
+        result = []
+        for opp, summary in zip(top_opps, summaries):
+            opp_with_summary = opp.copy()
+            opp_with_summary["llm_summary"] = summary
+            result.append(opp_with_summary)
+
+        # Add remaining opportunities without summaries
+        for opp in opportunities[limit:]:
+            result.append(opp)
+
+        return result
+
+    def _template_opportunity_summary(self, opp: Dict[str, Any]) -> str:
+        """Fallback template summary when LLM is unavailable."""
+        symbol = opp.get('symbol', 'Unknown')
+        strategy = opp.get('strategy', 'Unknown')
+        expected_return = opp.get('expected_return', 0)
+        prob = opp.get('probability_of_profit', 0)
+        iv_rank = opp.get('iv_rank', 0)
+
+        if "Iron Condor" in strategy or "Condor" in strategy:
+            return f"{symbol}: Premium selling opportunity with {iv_rank:.0f}% IV rank. Expecting {expected_return:.0f}% return with {prob:.0f}% probability of profit through range-bound trading."
+        elif "Long" in strategy and ("Call" in strategy or "Straddle" in strategy):
+            return f"{symbol}: Volatility expansion play with low IV ({iv_rank:.0f}%). Looking for a big move in either direction with {expected_return:.0f}% upside potential."
+        elif "Short" in strategy or "Put" in strategy:
+            return f"{symbol}: Bearish setup with {expected_return:.0f}% expected return. ML models suggest downside risk with {prob:.0f}% confidence."
+        elif "Perpetual" in strategy:
+            direction = "bullish" if "Long" in strategy else "bearish"
+            return f"{symbol}: {direction.capitalize()} perpetual futures trade. ML signals are {direction} with {expected_return:.0f}% expected move."
+        else:
+            return f"{symbol}: {strategy} opportunity with {expected_return:.0f}% expected return and {prob:.0f}% win probability."
+
 
 # Singleton
 _analyst: Optional[QuantAnalyst] = None

@@ -88,6 +88,7 @@ interface Opportunity {
   iv_rank: number;
   score: number;
   rationale: string;
+  llm_summary?: string;
   ml_confidence?: number;
   bayesian_confidence?: number;
 }
@@ -695,6 +696,7 @@ export default function MasterQuantBotPage() {
                   ) : (
                     opportunities.slice(0, 6).map((opp, i) => {
                       const style = getAssetClassStyle(opp.asset_class);
+                      const summary = opp.llm_summary || opp.rationale;
                       return (
                         <div key={i} className="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition-all">
                           <div className="flex items-start justify-between mb-2">
@@ -706,7 +708,7 @@ export default function MasterQuantBotPage() {
                             </div>
                             <div className="text-lg font-bold text-cyan-600">{opp.score.toFixed(0)}</div>
                           </div>
-                          <p className="text-sm text-gray-600 mb-2">{opp.rationale}</p>
+                          <p className="text-sm text-gray-700 mb-3 leading-relaxed">{summary}</p>
                           <div className="flex items-center gap-4 text-xs text-gray-500">
                             <span className="text-emerald-600 font-medium">{opp.expected_return?.toFixed(0)}% exp. return</span>
                             <span>{opp.probability_of_profit?.toFixed(0)}% win rate</span>
