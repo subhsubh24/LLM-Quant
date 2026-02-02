@@ -1803,6 +1803,14 @@ class MasterQuantBot:
         """Get comprehensive bot status with ML metrics."""
         engine_status = self.engine.get_status()
 
+        # Calculate crypto exposure metrics
+        crypto_positions = list(self.engine.crypto_positions.values())
+        long_exposure = sum(p.size for p in crypto_positions if p.side == "long")
+        short_exposure = sum(p.size for p in crypto_positions if p.side == "short")
+        net_exposure = long_exposure - short_exposure
+        total_exposure = long_exposure + short_exposure
+        crypto_pnl = sum(p.calculate_pnl() for p in crypto_positions)
+
         return {
             "is_running": self.is_running,
             "mode": self.mode.value,
@@ -1818,6 +1826,15 @@ class MasterQuantBot:
                 "options": engine_status["options_positions"],
                 "crypto": engine_status["crypto_positions"],
                 "total": engine_status["positions_count"],
+            },
+            "capital_deployed": engine_status["capital_deployed"],
+            "capital_deployed_pct": engine_status["capital_deployed_pct"],
+            "crypto_metrics": {
+                "long_exposure": round(long_exposure, 2),
+                "short_exposure": round(short_exposure, 2),
+                "net_exposure": round(net_exposure, 2),
+                "total_exposure": round(total_exposure, 2),
+                "unrealized_pnl": round(crypto_pnl, 2),
             },
             "allocations": {
                 ac.value: round(alloc * 100, 1)

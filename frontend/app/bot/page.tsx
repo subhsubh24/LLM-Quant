@@ -46,6 +46,15 @@ interface MasterBotStatus {
     crypto: number;
     total: number;
   };
+  capital_deployed?: number;
+  capital_deployed_pct?: number;
+  crypto_metrics?: {
+    long_exposure: number;
+    short_exposure: number;
+    net_exposure: number;
+    total_exposure: number;
+    unrealized_pnl: number;
+  };
   allocations: Record<string, number>;
   last_scan: string | null;
   opportunities_count: number;
@@ -631,45 +640,52 @@ export default function MasterQuantBotPage() {
               </div>
             </div>
 
-            {/* Greeks */}
+            {/* Key Metrics */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-gray-500">Portfolio Delta</span>
-                  <span className="text-xl font-bold text-gray-900">{status.risk_summary?.portfolio_delta?.toFixed(1) || "0"}</span>
+                  <span className="text-sm text-gray-500">Open Positions</span>
+                  <span className="text-xl font-bold text-gray-900">{status.positions?.total || 0}</span>
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, status.risk_summary?.delta_utilization || 0)}%` }} />
+                <div className="text-xs text-gray-500">
+                  {status.positions?.crypto || 0} crypto · {status.positions?.options || 0} options
                 </div>
               </div>
               <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-gray-500">Daily Theta</span>
+                  <span className="text-sm text-gray-500">Unrealized P&L</span>
                   <span className={cn(
                     "text-xl font-bold",
-                    (status.risk_summary?.portfolio_theta || 0) > 0 ? "text-emerald-600" : "text-red-600"
+                    (status.crypto_metrics?.unrealized_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-600"
                   )}>
-                    ${status.risk_summary?.portfolio_theta?.toFixed(0) || "0"}
+                    ${(status.crypto_metrics?.unrealized_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </span>
                 </div>
-                <div className="text-xs text-gray-500">per day decay</div>
+                <div className="text-xs text-gray-500">from open positions</div>
               </div>
               <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-gray-500">Portfolio Vega</span>
-                  <span className="text-xl font-bold text-gray-900">{status.risk_summary?.portfolio_vega?.toFixed(1) || "0"}</span>
+                  <span className="text-sm text-gray-500">Net Exposure</span>
+                  <span className={cn(
+                    "text-xl font-bold",
+                    (status.crypto_metrics?.net_exposure || 0) > 0 ? "text-emerald-600" :
+                    (status.crypto_metrics?.net_exposure || 0) < 0 ? "text-red-600" : "text-gray-900"
+                  )}>
+                    ${Math.abs(status.crypto_metrics?.net_exposure || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </span>
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-violet-500 rounded-full" style={{ width: `${Math.min(100, status.risk_summary?.vega_utilization || 0)}%` }} />
+                <div className="text-xs text-gray-500">
+                  {(status.crypto_metrics?.net_exposure || 0) > 0 ? "net long" :
+                   (status.crypto_metrics?.net_exposure || 0) < 0 ? "net short" : "neutral"}
                 </div>
               </div>
               <div className="rounded-xl bg-white border border-gray-200 shadow-sm p-4">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-gray-500">Capital Deployed</span>
-                  <span className="text-xl font-bold text-gray-900">{status.risk_summary?.buying_power_used_pct?.toFixed(0) || "0"}%</span>
+                  <span className="text-xl font-bold text-gray-900">{status.capital_deployed_pct?.toFixed(1) || "0"}%</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(100, status.risk_summary?.buying_power_used_pct || 0)}%` }} />
+                  <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(100, status.capital_deployed_pct || 0)}%` }} />
                 </div>
               </div>
             </div>
