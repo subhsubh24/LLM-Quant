@@ -95,6 +95,15 @@ from .activity_logger import (
     EventSubtype,
     Severity,
 )
+from .backtester import (
+    get_model_pretrainer,
+    get_alpha_manager,
+    get_data_downloader,
+    get_backtester,
+    ModelPreTrainer,
+    AlphaSourceManager,
+    CHECKPOINT_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -756,6 +765,25 @@ class MasterQuantBot:
 
         # Activity logger for comprehensive event tracking
         self.activity_logger = get_activity_logger()
+
+        # Pre-training integration - CRITICAL for intelligent trading
+        self.model_pretrainer = get_model_pretrainer()
+        self.alpha_manager = get_alpha_manager()
+        self.models_trained = False
+        self.training_required = True  # Require training before live trading
+
+        # Try to load pre-trained models
+        if self.model_pretrainer.load_checkpoints():
+            meets_req, reason = self.model_pretrainer.meets_training_requirements()
+            self.models_trained = meets_req
+            if meets_req:
+                logger.info("✅ Pre-trained models loaded successfully!")
+                # Sync DQN epsilon from loaded checkpoint
+                self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon
+            else:
+                logger.warning(f"⚠️ Models loaded but: {reason}")
+        else:
+            logger.warning("⚠️ No pre-trained models found - training required before trading")
 
         # Initialize with some synthetic price history for models
         self._initialize_price_history()
@@ -1473,9 +1501,30 @@ class MasterQuantBot:
     # ===================
 
     async def _execute_best_opportunities(self):
-        """Execute opportunities using RL-informed decisions."""
+        """Execute opportunities using RL-informed decisions.
+
+        IMPORTANT: This now requires trained models before executing trades.
+        No more "exploration bypass" - we don't trade with random weights.
+        """
         if not self.opportunities:
             return
+
+        # CRITICAL: Check if models are trained before allowing trades
+        if self.training_required and not self.models_trained:
+            meets_req, reason = self.model_pretrainer.meets_training_requirements()
+            if not meets_req:
+                self._add_commentary(
+                    f"⏸️ Trading paused - models not trained: {reason}. "
+                    f"Run training pipeline first!",
+                    "system"
+                )
+                return
+            else:
+                self.models_trained = True
+                self._add_commentary(
+                    "✅ Models trained - enabling intelligent trading",
+                    "system"
+                )
 
         executed = 0
         max_new_positions = 3
@@ -1494,22 +1543,52 @@ class MasterQuantBot:
             if self._has_position(opp.symbol):
                 continue
 
-            # RL decision - should we take this trade?
+            # Construct state for ML prediction
             state = self.analytics._construct_state(opp.symbol, {
                 "position_size": 0,
                 "vix": self.vix_level,
             })
 
-            # Get RL action
-            action = self.analytics.dqn.select_action(state, training=self.is_running)
+            # Get ensemble prediction from PRE-TRAINED models
+            ml_prediction = self.model_pretrainer.predict(state)
+            action = ml_prediction["action"]
+            confidence = ml_prediction["confidence"]
 
-            # Execute if ML agrees OR if ML is still learning (high epsilon = random)
-            # This prevents random initial weights from blocking good trades
-            ml_agrees = opp.ml_prediction and opp.ml_prediction.action != 1  # Not hold
-            ml_still_learning = self.analytics.dqn.epsilon > 0.3  # Still exploring
-            score_strong = opp.score >= 40  # Strong opportunity overrides ML
+            # Get alpha signals (sentiment, on-chain, fear/greed)
+            try:
+                alpha_signal = await self.alpha_manager.get_combined_alpha(opp.symbol)
+                alpha_boost = alpha_signal.get("combined_signal", 0) * 10  # -10 to +10
+            except Exception:
+                alpha_boost = 0
 
-            if ml_agrees or ml_still_learning or score_strong:
+            # INTELLIGENT TRADING DECISION (no more random exploration bypass!)
+            # Criteria for execution:
+            # 1. ML prediction is BUY (action=2) or SELL (action=0), not HOLD (action=1)
+            # 2. ML confidence > 60%
+            # 3. Opportunity score >= 35 (from traditional analysis)
+            # 4. Optional: alpha sources support the trade
+
+            ml_agrees = action != 1  # Not hold
+            ml_confident = confidence >= 0.6
+            score_sufficient = opp.score >= 35
+            alpha_supports = (
+                (action == 2 and alpha_boost > 0) or  # Buy + bullish alpha
+                (action == 0 and alpha_boost < 0) or  # Sell + bearish alpha
+                abs(alpha_boost) < 3  # Neutral alpha doesn't block
+            )
+
+            # Adjusted score with alpha
+            adjusted_score = opp.score + alpha_boost
+
+            # Execute only with proper ML support (NO RANDOM TRADING!)
+            should_execute = (
+                ml_agrees and
+                ml_confident and
+                score_sufficient and
+                alpha_supports
+            )
+
+            if should_execute:
                 success = await self._execute_opportunity(opp)
 
                 if success:
@@ -1517,15 +1596,36 @@ class MasterQuantBot:
                     position_size = opp.max_loss / self.initial_capital
                     self.current_allocations[opp.asset_class] = current_alloc + position_size
 
-                    # Store state for RL training
+                    # Store state for continued RL training (online learning)
                     self.last_state = state
                     self.last_action = action
 
+                    # Log the intelligent decision
+                    self._add_commentary(
+                        f"🎯 ML-INFORMED TRADE: {opp.symbol} | "
+                        f"Action: {'BUY' if action == 2 else 'SELL'} | "
+                        f"Confidence: {confidence:.1%} | "
+                        f"Score: {adjusted_score:.1f} (alpha: {alpha_boost:+.1f})",
+                        "execution"
+                    )
+            else:
+                # Log rejection reason for transparency
+                if not ml_agrees:
+                    rejection = "ML says HOLD"
+                elif not ml_confident:
+                    rejection = f"Low confidence ({confidence:.1%})"
+                elif not score_sufficient:
+                    rejection = f"Score too low ({opp.score:.1f})"
+                else:
+                    rejection = "Alpha signal conflicts"
+
+                logger.debug(f"Rejected {opp.symbol}: {rejection}")
+
         if executed > 0:
             self._add_commentary(
-                f"📈 Executed {executed} positions | "
-                f"RL Training Step: {self.analytics.training_step} | "
-                f"DQN Epsilon: {self.analytics.dqn.epsilon:.3f}",
+                f"📈 Executed {executed} intelligent trades | "
+                f"DQN Epsilon: {self.analytics.dqn.epsilon:.3f} | "
+                f"Models: {'TRAINED ✅' if self.models_trained else 'UNTRAINED ❌'}",
                 "execution"
             )
         else:
@@ -2111,6 +2211,10 @@ class MasterQuantBot:
         """Get comprehensive bot status with ML metrics."""
         engine_status = self.engine.get_status()
 
+        # Get training status
+        meets_req, training_reason = self.model_pretrainer.meets_training_requirements()
+        training_metrics = self.model_pretrainer.training_metrics
+
         return {
             "is_running": self.is_running,
             "mode": self.mode.value,
@@ -2140,6 +2244,15 @@ class MasterQuantBot:
                 "garch_fitted": self.analytics.garch_fitted,
                 "real_data_loaded": getattr(self, '_real_data_loaded', False),
                 "data_source": "Binance.US" if getattr(self, '_real_data_loaded', False) else "Synthetic",
+            },
+            # NEW: Training status
+            "training_status": {
+                "models_trained": self.models_trained,
+                "meets_requirements": meets_req,
+                "status_message": training_reason,
+                "epochs_completed": training_metrics.epochs_completed,
+                "total_samples": training_metrics.total_samples,
+                "checkpoint_exists": (CHECKPOINT_DIR / "model_checkpoint.pkl").exists(),
             },
             "last_scan": self.last_full_scan.isoformat() if self.last_full_scan else None,
             "opportunities_count": len(self.opportunities),
@@ -2242,3 +2355,81 @@ def create_master_bot(
     global _master_bot
     _master_bot = MasterQuantBot(initial_capital=capital, mode=mode)
     return _master_bot
+
+
+async def run_training_pipeline(
+    days_of_data: int = 180,
+    training_epochs: int = 100
+) -> Dict:
+    """
+    Run the full ML training pipeline.
+
+    This should be run BEFORE starting live/paper trading to ensure
+    models are properly trained on historical data.
+
+    Args:
+        days_of_data: Number of days of historical data to download
+        training_epochs: Number of training epochs
+
+    Returns:
+        Training results including backtest performance
+    """
+    from .backtester import run_full_training_pipeline
+
+    logger.info("="*60)
+    logger.info("STARTING ML TRAINING PIPELINE")
+    logger.info("="*60)
+
+    result = await run_full_training_pipeline(
+        days_of_data=days_of_data,
+        training_epochs=training_epochs
+    )
+
+    # Update the master bot's training status
+    global _master_bot
+    if _master_bot is not None:
+        _master_bot.model_pretrainer.load_checkpoints()
+        meets_req, reason = _master_bot.model_pretrainer.meets_training_requirements()
+        _master_bot.models_trained = meets_req
+
+        if meets_req:
+            _master_bot._add_commentary(
+                "✅ Training complete! Models are ready for intelligent trading.",
+                "system"
+            )
+        else:
+            _master_bot._add_commentary(
+                f"⚠️ Training incomplete: {reason}",
+                "system"
+            )
+
+    return result
+
+
+async def run_quick_backtest(
+    days: int = 90
+) -> Dict:
+    """
+    Run a quick backtest with current model state.
+
+    Returns backtest results without full retraining.
+    """
+    from .backtester import (
+        get_data_downloader,
+        get_model_pretrainer,
+        get_backtester,
+    )
+
+    downloader = get_data_downloader()
+    pretrainer = get_model_pretrainer()
+    backtester = get_backtester()
+
+    # Load data
+    historical_data = downloader.load_all_from_disk()
+    if not historical_data:
+        return {"error": "No historical data available. Run training pipeline first."}
+
+    # Run backtest
+    result = backtester.run_backtest(historical_data, pretrainer)
+
+    return result.to_dict()

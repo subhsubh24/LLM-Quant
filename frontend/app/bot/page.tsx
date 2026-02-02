@@ -65,8 +65,31 @@ interface MasterBotStatus {
     hmm_fitted: boolean;
     garch_fitted: boolean;
   };
+  training_status?: {
+    models_trained: boolean;
+    meets_requirements: boolean;
+    status_message: string;
+    epochs_completed: number;
+    total_samples: number;
+    checkpoint_exists: boolean;
+  };
   live_trading_enabled?: boolean;
   broker_connected?: boolean;
+}
+
+interface TrainingStatus {
+  models_trained: boolean;
+  meets_requirements: boolean;
+  status_message: string;
+  training_metrics: {
+    epochs_completed: number;
+    total_samples: number;
+    training_loss: number[];
+    prediction_accuracy: number[];
+  };
+  checkpoint_exists: boolean;
+  dqn_epsilon: number;
+  is_pretrained_loaded: boolean;
 }
 
 interface BrokerStatus {
@@ -174,13 +197,16 @@ export default function MasterQuantBotPage() {
   const [tradeLog, setTradeLog] = useState<TradeLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [trainingStatus, setTrainingStatus] = useState<TrainingStatus | null>(null);
+  const [isTraining, setIsTraining] = useState(false);
+  const [trainingProgress, setTrainingProgress] = useState("");
 
   const [capital, setCapital] = useState("100000");
   const [mode, setMode] = useState("balanced");
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, oppsRes, posRes, commentaryRes, perfRes, brokerRes, tradeLogRes] = await Promise.all([
+      const [statusRes, oppsRes, posRes, commentaryRes, perfRes, brokerRes, tradeLogRes, trainingRes] = await Promise.all([
         fetch(`${API_BASE}/api/master-bot/status`),
         fetch(`${API_BASE}/api/master-bot/opportunities?limit=10`),
         fetch(`${API_BASE}/api/master-bot/positions`),
@@ -188,6 +214,7 @@ export default function MasterQuantBotPage() {
         fetch(`${API_BASE}/api/master-bot/performance`),
         fetch(`${API_BASE}/api/broker/status`),
         fetch(`${API_BASE}/api/master-bot/trade-log?limit=20`),
+        fetch(`${API_BASE}/api/master-bot/training-status`),
       ]);
 
       if (statusRes.ok) setStatus(await statusRes.json());
@@ -210,6 +237,7 @@ export default function MasterQuantBotPage() {
         const data = await tradeLogRes.json();
         setTradeLog(data.trades || []);
       }
+      if (trainingRes.ok) setTrainingStatus(await trainingRes.json());
     } catch (err) {
       console.error("Failed to fetch bot data:", err);
     } finally {
@@ -244,6 +272,82 @@ export default function MasterQuantBotPage() {
       await fetchData();
     } catch (err) {
       console.error("Failed to stop bot:", err);
+    }
+  };
+
+  const startTraining = async () => {
+    if (status?.is_running) {
+      alert("Stop the bot before training");
+      return;
+    }
+
+    setIsTraining(true);
+    setTrainingProgress("Starting training pipeline...");
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/master-bot/train?days_of_data=180&training_epochs=100`,
+        { method: "POST" }
+      );
+
+      if (res.ok) {
+        const result = await res.json();
+        setTrainingProgress(
+          result.status === "success"
+            ? "Training complete! Models are ready."
+            : `Training incomplete: ${result.message}`
+        );
+        await fetchData();
+      } else {
+        setTrainingProgress("Training failed - check server logs");
+      }
+    } catch (err) {
+      console.error("Training error:", err);
+      setTrainingProgress("Training error - check connection");
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
+  const downloadData = async () => {
+    setTrainingProgress("Downloading historical data...");
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/master-bot/download-data?days=365`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const result = await res.json();
+        setTrainingProgress(
+          `Downloaded ${result.total_candles} candles for ${result.total_symbols} symbols`
+        );
+      }
+    } catch (err) {
+      setTrainingProgress("Download failed");
+    }
+  };
+
+  const runBacktest = async () => {
+    setTrainingProgress("Running backtest...");
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/master-bot/backtest?days=90`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const result = await res.json();
+        if (result.error) {
+          setTrainingProgress(`Backtest error: ${result.error}`);
+        } else {
+          setTrainingProgress(
+            `Backtest: ${result.total_return_pct?.toFixed(1)}% return, ` +
+            `Sharpe: ${result.sharpe_ratio?.toFixed(2)}, ` +
+            `Win Rate: ${result.win_rate?.toFixed(1)}%`
+          );
+        }
+      }
+    } catch (err) {
+      setTrainingProgress("Backtest failed");
     }
   };
 
@@ -461,6 +565,107 @@ export default function MasterQuantBotPage() {
                 ? "Using LIVE market data with simulated trades. No real money at risk."
                 : "Using simulated data. Connect Alpaca/Binance for live prices."}
             </p>
+          </div>
+
+          {/* ML Training Panel */}
+          <div className="mt-6 border-t border-gray-100 pt-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Brain className="w-5 h-5 text-purple-500" />
+              ML Model Training
+              {trainingStatus?.models_trained ? (
+                <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                  TRAINED
+                </span>
+              ) : (
+                <span className="ml-2 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
+                  UNTRAINED
+                </span>
+              )}
+            </h3>
+
+            {/* Training Status */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="p-3 bg-gray-50 rounded-xl">
+                <div className="text-xs text-gray-500">Status</div>
+                <div className={cn(
+                  "font-medium",
+                  trainingStatus?.meets_requirements ? "text-green-600" : "text-yellow-600"
+                )}>
+                  {trainingStatus?.status_message || "Not trained"}
+                </div>
+              </div>
+              <div className="p-3 bg-gray-50 rounded-xl">
+                <div className="text-xs text-gray-500">Epochs</div>
+                <div className="font-medium text-gray-900">
+                  {trainingStatus?.training_metrics?.epochs_completed || 0} / 100
+                </div>
+              </div>
+              <div className="p-3 bg-gray-50 rounded-xl">
+                <div className="text-xs text-gray-500">Samples</div>
+                <div className="font-medium text-gray-900">
+                  {(trainingStatus?.training_metrics?.total_samples || 0).toLocaleString()}
+                </div>
+              </div>
+              <div className="p-3 bg-gray-50 rounded-xl">
+                <div className="text-xs text-gray-500">DQN Epsilon</div>
+                <div className="font-medium text-gray-900">
+                  {trainingStatus?.dqn_epsilon?.toFixed(4) || "1.0000"}
+                </div>
+              </div>
+            </div>
+
+            {/* Training Actions */}
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={downloadData}
+                disabled={isTraining}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-medium text-gray-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Download Data
+              </button>
+              <button
+                onClick={startTraining}
+                disabled={isTraining || status?.is_running}
+                className="px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 rounded-xl text-sm font-medium text-white disabled:opacity-50 flex items-center gap-2"
+              >
+                {isTraining ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Brain className="w-4 h-4" />
+                )}
+                {isTraining ? "Training..." : "Train Models"}
+              </button>
+              <button
+                onClick={runBacktest}
+                disabled={isTraining}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-medium text-gray-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                <BarChart3 className="w-4 h-4" />
+                Run Backtest
+              </button>
+            </div>
+
+            {/* Progress Message */}
+            {trainingProgress && (
+              <div className="mt-3 p-3 bg-purple-50 border border-purple-100 rounded-xl text-sm text-purple-700">
+                {trainingProgress}
+              </div>
+            )}
+
+            {/* Warning if not trained */}
+            {!trainingStatus?.models_trained && (
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-100 rounded-xl">
+                <div className="flex items-center gap-2 text-yellow-700 text-sm">
+                  <Zap className="w-4 h-4" />
+                  <span className="font-medium">Training Recommended</span>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">
+                  Models are untrained. Trading will be paused until you train on historical data.
+                  Click "Train Models" to download data and train all ML models (DQN, PPO, LSTM, Transformer).
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
