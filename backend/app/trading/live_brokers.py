@@ -750,8 +750,9 @@ class BrokerManager:
             binance_symbol = f"{symbol}USDT" if not symbol.endswith("USDT") else symbol
             return await self.binance.get_price(binance_symbol)
         elif asset_type == "crypto_futures" and self.binance and self.binance._connected:
+            # Binance.US doesn't have futures - use spot price as proxy for perpetuals
             binance_symbol = f"{symbol.replace('-PERP', '')}USDT"
-            return await self.binance.get_futures_price(binance_symbol)
+            return await self.binance.get_price(binance_symbol)  # Use spot price
         return 0
 
     async def submit_stock_order(

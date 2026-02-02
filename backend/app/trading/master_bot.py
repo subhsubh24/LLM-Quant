@@ -1365,6 +1365,11 @@ class MasterQuantBot:
         base = symbol.split("-")[0]
         price = await self.engine._get_crypto_price(symbol)
 
+        # Skip if no valid price (no synthetic fallback)
+        if price <= 0:
+            logger.debug(f"Skipping {symbol} - no live price available")
+            return None
+
         # Get ML prediction for crypto
         ml_pred = self.analytics.get_ml_prediction(symbol)
 
@@ -1389,7 +1394,7 @@ class MasterQuantBot:
 
         max_profit = price * 0.10
         max_loss = price * 0.05
-        risk_reward = max_profit / max_loss
+        risk_reward = max_profit / max_loss if max_loss > 0 else 2.0
 
         score = (
             expected_return * 0.30 +
@@ -1416,6 +1421,11 @@ class MasterQuantBot:
         """Score crypto option opportunity."""
         symbol = f"{base_asset}-OPT"
         price = await self.engine._get_crypto_price(symbol)
+
+        # Skip if no valid price (no synthetic fallback)
+        if price <= 0:
+            logger.debug(f"Skipping {symbol} - no live price available")
+            return None
 
         iv = 0.65 + np.random.uniform(-0.1, 0.2)
 
