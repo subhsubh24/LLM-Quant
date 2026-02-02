@@ -902,10 +902,11 @@ class MasterQuantBot:
             # Combine HMM and VAE
             combined_confidence = (np.max(hmm_probs) + np.max(vae_probs)) / 2
 
-            # Map to regime
-            # HMM: 0=low vol, 1=medium, 2=high vol
-            # VAE: 0=bull, 1=bear, 2=high vol, 3=low vol
-            self.vix_level = 15 + hmm_state * 5 + np.random.uniform(-2, 5)
+            # Calculate VIX from actual SPY volatility (annualized)
+            # HMM state provides regime context: 0=low vol, 1=medium, 2=high vol
+            actual_vol = float(np.std(spy_returns[-20:]) * np.sqrt(252) * 100) if len(spy_returns) >= 20 else 18
+            # VIX typically ranges 10-40, with SPY vol * 100 being a good proxy
+            self.vix_level = max(10, min(50, actual_vol + hmm_state * 2))
 
             if self.vix_level > 25:
                 self.market_regime = MarketRegime.HIGH_VOLATILITY
@@ -933,7 +934,17 @@ class MasterQuantBot:
                 "analysis"
             )
         else:
-            self.vix_level = 18 + np.random.uniform(-3, 5)
+            # No SPY data - try to use BTC volatility as market proxy
+            if "BTC" in self.analytics.return_history:
+                btc_returns = self.analytics.return_history["BTC"]
+                if len(btc_returns) >= 20:
+                    btc_vol = float(np.std(btc_returns[-20:]) * np.sqrt(365) * 100)
+                    # BTC vol is typically 2-3x stock vol, so scale down
+                    self.vix_level = max(10, min(50, btc_vol / 3))
+                else:
+                    self.vix_level = 18  # Default if no data
+            else:
+                self.vix_level = 18  # Default
             self.market_regime = MarketRegime.RANGE_BOUND
 
     # ===================
