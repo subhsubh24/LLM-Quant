@@ -3,10 +3,27 @@ Configuration management for QuantLab.
 Uses pydantic-settings for type-safe configuration.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+
+def find_env_file():
+    """Find .env file in multiple locations."""
+    possible_paths = [
+        ".env",                           # Current directory
+        "../.env",                         # Parent directory
+        "backend/.env",                    # If running from root
+        os.path.expanduser("~/.env"),      # Home directory
+        "/home/user/LLM-Quant/.env",       # Absolute path
+        "/home/user/LLM-Quant/backend/.env",  # Backend folder
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    return ".env"  # Default
 
 
 class Settings(BaseSettings):
@@ -61,7 +78,7 @@ class Settings(BaseSettings):
     auto_connect_brokers: bool = True
 
     class Config:
-        env_file = ".env"
+        env_file = find_env_file()
         env_file_encoding = "utf-8"
         extra = "ignore"
 
