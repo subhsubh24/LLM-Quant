@@ -1346,6 +1346,15 @@ class MasterQuantBot:
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
         """Execute a single opportunity."""
         try:
+            # CRITICAL: Check market hours for stock/ETF/commodity options
+            if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
+                if not is_market_open():
+                    self._add_commentary(
+                        f"⛔ BLOCKED: Cannot execute {opp.symbol} - market is CLOSED",
+                        "execution"
+                    )
+                    return False
+
             # If live trading is enabled, execute on real exchanges
             if self.live_trading_enabled and self.broker_manager:
                 live_success = await self._execute_live_trade(opp)
@@ -1442,6 +1451,13 @@ class MasterQuantBot:
             position_size = min(5000, self.initial_capital * 0.05)  # 5% max per position
 
             if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
+                # CRITICAL: Double-check market hours for stock-based assets
+                if not is_market_open():
+                    self._add_commentary(
+                        f"⛔ LIVE BLOCKED: {opp.symbol} - stock market CLOSED",
+                        "execution"
+                    )
+                    return False
                 # For options, we trade the underlying for now
                 # TODO: Integrate with options broker when available
                 underlying = symbol.replace("-CALL", "").replace("-PUT", "").split("-")[0]
