@@ -161,26 +161,33 @@ class BotActivityLogger:
     def _log_sync(self, entry: ActivityLogEntry):
         """Synchronously log an entry (for startup/shutdown)."""
         try:
+            event_type = entry.event_type.value if isinstance(entry.event_type, Enum) else entry.event_type
+            event_subtype = entry.event_subtype.value if isinstance(entry.event_subtype, Enum) else entry.event_subtype
+            severity = entry.severity.value if isinstance(entry.severity, Enum) else entry.severity
+            details_json = json.dumps(entry.details) if entry.details else None
+            created_at = datetime.now()
+
             log_record = BotActivityLog(
-                event_type=entry.event_type.value if isinstance(entry.event_type, Enum) else entry.event_type,
-                event_subtype=entry.event_subtype.value if isinstance(entry.event_subtype, Enum) else entry.event_subtype,
-                severity=entry.severity.value if isinstance(entry.severity, Enum) else entry.severity,
+                event_type=event_type,
+                event_subtype=event_subtype,
+                severity=severity,
                 symbol=entry.symbol,
                 asset_class=entry.asset_class,
                 broker=entry.broker,
                 message=entry.message,
-                details_json=json.dumps(entry.details) if entry.details else None,
+                details_json=details_json,
                 value=entry.value,
                 duration_ms=entry.duration_ms,
                 session_id=self.session_id,
                 correlation_id=entry.correlation_id,
+                created_at=created_at,
             )
 
             with get_session() as session:
                 session.add(log_record)
 
-            # Also add to buffer
-            self._add_to_buffer(log_record)
+            # Add to buffer using the entry values (not the detached log_record)
+            self._add_to_buffer_from_entry(entry, event_type, event_subtype, severity, details_json, created_at)
             self._log_count += 1
 
         except Exception as e:
@@ -189,27 +196,34 @@ class BotActivityLogger:
     async def log(self, entry: ActivityLogEntry):
         """Asynchronously log an activity entry."""
         try:
+            event_type = entry.event_type.value if isinstance(entry.event_type, Enum) else entry.event_type
+            event_subtype = entry.event_subtype.value if isinstance(entry.event_subtype, Enum) else entry.event_subtype
+            severity = entry.severity.value if isinstance(entry.severity, Enum) else entry.severity
+            details_json = json.dumps(entry.details) if entry.details else None
+            created_at = datetime.now()
+
             log_record = BotActivityLog(
-                event_type=entry.event_type.value if isinstance(entry.event_type, Enum) else entry.event_type,
-                event_subtype=entry.event_subtype.value if isinstance(entry.event_subtype, Enum) else entry.event_subtype,
-                severity=entry.severity.value if isinstance(entry.severity, Enum) else entry.severity,
+                event_type=event_type,
+                event_subtype=event_subtype,
+                severity=severity,
                 symbol=entry.symbol,
                 asset_class=entry.asset_class,
                 broker=entry.broker,
                 message=entry.message,
-                details_json=json.dumps(entry.details) if entry.details else None,
+                details_json=details_json,
                 value=entry.value,
                 duration_ms=entry.duration_ms,
                 session_id=self.session_id,
                 correlation_id=entry.correlation_id,
+                created_at=created_at,
             )
 
             # Run DB write in executor to not block async loop
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._persist_log, log_record)
 
-            # Add to buffer
-            self._add_to_buffer(log_record)
+            # Add to buffer using entry values (not detached log_record)
+            self._add_to_buffer_from_entry(entry, event_type, event_subtype, severity, details_json, created_at)
             self._log_count += 1
 
         except Exception as e:
@@ -223,23 +237,31 @@ class BotActivityLogger:
         except Exception as e:
             logger.error(f"Database error logging activity: {e}")
 
-    def _add_to_buffer(self, log_record: BotActivityLog):
-        """Add log record to in-memory buffer."""
+    def _add_to_buffer_from_entry(
+        self,
+        entry: ActivityLogEntry,
+        event_type: str,
+        event_subtype: str,
+        severity: str,
+        details_json: Optional[str],
+        created_at: datetime,
+    ):
+        """Add log entry to in-memory buffer without accessing detached ORM object."""
         record_dict = {
-            "id": log_record.id,
-            "event_type": log_record.event_type,
-            "event_subtype": log_record.event_subtype,
-            "severity": log_record.severity,
-            "symbol": log_record.symbol,
-            "asset_class": log_record.asset_class,
-            "broker": log_record.broker,
-            "message": log_record.message,
-            "details": log_record.get_details() if log_record.details_json else None,
-            "value": log_record.value,
-            "duration_ms": log_record.duration_ms,
-            "session_id": log_record.session_id,
-            "correlation_id": log_record.correlation_id,
-            "created_at": log_record.created_at.isoformat() if log_record.created_at else datetime.now().isoformat(),
+            "id": None,  # Not available until DB insert
+            "event_type": event_type,
+            "event_subtype": event_subtype,
+            "severity": severity,
+            "symbol": entry.symbol,
+            "asset_class": entry.asset_class,
+            "broker": entry.broker,
+            "message": entry.message,
+            "details": entry.details,
+            "value": entry.value,
+            "duration_ms": entry.duration_ms,
+            "session_id": self.session_id,
+            "correlation_id": entry.correlation_id,
+            "created_at": created_at.isoformat(),
         }
 
         self._buffer.append(record_dict)
