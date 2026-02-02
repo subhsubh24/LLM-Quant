@@ -520,7 +520,7 @@ export default function MasterQuantBotPage() {
               </div>
             </div>
 
-            {/* Trade Log - Full Width */}
+            {/* Trade Log - Table Format */}
             <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -529,44 +529,54 @@ export default function MasterQuantBotPage() {
                 </div>
                 <span className="text-sm text-gray-500">{trades.length} executions</span>
               </div>
-              <div className="p-4 max-h-[300px] overflow-y-auto">
+              <div className="overflow-x-auto">
                 {trades.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">No trades executed yet</div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {[...trades].reverse().map((trade, i) => {
-                      const isLong = trade.action === "BUY";
-                      const displayAction = isLong ? "LONG" : "SHORT";
-                      return (
-                        <div
-                          key={i}
-                          className={cn(
-                            "p-3 rounded-xl text-sm border-l-3",
-                            isLong ? "bg-emerald-50 border-l-emerald-500" : "bg-red-50 border-l-red-500"
-                          )}
-                          style={{ borderLeftWidth: '3px' }}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-2">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium">Time</th>
+                        <th className="px-4 py-3 text-left font-medium">Asset</th>
+                        <th className="px-4 py-3 text-left font-medium">Position</th>
+                        <th className="px-4 py-3 text-left font-medium">Strategy</th>
+                        <th className="px-4 py-3 text-left font-medium">Score</th>
+                        <th className="px-4 py-3 text-left font-medium">Regime</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {[...trades].reverse().slice(0, 20).map((trade, i) => {
+                        const isLong = trade.action === "BUY";
+                        return (
+                          <tr key={i} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                              {new Date(trade.timestamp).toLocaleTimeString()}
+                            </td>
+                            <td className="px-4 py-3 font-medium text-gray-900">
+                              {trade.symbol}
+                            </td>
+                            <td className="px-4 py-3">
                               <span className={cn(
-                                "text-xs px-2 py-0.5 rounded font-bold",
+                                "text-xs px-2 py-1 rounded font-bold",
                                 isLong ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
                               )}>
-                                {displayAction}
+                                {isLong ? "LONG" : "SHORT"}
                               </span>
-                              <span className="font-bold text-gray-900">{trade.symbol}</span>
-                            </div>
-                            <span className="text-xs text-gray-500">
-                              {new Date(trade.timestamp).toLocaleTimeString()}
-                            </span>
-                          </div>
-                          <div className="text-gray-600 text-xs mt-1 line-clamp-2">
-                            {trade.rationale}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                            </td>
+                            <td className="px-4 py-3 text-gray-600">
+                              {trade.strategy}
+                            </td>
+                            <td className="px-4 py-3 text-gray-900 font-medium">
+                              {trade.score}
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 text-xs">
+                              {trade.regime?.replace(/_/g, ' ')}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 )}
               </div>
             </div>
@@ -683,37 +693,24 @@ export default function MasterQuantBotPage() {
                       <p className="text-gray-500">Scanning markets...</p>
                     </div>
                   ) : (
-                    opportunities.map((opp, i) => {
+                    opportunities.slice(0, 6).map((opp, i) => {
                       const style = getAssetClassStyle(opp.asset_class);
                       return (
                         <div key={i} className="p-4 rounded-xl bg-gray-50 border border-gray-100 hover:border-gray-200 transition-all">
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex items-center gap-2">
-                              <span className={cn("px-2 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5", style.bg, style.text)}>
-                                {style.icon}
-                                {opp.asset_class.split("_")[0]}
+                              <span className="font-bold text-gray-900">{opp.symbol}</span>
+                              <span className={cn("px-2 py-0.5 rounded text-xs font-medium", style.bg, style.text)}>
+                                {opp.strategy}
                               </span>
-                              <span className="font-bold text-gray-900 text-lg">{opp.symbol}</span>
                             </div>
-                            <div className="text-right">
-                              <div className="text-lg font-bold text-cyan-600">{opp.score.toFixed(0)}</div>
-                              <div className="text-xs text-gray-500">score</div>
-                            </div>
+                            <div className="text-lg font-bold text-cyan-600">{opp.score.toFixed(0)}</div>
                           </div>
-                          <div className="text-sm text-gray-600 mb-3">{opp.strategy}</div>
-                          <div className="grid grid-cols-3 gap-2 text-xs">
-                            <div className="text-center p-2 rounded-lg bg-white border border-gray-100">
-                              <div className="text-emerald-600 font-bold text-sm">{opp.expected_return?.toFixed(0)}%</div>
-                              <div className="text-gray-500">return</div>
-                            </div>
-                            <div className="text-center p-2 rounded-lg bg-white border border-gray-100">
-                              <div className="text-gray-900 font-bold text-sm">{opp.probability_of_profit?.toFixed(0)}%</div>
-                              <div className="text-gray-500">P(profit)</div>
-                            </div>
-                            <div className="text-center p-2 rounded-lg bg-white border border-gray-100">
-                              <div className="text-amber-600 font-bold text-sm">{opp.iv_rank?.toFixed(0)}%</div>
-                              <div className="text-gray-500">IV rank</div>
-                            </div>
+                          <p className="text-sm text-gray-600 mb-2">{opp.rationale}</p>
+                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                            <span className="text-emerald-600 font-medium">{opp.expected_return?.toFixed(0)}% exp. return</span>
+                            <span>{opp.probability_of_profit?.toFixed(0)}% win rate</span>
+                            <span>IV: {opp.iv_rank?.toFixed(0)}%</span>
                           </div>
                         </div>
                       );
