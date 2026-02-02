@@ -520,100 +520,54 @@ export default function MasterQuantBotPage() {
               </div>
             </div>
 
-            {/* Position Summary & Trade Log - Side by Side */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Position Summary */}
-              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Bitcoin className="w-4 h-4 text-orange-500" />
-                    <span className="font-semibold text-gray-900">Position Summary</span>
-                  </div>
-                  <span className="text-sm text-gray-500">{cryptoPositions.length} open</span>
+            {/* Trade Log - Full Width */}
+            <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ChevronRight className="w-4 h-4 text-blue-500" />
+                  <span className="font-semibold text-gray-900">Trade Log</span>
                 </div>
-                <div className="p-4 space-y-3 max-h-[280px] overflow-y-auto">
-                  {cryptoPositions.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">No open positions</div>
-                  ) : (
-                    cryptoPositions.map((pos) => (
-                      <div key={pos.id} className="p-3 rounded-xl bg-gray-50 border border-gray-100">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-gray-900">{pos.symbol}</span>
-                            <span className={cn(
-                              "text-xs px-2 py-0.5 rounded-md font-bold",
-                              pos.side === "long" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
-                            )}>
-                              {pos.side?.toUpperCase()}
-                            </span>
-                          </div>
-                          <span className={cn(
-                            "font-bold",
-                            (pos.unrealized_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-600"
-                          )}>
-                            {(pos.unrealized_pnl || 0) >= 0 ? "+" : ""}${pos.unrealized_pnl?.toFixed(2) || 0}
-                          </span>
-                        </div>
-                        <p className="text-sm text-gray-600 leading-relaxed">
-                          {pos.rationale || `${pos.derivative_type} position at $${pos.entry_price?.toLocaleString()}`}
-                        </p>
-                        <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
-                          <span>Size: ${pos.size?.toLocaleString()}</span>
-                          <span>{pos.leverage}x</span>
-                          {pos.entry_time && (
-                            <span>Opened: {new Date(pos.entry_time).toLocaleTimeString()}</span>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                <span className="text-sm text-gray-500">{trades.length} executions</span>
               </div>
-
-              {/* Trade Log */}
-              <div className="rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ChevronRight className="w-4 h-4 text-blue-500" />
-                    <span className="font-semibold text-gray-900">Trade Executions</span>
-                  </div>
-                  <span className="text-sm text-gray-500">{trades.length} trades</span>
-                </div>
-                <div className="p-4 space-y-2 max-h-[280px] overflow-y-auto">
-                  {trades.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">No trades executed yet</div>
-                  ) : (
-                    [...trades].reverse().map((trade, i) => (
-                      <div
-                        key={i}
-                        className={cn(
-                          "p-3 rounded-xl text-sm border-l-3",
-                          trade.action === "BUY" ? "bg-emerald-50 border-l-emerald-500" : "bg-red-50 border-l-red-500"
-                        )}
-                        style={{ borderLeftWidth: '3px' }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              "text-xs px-2 py-0.5 rounded font-bold",
-                              trade.action === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                            )}>
-                              {trade.action}
+              <div className="p-4 max-h-[300px] overflow-y-auto">
+                {trades.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">No trades executed yet</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {[...trades].reverse().map((trade, i) => {
+                      const isLong = trade.action === "BUY";
+                      const displayAction = isLong ? "LONG" : "SHORT";
+                      return (
+                        <div
+                          key={i}
+                          className={cn(
+                            "p-3 rounded-xl text-sm border-l-3",
+                            isLong ? "bg-emerald-50 border-l-emerald-500" : "bg-red-50 border-l-red-500"
+                          )}
+                          style={{ borderLeftWidth: '3px' }}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "text-xs px-2 py-0.5 rounded font-bold",
+                                isLong ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                              )}>
+                                {displayAction}
+                              </span>
+                              <span className="font-bold text-gray-900">{trade.symbol}</span>
+                            </div>
+                            <span className="text-xs text-gray-500">
+                              {new Date(trade.timestamp).toLocaleTimeString()}
                             </span>
-                            <span className="font-bold text-gray-900">{trade.symbol}</span>
                           </div>
-                          <span className="text-xs text-gray-500">
-                            {new Date(trade.timestamp).toLocaleTimeString()}
-                          </span>
+                          <div className="text-gray-600 text-xs mt-1 line-clamp-2">
+                            {trade.rationale}
+                          </div>
                         </div>
-                        <div className="text-gray-600">{trade.strategy}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {trade.rationale}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
