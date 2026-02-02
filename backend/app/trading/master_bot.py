@@ -1347,78 +1347,194 @@ class MasterQuantBot:
         )
 
     # ===================
-    # TRADE EXECUTION (RL-Enhanced)
+    # TRADE EXECUTION (RL-Enhanced with Intelligent Filters)
     # ===================
 
+    # Quality thresholds for trade execution
+    MIN_SCORE_THRESHOLD = 45  # Minimum opportunity score (0-100)
+    MIN_ML_CONFIDENCE = 0.55  # Minimum ML model confidence (0-1)
+    MIN_PROBABILITY_OF_PROFIT = 40  # Minimum win probability %
+    MAX_POSITIONS_PER_DIRECTION = 4  # Max longs OR shorts at once
+    MAX_TOTAL_POSITIONS = 6  # Max total open positions
+    MIN_RISK_REWARD_RATIO = 1.2  # Minimum risk/reward
+
+    def _count_positions_by_direction(self) -> tuple:
+        """Count current long and short positions."""
+        longs = 0
+        shorts = 0
+        for pos in self.engine.crypto_positions.values():
+            if pos.side == "long":
+                longs += 1
+            else:
+                shorts += 1
+        # Also count options positions by delta
+        for pos in self.engine.positions.values():
+            if hasattr(pos, 'current_delta'):
+                if pos.current_delta > 0:
+                    longs += 1
+                else:
+                    shorts += 1
+        return longs, shorts
+
+    def _is_opportunity_quality(self, opp: Opportunity) -> tuple:
+        """
+        Check if opportunity meets quality standards.
+        Returns (is_quality, rejection_reason).
+        """
+        # Score threshold
+        if opp.score < self.MIN_SCORE_THRESHOLD:
+            return False, f"Score {opp.score:.1f} < {self.MIN_SCORE_THRESHOLD}"
+
+        # ML confidence threshold
+        if opp.ml_prediction:
+            if opp.ml_prediction.confidence < self.MIN_ML_CONFIDENCE:
+                return False, f"ML confidence {opp.ml_prediction.confidence:.2f} < {self.MIN_ML_CONFIDENCE}"
+
+            # Require ensemble agreement
+            if opp.ml_prediction.ensemble_agreement < 0.5:
+                return False, f"Low ensemble agreement {opp.ml_prediction.ensemble_agreement:.2f}"
+
+        # Probability of profit threshold
+        if opp.probability_of_profit < self.MIN_PROBABILITY_OF_PROFIT:
+            return False, f"Win prob {opp.probability_of_profit:.0f}% < {self.MIN_PROBABILITY_OF_PROFIT}%"
+
+        # Risk/reward threshold
+        if opp.risk_reward_ratio < self.MIN_RISK_REWARD_RATIO:
+            return False, f"Risk/reward {opp.risk_reward_ratio:.1f} < {self.MIN_RISK_REWARD_RATIO}"
+
+        return True, "Quality checks passed"
+
+    def _check_direction_limits(self, opp: Opportunity) -> tuple:
+        """
+        Check if we can add a position in this direction.
+        Returns (can_add, rejection_reason).
+        """
+        longs, shorts = self._count_positions_by_direction()
+        total = longs + shorts
+
+        # Check total position limit
+        if total >= self.MAX_TOTAL_POSITIONS:
+            return False, f"Max total positions ({self.MAX_TOTAL_POSITIONS}) reached"
+
+        # Determine direction of this opportunity
+        is_short = "Short" in opp.strategy or "Sell" in opp.strategy or "Put" in opp.strategy
+
+        if is_short:
+            if shorts >= self.MAX_POSITIONS_PER_DIRECTION:
+                return False, f"Max short positions ({self.MAX_POSITIONS_PER_DIRECTION}) reached"
+            # Encourage balance - if heavily short, prefer longs
+            if shorts > longs + 2:
+                return False, f"Portfolio too short-biased ({shorts} shorts vs {longs} longs)"
+        else:
+            if longs >= self.MAX_POSITIONS_PER_DIRECTION:
+                return False, f"Max long positions ({self.MAX_POSITIONS_PER_DIRECTION}) reached"
+            # Encourage balance - if heavily long, prefer shorts
+            if longs > shorts + 2:
+                return False, f"Portfolio too long-biased ({longs} longs vs {shorts} shorts)"
+
+        return True, "Direction limits OK"
+
     async def _execute_best_opportunities(self):
-        """Execute opportunities using RL-informed decisions."""
+        """Execute opportunities using RL-informed decisions with strict quality filters."""
         if not self.opportunities:
             return
 
         executed = 0
+        rejected_reasons = {}
         stock_market_open = self.is_stock_market_open()
 
-        # Be more aggressive with crypto during off-hours
+        # Conservative position limits
         if stock_market_open:
-            max_new_positions = 3
+            max_new_positions = 2  # More conservative during market hours
         else:
-            max_new_positions = 5  # More crypto trades during off-hours
+            max_new_positions = 3  # Slightly more for 24/7 crypto
             self._add_commentary(
-                f"🌙 Off-hours mode: focusing on {len([o for o in self.opportunities if o.asset_class in [AssetClass.CRYPTO_PERPETUAL, AssetClass.CRYPTO_OPTIONS]])} crypto opportunities",
+                f"🌙 Off-hours mode: {len([o for o in self.opportunities if o.asset_class in [AssetClass.CRYPTO_PERPETUAL, AssetClass.CRYPTO_OPTIONS]])} crypto opportunities available",
                 "info"
             )
 
-        for opp in self.opportunities[:15]:
+        # Only consider top opportunities (already sorted by score)
+        for opp in self.opportunities[:10]:
             if executed >= max_new_positions:
                 break
 
-            # CRITICAL: Don't trade stock/ETF/commodity options when market is closed
+            # === FILTER 1: Market hours for stock assets ===
             is_stock_asset = opp.asset_class in [
                 AssetClass.STOCK_OPTIONS,
                 AssetClass.ETF_OPTIONS,
                 AssetClass.COMMODITY_OPTIONS
             ]
             if is_stock_asset and not stock_market_open:
-                continue  # Skip stock-based trades when market is closed
-
-            # Check allocation limit
-            current_alloc = self.current_allocations.get(opp.asset_class, 0)
-            limit = self.allocation_limits.get(opp.asset_class, 0.20)
-
-            if current_alloc >= limit:
                 continue
 
+            # === FILTER 2: Quality thresholds ===
+            is_quality, reason = self._is_opportunity_quality(opp)
+            if not is_quality:
+                rejected_reasons[opp.symbol] = reason
+                continue
+
+            # === FILTER 3: Direction/position limits ===
+            can_add, reason = self._check_direction_limits(opp)
+            if not can_add:
+                rejected_reasons[opp.symbol] = reason
+                continue
+
+            # === FILTER 4: Allocation limits ===
+            current_alloc = self.current_allocations.get(opp.asset_class, 0)
+            limit = self.allocation_limits.get(opp.asset_class, 0.20)
+            if current_alloc >= limit:
+                rejected_reasons[opp.symbol] = f"Allocation limit reached for {opp.asset_class.value}"
+                continue
+
+            # === FILTER 5: No duplicate positions ===
             if self._has_position(opp.symbol):
                 continue
 
-            # RL decision - should we take this trade?
+            # === FILTER 6: RL model agreement ===
             state = self.analytics._construct_state(opp.symbol, {
                 "position_size": 0,
                 "vix": self.vix_level,
             })
-
-            # Get RL action
             action = self.analytics.dqn.select_action(state, training=self.is_running)
 
-            # Only execute if RL agrees (action 2, 3, 4 = buy)
-            if opp.ml_prediction and opp.ml_prediction.action != 1:  # Not hold
-                success = await self._execute_opportunity(opp)
+            # Require ML prediction to NOT be "hold"
+            if not opp.ml_prediction or opp.ml_prediction.action == 1:  # 1 = hold
+                rejected_reasons[opp.symbol] = "ML recommends HOLD"
+                continue
 
-                if success:
-                    executed += 1
-                    position_size = opp.max_loss / self.initial_capital
-                    self.current_allocations[opp.asset_class] = current_alloc + position_size
+            # === ALL FILTERS PASSED - Execute ===
+            success = await self._execute_opportunity(opp)
 
-                    # Store state for RL training
-                    self.last_state = state
-                    self.last_action = action
+            if success:
+                executed += 1
+                position_size = opp.max_loss / self.initial_capital
+                self.current_allocations[opp.asset_class] = current_alloc + position_size
+                self.last_state = state
+                self.last_action = action
 
+                self._add_commentary(
+                    f"✅ EXECUTED {opp.symbol} | Score: {opp.score:.0f} | "
+                    f"ML: {opp.ml_prediction.confidence*100:.0f}% | "
+                    f"Win: {opp.probability_of_profit:.0f}% | "
+                    f"R/R: {opp.risk_reward_ratio:.1f}x",
+                    "trade"
+                )
+
+        # Log summary
         if executed > 0:
+            longs, shorts = self._count_positions_by_direction()
             self._add_commentary(
-                f"📈 Executed {executed} positions | "
-                f"RL Training Step: {self.analytics.training_step} | "
-                f"DQN Epsilon: {self.analytics.dqn.epsilon:.3f}",
+                f"📊 Portfolio: {longs} longs, {shorts} shorts | "
+                f"New: {executed} | RL Step: {self.analytics.training_step}",
                 "execution"
+            )
+        elif rejected_reasons:
+            # Log why no trades were made (for debugging)
+            top_rejections = list(rejected_reasons.items())[:3]
+            reasons_str = ", ".join([f"{s}: {r}" for s, r in top_rejections])
+            self._add_commentary(
+                f"⏸️ No trades executed. Top rejections: {reasons_str}",
+                "analysis"
             )
 
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
