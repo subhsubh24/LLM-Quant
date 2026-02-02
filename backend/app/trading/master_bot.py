@@ -760,12 +760,13 @@ class MasterQuantBot:
         )
 
     def _initialize_price_history(self):
-        """Initialize synthetic price history for models."""
+        """Initialize price history - synthetic first, then real data async."""
         np.random.seed(42)
 
         all_symbols = (self.STOCK_OPTIONS + self.ETF_OPTIONS +
                        self.COMMODITY_OPTIONS + self.CRYPTO_PERPETUALS)
 
+        # Initialize with synthetic data as fallback
         for symbol in all_symbols:
             # Generate 252 days of synthetic returns
             if "BTC" in symbol or "ETH" in symbol:
@@ -782,6 +783,98 @@ class MasterQuantBot:
             prices = 100 * np.cumprod(1 + returns)
 
             self.analytics.update_price_history(symbol, prices)
+
+        # Flag to track if real data has been loaded
+        self._real_data_loaded = False
+
+    async def _load_real_market_data(self):
+        """Load real historical data from Binance for crypto symbols."""
+        if self._real_data_loaded:
+            return
+
+        try:
+            from ..data.binance_data import get_binance_fetcher
+
+            fetcher = get_binance_fetcher()
+
+            # Crypto symbols to fetch real data for
+            crypto_symbols = [
+                "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX",
+                "LINK", "DOT", "MATIC", "LTC", "ATOM", "UNI", "FET", "INJ",
+                "AAVE", "MKR", "CRV", "NEAR", "APT", "ARB", "OP", "SUI",
+            ]
+
+            self._add_commentary(
+                "📊 Fetching real historical data from Binance for ML training...",
+                "system"
+            )
+
+            data = await fetcher.get_multi_symbol_data(crypto_symbols, days=252, interval="1d")
+
+            loaded = 0
+            for symbol, (prices, returns) in data.items():
+                if len(prices) >= 60:
+                    # Update both the base symbol and perpetual version
+                    self.analytics.update_price_history(symbol, prices)
+                    self.analytics.update_price_history(f"{symbol}-PERP", prices)
+                    loaded += 1
+
+            if loaded > 0:
+                self._real_data_loaded = True
+                self._add_commentary(
+                    f"✅ Loaded REAL market data for {loaded} crypto symbols from Binance",
+                    "system"
+                )
+                logger.info(f"Loaded real Binance data for {loaded} symbols")
+            else:
+                self._add_commentary(
+                    "⚠️ Could not fetch Binance data - using synthetic data for ML",
+                    "system"
+                )
+
+        except Exception as e:
+            logger.warning(f"Failed to load real market data: {e}")
+            self._add_commentary(
+                f"⚠️ Binance data fetch failed: {str(e)[:50]} - using synthetic data",
+                "system"
+            )
+
+    async def _update_live_prices(self):
+        """Update price history with latest live data from Binance."""
+        try:
+            from ..data.binance_data import get_binance_fetcher
+
+            fetcher = get_binance_fetcher()
+
+            # Update prices for actively traded symbols
+            active_symbols = list(set(
+                [pos.symbol.replace("-PERP", "").split("-")[0]
+                 for pos in self.engine.crypto_positions.values()]
+            ))
+
+            # Also update top crypto symbols
+            top_cryptos = ["BTC", "ETH", "SOL", "BNB", "XRP"]
+            symbols_to_update = list(set(active_symbols + top_cryptos))
+
+            for symbol in symbols_to_update[:10]:  # Limit to 10 to avoid rate limits
+                try:
+                    price = await fetcher.get_price(symbol)
+                    if price:
+                        # Append to existing price history
+                        key = symbol if symbol in self.analytics.price_history else f"{symbol}-PERP"
+                        if key in self.analytics.price_history:
+                            prices = self.analytics.price_history[key]
+                            # Append new price
+                            new_prices = np.append(prices, price)
+                            # Keep last 500 prices
+                            if len(new_prices) > 500:
+                                new_prices = new_prices[-500:]
+                            self.analytics.update_price_history(key, new_prices)
+                except Exception:
+                    pass  # Silently skip failed updates
+
+        except Exception as e:
+            logger.debug(f"Live price update failed: {e}")
 
     # ===================
     # MARKET ANALYSIS (ML-Enhanced)
@@ -1629,10 +1722,15 @@ class MasterQuantBot:
         scan_interval = 60
         position_check_interval = 30
         rl_train_interval = 10
+        live_price_update_interval = 300  # Update live prices every 5 minutes
 
         last_scan = datetime.min
         last_position_check = datetime.min
         last_rl_train = datetime.min
+        last_price_update = datetime.min
+
+        # Load real market data on first run
+        await self._load_real_market_data()
 
         while self.is_running:
             try:
@@ -1654,6 +1752,11 @@ class MasterQuantBot:
                 if (now - last_rl_train).seconds >= rl_train_interval:
                     await self._train_rl_models()
                     last_rl_train = now
+
+                # Update live prices from Binance
+                if (now - last_price_update).seconds >= live_price_update_interval:
+                    await self._update_live_prices()
+                    last_price_update = now
 
                 await asyncio.sleep(5)
 
@@ -1771,6 +1874,8 @@ class MasterQuantBot:
                 "total_episodes": len(self.analytics.episode_rewards),
                 "hmm_fitted": self.analytics.hmm_fitted,
                 "garch_fitted": self.analytics.garch_fitted,
+                "real_data_loaded": getattr(self, '_real_data_loaded', False),
+                "data_source": "Binance.US" if getattr(self, '_real_data_loaded', False) else "Synthetic",
             },
             "last_scan": self.last_full_scan.isoformat() if self.last_full_scan else None,
             "opportunities_count": len(self.opportunities),
