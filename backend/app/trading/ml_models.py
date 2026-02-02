@@ -714,14 +714,14 @@ class DQN:
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
 
-        # Build networks
-        self.q_network = self._build_network(state_dim, action_dim, hidden_dims)
-        self.target_network = self._build_network(state_dim, action_dim, hidden_dims)
+        # Build networks (internal lists)
+        self._q_network = self._build_network(state_dim, action_dim, hidden_dims)
+        self._target_network = self._build_network(state_dim, action_dim, hidden_dims)
         self._hard_update()
 
         # Optimizer
         params = []
-        for layer in self.q_network:
+        for layer in self._q_network:
             params.extend(layer.parameters())
         self.optimizer = Adam(params, lr=lr)
 
@@ -760,17 +760,27 @@ class DQN:
 
     def _hard_update(self):
         """Copy Q-network to target network."""
-        for q_layer, target_layer in zip(self.q_network, self.target_network):
+        for q_layer, target_layer in zip(self._q_network, self._target_network):
             for q_param, target_param in zip(q_layer.parameters(),
                                               target_layer.parameters()):
                 target_param[:] = q_param
 
     def _soft_update(self):
         """Soft update target network (Polyak averaging)."""
-        for q_layer, target_layer in zip(self.q_network, self.target_network):
+        for q_layer, target_layer in zip(self._q_network, self._target_network):
             for q_param, target_param in zip(q_layer.parameters(),
                                               target_layer.parameters()):
                 target_param[:] = self.tau * q_param + (1 - self.tau) * target_param
+
+    @property
+    def q_network(self):
+        """Property wrapper for checkpoint compatibility."""
+        return _NetworkWrapper(self._q_network)
+
+    @property
+    def target_network(self):
+        """Property wrapper for checkpoint compatibility."""
+        return _NetworkWrapper(self._target_network)
 
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """Select action using epsilon-greedy policy."""
@@ -778,13 +788,13 @@ class DQN:
             return np.random.randint(self.action_dim)
 
         state = np.array(state).reshape(1, -1)
-        q_values = self._forward(state, self.q_network)
+        q_values = self._forward(state, self._q_network)
         return int(np.argmax(q_values))
 
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
         """Get Q-values for a state (for ensemble prediction)."""
         state = np.array(state).reshape(1, -1)
-        q_values = self._forward(state, self.q_network)
+        q_values = self._forward(state, self._q_network)
         return q_values[0]  # Return 1D array
 
     def train_step(self, batch_size: int = 64) -> float:
@@ -802,13 +812,13 @@ class DQN:
         dones = np.array([e.done for e in experiences])
 
         # Current Q values
-        current_q = self._forward(states, self.q_network)
+        current_q = self._forward(states, self._q_network)
         current_q_actions = current_q[np.arange(batch_size), actions]
 
         # Double DQN: select action with online network, evaluate with target
-        next_q_online = self._forward(next_states, self.q_network)
+        next_q_online = self._forward(next_states, self._q_network)
         next_actions = np.argmax(next_q_online, axis=1)
-        next_q_target = self._forward(next_states, self.target_network)
+        next_q_target = self._forward(next_states, self._target_network)
         next_q_values = next_q_target[np.arange(batch_size), next_actions]
 
         # Compute targets
@@ -829,12 +839,12 @@ class DQN:
         full_grad[np.arange(batch_size), actions] = grad
 
         # Backward pass through layers
-        for layer in reversed(self.q_network):
+        for layer in reversed(self._q_network):
             full_grad = layer.backward(full_grad)
 
         # Collect gradients and update
         grads = []
-        for layer in self.q_network:
+        for layer in self._q_network:
             grads.extend(layer.gradients())
 
         # Gradient clipping
@@ -874,7 +884,7 @@ class DQN:
     def save(self, path: str):
         """Save model parameters."""
         params = {}
-        for i, layer in enumerate(self.q_network):
+        for i, layer in enumerate(self._q_network):
             for j, param in enumerate(layer.parameters()):
                 params[f"layer_{i}_param_{j}"] = param
         np.savez(path, **params)
@@ -883,7 +893,7 @@ class DQN:
         """Load model parameters."""
         data = np.load(path)
         idx = 0
-        for layer in self.q_network:
+        for layer in self._q_network:
             for param in layer.parameters():
                 key = f"layer_{idx}_param_{0}"
                 if key in data:
@@ -1131,6 +1141,52 @@ class PPOAgent:
             "value_loss": total_value_loss / n_updates,
             "entropy": total_entropy / n_updates,
         }
+
+    def train_step(self, next_value: float = 0) -> float:
+        """
+        Single training step (alias for train() for consistency with other models).
+        Returns total loss.
+        """
+        if len(self.states) < 10:
+            return 0.0
+
+        result = self.train(next_value=next_value, n_epochs=4, batch_size=32)
+        return result.get("policy_loss", 0) + result.get("value_loss", 0)
+
+    # Aliases for checkpoint save/load compatibility
+    @property
+    def policy_network(self):
+        """Alias for actor network (for checkpoint compatibility)."""
+        return _NetworkWrapper(self.actor)
+
+    @property
+    def value_network(self):
+        """Alias for critic network (for checkpoint compatibility)."""
+        return _NetworkWrapper(self.critic)
+
+
+class _NetworkWrapper:
+    """Wrapper to provide get_weights/set_weights for PPO networks."""
+
+    def __init__(self, layers: List[Layer]):
+        self.layers = layers
+
+    def get_weights(self) -> List[Dict]:
+        """Get all layer weights."""
+        weights = []
+        for layer in self.layers:
+            if hasattr(layer, 'W') and hasattr(layer, 'b'):
+                weights.append({'W': layer.W.copy(), 'b': layer.b.copy()})
+        return weights
+
+    def set_weights(self, weights: List[Dict]):
+        """Set all layer weights."""
+        weight_idx = 0
+        for layer in self.layers:
+            if hasattr(layer, 'W') and hasattr(layer, 'b') and weight_idx < len(weights):
+                layer.W = weights[weight_idx]['W'].copy()
+                layer.b = weights[weight_idx]['b'].copy()
+                weight_idx += 1
 
 
 # =============================================================================

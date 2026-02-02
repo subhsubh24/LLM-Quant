@@ -133,17 +133,105 @@ class HistoricalDataDownloader:
     - Federal Reserve FRED (economic indicators)
     """
 
-    # Crypto symbols to download
+    # Crypto symbols - Top 100 by market cap
     CRYPTO_SYMBOLS = [
-        "BTC", "ETH", "SOL", "AVAX", "MATIC", "LINK", "UNI", "AAVE",
-        "DOT", "ADA", "XRP", "LTC", "ATOM", "ARB", "OP", "APT"
+        # Top 20
+        "BTC", "ETH", "BNB", "XRP", "SOL", "ADA", "DOGE", "TRX", "AVAX", "LINK",
+        "DOT", "MATIC", "SHIB", "LTC", "BCH", "UNI", "ATOM", "XLM", "XMR", "ETC",
+        # 21-40
+        "NEAR", "APT", "FIL", "ARB", "OP", "VET", "AAVE", "MKR", "GRT", "INJ",
+        "ALGO", "THETA", "FTM", "SAND", "MANA", "AXS", "EGLD", "XTZ", "EOS", "FLOW",
+        # 41-60
+        "SNX", "CRV", "LDO", "RUNE", "COMP", "ZEC", "DASH", "BAT", "ENJ", "1INCH",
+        "CHZ", "HOT", "KAVA", "CELO", "ZIL", "QTUM", "RVN", "WAVES", "ICX", "ONT",
+        # 61-80
+        "IOST", "ZRX", "OMG", "ANKR", "SKL", "STORJ", "CELR", "OCEAN", "RSR", "NKN",
+        "BAND", "REN", "DENT", "FET", "CTSI", "OGN", "IOTX", "SXP", "REEF", "ALICE",
+        # 81-100
+        "TLM", "DYDX", "MASK", "API3", "PERP", "SPELL", "JOE", "BICO", "HIGH", "LOKA",
+        "SUI", "SEI", "TIA", "PYTH", "JUP", "WIF", "BONK", "PEPE", "FLOKI", "WLD"
     ]
 
-    # Stock/ETF symbols
-    STOCK_SYMBOLS = [
-        "SPY", "QQQ", "IWM", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
-        "META", "TSLA", "AMD", "NFLX", "GLD", "SLV", "TLT", "VIX"
+    # Stock symbols - S&P 500 Top 100 + Major Growth/Tech
+    STOCK_SYMBOLS_SP500 = [
+        # Mega Cap Tech
+        "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "AVGO",
+        # Top 11-30
+        "JPM", "LLY", "V", "UNH", "XOM", "MA", "JNJ", "HD", "PG", "COST",
+        "ABBV", "MRK", "CVX", "CRM", "NFLX", "AMD", "PEP", "KO", "TMO", "ADBE",
+        # Top 31-50
+        "BAC", "WMT", "ACN", "MCD", "CSCO", "ABT", "LIN", "DHR", "WFC", "INTC",
+        "ORCL", "VZ", "DIS", "PM", "INTU", "CMCSA", "NKE", "TXN", "QCOM", "UPS",
+        # Top 51-70
+        "IBM", "NEE", "SPGI", "NOW", "HON", "CAT", "GE", "AMGN", "PFE", "RTX",
+        "LOW", "BKNG", "GS", "ISRG", "SYK", "BLK", "AMAT", "DE", "MDLZ", "ADP",
+        # Top 71-100
+        "T", "MS", "GILD", "VRTX", "MMC", "CB", "SBUX", "LMT", "ADI", "SCHW",
+        "PLD", "LRCX", "ETN", "C", "AMT", "MO", "SO", "CI", "TMUS", "BDX",
+        "ZTS", "EOG", "CME", "DUK", "CL", "FI", "SLB", "ITW", "REGN", "BSX"
     ]
+
+    # High Growth / Momentum Stocks
+    STOCK_SYMBOLS_GROWTH = [
+        # AI/Tech Growth
+        "PLTR", "SNOW", "CRWD", "DDOG", "NET", "ZS", "MDB", "PANW", "FTNT", "OKTA",
+        "BILL", "HUBS", "VEEV", "TEAM", "DOCU", "TTD", "RBLX", "U", "COIN", "SQ",
+        # EV/Clean Energy
+        "RIVN", "LCID", "NIO", "XPEV", "LI", "ENPH", "SEDG", "FSLR", "RUN", "PLUG",
+        # Biotech
+        "MRNA", "BNTX", "BIIB", "ILMN", "EXAS", "SGEN", "ALNY", "DXCM", "ALGN", "IDXX",
+        # Fintech/Payments
+        "PYPL", "AFRM", "SOFI", "UPST", "HOOD", "MELI", "NU", "SE", "GRAB", "SHOP",
+        # Other High Growth
+        "ABNB", "UBER", "LYFT", "DASH", "ZM", "ROKU", "SPOT", "SNAP", "PINS", "MTCH"
+    ]
+
+    # ETFs - Comprehensive Market Coverage
+    ETF_SYMBOLS = [
+        # Major Index ETFs
+        "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "IVV", "RSP", "MDY", "IJH",
+        # Sector ETFs
+        "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLRE", "XLB",
+        "XLC", "VGT", "VFH", "VDE", "VHT", "VIS", "VCR", "VDC", "VPU", "VNQ",
+        # Tech/Growth ETFs
+        "ARKK", "ARKW", "ARKF", "ARKG", "ARKQ", "SMH", "SOXX", "IGV", "SKYY", "WCLD",
+        "HACK", "BOTZ", "ROBO", "AIQ", "IRBO", "GNOM", "PRNT", "IZRL", "QCLN", "TAN",
+        # Dividend/Value ETFs
+        "VYM", "SCHD", "DVY", "HDV", "SDY", "VIG", "DGRO", "DGRW", "VTV", "IVE",
+        # International ETFs
+        "EFA", "EEM", "VEA", "VWO", "IEFA", "IEMG", "FXI", "EWJ", "EWZ", "EWG",
+        "INDA", "EWY", "EWT", "EWH", "EWC", "EWA", "EWU", "EWP", "EWI", "EWQ",
+        # Bond ETFs
+        "TLT", "IEF", "SHY", "BND", "AGG", "LQD", "HYG", "JNK", "TIP", "GOVT",
+        "MUB", "VCSH", "VCIT", "VCLT", "EMB", "BNDX", "BWX", "IGOV", "IAGG", "VGSH",
+        # Commodity ETFs
+        "GLD", "SLV", "IAU", "GLDM", "PPLT", "PALL", "USO", "BNO", "UNG", "DBA",
+        "DBC", "PDBC", "COMT", "GSG", "RJI", "CPER", "WEAT", "CORN", "SOYB", "WOOD",
+        # Volatility/Inverse ETFs
+        "VXX", "UVXY", "SVXY", "VIXY", "VIXM", "SH", "PSQ", "DOG", "SDS", "QID",
+        # Leveraged ETFs (for momentum/vol signals)
+        "TQQQ", "SQQQ", "UPRO", "SPXU", "TNA", "TZA", "LABU", "LABD", "SOXL", "SOXS",
+        # Factor ETFs
+        "MTUM", "VLUE", "QUAL", "SIZE", "USMV", "SPLV", "EFAV", "ACWV", "SPHB", "SPHD",
+        # Thematic ETFs
+        "LIT", "DRIV", "ESPO", "HERO", "BETZ", "JETS", "PBW", "ICLN", "ACES", "GRID",
+        "XBI", "IBB", "ARKG", "LABU", "XHB", "ITB", "KRE", "KBE", "XRT", "XME"
+    ]
+
+    # Futures/Index proxies (for macro signals)
+    FUTURES_SYMBOLS = [
+        # Index Futures ETF proxies
+        "ES=F", "NQ=F", "YM=F", "RTY=F",
+        # Commodities
+        "GC=F", "SI=F", "CL=F", "NG=F", "HG=F", "PL=F",
+        # Bonds
+        "ZB=F", "ZN=F", "ZF=F", "ZT=F",
+        # Currencies
+        "DX=F", "6E=F", "6J=F", "6B=F", "6C=F", "6A=F"
+    ]
+
+    # Combined stock symbols
+    STOCK_SYMBOLS = STOCK_SYMBOLS_SP500 + STOCK_SYMBOLS_GROWTH + ETF_SYMBOLS + FUTURES_SYMBOLS
 
     def __init__(self):
         self.data_cache: Dict[str, List[OHLCV]] = {}
@@ -288,23 +376,48 @@ class HistoricalDataDownloader:
             logger.error(f"Error downloading {symbol}: {e}")
             return []
 
-    async def download_all(self, days: int = 365) -> Dict[str, List[OHLCV]]:
-        """Download all historical data for training."""
-        logger.info(f"Downloading {days} days of historical data...")
+    async def download_all(self, days: int = 365, max_concurrent: int = 10) -> Dict[str, List[OHLCV]]:
+        """Download all historical data for training with parallel downloads."""
+        total_crypto = len(self.CRYPTO_SYMBOLS)
+        total_stocks = len(self.STOCK_SYMBOLS)
+        total_symbols = total_crypto + total_stocks
 
-        # Download crypto
+        logger.info(f"Downloading {days} days of data for {total_symbols} symbols...")
+        logger.info(f"  - {total_crypto} crypto symbols")
+        logger.info(f"  - {total_stocks} stock/ETF/futures symbols")
+
+        # Use semaphore for rate limiting parallel downloads
+        semaphore = asyncio.Semaphore(max_concurrent)
+        downloaded = {"count": 0, "failed": 0}
+
+        async def download_with_limit(symbol: str, is_crypto: bool):
+            async with semaphore:
+                try:
+                    if symbol not in self.data_cache:
+                        if is_crypto:
+                            await self.download_crypto_history(symbol, days=days)
+                        else:
+                            await self.download_stock_history(symbol, days=days)
+                        await asyncio.sleep(0.2)  # Small delay between requests
+
+                    downloaded["count"] += 1
+                    if downloaded["count"] % 50 == 0:
+                        logger.info(f"  Progress: {downloaded['count']}/{total_symbols} symbols downloaded")
+                except Exception as e:
+                    downloaded["failed"] += 1
+                    logger.warning(f"Failed to download {symbol}: {e}")
+
+        # Create download tasks
+        tasks = []
         for symbol in self.CRYPTO_SYMBOLS:
-            if symbol not in self.data_cache:
-                await self.download_crypto_history(symbol, days=days)
-                await asyncio.sleep(0.5)  # Rate limiting
-
-        # Download stocks
+            tasks.append(download_with_limit(symbol, is_crypto=True))
         for symbol in self.STOCK_SYMBOLS:
-            if symbol not in self.data_cache:
-                await self.download_stock_history(symbol, days=days)
-                await asyncio.sleep(0.5)
+            tasks.append(download_with_limit(symbol, is_crypto=False))
 
-        logger.info(f"Downloaded data for {len(self.data_cache)} symbols")
+        # Execute all downloads with concurrency limit
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        logger.info(f"Download complete: {len(self.data_cache)} symbols cached, {downloaded['failed']} failed")
         return self.data_cache
 
     def _save_to_disk(self, symbol: str, candles: List[OHLCV]):
