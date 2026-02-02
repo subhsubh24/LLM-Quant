@@ -410,16 +410,22 @@ class MultiProviderWebSocket:
         """Connect to a specific provider."""
         ssl_context = _create_ssl_context()
 
+        # Binance sends ping frames every 3 minutes, expects pong within 10 minutes
+        # websockets library auto-responds to pings with pongs
+        # Don't send our own pings (ping_interval=None) - let Binance manage keepalive
         async with websockets.connect(
             provider.url,
             ssl=ssl_context,
-            ping_interval=20,
-            ping_timeout=10,
+            ping_interval=None,  # Don't send our own pings
+            ping_timeout=None,   # No timeout for our pings (we don't send any)
+            close_timeout=5,     # Fast close on disconnect
         ) as ws:
             self._ws = ws
             self._connected = True
             self._current_provider = provider.name
             self._reconnect_delay = 1
+            connection_start = datetime.now()
+            max_connection_hours = 23.5  # Reconnect before 24-hour limit
             logger.info(f"✅ {provider.name} WebSocket connected - streaming LIVE prices")
 
             # Subscribe to channels
@@ -428,6 +434,12 @@ class MultiProviderWebSocket:
             # Process messages
             async for message in ws:
                 if not self._running:
+                    break
+
+                # Check 24-hour connection limit - reconnect proactively
+                hours_connected = (datetime.now() - connection_start).total_seconds() / 3600
+                if hours_connected >= max_connection_hours:
+                    logger.info(f"🔄 {provider.name}: Reconnecting (approaching 24h limit)")
                     break
 
                 prices = provider.parse_message(message)
