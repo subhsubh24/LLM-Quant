@@ -133,105 +133,387 @@ class HistoricalDataDownloader:
     - Federal Reserve FRED (economic indicators)
     """
 
-    # Crypto symbols - Top 100 by market cap
+    # ==========================================================================
+    # COMPREHENSIVE MARKET COVERAGE - CRYPTO (200+ symbols)
+    # ==========================================================================
     CRYPTO_SYMBOLS = [
-        # Top 20
+        # === TOP 50 BY MARKET CAP ===
         "BTC", "ETH", "BNB", "XRP", "SOL", "ADA", "DOGE", "TRX", "AVAX", "LINK",
         "DOT", "MATIC", "SHIB", "LTC", "BCH", "UNI", "ATOM", "XLM", "XMR", "ETC",
-        # 21-40
         "NEAR", "APT", "FIL", "ARB", "OP", "VET", "AAVE", "MKR", "GRT", "INJ",
         "ALGO", "THETA", "FTM", "SAND", "MANA", "AXS", "EGLD", "XTZ", "EOS", "FLOW",
-        # 41-60
         "SNX", "CRV", "LDO", "RUNE", "COMP", "ZEC", "DASH", "BAT", "ENJ", "1INCH",
-        "CHZ", "HOT", "KAVA", "CELO", "ZIL", "QTUM", "RVN", "WAVES", "ICX", "ONT",
-        # 61-80
-        "IOST", "ZRX", "OMG", "ANKR", "SKL", "STORJ", "CELR", "OCEAN", "RSR", "NKN",
-        "BAND", "REN", "DENT", "FET", "CTSI", "OGN", "IOTX", "SXP", "REEF", "ALICE",
-        # 81-100
-        "TLM", "DYDX", "MASK", "API3", "PERP", "SPELL", "JOE", "BICO", "HIGH", "LOKA",
-        "SUI", "SEI", "TIA", "PYTH", "JUP", "WIF", "BONK", "PEPE", "FLOKI", "WLD"
+
+        # === LAYER 2 / SCALING ===
+        "STRK", "ZK", "MANTA", "BLAST", "MODE", "SCROLL", "LINEA", "BASE", "ZKSYNC",
+        "IMX", "LRC", "METIS", "BOBA", "SKL", "CELR", "CTSI", "COTI",
+
+        # === DEFI PROTOCOLS ===
+        "SUSHI", "YFI", "BAL", "CAKE", "JOE", "SPELL", "LQTY", "PENDLE", "GMX",
+        "DYDX", "PERP", "INJ", "OSMO", "KAVA", "RUNE", "VELO", "THE", "AERO",
+        "RAY", "SRM", "MNGO", "ORCA", "STEP", "RAYDIUM", "MARINADE",
+
+        # === AI / COMPUTE TOKENS ===
+        "FET", "AGIX", "OCEAN", "RNDR", "AKT", "TAO", "ARKM", "WLD", "PRIME",
+        "AIOZ", "NMR", "GNO", "CTXC", "DBC", "PHB", "MDT", "RSS3",
+
+        # === GAMING / METAVERSE ===
+        "IMX", "GALA", "SAND", "MANA", "AXS", "ENJ", "WAXP", "ALICE", "TLM",
+        "ILV", "MAGIC", "PRIME", "BEAM", "PIXEL", "PORTAL", "XAI", "RONIN",
+        "GODS", "PYR", "SUPER", "UFO", "HERO", "ATLAS", "POLIS", "SLP", "YGG",
+
+        # === MEME COINS (high volatility = opportunities) ===
+        "DOGE", "SHIB", "PEPE", "FLOKI", "BONK", "WIF", "MEME", "COQ", "MYRO",
+        "SNEK", "LADYS", "TURBO", "AIDOGE", "BABYDOGE", "ELON", "AKITA", "KISHU",
+        "SAMO", "CORGIAI", "POPCAT", "BRETT", "DOG", "NEIRO", "MOG", "SPX",
+
+        # === INFRASTRUCTURE / ORACLES ===
+        "LINK", "BAND", "API3", "PYTH", "UMA", "TRB", "DIA", "NEST", "DOS",
+        "PUNDIX", "QNT", "GRT", "LPT", "AR", "FIL", "STORJ", "SC", "HOT",
+
+        # === PRIVACY COINS ===
+        "XMR", "ZEC", "DASH", "SCRT", "DUSK", "BEAM", "GRIN", "FIRO", "ZEN",
+        "ARRR", "KMD", "XVG", "PIVX", "NAV", "PART",
+
+        # === LAYER 1 ALTERNATIVES ===
+        "HBAR", "EGLD", "KAS", "SEI", "SUI", "TIA", "CORE", "CANTO", "ZETA",
+        "FTM", "ONE", "ROSE", "CELO", "MOVR", "GLMR", "ASTR", "CFX", "CKB",
+        "KDA", "FLUX", "ERG", "RVN", "FIRO", "DCR", "ZIL", "ICX", "ONT",
+        "QTUM", "NEO", "VET", "IOST", "WAN", "ARDR", "LSK", "WAVES", "XEM",
+
+        # === EXCHANGE TOKENS ===
+        "BNB", "CRO", "OKB", "KCS", "GT", "HT", "MX", "LEO", "FTT",
+
+        # === STAKING / LIQUID STAKING ===
+        "LDO", "RPL", "FXS", "SFRXETH", "CBETH", "RETH", "ANKR", "SSV", "OETH",
+
+        # === REAL WORLD ASSETS (RWA) ===
+        "ONDO", "MKR", "CFG", "MPL", "GFI", "CPOOL", "TRU", "MAPLE",
+
+        # === CROSS-CHAIN / BRIDGES ===
+        "RUNE", "STG", "MULTI", "SYN", "HOP", "CELER", "AXL", "LZ",
+
+        # === MISC HIGH VOLUME ===
+        "CHZ", "HOT", "CELO", "ZIL", "QTUM", "RVN", "WAVES", "ICX", "ONT",
+        "IOST", "ZRX", "OMG", "ANKR", "SKL", "STORJ", "CELR", "OCEAN", "RSR",
+        "NKN", "BAND", "REN", "DENT", "FET", "CTSI", "OGN", "IOTX", "SXP",
+        "REEF", "ALICE", "TLM", "DYDX", "MASK", "API3", "PERP", "SPELL",
+        "JOE", "BICO", "HIGH", "LOKA", "SUI", "SEI", "TIA", "PYTH", "JUP"
     ]
 
-    # Stock symbols - S&P 500 Top 100 + Major Growth/Tech
+    # ==========================================================================
+    # FULL S&P 500 (All 500 components)
+    # ==========================================================================
     STOCK_SYMBOLS_SP500 = [
-        # Mega Cap Tech
-        "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "NVDA", "META", "TSLA", "BRK.B", "AVGO",
-        # Top 11-30
-        "JPM", "LLY", "V", "UNH", "XOM", "MA", "JNJ", "HD", "PG", "COST",
-        "ABBV", "MRK", "CVX", "CRM", "NFLX", "AMD", "PEP", "KO", "TMO", "ADBE",
-        # Top 31-50
-        "BAC", "WMT", "ACN", "MCD", "CSCO", "ABT", "LIN", "DHR", "WFC", "INTC",
-        "ORCL", "VZ", "DIS", "PM", "INTU", "CMCSA", "NKE", "TXN", "QCOM", "UPS",
-        # Top 51-70
-        "IBM", "NEE", "SPGI", "NOW", "HON", "CAT", "GE", "AMGN", "PFE", "RTX",
-        "LOW", "BKNG", "GS", "ISRG", "SYK", "BLK", "AMAT", "DE", "MDLZ", "ADP",
-        # Top 71-100
-        "T", "MS", "GILD", "VRTX", "MMC", "CB", "SBUX", "LMT", "ADI", "SCHW",
-        "PLD", "LRCX", "ETN", "C", "AMT", "MO", "SO", "CI", "TMUS", "BDX",
-        "ZTS", "EOG", "CME", "DUK", "CL", "FI", "SLB", "ITW", "REGN", "BSX"
+        # === INFORMATION TECHNOLOGY (75 stocks) ===
+        "AAPL", "MSFT", "NVDA", "AVGO", "AMD", "ADBE", "CRM", "CSCO", "ACN", "ORCL",
+        "INTC", "IBM", "TXN", "QCOM", "NOW", "INTU", "AMAT", "ADI", "LRCX", "MU",
+        "KLAC", "SNPS", "CDNS", "MCHP", "FTNT", "PANW", "NXPI", "HPQ", "HPE", "KEYS",
+        "ON", "MPWR", "SWKS", "QRVO", "TER", "ZBRA", "NTAP", "JNPR", "AKAM", "FFIV",
+        "CTSH", "IT", "EPAM", "GDDY", "PAYC", "PAYX", "VRSN", "WDC", "STX", "GEN",
+        "FSLR", "ENPH", "SEDG", "TRMB", "TYL", "CDW", "ANSS", "FICO", "PTC", "MANH",
+        "CPAY", "BR", "JKHY", "CDAY", "GLOB", "TECH", "SSNC", "NLOK", "ROP", "FIS",
+        "FISV", "GPN", "FLT", "WEX", "ADP", "PAYX",
+
+        # === HEALTH CARE (65 stocks) ===
+        "LLY", "UNH", "JNJ", "MRK", "ABBV", "TMO", "PFE", "ABT", "DHR", "AMGN",
+        "ISRG", "SYK", "GILD", "VRTX", "MDT", "BMY", "CI", "CVS", "ELV", "REGN",
+        "BSX", "ZTS", "BDX", "HUM", "MCK", "EW", "A", "IQV", "IDXX", "CNC",
+        "MTD", "DXCM", "ALGN", "PODD", "HOLX", "COO", "RMD", "BAX", "BIIB", "MOH",
+        "LH", "DGX", "WAT", "PKI", "TFX", "TECH", "INCY", "VTRS", "CTLT", "CRL",
+        "BIO", "HSIC", "OGN", "CAH", "ABC", "XRAY", "ALLE", "HCA", "UHS", "THC",
+        "DVA", "STE", "WST", "ZBH", "ILMN",
+
+        # === FINANCIALS (70 stocks) ===
+        "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SCHW", "C", "AXP",
+        "BLK", "SPGI", "CME", "ICE", "PNC", "CB", "MMC", "USB", "TFC", "AON",
+        "MET", "PRU", "AIG", "AFL", "TRV", "ALL", "PGR", "HIG", "CINF", "WRB",
+        "BK", "STT", "NTRS", "KEY", "CFG", "RF", "FITB", "HBAN", "MTB", "ZION",
+        "CMA", "FRC", "SIVB", "FHN", "WAL", "SBNY", "PACW", "FNF", "FAF", "OLD",
+        "RJF", "SEIC", "SF", "EVR", "LAZ", "HLI", "PJT", "MKTX", "NDAQ", "CBOE",
+        "MSCI", "COIN", "HOOD", "LPLA", "AMP", "BEN", "IVZ", "TROW", "AMG", "JHG",
+
+        # === CONSUMER DISCRETIONARY (60 stocks) ===
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "BKNG", "SBUX", "TJX", "MAR",
+        "CMG", "ORLY", "AZO", "ROST", "DHI", "LEN", "PHM", "NVR", "TOL", "KBH",
+        "GM", "F", "APTV", "RIVN", "LCID", "BWA", "LEA", "RL", "TPR", "VFC",
+        "PVH", "HBI", "GRMN", "POOL", "WSM", "RH", "BBWI", "ULTA", "DRI", "YUM",
+        "WYNN", "MGM", "CZR", "LVS", "HLT", "H", "CCL", "NCLH", "RCL", "EXPE",
+        "ABNB", "UBER", "LYFT", "DASH", "MTCH", "EBAY", "ETSY", "W", "CHWY", "CVNA",
+
+        # === COMMUNICATION SERVICES (25 stocks) ===
+        "GOOGL", "GOOG", "META", "NFLX", "DIS", "CMCSA", "VZ", "T", "TMUS", "CHTR",
+        "PARA", "WBD", "FOX", "FOXA", "NWS", "NWSA", "OMC", "IPG", "TTWO", "EA",
+        "ATVI", "RBLX", "MTCH", "ZG", "PINS",
+
+        # === INDUSTRIALS (75 stocks) ===
+        "CAT", "GE", "HON", "UPS", "UNP", "RTX", "BA", "LMT", "DE", "ETN",
+        "ITW", "EMR", "PH", "CTAS", "GD", "NOC", "WM", "RSG", "VRSK", "CSX",
+        "NSC", "PCAR", "CARR", "OTIS", "TT", "ROK", "AME", "FAST", "GWW", "SWK",
+        "CPRT", "ODFL", "URI", "IR", "EXPD", "CHRW", "JBHT", "XYL", "IEX", "DOV",
+        "ROP", "FTV", "NDSN", "SNA", "TDG", "HWM", "HEI", "TDY", "AXON", "LHX",
+        "LDOS", "BAH", "SAIC", "KBR", "CACI", "J", "WAB", "AGCO", "GNRC", "HUBB",
+        "AOS", "MAS", "ALLE", "FBHS", "LII", "TTC", "MIDD", "FLS", "CFX", "RBC",
+        "PNR", "PAYC", "NLSN", "INFO", "DNB",
+
+        # === CONSUMER STAPLES (35 stocks) ===
+        "PG", "COST", "PEP", "KO", "WMT", "PM", "MO", "MDLZ", "CL", "KMB",
+        "GIS", "K", "HSY", "HRL", "SJM", "MKC", "CPB", "CAG", "KHC", "TSN",
+        "ADM", "BG", "STZ", "TAP", "SAM", "KDP", "MNST", "EL", "CLX", "CHD",
+        "CLORX", "WBA", "KR", "SYY", "TGT",
+
+        # === ENERGY (25 stocks) ===
+        "XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "PXD", "OXY",
+        "DVN", "HES", "HAL", "FANG", "BKR", "WMB", "KMI", "OKE", "TRGP", "LNG",
+        "MRO", "APA", "EQT", "AR", "RRC",
+
+        # === UTILITIES (30 stocks) ===
+        "NEE", "DUK", "SO", "D", "AEP", "SRE", "XEL", "EXC", "ED", "WEC",
+        "PEG", "ES", "DTE", "EIX", "AWK", "AEE", "CMS", "FE", "ETR", "PPL",
+        "EVRG", "ATO", "NI", "CNP", "PNW", "NRG", "VST", "CEG", "PCG", "OGE",
+
+        # === MATERIALS (30 stocks) ===
+        "LIN", "APD", "SHW", "ECL", "DD", "NEM", "FCX", "NUE", "STLD", "VMC",
+        "MLM", "PPG", "ALB", "CTVA", "CF", "MOS", "FMC", "LYB", "DOW", "CE",
+        "EMN", "IP", "PKG", "WRK", "SEE", "AVY", "SON", "BALL", "AMCR", "IFF",
+
+        # === REAL ESTATE (30 stocks) ===
+        "PLD", "AMT", "EQIX", "CCI", "PSA", "O", "SPG", "WELL", "DLR", "AVB",
+        "EQR", "VTR", "SBAC", "ARE", "MAA", "UDR", "ESS", "EXR", "PEAK", "HST",
+        "CBRE", "CSGP", "REG", "KIM", "BXP", "SLG", "VNO", "HIW", "CPT", "IRM"
     ]
 
-    # High Growth / Momentum Stocks
+    # ==========================================================================
+    # HIGH GROWTH / MOMENTUM / IPOs / SPACs
+    # ==========================================================================
     STOCK_SYMBOLS_GROWTH = [
-        # AI/Tech Growth
-        "PLTR", "SNOW", "CRWD", "DDOG", "NET", "ZS", "MDB", "PANW", "FTNT", "OKTA",
-        "BILL", "HUBS", "VEEV", "TEAM", "DOCU", "TTD", "RBLX", "U", "COIN", "SQ",
-        # EV/Clean Energy
-        "RIVN", "LCID", "NIO", "XPEV", "LI", "ENPH", "SEDG", "FSLR", "RUN", "PLUG",
-        # Biotech
-        "MRNA", "BNTX", "BIIB", "ILMN", "EXAS", "SGEN", "ALNY", "DXCM", "ALGN", "IDXX",
-        # Fintech/Payments
-        "PYPL", "AFRM", "SOFI", "UPST", "HOOD", "MELI", "NU", "SE", "GRAB", "SHOP",
-        # Other High Growth
-        "ABNB", "UBER", "LYFT", "DASH", "ZM", "ROKU", "SPOT", "SNAP", "PINS", "MTCH"
+        # === AI / CLOUD / SAAS ===
+        "PLTR", "SNOW", "CRWD", "DDOG", "NET", "ZS", "MDB", "OKTA", "S", "PATH",
+        "CFLT", "DOCN", "ESTC", "GTLB", "SUMO", "DT", "NEWR", "SPLK", "IOT", "AI",
+        "BBAI", "SOUN", "UPST", "BIGC", "BILL", "HUBS", "VEEV", "TEAM", "ZI", "ASAN",
+
+        # === SEMICONDUCTORS / AI CHIPS ===
+        "NVDA", "AMD", "INTC", "AVGO", "QCOM", "ARM", "MRVL", "SMCI", "ANET", "MU",
+        "LRCX", "AMAT", "KLAC", "ASML", "TSM", "WOLF", "CRUS", "SLAB", "RMBS", "POWI",
+
+        # === EV / CLEAN ENERGY ===
+        "TSLA", "RIVN", "LCID", "NIO", "XPEV", "LI", "FSR", "FFIE", "GOEV", "WKHS",
+        "ENPH", "SEDG", "FSLR", "RUN", "PLUG", "BLDP", "BE", "CHPT", "EVGO", "QS",
+        "STEM", "NEE", "CEG", "VST", "NRG", "ORA", "NOVA", "ARRY",
+
+        # === BIOTECH / PHARMA ===
+        "MRNA", "BNTX", "NVAX", "VRTX", "REGN", "BIIB", "ILMN", "EXAS", "SGEN", "ALNY",
+        "DXCM", "ALGN", "IDXX", "BMRN", "INCY", "SRPT", "RARE", "IONS", "NBIX", "CRSP",
+        "BEAM", "EDIT", "NTLA", "VERV", "BLUE", "SGMO", "FATE", "KYMR", "IMVT", "RVNC",
+
+        # === FINTECH / PAYMENTS ===
+        "PYPL", "SQ", "AFRM", "SOFI", "UPST", "HOOD", "NU", "COIN", "MELI", "SE",
+        "GRAB", "SHOP", "TOST", "BILL", "LSPD", "FOUR", "MQ", "DLO", "PAYO", "RELY",
+
+        # === CONSUMER / TECH ===
+        "ABNB", "UBER", "LYFT", "DASH", "ZM", "ROKU", "SPOT", "SNAP", "PINS", "MTCH",
+        "RBLX", "U", "DUOL", "BIRD", "CHWY", "ETSY", "W", "CVNA", "CARG", "OPEN",
+
+        # === RECENT IPOS / HIGH VOLATILITY ===
+        "ARM", "CART", "KVYO", "VRT", "ONON", "BIRK", "ASTS", "IONQ", "RGTI", "QUBT",
+        "TMDX", "PRCT", "DRUG", "DNA", "JOBY", "ACHR", "LILM", "EVTL", "BLDE", "SPCE",
+
+        # === CANNABIS (high volatility) ===
+        "TLRY", "CGC", "ACB", "SNDL", "OGI", "HEXO", "CRON", "CURLF", "TCNNF", "GTBIF",
+
+        # === CHINESE ADRS (high volatility) ===
+        "BABA", "JD", "PDD", "BIDU", "TCEHY", "NIO", "XPEV", "LI", "BILI", "IQ",
+        "TAL", "EDU", "VIPS", "HTHT", "TCOM", "BZUN", "HUYA", "DOYU", "KC", "YMM"
     ]
 
-    # ETFs - Comprehensive Market Coverage
+    # ==========================================================================
+    # INTERNATIONAL ADRS & EMERGING MARKETS
+    # ==========================================================================
+    INTERNATIONAL_ADRS = [
+        # === EUROPE ===
+        "ASML", "NVO", "SAP", "SHEL", "TM", "UL", "BP", "RIO", "BHP", "HSBC",
+        "GSK", "AZN", "SNY", "SHOP", "TD", "RY", "ENB", "CNQ", "SU", "BMO",
+        "BNS", "CM", "NTR", "TRI", "WCN", "QSR", "MFC", "SLF", "FFH", "LULU",
+        "DEO", "BTI", "NGG", "VOD", "SONY", "MUFG", "SMFG", "MFG", "IX", "KB",
+        "SHG", "WF", "HMC", "TM", "NVS", "RHHBY", "OR",
+
+        # === ASIA / EMERGING ===
+        "TSM", "BABA", "JD", "PDD", "BIDU", "NIO", "XPEV", "LI", "TCEHY", "NTES",
+        "WB", "TME", "YUMC", "ZTO", "MNSO", "BILI", "IQ", "VIPS", "HTHT", "TCOM",
+        "INFY", "WIT", "HDB", "IBN", "TTM", "SIFY", "VEDL", "RDY", "VALE", "PBR",
+        "ITUB", "BBD", "SBS", "ABEV", "BSBR", "CIG", "SID", "GGB", "ERJ", "GOL",
+
+        # === AUSTRALIA / MINING ===
+        "BHP", "RIO", "VALE", "FCX", "SCCO", "TECK", "FM", "AA", "CENX", "KALU"
+    ]
+
+    # ==========================================================================
+    # COMPREHENSIVE ETF COVERAGE (300+ ETFs)
+    # ==========================================================================
     ETF_SYMBOLS = [
-        # Major Index ETFs
+        # === MAJOR INDEX ETFs ===
         "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "IVV", "RSP", "MDY", "IJH",
-        # Sector ETFs
-        "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLRE", "XLB",
-        "XLC", "VGT", "VFH", "VDE", "VHT", "VIS", "VCR", "VDC", "VPU", "VNQ",
-        # Tech/Growth ETFs
-        "ARKK", "ARKW", "ARKF", "ARKG", "ARKQ", "SMH", "SOXX", "IGV", "SKYY", "WCLD",
-        "HACK", "BOTZ", "ROBO", "AIQ", "IRBO", "GNOM", "PRNT", "IZRL", "QCLN", "TAN",
-        # Dividend/Value ETFs
-        "VYM", "SCHD", "DVY", "HDV", "SDY", "VIG", "DGRO", "DGRW", "VTV", "IVE",
-        # International ETFs
-        "EFA", "EEM", "VEA", "VWO", "IEFA", "IEMG", "FXI", "EWJ", "EWZ", "EWG",
-        "INDA", "EWY", "EWT", "EWH", "EWC", "EWA", "EWU", "EWP", "EWI", "EWQ",
-        # Bond ETFs
-        "TLT", "IEF", "SHY", "BND", "AGG", "LQD", "HYG", "JNK", "TIP", "GOVT",
-        "MUB", "VCSH", "VCIT", "VCLT", "EMB", "BNDX", "BWX", "IGOV", "IAGG", "VGSH",
-        # Commodity ETFs
-        "GLD", "SLV", "IAU", "GLDM", "PPLT", "PALL", "USO", "BNO", "UNG", "DBA",
-        "DBC", "PDBC", "COMT", "GSG", "RJI", "CPER", "WEAT", "CORN", "SOYB", "WOOD",
-        # Volatility/Inverse ETFs
-        "VXX", "UVXY", "SVXY", "VIXY", "VIXM", "SH", "PSQ", "DOG", "SDS", "QID",
-        # Leveraged ETFs (for momentum/vol signals)
-        "TQQQ", "SQQQ", "UPRO", "SPXU", "TNA", "TZA", "LABU", "LABD", "SOXL", "SOXS",
-        # Factor ETFs
+        "IJR", "IWB", "IWF", "IWD", "ITOT", "SCHB", "SPTM", "VV", "VB", "VXF",
+
+        # === NASDAQ / TECH FOCUS ===
+        "QQQM", "QQQJ", "ONEQ", "QQEW", "PSQ", "QID", "TQQQ", "SQQQ", "QLD", "QYLD",
+
+        # === SECTOR SPDR ===
+        "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLRE", "XLB", "XLC",
+
+        # === VANGUARD SECTORS ===
+        "VGT", "VFH", "VDE", "VHT", "VIS", "VCR", "VDC", "VPU", "VNQ", "VOX", "VAW",
+
+        # === iSHARES SECTORS ===
+        "IYW", "IYF", "IYE", "IYH", "IYJ", "IYC", "IYK", "IDU", "IYR", "IYZ", "IYM",
+
+        # === INDUSTRY / SUB-SECTOR ===
+        "XBI", "IBB", "XHB", "ITB", "KRE", "KBE", "XRT", "XME", "XOP", "OIH",
+        "XSD", "SOXX", "SMH", "IGV", "HACK", "CIBR", "SKYY", "CLOU", "WCLD", "ARKK",
+        "ARKW", "ARKF", "ARKG", "ARKQ", "ARKX", "BOTZ", "ROBO", "IRBO", "AIQ", "GNOM",
+        "PRNT", "IZRL", "BETZ", "NERD", "HERO", "ESPO", "BJK", "PBW", "ICLN", "TAN",
+        "QCLN", "FAN", "ACES", "GRID", "LIT", "DRIV", "IDRV", "HAIL", "KARS", "MOTO",
+
+        # === DIVIDEND / VALUE / INCOME ===
+        "VYM", "SCHD", "DVY", "HDV", "SDY", "VIG", "DGRO", "DGRW", "NOBL", "SPHD",
+        "SPYD", "PFF", "PGX", "PFFD", "VTV", "IVE", "IWD", "RPV", "VLUE", "VONV",
+
+        # === GROWTH ===
+        "VUG", "IWF", "SCHG", "RPG", "VONG", "MGK", "SPYG", "IVW", "IUSG", "QQQ",
+
+        # === SMALL / MID CAP ===
+        "IWM", "IJR", "VB", "SCHA", "SLY", "VIOO", "IJH", "MDY", "VO", "IVOO",
+        "IWO", "IWN", "VBK", "VBR", "SLYG", "SLYV", "IJT", "IJS", "VIOG", "VIOV",
+
+        # === INTERNATIONAL - DEVELOPED ===
+        "EFA", "VEA", "IEFA", "SCHF", "EFV", "EFG", "IDEV", "IXUS", "VEU", "VXUS",
+        "VGK", "EWU", "EWG", "EWQ", "EWP", "EWI", "EWN", "EWK", "EWL", "EWD",
+        "EWJ", "EWY", "EWT", "EWH", "EWS", "EWA", "EWC", "ENZL", "NORW", "EDEN",
+
+        # === INTERNATIONAL - EMERGING ===
+        "EEM", "VWO", "IEMG", "SCHE", "SPEM", "XSOE", "FNDE", "EMQQ", "KEMQ", "EEMV",
+        "FXI", "MCHI", "KWEB", "CQQQ", "CHIQ", "ASHR", "GXC", "EWZ", "EWZS", "FLBR",
+        "INDA", "SMIN", "EPI", "INDY", "PIN", "EWW", "EWT", "THD", "VNM", "EPHE",
+        "EIDO", "ECH", "EPU", "EWM", "ARGT", "TUR", "GREK", "EPOL", "RSX", "ERUS",
+
+        # === BOND ETFs - DURATION ===
+        "BND", "AGG", "SCHZ", "BIV", "VCIT", "LQD", "VCSH", "BSV", "SHY", "IEI",
+        "IEF", "TLT", "TLH", "EDV", "ZROZ", "VGLT", "VGIT", "VGSH", "SCHO", "SCHR",
+
+        # === BOND ETFs - CREDIT ===
+        "LQD", "VCIT", "VCSH", "IGIB", "IGSB", "HYG", "JNK", "USHY", "SHYG", "HYLD",
+        "SJNK", "PHB", "ANGL", "FALN", "BKLN", "SRLN", "FTSL", "FLOT", "FLRN",
+
+        # === BOND ETFs - SPECIALTY ===
+        "TIP", "SCHP", "VTIP", "STIP", "MUB", "SUB", "CMF", "NYF", "HYD", "HYMB",
+        "EMB", "PCY", "VWOB", "EMLC", "EBND", "IAGG", "BNDX", "BWX", "IGOV",
+
+        # === COMMODITY ETFs ===
+        "GLD", "IAU", "GLDM", "SGOL", "BAR", "OUNZ", "SLV", "SIVR", "PSLV", "PPLT",
+        "PALL", "GLTR", "DBP", "DBA", "DBC", "PDBC", "COMT", "GSG", "RJI", "DJP",
+        "USO", "BNO", "UNG", "UNL", "BOIL", "KOLD", "UCO", "SCO", "OILK", "USOI",
+        "CORN", "WEAT", "SOYB", "CANE", "JO", "NIB", "COW", "MOO", "WOOD", "CUT",
+        "CPER", "JJC", "COPX", "REMX", "PICK", "SIL", "SILJ", "GDX", "GDXJ", "RING",
+
+        # === VOLATILITY / VIX ===
+        "VXX", "UVXY", "SVXY", "VIXY", "VIXM", "ZIV", "VXZ", "TAIL", "SVOL",
+
+        # === INVERSE / LEVERAGED ===
+        "SH", "PSQ", "DOG", "SDS", "QID", "DXD", "TWM", "RWM", "SPXS", "SPXU",
+        "SQQQ", "TQQQ", "UPRO", "SPXL", "TNA", "TZA", "LABU", "LABD", "SOXL", "SOXS",
+        "NUGT", "DUST", "JNUG", "JDST", "GUSH", "DRIP", "BOIL", "KOLD", "YANG", "YINN",
+        "FAS", "FAZ", "ERX", "ERY", "CURE", "NAIL", "DRV", "TECL", "TECS", "WEBL",
+
+        # === FACTOR / SMART BETA ===
         "MTUM", "VLUE", "QUAL", "SIZE", "USMV", "SPLV", "EFAV", "ACWV", "SPHB", "SPHD",
-        # Thematic ETFs
-        "LIT", "DRIV", "ESPO", "HERO", "BETZ", "JETS", "PBW", "ICLN", "ACES", "GRID",
-        "XBI", "IBB", "ARKG", "LABU", "XHB", "ITB", "KRE", "KBE", "XRT", "XME"
+        "MOAT", "PKW", "COWZ", "QVAL", "QMOM", "DFSV", "DFUV", "DFUS", "DFAC", "AVUV",
+
+        # === DIVIDEND / COVERED CALL ===
+        "JEPI", "JEPQ", "XYLD", "QYLD", "RYLD", "DJIA", "DIVO", "NUSI", "PUTW", "PBP",
+
+        # === THEMATIC / MEGATRENDS ===
+        "ARKK", "ARKG", "ARKW", "ARKF", "ARKQ", "ARKX", "MOON", "UFO", "ROKT", "AWAY",
+        "URNM", "URA", "NLR", "ICLN", "PBW", "TAN", "QCLN", "LIT", "DRIV", "IDRV",
+        "WCLD", "SKYY", "CLOU", "HACK", "CIBR", "BUG", "SNSR", "BOTZ", "ROBO", "GNOM",
+        "EDOC", "ARKG", "XBI", "IDNA", "BTEK", "HTEC", "HELX", "AGNG", "GERM",
+        "FINX", "IPAY", "KOIN", "BLOK", "BKCH", "LEGR", "BITQ", "DAPP", "WGMI", "BITO",
+
+        # === REAL ESTATE ===
+        "VNQ", "IYR", "SCHH", "XLRE", "RWR", "USRT", "REET", "REM", "MORT", "SRET",
+        "REZ", "HOMZ", "INDS", "NURE", "PPTY", "KBWY", "KBWD", "O", "VICI", "STAG"
     ]
 
-    # Futures/Index proxies (for macro signals)
+    # ==========================================================================
+    # FUTURES / FOREX / INDICES
+    # ==========================================================================
     FUTURES_SYMBOLS = [
-        # Index Futures ETF proxies
-        "ES=F", "NQ=F", "YM=F", "RTY=F",
-        # Commodities
-        "GC=F", "SI=F", "CL=F", "NG=F", "HG=F", "PL=F",
-        # Bonds
-        "ZB=F", "ZN=F", "ZF=F", "ZT=F",
-        # Currencies
-        "DX=F", "6E=F", "6J=F", "6B=F", "6C=F", "6A=F"
+        # === INDEX FUTURES ===
+        "ES=F", "NQ=F", "YM=F", "RTY=F", "EMD=F", "NKD=F", "NIY=F",
+
+        # === COMMODITIES - METALS ===
+        "GC=F", "SI=F", "HG=F", "PL=F", "PA=F",
+
+        # === COMMODITIES - ENERGY ===
+        "CL=F", "BZ=F", "HO=F", "RB=F", "NG=F",
+
+        # === COMMODITIES - AGRICULTURE ===
+        "ZC=F", "ZW=F", "ZS=F", "ZM=F", "ZL=F", "KC=F", "SB=F", "CC=F", "CT=F",
+        "LC=F", "LH=F", "FC=F", "ZO=F", "ZR=F",
+
+        # === BONDS / RATES ===
+        "ZB=F", "ZN=F", "ZF=F", "ZT=F", "GE=F",
+
+        # === CURRENCIES ===
+        "DX=F", "6E=F", "6J=F", "6B=F", "6C=F", "6A=F", "6S=F", "6N=F", "6M=F"
     ]
 
-    # Combined stock symbols
-    STOCK_SYMBOLS = STOCK_SYMBOLS_SP500 + STOCK_SYMBOLS_GROWTH + ETF_SYMBOLS + FUTURES_SYMBOLS
+    # === FOREX PAIRS (via Yahoo Finance symbols) ===
+    FOREX_SYMBOLS = [
+        # Major Pairs
+        "EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "AUDUSD=X", "USDCAD=X", "NZDUSD=X",
+        # Cross Pairs
+        "EURGBP=X", "EURJPY=X", "GBPJPY=X", "AUDJPY=X", "EURAUD=X", "EURCHF=X", "GBPCHF=X",
+        "CADJPY=X", "NZDJPY=X", "AUDNZD=X", "AUDCAD=X", "AUDCHF=X", "CADCHF=X",
+        # Emerging
+        "USDZAR=X", "USDMXN=X", "USDBRL=X", "USDTRY=X", "USDINR=X", "USDCNY=X", "USDRUB=X",
+        "USDSGD=X", "USDHKD=X", "USDKRW=X", "USDTWD=X", "USDTHB=X", "USDIDR=X", "USDPHP=X"
+    ]
+
+    # ==========================================================================
+    # REITS & SPECIALTY
+    # ==========================================================================
+    REIT_SYMBOLS = [
+        # === DATA CENTERS ===
+        "EQIX", "DLR", "AMT", "CCI", "SBAC", "UNIT", "CONE", "QTS",
+        # === INDUSTRIAL ===
+        "PLD", "STAG", "REXR", "FR", "EGP", "TRNO", "COLD", "IIPR",
+        # === RESIDENTIAL ===
+        "AVB", "EQR", "MAA", "UDR", "ESS", "CPT", "AIV", "INVH", "AMH",
+        # === RETAIL ===
+        "SPG", "O", "NNN", "REG", "KIM", "FRT", "BRX", "SITC", "AKR",
+        # === OFFICE ===
+        "BXP", "SLG", "VNO", "KRC", "ARE", "HIW", "OFC", "DEI", "JBGS",
+        # === HEALTHCARE ===
+        "WELL", "VTR", "PEAK", "OHI", "HR", "DOC", "LTC", "SBRA", "MPW",
+        # === SPECIALTY ===
+        "PSA", "EXR", "CUBE", "LSI", "NSA", "IRM", "LAMR", "OUT", "CCU"
+    ]
+
+    # ==========================================================================
+    # COMBINE ALL SYMBOLS
+    # ==========================================================================
+    STOCK_SYMBOLS = (
+        STOCK_SYMBOLS_SP500 +
+        STOCK_SYMBOLS_GROWTH +
+        INTERNATIONAL_ADRS +
+        ETF_SYMBOLS +
+        FUTURES_SYMBOLS +
+        FOREX_SYMBOLS +
+        REIT_SYMBOLS
+    )
+
+    # Remove duplicates while preserving order
+    STOCK_SYMBOLS = list(dict.fromkeys(STOCK_SYMBOLS))
 
     def __init__(self):
         self.data_cache: Dict[str, List[OHLCV]] = {}
