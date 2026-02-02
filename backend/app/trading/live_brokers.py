@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import json
 
+from .activity_logger import get_activity_logger, EventSubtype
+
 logger = logging.getLogger(__name__)
 
 
@@ -839,6 +841,7 @@ async def auto_initialize_brokers() -> Dict[str, Any]:
 
     settings = get_settings()
     manager = get_broker_manager()
+    activity_logger = get_activity_logger()
     results = {"alpaca": None, "binance": None, "errors": []}
 
     # Setup Alpaca if keys are configured
@@ -880,8 +883,30 @@ async def auto_initialize_brokers() -> Dict[str, Any]:
             connect_results = await manager.connect_all()
             results["connection"] = connect_results
             logger.info(f"Broker auto-connect results: {connect_results}")
+
+            # Log broker connection results to activity logger
+            for broker_name, success in connect_results.items():
+                await activity_logger.log_broker(
+                    subtype=EventSubtype.CONNECT if success else EventSubtype.AUTH_FAILURE,
+                    broker=broker_name,
+                    message=f"{broker_name.capitalize()} connection {'successful' if success else 'failed'}",
+                    success=success,
+                    details={
+                        "mode": "paper" if broker_name == "alpaca" and settings.alpaca_paper_mode else
+                               "testnet" if broker_name == "binance" and settings.binance_testnet_mode else "live",
+                        "us_mode": True if broker_name == "binance" and getattr(settings, 'binance_us_mode', True) else None,
+                    }
+                )
+
         except Exception as e:
             logger.error(f"Broker auto-connect failed: {e}")
             results["errors"].append(f"Auto-connect error: {e}")
+
+            # Log connection error
+            await activity_logger.log_error(
+                subtype=EventSubtype.EXCEPTION,
+                message=f"Broker auto-connect failed: {str(e)[:200]}",
+                details={"error": str(e)}
+            )
 
     return results

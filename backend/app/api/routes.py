@@ -2329,6 +2329,68 @@ async def get_master_bot_trade_log(limit: int = 50):
     }
 
 
+@router.get("/master-bot/activity-logs")
+async def get_activity_logs(
+    limit: int = 100,
+    event_type: Optional[str] = None,
+    symbol: Optional[str] = None,
+):
+    """
+    Get bot activity logs for monitoring and debugging.
+
+    Query params:
+    - limit: Number of logs to return (default 100)
+    - event_type: Filter by type (lifecycle, broker, trade, scan, ml, error, position, config, data)
+    - symbol: Filter by trading symbol
+    """
+    from ..trading.activity_logger import get_activity_logger
+
+    activity_logger = get_activity_logger()
+
+    if event_type:
+        logs = activity_logger.get_logs_by_type(event_type, limit)
+    elif symbol:
+        logs = activity_logger.get_logs_by_symbol(symbol.upper(), limit)
+    else:
+        logs = activity_logger.get_recent_logs(limit)
+
+    return {
+        "status": "success",
+        "logs": logs,
+        "count": len(logs),
+        "session_id": activity_logger.session_id,
+    }
+
+
+@router.get("/master-bot/activity-logs/errors")
+async def get_error_logs(limit: int = 50):
+    """Get error, warning, and critical activity logs."""
+    from ..trading.activity_logger import get_activity_logger
+
+    activity_logger = get_activity_logger()
+    logs = activity_logger.get_error_logs(limit)
+
+    return {
+        "status": "success",
+        "logs": logs,
+        "count": len(logs),
+    }
+
+
+@router.get("/master-bot/activity-logs/stats")
+async def get_activity_stats():
+    """Get activity logging statistics."""
+    from ..trading.activity_logger import get_activity_logger
+
+    activity_logger = get_activity_logger()
+    stats = activity_logger.get_stats()
+
+    return {
+        "status": "success",
+        "stats": stats,
+    }
+
+
 @router.post("/master-bot/scan")
 async def trigger_master_bot_scan():
     """Manually trigger a full market scan."""

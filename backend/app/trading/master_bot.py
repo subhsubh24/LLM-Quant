@@ -89,6 +89,12 @@ from .quant_analytics import (
     WalkForwardOptimizer,
     create_analytics_suite,
 )
+from .activity_logger import (
+    get_activity_logger,
+    EventType,
+    EventSubtype,
+    Severity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -748,6 +754,9 @@ class MasterQuantBot:
         self.live_trading_enabled = False
         self.broker_manager = None  # Set via enable_live_trading endpoint
 
+        # Activity logger for comprehensive event tracking
+        self.activity_logger = get_activity_logger()
+
         # Initialize with some synthetic price history for models
         self._initialize_price_history()
 
@@ -1076,6 +1085,27 @@ class MasterQuantBot:
 
         self.opportunities = opportunities
         self.last_full_scan = datetime.now()
+
+        # Log scan completion to activity logger
+        await self.activity_logger.log_scan(
+            subtype=EventSubtype.SCAN_COMPLETE,
+            message=f"Market scan complete: {len(opportunities)} opportunities found",
+            details={
+                "market_open": market_open,
+                "total_opportunities": len(opportunities),
+                "by_asset_class": {
+                    "stock_options": len([o for o in opportunities if o.asset_class == AssetClass.STOCK_OPTIONS]),
+                    "etf_options": len([o for o in opportunities if o.asset_class == AssetClass.ETF_OPTIONS]),
+                    "commodity_options": len([o for o in opportunities if o.asset_class == AssetClass.COMMODITY_OPTIONS]),
+                    "crypto_perpetual": len([o for o in opportunities if o.asset_class == AssetClass.CRYPTO_PERPETUAL]),
+                    "crypto_options": len([o for o in opportunities if o.asset_class == AssetClass.CRYPTO_OPTIONS]),
+                    "crypto_spot": len([o for o in opportunities if o.asset_class == AssetClass.CRYPTO_SPOT]),
+                },
+                "top_opportunity": opportunities[0].symbol if opportunities else None,
+                "market_regime": self.market_regime.value,
+                "vix_level": self.vix_level,
+            }
+        )
 
         return opportunities
 
@@ -1610,17 +1640,22 @@ class MasterQuantBot:
         """Record trade for RL training and analysis with LLM summary."""
         from ..llm.analyst import get_quant_analyst
 
+        trade_id = str(uuid.uuid4())[:8]
+        side = "long" if "Long" in opp.strategy or "Buy" in opp.strategy or "Call" in opp.strategy else "short"
+        trade_price = price or opp.max_profit / 100 if opp.max_profit else 0
+        trade_size = size or min(5000, self.initial_capital * 0.05)
+
         # Build comprehensive trade record
         trade_record = {
-            "id": str(uuid.uuid4())[:8],
+            "id": trade_id,
             "timestamp": datetime.now().isoformat(),
             "symbol": opp.symbol,
             "asset_class": opp.asset_class.value,
             "type": trade_type,
             "strategy": opp.strategy,
-            "side": "long" if "Long" in opp.strategy or "Buy" in opp.strategy or "Call" in opp.strategy else "short",
-            "price": price or opp.max_profit / 100 if opp.max_profit else 0,
-            "size": size or min(5000, self.initial_capital * 0.05),
+            "side": side,
+            "price": trade_price,
+            "size": trade_size,
             "score": round(opp.score, 1),
             "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
             "iv_rank": opp.iv_rank,
@@ -1644,6 +1679,30 @@ class MasterQuantBot:
         asyncio.create_task(generate_summary())
 
         self.trade_history.append(trade_record)
+
+        # Log trade to activity logger (async, non-blocking)
+        async def log_trade_activity():
+            await self.activity_logger.log_trade(
+                subtype=EventSubtype.SUBMIT,
+                symbol=opp.symbol,
+                asset_class=opp.asset_class.value,
+                message=f"Trade executed: {side.upper()} {opp.symbol} via {trade_type}",
+                broker="live" if self.live_trading_enabled else "paper",
+                value=trade_size,
+                details={
+                    "trade_id": trade_id,
+                    "strategy": opp.strategy,
+                    "price": trade_price,
+                    "size": trade_size,
+                    "score": opp.score,
+                    "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
+                    "iv_rank": opp.iv_rank,
+                    "regime": self.market_regime.value,
+                    "rationale": opp.rationale[:200] if opp.rationale else None,
+                }
+            )
+
+        asyncio.create_task(log_trade_activity())
 
     def get_trade_log(self, limit: int = 50) -> List[Dict]:
         """Get formatted trade log for display."""
@@ -1771,6 +1830,18 @@ class MasterQuantBot:
             "system"
         )
 
+        # Log startup to activity logger
+        await self.activity_logger.log_lifecycle(
+            subtype=EventSubtype.START,
+            message=f"Master Quant Bot started with ${self.initial_capital:,.0f} capital, mode={self.mode.value}",
+            details={
+                "capital": self.initial_capital,
+                "mode": self.mode.value,
+                "ml_models": ["DQN", "PPO", "LSTM", "Transformer", "HMM", "VAE", "GARCH"],
+                "asset_classes": [ac.value for ac in AssetClass],
+            }
+        )
+
         self._task = asyncio.create_task(self._run_loop())
 
     async def stop(self):
@@ -1791,6 +1862,18 @@ class MasterQuantBot:
             f"Total RL Training Steps: {self.analytics.training_step} | "
             f"Episodes: {len(self.analytics.episode_rewards)}",
             "system"
+        )
+
+        # Log shutdown to activity logger
+        await self.activity_logger.log_lifecycle(
+            subtype=EventSubtype.STOP,
+            message=f"Master Quant Bot stopped after {self.analytics.training_step} RL training steps",
+            details={
+                "rl_training_steps": self.analytics.training_step,
+                "episodes_completed": len(self.analytics.episode_rewards),
+                "final_pnl": self.engine.total_pnl,
+                "trades_executed": len(self.trade_history),
+            }
         )
 
     async def _run_loop(self):
@@ -1840,6 +1923,15 @@ class MasterQuantBot:
                 break
             except Exception as e:
                 logger.error(f"Error in master bot loop: {e}")
+                # Log error to activity logger
+                await self.activity_logger.log_error(
+                    subtype=EventSubtype.EXCEPTION,
+                    message=f"Error in bot main loop: {str(e)[:200]}",
+                    details={
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    }
+                )
                 await asyncio.sleep(10)
 
     async def _manage_positions(self):
