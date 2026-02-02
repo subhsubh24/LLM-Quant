@@ -408,21 +408,27 @@ class QuantAnalyticsEngine:
         # LSTM prediction (if we have history)
         lstm_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
-            self.lstm.reset_state()
-            returns = self.return_history[symbol][-60:]
-            # Reshape for LSTM: (seq_len, features)
-            lstm_input = returns.reshape(-1, 1)
-            lstm_input = np.pad(lstm_input, ((0, 0), (0, 15)), mode='constant')
-            lstm_out = self.lstm.forward(lstm_input)
-            lstm_pred = float(lstm_out[0, -1, 0])
+            try:
+                self.lstm.reset_state()
+                returns = np.array(self.return_history[symbol][-60:]).flatten()
+                # Reshape for LSTM: (seq_len, features)
+                lstm_input = returns.reshape(-1, 1)
+                lstm_input = np.pad(lstm_input, ((0, 0), (0, 15)), mode='constant')
+                lstm_out = self.lstm.forward(lstm_input)
+                lstm_pred = float(lstm_out[0, -1, 0])
+            except Exception as e:
+                logger.debug(f"LSTM prediction failed for {symbol}: {e}")
 
         # Transformer prediction
         transformer_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
-            returns = self.return_history[symbol][-60:]
-            transformer_input = returns.reshape(-1, 1)
-            transformer_input = np.pad(transformer_input, ((0, 0), (0, 15)), mode='constant')
-            transformer_pred = self.transformer.predict(transformer_input)
+            try:
+                returns = np.array(self.return_history[symbol][-60:]).flatten()
+                transformer_input = returns.reshape(-1, 1)
+                transformer_input = np.pad(transformer_input, ((0, 0), (0, 15)), mode='constant')
+                transformer_pred = self.transformer.predict(transformer_input)
+            except Exception as e:
+                logger.debug(f"Transformer prediction failed for {symbol}: {e}")
 
         # Regime detection
         regime = "Unknown"
@@ -791,12 +797,14 @@ class MasterQuantBot:
             hmm_state, hmm_probs = self.analytics.detect_regime_hmm(spy_returns)
 
             # VAE regime detection
+            vae_regime, vae_probs = 1, np.array([0.25, 0.25, 0.25, 0.25])  # Default
             if len(spy_returns) >= 32:
-                vae_regime, vae_probs, _ = self.analytics.regime_vae.detect_regime(
-                    spy_returns[-32:].reshape(1, -1)
-                )
-            else:
-                vae_regime, vae_probs = 1, np.array([0.25, 0.25, 0.25, 0.25])
+                try:
+                    vae_regime, vae_probs, _ = self.analytics.regime_vae.detect_regime(
+                        spy_returns[-32:].reshape(1, -1)
+                    )
+                except Exception as e:
+                    logger.debug(f"VAE regime detection failed: {e}")
 
             # Combine HMM and VAE
             combined_confidence = (np.max(hmm_probs) + np.max(vae_probs)) / 2
@@ -1101,7 +1109,9 @@ class MasterQuantBot:
                 strategy=strategy,
                 score=base_score,
                 expected_return=expected_return,
-                probability=ml_pred.confidence,
+                probability_of_profit=ml_pred.confidence,
+                risk_reward_ratio=max_profit / max_loss if max_loss > 0 else 2.0,
+                iv_rank=50,  # N/A for spot, use neutral value
                 max_profit=max_profit,
                 max_loss=max_loss,
                 rationale=f"ML Signal: {ml_pred.action_name} (conf: {ml_pred.confidence:.1%}) | "
