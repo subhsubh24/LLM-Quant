@@ -274,7 +274,7 @@ export default function MasterQuantBotPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen p-8 space-y-6">
       {/* Broker Status Banner */}
       {brokerStatus && (
         <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3 shadow-sm flex items-center justify-between">
