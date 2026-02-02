@@ -1648,8 +1648,16 @@ class MasterQuantBot:
 
         trade_id = str(uuid.uuid4())[:8]
         side = "long" if "Long" in opp.strategy or "Buy" in opp.strategy or "Call" in opp.strategy else "short"
-        trade_price = price or opp.max_profit / 100 if opp.max_profit else 0
-        trade_size = size or min(5000, self.initial_capital * 0.05)
+
+        # Use explicit checks for price/size to avoid falsy 0 issues
+        if price > 0:
+            trade_price = price
+        elif opp.max_profit and opp.max_profit > 0:
+            trade_price = opp.max_profit / 100
+        else:
+            trade_price = 0
+
+        trade_size = size if size > 0 else min(5000, self.initial_capital * 0.05)
 
         # Build comprehensive trade record with full details
         trade_record = {
@@ -1660,7 +1668,8 @@ class MasterQuantBot:
             "type": trade_type,
             "strategy": opp.strategy,
             "side": side,
-            # Entry details
+            # Entry details (keep both 'price' and 'entry_price' for frontend compatibility)
+            "price": trade_price,  # Legacy field for frontend
             "entry_price": trade_price,
             "size": trade_size,
             # Exit details (populated when position closes)

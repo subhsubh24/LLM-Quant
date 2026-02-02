@@ -143,7 +143,17 @@ interface TradeLogEntry {
   strategy: string;
   side: string;
   price: number;
+  entry_price: number;
   size: number;
+  // Exit/P&L tracking
+  status: string;  // open, closed
+  exit_price: number | null;
+  exit_timestamp: string | null;
+  close_reason: string | null;
+  realized_pnl: number | null;
+  realized_pnl_pct: number | null;
+  duration_minutes: number | null;
+  // ML context
   score: number;
   ml_confidence: number;
   iv_rank: number;
@@ -739,15 +749,17 @@ export default function MasterQuantBotPage() {
                     <th className="pb-3 font-medium">Asset</th>
                     <th className="pb-3 font-medium">Strategy</th>
                     <th className="pb-3 font-medium">Side</th>
+                    <th className="pb-3 font-medium">Entry</th>
                     <th className="pb-3 font-medium">Size</th>
+                    <th className="pb-3 font-medium">P&L</th>
                     <th className="pb-3 font-medium">Score</th>
-                    <th className="pb-3 font-medium min-w-[300px]">AI Rationale</th>
+                    <th className="pb-3 font-medium min-w-[250px]">AI Rationale</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {tradeLog.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-gray-400">
+                      <td colSpan={9} className="py-8 text-center text-gray-400">
                         No trades recorded yet
                       </td>
                     </tr>
@@ -795,9 +807,44 @@ export default function MasterQuantBotPage() {
                           </span>
                         </td>
                         <td className="py-3 pr-4">
+                          <div className="font-mono text-gray-900">
+                            ${(trade.entry_price || trade.price)?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          </div>
+                          {trade.exit_price && (
+                            <div className="text-xs text-gray-500">
+                              Exit: ${trade.exit_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4">
                           <div className="font-mono text-gray-900">${trade.size?.toLocaleString()}</div>
                           {trade.live_executed && (
                             <div className="text-xs text-green-600 font-medium">LIVE</div>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {trade.status === "closed" && trade.realized_pnl !== null ? (
+                            <div>
+                              <div className={cn(
+                                "font-mono font-semibold",
+                                trade.realized_pnl >= 0 ? "text-green-600" : "text-red-600"
+                              )}>
+                                {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl?.toFixed(2)}
+                              </div>
+                              <div className={cn(
+                                "text-xs",
+                                trade.realized_pnl >= 0 ? "text-green-500" : "text-red-500"
+                              )}>
+                                {trade.realized_pnl_pct >= 0 ? '+' : ''}{trade.realized_pnl_pct?.toFixed(1)}%
+                              </div>
+                              {trade.close_reason && (
+                                <div className="text-xs text-gray-400">{trade.close_reason}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-xs font-medium">
+                              OPEN
+                            </span>
                           )}
                         </td>
                         <td className="py-3 pr-4">
@@ -818,6 +865,7 @@ export default function MasterQuantBotPage() {
                           </div>
                           <div className="text-xs text-gray-400 mt-1">
                             Regime: {trade.regime}
+                            {trade.duration_minutes && ` • ${trade.duration_minutes?.toFixed(0)}min`}
                           </div>
                         </td>
                       </tr>
