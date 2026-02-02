@@ -318,34 +318,38 @@ class LiveMarketService:
         """Get market news."""
         cache_key = f"news_{category}"
         cached = self._get_cached(cache_key)
-        if cached:
+        if cached and len(cached) > 0 and cached[0].headline:
             return cached[:limit]
 
+        news = []
+
+        # Try Finnhub first
         try:
-            news = []
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 if self.finnhub_key:
                     news = await self._fetch_finnhub_news(client, category)
+        except Exception as e:
+            logger.debug(f"Finnhub news failed: {e}")
 
-            # If no news from Finnhub, try yfinance
-            if not news and YFINANCE_AVAILABLE:
+        # If no news from Finnhub, try yfinance
+        if not news and YFINANCE_AVAILABLE:
+            try:
                 loop = asyncio.get_event_loop()
                 news = await loop.run_in_executor(
                     self.executor,
                     self._fetch_yfinance_news_sync,
                     "SPY"
                 )
+            except Exception as e:
+                logger.debug(f"yfinance news failed: {e}")
 
-            # Fallback to demo news if nothing else works
-            if not news:
-                news = self._generate_demo_news()
+        # Fallback to demo news if nothing else works
+        if not news:
+            logger.info("Using demo news - API sources unavailable")
+            news = self._generate_demo_news()
 
-            self._set_cached(cache_key, news)
-            return news[:limit]
-
-        except Exception as e:
-            logger.error(f"Error fetching news: {e}")
-            return self._generate_demo_news()[:limit]
+        self._set_cached(cache_key, news)
+        return news[:limit]
 
     async def get_symbol_news(self, symbol: str, limit: int = 10) -> List[NewsItem]:
         """Get news for a specific symbol."""
