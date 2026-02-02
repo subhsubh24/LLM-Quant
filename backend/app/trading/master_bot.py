@@ -788,10 +788,13 @@ class MasterQuantBot:
         self._real_data_loaded = False
 
     async def _load_real_market_data(self):
-        """Load real historical data from Binance for crypto symbols."""
+        """Load real historical data from Binance (crypto) and Alpaca (stocks)."""
         if self._real_data_loaded:
             return
 
+        total_loaded = 0
+
+        # ============ CRYPTO DATA FROM BINANCE ============
         try:
             from ..data.binance_data import get_binance_fetcher
 
@@ -805,37 +808,99 @@ class MasterQuantBot:
             ]
 
             self._add_commentary(
-                "📊 Fetching real historical data from Binance for ML training...",
+                "📊 Fetching REAL crypto data from Binance.US...",
                 "system"
             )
 
             data = await fetcher.get_multi_symbol_data(crypto_symbols, days=252, interval="1d")
 
-            loaded = 0
+            crypto_loaded = 0
             for symbol, (prices, returns) in data.items():
                 if len(prices) >= 60:
                     # Update both the base symbol and perpetual version
                     self.analytics.update_price_history(symbol, prices)
                     self.analytics.update_price_history(f"{symbol}-PERP", prices)
-                    loaded += 1
+                    crypto_loaded += 1
 
-            if loaded > 0:
-                self._real_data_loaded = True
+            if crypto_loaded > 0:
                 self._add_commentary(
-                    f"✅ Loaded REAL market data for {loaded} crypto symbols from Binance",
+                    f"✅ Loaded {crypto_loaded} crypto symbols from Binance.US",
                     "system"
                 )
-                logger.info(f"Loaded real Binance data for {loaded} symbols")
+                logger.info(f"Loaded real Binance data for {crypto_loaded} crypto symbols")
+                total_loaded += crypto_loaded
+
+        except Exception as e:
+            logger.warning(f"Failed to load Binance crypto data: {e}")
+            self._add_commentary(
+                f"⚠️ Binance fetch failed: {str(e)[:40]}",
+                "system"
+            )
+
+        # ============ STOCK DATA FROM ALPACA ============
+        try:
+            from ..data.alpaca_data import get_alpaca_fetcher
+
+            alpaca = get_alpaca_fetcher()
+
+            if alpaca.has_keys:
+                # Stock/ETF symbols to fetch
+                stock_symbols = [
+                    # ETFs (most important for regime detection)
+                    "SPY", "QQQ", "IWM", "DIA",
+                    # Major stocks
+                    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+                    # Commodities ETFs
+                    "GLD", "SLV", "USO",
+                    # Financials
+                    "JPM", "BAC", "GS",
+                    # High vol
+                    "AMD", "COIN",
+                ]
+
+                self._add_commentary(
+                    "📈 Fetching REAL stock data from Alpaca...",
+                    "system"
+                )
+
+                stock_data = await alpaca.get_multi_symbol_data(stock_symbols, days=252)
+
+                stock_loaded = 0
+                for symbol, (prices, returns) in stock_data.items():
+                    if len(prices) >= 60:
+                        self.analytics.update_price_history(symbol, prices)
+                        stock_loaded += 1
+
+                if stock_loaded > 0:
+                    self._add_commentary(
+                        f"✅ Loaded {stock_loaded} stock symbols from Alpaca",
+                        "system"
+                    )
+                    logger.info(f"Loaded real Alpaca data for {stock_loaded} stock symbols")
+                    total_loaded += stock_loaded
             else:
                 self._add_commentary(
-                    "⚠️ Could not fetch Binance data - using synthetic data for ML",
+                    "⚠️ Alpaca API keys not configured - stocks use synthetic data",
                     "system"
                 )
 
         except Exception as e:
-            logger.warning(f"Failed to load real market data: {e}")
+            logger.warning(f"Failed to load Alpaca stock data: {e}")
             self._add_commentary(
-                f"⚠️ Binance data fetch failed: {str(e)[:50]} - using synthetic data",
+                f"⚠️ Alpaca fetch failed: {str(e)[:40]}",
+                "system"
+            )
+
+        # ============ SUMMARY ============
+        if total_loaded > 0:
+            self._real_data_loaded = True
+            self._add_commentary(
+                f"🎯 ML Training Data: {total_loaded} symbols with REAL market data",
+                "system"
+            )
+        else:
+            self._add_commentary(
+                "⚠️ No real data loaded - ML using synthetic fallback data",
                 "system"
             )
 
