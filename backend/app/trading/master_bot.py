@@ -645,11 +645,20 @@ class MasterQuantBot:
         "GLD", "SLV", "GDX", "USO", "UNG", "WEAT", "CORN",
     ]
 
+    # Expanded crypto perpetuals - Top 25 liquid coins for more opportunities
     CRYPTO_PERPETUALS = [
-        "BTC-PERP", "ETH-PERP", "SOL-PERP", "AVAX-PERP", "LINK-PERP",
+        # Tier 1 - Blue Chips (highest liquidity)
+        "BTC-PERP", "ETH-PERP", "SOL-PERP", "BNB-PERP", "XRP-PERP",
+        # Tier 2 - Major Alts
+        "AVAX-PERP", "LINK-PERP", "DOGE-PERP", "ADA-PERP", "DOT-PERP",
+        "MATIC-PERP", "LTC-PERP", "ATOM-PERP", "UNI-PERP", "NEAR-PERP",
+        # Tier 3 - High volatility / momentum plays
+        "ARB-PERP", "OP-PERP", "INJ-PERP", "SUI-PERP", "SEI-PERP",
+        "APT-PERP", "FTM-PERP", "RUNE-PERP", "AAVE-PERP", "MKR-PERP",
     ]
 
-    CRYPTO_OPTIONS = ["BTC", "ETH"]
+    # Expanded crypto options - More underlyings for puts/calls
+    CRYPTO_OPTIONS = ["BTC", "ETH", "SOL", "BNB", "XRP", "AVAX", "LINK", "DOGE"]
 
     def __init__(
         self,
@@ -969,7 +978,8 @@ class MasterQuantBot:
 
         for symbol in self.CRYPTO_PERPETUALS:
             opp = await self._score_crypto_perpetual(symbol)
-            if opp and opp.score > 35:
+            # Lower threshold (30) to capture more opportunities in range-bound markets
+            if opp and opp.score > 30:
                 opportunities.append(opp)
 
         return opportunities
@@ -980,11 +990,12 @@ class MasterQuantBot:
 
         for base_asset in self.CRYPTO_OPTIONS:
             call_opp = await self._score_crypto_option(base_asset, "call")
-            if call_opp and call_opp.score > 40:
+            # Lower threshold (35) for more opportunity capture
+            if call_opp and call_opp.score > 35:
                 opportunities.append(call_opp)
 
             put_opp = await self._score_crypto_option(base_asset, "put")
-            if put_opp and put_opp.score > 40:
+            if put_opp and put_opp.score > 35:
                 opportunities.append(put_opp)
 
         return opportunities
@@ -1201,6 +1212,20 @@ class MasterQuantBot:
                 f"DQN Epsilon: {self.analytics.dqn.epsilon:.3f}",
                 "execution"
             )
+        else:
+            # Log why no trades executed (for debugging)
+            top_opps = self.opportunities[:3] if self.opportunities else []
+            if top_opps:
+                rejection_reasons = []
+                for opp in top_opps:
+                    reason = f"{opp.symbol}: Score {opp.score:.1f}"
+                    if opp.ml_prediction and opp.ml_prediction.action == 1:
+                        reason += " (ML: HOLD)"
+                    rejection_reasons.append(reason)
+                self._add_commentary(
+                    f"⏸️ No trades executed. Top opportunities: {', '.join(rejection_reasons)}",
+                    "scan"
+                )
 
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
         """Execute a single opportunity."""
