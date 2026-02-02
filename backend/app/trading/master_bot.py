@@ -645,20 +645,35 @@ class MasterQuantBot:
         "GLD", "SLV", "GDX", "USO", "UNG", "WEAT", "CORN",
     ]
 
-    # Expanded crypto perpetuals - Top 25 liquid coins for more opportunities
+    # Expanded crypto perpetuals - 50+ liquid coins for maximum opportunities
     CRYPTO_PERPETUALS = [
-        # Tier 1 - Blue Chips (highest liquidity)
+        # Tier 1 - Blue Chips (highest liquidity, tightest spreads)
         "BTC-PERP", "ETH-PERP", "SOL-PERP", "BNB-PERP", "XRP-PERP",
-        # Tier 2 - Major Alts
+        # Tier 2 - Major Alts (high liquidity)
         "AVAX-PERP", "LINK-PERP", "DOGE-PERP", "ADA-PERP", "DOT-PERP",
         "MATIC-PERP", "LTC-PERP", "ATOM-PERP", "UNI-PERP", "NEAR-PERP",
-        # Tier 3 - High volatility / momentum plays
+        # Tier 3 - L2s & Infrastructure
         "ARB-PERP", "OP-PERP", "INJ-PERP", "SUI-PERP", "SEI-PERP",
         "APT-PERP", "FTM-PERP", "RUNE-PERP", "AAVE-PERP", "MKR-PERP",
+        # Tier 4 - DeFi & GameFi
+        "CRV-PERP", "LDO-PERP", "SNX-PERP", "COMP-PERP", "GMX-PERP",
+        "DYDX-PERP", "1INCH-PERP", "SUSHI-PERP", "YFI-PERP", "BAL-PERP",
+        # Tier 5 - AI & Computing
+        "FET-PERP", "RNDR-PERP", "AGIX-PERP", "OCEAN-PERP", "TAO-PERP",
+        "AR-PERP", "FIL-PERP", "GRT-PERP", "THETA-PERP", "HNT-PERP",
+        # Tier 6 - Memes & High Volatility (use smaller position sizes)
+        "PEPE-PERP", "SHIB-PERP", "FLOKI-PERP", "BONK-PERP", "WIF-PERP",
+        "MEME-PERP", "TURBO-PERP", "BOME-PERP", "ORDI-PERP", "SATS-PERP",
+        # Tier 7 - Emerging & New Listings
+        "TIA-PERP", "STRK-PERP", "PYTH-PERP", "JUP-PERP", "JTO-PERP",
+        "W-PERP", "ENA-PERP", "ETHFI-PERP", "ONDO-PERP", "PENDLE-PERP",
     ]
 
-    # Expanded crypto options - More underlyings for puts/calls
-    CRYPTO_OPTIONS = ["BTC", "ETH", "SOL", "BNB", "XRP", "AVAX", "LINK", "DOGE"]
+    # Expanded crypto options - 15 underlyings for puts/calls (30 instruments total)
+    CRYPTO_OPTIONS = [
+        "BTC", "ETH", "SOL", "BNB", "XRP", "AVAX", "LINK", "DOGE",
+        "ADA", "DOT", "MATIC", "LTC", "ATOM", "UNI", "NEAR",
+    ]
 
     def __init__(
         self,
@@ -1192,8 +1207,13 @@ class MasterQuantBot:
             # Get RL action
             action = self.analytics.dqn.select_action(state, training=self.is_running)
 
-            # Only execute if RL agrees (action 2, 3, 4 = buy)
-            if opp.ml_prediction and opp.ml_prediction.action != 1:  # Not hold
+            # Execute if ML agrees OR if ML is still learning (high epsilon = random)
+            # This prevents random initial weights from blocking good trades
+            ml_agrees = opp.ml_prediction and opp.ml_prediction.action != 1  # Not hold
+            ml_still_learning = self.analytics.dqn.epsilon > 0.3  # Still exploring
+            score_strong = opp.score >= 40  # Strong opportunity overrides ML
+
+            if ml_agrees or ml_still_learning or score_strong:
                 success = await self._execute_opportunity(opp)
 
                 if success:
