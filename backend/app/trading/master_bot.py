@@ -65,6 +65,7 @@ from .options_bot import (
     IVAnalysis,
     create_options_bot,
 )
+from .quant_bot import is_market_open, get_market_status
 from .ml_models import (
     DQN,
     PPOAgent,
@@ -839,26 +840,37 @@ class MasterQuantBot:
     # ===================
 
     async def _scan_all_markets(self) -> List[Opportunity]:
-        """Scan ALL markets with ML-enhanced scoring."""
+        """Scan markets with ML-enhanced scoring, respecting market hours."""
         opportunities = []
 
-        self._add_commentary(
-            "🔍 Initiating full market scan with ML analytics...",
-            "scan"
-        )
+        # Check if US stock market is open
+        market_open = is_market_open()
+        market_status = get_market_status()
 
-        # 1. Scan Stock Options with ML
-        stock_opps = await self._scan_stock_options()
-        opportunities.extend(stock_opps)
+        if market_open:
+            self._add_commentary(
+                "🔍 Market OPEN - Scanning ALL markets with ML analytics...",
+                "scan"
+            )
 
-        # 2. Scan ETF Options
-        etf_opps = await self._scan_etf_options()
-        opportunities.extend(etf_opps)
+            # 1. Scan Stock Options with ML
+            stock_opps = await self._scan_stock_options()
+            opportunities.extend(stock_opps)
 
-        # 3. Scan Commodity Options
-        commodity_opps = await self._scan_commodity_options()
-        opportunities.extend(commodity_opps)
+            # 2. Scan ETF Options
+            etf_opps = await self._scan_etf_options()
+            opportunities.extend(etf_opps)
 
+            # 3. Scan Commodity Options
+            commodity_opps = await self._scan_commodity_options()
+            opportunities.extend(commodity_opps)
+        else:
+            self._add_commentary(
+                f"🌙 Market CLOSED ({market_status['message']}) - CRYPTO ONLY mode active",
+                "scan"
+            )
+
+        # Crypto markets are 24/7 - always scan
         # 4. Scan Crypto Perpetuals
         crypto_perp_opps = await self._scan_crypto_perpetuals()
         opportunities.extend(crypto_perp_opps)

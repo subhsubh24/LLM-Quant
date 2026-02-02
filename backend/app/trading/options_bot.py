@@ -230,11 +230,23 @@ class CryptoDerivativePosition:
     stop_loss: float = 0.0
 
     def calculate_pnl(self) -> float:
-        """Calculate current P&L including funding."""
-        price_pnl = (self.current_price - self.entry_price) * self.size
+        """Calculate current P&L including funding.
+
+        Note: self.size is in USD (position value), not quantity.
+        PnL = percentage_change * position_size * leverage
+        """
+        if self.entry_price <= 0:
+            return 0.0
+
+        # Calculate percentage change
+        pct_change = (self.current_price - self.entry_price) / self.entry_price
+
+        # For short positions, profit when price goes down
         if self.side == "short":
-            price_pnl = -price_pnl
-        return price_pnl * self.leverage + self.funding_received
+            pct_change = -pct_change
+
+        # PnL = percentage change * position size * leverage + funding
+        return pct_change * self.size * self.leverage + self.funding_received
 
     def to_dict(self) -> Dict:
         return {
