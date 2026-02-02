@@ -341,9 +341,44 @@ class BinanceBroker:
 
         self._session = None
         self._connected = False
+        self._server_time_offset = 0  # Offset between local and server time (ms)
+        self._recv_window = 5000  # Recommended by Binance
 
         mode = "US" if use_us else ("TESTNET" if testnet else "LIVE")
         logger.info(f"BinanceBroker initialized: {mode} mode")
+
+    def _get_timestamp(self) -> int:
+        """Get timestamp adjusted for server time offset."""
+        return int(datetime.now().timestamp() * 1000) + self._server_time_offset
+
+    def _get_signed_params(self, extra_params: Dict = None) -> Dict:
+        """Get params with timestamp, recvWindow, and signature."""
+        params = {
+            "timestamp": self._get_timestamp(),
+            "recvWindow": self._recv_window,
+        }
+        if extra_params:
+            params.update(extra_params)
+        params["signature"] = self._sign(params)
+        return params
+
+    async def _sync_server_time(self):
+        """Sync local time with Binance server time to prevent timing errors."""
+        try:
+            session = await self._get_session()
+            local_time = int(datetime.now().timestamp() * 1000)
+
+            async with session.get(f"{self.spot_url}/api/v3/time") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    server_time = data.get("serverTime", local_time)
+                    self._server_time_offset = server_time - local_time
+                    if abs(self._server_time_offset) > 1000:
+                        logger.warning(f"Binance time offset: {self._server_time_offset}ms")
+                    else:
+                        logger.debug(f"Binance time synced (offset: {self._server_time_offset}ms)")
+        except Exception as e:
+            logger.debug(f"Failed to sync Binance server time: {e}")
 
     def _sign(self, params: Dict) -> str:
         """Sign request parameters."""
@@ -379,8 +414,10 @@ class BinanceBroker:
         try:
             session = await self._get_session()
 
-            params = {"timestamp": int(datetime.now().timestamp() * 1000)}
-            params["signature"] = self._sign(params)
+            # Sync server time first to prevent timestamp errors
+            await self._sync_server_time()
+
+            params = self._get_signed_params()
 
             async with session.get(
                 f"{self.spot_url}/api/v3/account",
@@ -408,9 +445,7 @@ class BinanceBroker:
     async def get_account(self) -> Dict:
         """Get account information."""
         session = await self._get_session()
-
-        params = {"timestamp": int(datetime.now().timestamp() * 1000)}
-        params["signature"] = self._sign(params)
+        params = self._get_signed_params()
 
         async with session.get(
             f"{self.spot_url}/api/v3/account",
@@ -423,9 +458,7 @@ class BinanceBroker:
     async def get_futures_account(self) -> Dict:
         """Get futures account information."""
         session = await self._get_session()
-
-        params = {"timestamp": int(datetime.now().timestamp() * 1000)}
-        params["signature"] = self._sign(params)
+        params = self._get_signed_params()
 
         async with session.get(
             f"{self.futures_url}/fapi/v2/account",
@@ -492,9 +525,7 @@ class BinanceBroker:
     async def get_positions(self) -> List[LivePosition]:
         """Get all open positions (futures)."""
         session = await self._get_session()
-
-        params = {"timestamp": int(datetime.now().timestamp() * 1000)}
-        params["signature"] = self._sign(params)
+        params = self._get_signed_params()
 
         async with session.get(
             f"{self.futures_url}/fapi/v2/positionRisk",
@@ -530,19 +561,18 @@ class BinanceBroker:
         """Submit a spot order."""
         session = await self._get_session()
 
-        params = {
+        order_params = {
             "symbol": symbol,
             "side": side.upper(),
             "type": order_type,
             "quantity": str(quantity),
-            "timestamp": int(datetime.now().timestamp() * 1000),
         }
 
         if price and order_type == "LIMIT":
-            params["price"] = str(price)
-            params["timeInForce"] = "GTC"
+            order_params["price"] = str(price)
+            order_params["timeInForce"] = "GTC"
 
-        params["signature"] = self._sign(params)
+        params = self._get_signed_params(order_params)
 
         async with session.post(
             f"{self.spot_url}/api/v3/order",
@@ -579,20 +609,21 @@ class BinanceBroker:
         """Submit a futures order."""
         session = await self._get_session()
 
-        params = {
+        order_params = {
             "symbol": symbol,
             "side": side.upper(),
             "type": order_type,
             "quantity": str(quantity),
-            "timestamp": int(datetime.now().timestamp() * 1000),
         }
 
         if reduce_only:
-            params["reduceOnly"] = "true"
+            order_params["reduceOnly"] = "true"
 
         if price and order_type == "LIMIT":
-            params["price"] = str(price)
-            params["timeInForce"] = "GTC"
+            order_params["price"] = str(price)
+            order_params["timeInForce"] = "GTC"
+
+        params = self._get_signed_params(order_params)
 
         params["signature"] = self._sign(params)
 
@@ -701,13 +732,14 @@ class BinanceBroker:
             ssl_context.verify_mode = ssl.CERT_NONE
 
             async with websockets.connect(ws_url, ssl=ssl_context) as ws:
-                # Build order params
+                # Build order params with proper timing
                 params = {
                     "symbol": symbol,
                     "side": side.upper(),
                     "type": order_type,
                     "quantity": str(quantity),
-                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "timestamp": self._get_timestamp(),
+                    "recvWindow": self._recv_window,
                     "apiKey": self.api_key,
                 }
 
@@ -777,7 +809,8 @@ class BinanceBroker:
 
             async with websockets.connect(ws_url, ssl=ssl_context) as ws:
                 params = {
-                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "timestamp": self._get_timestamp(),
+                    "recvWindow": self._recv_window,
                     "apiKey": self.api_key,
                 }
                 params["signature"] = await self._ws_sign_params(params)
