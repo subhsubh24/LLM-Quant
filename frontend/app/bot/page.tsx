@@ -188,10 +188,10 @@ export default function MasterQuantBotPage() {
     try {
       const [statusRes, oppsRes, posRes, commentaryRes, tradesRes, brokerRes] = await Promise.all([
         fetch(`${API_BASE}/api/master-bot/status`),
-        fetch(`${API_BASE}/api/master-bot/opportunities?limit=10`),
+        fetch(`${API_BASE}/api/master-bot/opportunities`),
         fetch(`${API_BASE}/api/master-bot/positions`),
-        fetch(`${API_BASE}/api/master-bot/commentary?limit=20`),
-        fetch(`${API_BASE}/api/master-bot/trades?limit=20`),
+        fetch(`${API_BASE}/api/master-bot/commentary`),
+        fetch(`${API_BASE}/api/master-bot/trades`),
         fetch(`${API_BASE}/api/broker/status`),
       ]);
 
