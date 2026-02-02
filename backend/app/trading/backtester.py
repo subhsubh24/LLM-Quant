@@ -1186,49 +1186,41 @@ class ModelPreTrainer:
 
 class AlphaSourceManager:
     """
-    Alternative Alpha Sources
+    Alternative Alpha Sources using APIs you already have!
 
-    Provides unique signals beyond just price data:
-    - Sentiment analysis (LunarCrush API - social media sentiment)
-    - On-chain metrics (Glassnode API - blockchain data)
-    - Fear & Greed Index
-    - Cross-asset correlations
-    - Order flow imbalance
+    Sources:
+    1. Fear & Greed Index (free, no key needed)
+    2. Finnhub API (news sentiment, analyst ratings, insider transactions)
+    3. Claude AI (LLM-powered market analysis and pattern recognition)
+    4. Cross-asset signals (DXY, correlations via Yahoo Finance)
 
-    API Keys (set as environment variables):
-    - LUNARCRUSH_API_KEY: For social sentiment data
-    - GLASSNODE_API_KEY: For on-chain metrics
+    The Claude integration is the secret sauce - it can:
+    - Interpret news headlines for sentiment
+    - Detect market regime changes
+    - Identify patterns humans might miss
+    - Provide contrarian signals
     """
-
-    # Symbol mapping for APIs
-    SYMBOL_MAP = {
-        "BTC": {"lunarcrush": "BTC", "glassnode": "BTC"},
-        "ETH": {"lunarcrush": "ETH", "glassnode": "ETH"},
-        "SOL": {"lunarcrush": "SOL", "glassnode": "SOL"},
-        "AVAX": {"lunarcrush": "AVAX", "glassnode": "AVAX"},
-        "MATIC": {"lunarcrush": "MATIC", "glassnode": "MATIC"},
-        "LINK": {"lunarcrush": "LINK", "glassnode": "LINK"},
-        "UNI": {"lunarcrush": "UNI", "glassnode": "UNI"},
-        "AAVE": {"lunarcrush": "AAVE", "glassnode": "AAVE"},
-        "DOT": {"lunarcrush": "DOT", "glassnode": "DOT"},
-        "ADA": {"lunarcrush": "ADA", "glassnode": "ADA"},
-        "XRP": {"lunarcrush": "XRP", "glassnode": "XRP"},
-        "LTC": {"lunarcrush": "LTC", "glassnode": "LTC"},
-    }
 
     def __init__(self):
         self.sentiment_cache: Dict[str, Dict] = {}
-        self.onchain_cache: Dict[str, Dict] = {}
-        self.fear_greed_value: float = 50  # Neutral
+        self.news_cache: Dict[str, Dict] = {}
+        self.claude_cache: Dict[str, Dict] = {}
+        self.fear_greed_value: float = 50
         self.last_update: Optional[datetime] = None
-        self.cache_duration = timedelta(minutes=15)  # Cache API responses
+        self.cache_duration = timedelta(minutes=15)
 
-        # API keys from environment
-        self.lunarcrush_api_key = os.environ.get("LUNARCRUSH_API_KEY", "")
-        self.glassnode_api_key = os.environ.get("GLASSNODE_API_KEY", "")
+        # Get API keys from settings
+        try:
+            from ..config import get_settings
+            settings = get_settings()
+            self.finnhub_api_key = settings.finnhub_api_key
+            self.anthropic_api_key = settings.anthropic_api_key
+        except Exception:
+            self.finnhub_api_key = os.environ.get("FINNHUB_API_KEY", "")
+            self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
     async def get_fear_greed_index(self) -> Dict:
-        """Fetch Crypto Fear & Greed Index."""
+        """Fetch Crypto Fear & Greed Index (free, no key needed)."""
         import aiohttp
 
         try:
@@ -1246,23 +1238,15 @@ class AlphaSourceManager:
                             "value": value,
                             "classification": classification,
                             "signal": self._fear_greed_signal(value),
+                            "source": "alternative.me",
                         }
         except Exception as e:
             logger.warning(f"Failed to fetch Fear & Greed: {e}")
 
-        return {"value": 50, "classification": "Neutral", "signal": 0}
+        return {"value": 50, "classification": "Neutral", "signal": 0, "source": "default"}
 
     def _fear_greed_signal(self, value: int) -> float:
-        """
-        Convert Fear & Greed to trading signal.
-
-        Contrarian approach:
-        - Extreme fear (0-25): Buy signal (+1)
-        - Fear (25-45): Slight buy (+0.5)
-        - Neutral (45-55): No signal (0)
-        - Greed (55-75): Slight sell (-0.5)
-        - Extreme greed (75-100): Sell signal (-1)
-        """
+        """Contrarian Fear & Greed signal."""
         if value < 25:
             return 1.0  # Extreme fear = strong buy
         elif value < 45:
@@ -1274,283 +1258,300 @@ class AlphaSourceManager:
         else:
             return -1.0  # Extreme greed = strong sell
 
-    async def get_crypto_sentiment(self, symbol: str) -> Dict:
+    async def get_finnhub_sentiment(self, symbol: str) -> Dict:
         """
-        Get sentiment for a crypto asset using LunarCrush API.
+        Get market sentiment from Finnhub API.
 
-        LunarCrush provides:
-        - Galaxy Score: Overall social sentiment (0-100)
-        - Social Volume: Number of social posts
-        - Social Engagement: Likes, shares, comments
-        - Sentiment Score: Bullish vs bearish sentiment
-        - AltRank: Relative ranking vs other cryptos
+        Finnhub provides:
+        - News sentiment scores
+        - Analyst recommendations (buy/hold/sell)
+        - Insider transactions
+        - Social sentiment (Reddit, Twitter mentions)
 
-        API Docs: https://lunarcrush.com/developers/api/endpoints
+        Free tier: 60 API calls/minute
+        Docs: https://finnhub.io/docs/api
         """
         import aiohttp
 
-        # Check cache first
-        cache_key = f"sentiment_{symbol}"
+        cache_key = f"finnhub_{symbol}"
         if cache_key in self.sentiment_cache:
             cached = self.sentiment_cache[cache_key]
             if datetime.now() - cached.get("timestamp", datetime.min) < self.cache_duration:
                 return cached["data"]
 
-        # Default response if API fails or no key
         default_response = {
             "symbol": symbol,
-            "sentiment_score": 0.5,
-            "galaxy_score": 50,
-            "social_volume": 0,
-            "social_engagement": 0,
-            "alt_rank": 0,
+            "news_sentiment": 0,
+            "analyst_signal": 0,
+            "insider_signal": 0,
+            "social_sentiment": 0,
             "signal": 0,
             "source": "default",
         }
 
-        if not self.lunarcrush_api_key:
-            logger.debug("LunarCrush API key not set, using default sentiment")
+        if not self.finnhub_api_key:
+            logger.debug("Finnhub API key not set")
             return default_response
 
         try:
-            # LunarCrush API v2 endpoint
-            url = "https://lunarcrush.com/api4/public/coins"
-            headers = {
-                "Authorization": f"Bearer {self.lunarcrush_api_key}",
-            }
-            params = {
-                "symbol": symbol,
-                "interval": "1d",
-            }
+            base_url = "https://finnhub.io/api/v1"
+            signals = []
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
+                # 1. News Sentiment
+                try:
+                    url = f"{base_url}/news-sentiment"
+                    params = {"symbol": symbol, "token": self.finnhub_api_key}
+                    async with session.get(url, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("sentiment"):
+                                # Finnhub sentiment: -1 (bearish) to 1 (bullish)
+                                buzz_score = data.get("buzz", {}).get("buzz", 0)
+                                sentiment_score = data["sentiment"].get("bullishPercent", 50) / 100
+                                news_signal = (sentiment_score - 0.5) * 2  # Normalize to -1 to 1
 
-                        if data.get("data"):
-                            coin_data = data["data"][0] if isinstance(data["data"], list) else data["data"]
+                                # Weight by buzz (more mentions = more significant)
+                                if buzz_score > 1.5:
+                                    news_signal *= 1.2
 
-                            # Extract sentiment metrics
-                            galaxy_score = coin_data.get("galaxy_score", 50)
-                            alt_rank = coin_data.get("alt_rank", 100)
-                            social_volume = coin_data.get("social_volume", 0)
-                            social_engagement = coin_data.get("social_contributors", 0)
-                            sentiment = coin_data.get("sentiment", 50)
+                                signals.append(("news", news_signal))
+                except Exception as e:
+                    logger.debug(f"Finnhub news sentiment error: {e}")
 
-                            # Calculate signal: Galaxy Score is 0-100, normalize to -1 to 1
-                            # Galaxy Score > 70 = bullish, < 30 = bearish
-                            signal = (galaxy_score - 50) / 50  # -1 to 1 range
+                # 2. Analyst Recommendations
+                try:
+                    url = f"{base_url}/stock/recommendation"
+                    params = {"symbol": symbol, "token": self.finnhub_api_key}
+                    async with session.get(url, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data:
+                                latest = data[0]  # Most recent
+                                buy = latest.get("buy", 0) + latest.get("strongBuy", 0)
+                                sell = latest.get("sell", 0) + latest.get("strongSell", 0)
+                                hold = latest.get("hold", 0)
+                                total = buy + sell + hold
 
-                            # Adjust based on social volume trend
-                            volume_change = coin_data.get("social_volume_change_24h", 0)
-                            if volume_change > 50:  # >50% increase in social activity
-                                signal *= 1.2  # Amplify signal
+                                if total > 0:
+                                    # Score: more buys = positive, more sells = negative
+                                    analyst_signal = (buy - sell) / total
+                                    signals.append(("analyst", analyst_signal))
+                except Exception as e:
+                    logger.debug(f"Finnhub analyst error: {e}")
 
-                            result = {
-                                "symbol": symbol,
-                                "sentiment_score": sentiment / 100,
-                                "galaxy_score": galaxy_score,
-                                "social_volume": social_volume,
-                                "social_engagement": social_engagement,
-                                "alt_rank": alt_rank,
-                                "signal": max(-1, min(1, signal)),  # Clamp to -1 to 1
-                                "source": "lunarcrush",
-                            }
+                # 3. Insider Transactions (for stocks)
+                try:
+                    url = f"{base_url}/stock/insider-transactions"
+                    params = {"symbol": symbol, "token": self.finnhub_api_key}
+                    async with session.get(url, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("data"):
+                                # Analyze recent insider activity
+                                recent = data["data"][:10]  # Last 10 transactions
+                                buys = sum(1 for t in recent if t.get("transactionType") == "P")
+                                sells = sum(1 for t in recent if t.get("transactionType") == "S")
 
-                            # Cache the result
-                            self.sentiment_cache[cache_key] = {
-                                "data": result,
-                                "timestamp": datetime.now(),
-                            }
+                                if buys + sells > 0:
+                                    insider_signal = (buys - sells) / (buys + sells)
+                                    signals.append(("insider", insider_signal * 0.5))  # Lower weight
+                except Exception as e:
+                    logger.debug(f"Finnhub insider error: {e}")
 
-                            return result
-                    else:
-                        logger.warning(f"LunarCrush API returned {response.status}")
+                # 4. Social Sentiment (if available)
+                try:
+                    url = f"{base_url}/stock/social-sentiment"
+                    params = {"symbol": symbol, "token": self.finnhub_api_key}
+                    async with session.get(url, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            reddit = data.get("reddit", [])
+                            twitter = data.get("twitter", [])
+
+                            if reddit or twitter:
+                                # Aggregate sentiment from social platforms
+                                all_mentions = reddit + twitter
+                                if all_mentions:
+                                    avg_score = sum(m.get("score", 0) for m in all_mentions) / len(all_mentions)
+                                    social_signal = max(-1, min(1, avg_score / 100))
+                                    signals.append(("social", social_signal))
+                except Exception as e:
+                    logger.debug(f"Finnhub social error: {e}")
+
+            # Combine signals with equal weighting
+            if signals:
+                combined_signal = sum(s[1] for s in signals) / len(signals)
+            else:
+                combined_signal = 0
+
+            result = {
+                "symbol": symbol,
+                "signals": {name: round(val, 3) for name, val in signals},
+                "signal": round(max(-1, min(1, combined_signal)), 3),
+                "source": "finnhub",
+                "num_signals": len(signals),
+            }
+
+            self.sentiment_cache[cache_key] = {
+                "data": result,
+                "timestamp": datetime.now(),
+            }
+
+            return result
 
         except Exception as e:
-            logger.warning(f"LunarCrush API error for {symbol}: {e}")
+            logger.warning(f"Finnhub API error for {symbol}: {e}")
 
         return default_response
 
-    async def get_onchain_metrics(self, symbol: str) -> Dict:
+    async def get_claude_alpha(self, symbol: str, market_data: Optional[Dict] = None) -> Dict:
         """
-        Get on-chain metrics using Glassnode API.
+        Use Claude to generate alpha signals from market analysis.
 
-        Glassnode provides:
-        - Exchange Net Flow: Coins entering/leaving exchanges
-        - Active Addresses: Network usage
-        - SOPR (Spent Output Profit Ratio): Profit-taking indicator
-        - NUPL (Net Unrealized Profit/Loss): Market sentiment
-        - Reserve Risk: Risk-adjusted return indicator
+        Claude analyzes:
+        1. Recent price action and technical patterns
+        2. News headlines and sentiment
+        3. Market regime (trending, ranging, volatile)
+        4. Cross-asset correlations
+        5. Contrarian opportunities
 
-        API Docs: https://docs.glassnode.com/
-
-        Signals:
-        - Negative exchange netflow = bullish (accumulation)
-        - High active addresses = bullish (adoption)
-        - SOPR < 1 = capitulation (buy signal)
-        - NUPL < 0.25 = fear (buy signal)
+        This is your UNIQUE EDGE - LLM-powered trading signals!
         """
-        import aiohttp
-
-        # Check cache first
-        cache_key = f"onchain_{symbol}"
-        if cache_key in self.onchain_cache:
-            cached = self.onchain_cache[cache_key]
+        cache_key = f"claude_{symbol}"
+        if cache_key in self.claude_cache:
+            cached = self.claude_cache[cache_key]
             if datetime.now() - cached.get("timestamp", datetime.min) < self.cache_duration:
                 return cached["data"]
 
-        # Default response
         default_response = {
             "symbol": symbol,
-            "exchange_netflow": 0,
-            "exchange_netflow_signal": 0,
-            "active_addresses": 0,
-            "active_addresses_change": 0,
-            "sopr": 1.0,
-            "nupl": 0.5,
-            "reserve_risk": 0,
             "signal": 0,
+            "confidence": 0,
+            "analysis": "No analysis available",
+            "recommendation": "hold",
             "source": "default",
         }
 
-        if not self.glassnode_api_key:
-            logger.debug("Glassnode API key not set, using default on-chain metrics")
-            return default_response
-
-        # Only BTC and ETH have comprehensive on-chain data
-        if symbol not in ["BTC", "ETH"]:
+        if not self.anthropic_api_key:
+            logger.debug("Anthropic API key not set for Claude alpha")
             return default_response
 
         try:
-            base_url = "https://api.glassnode.com/v1/metrics"
-            headers = {"X-API-Key": self.glassnode_api_key}
-            asset = symbol.lower()
+            import anthropic
 
-            async with aiohttp.ClientSession() as session:
-                metrics = {}
+            # Gather context for Claude
+            context_parts = [f"Symbol: {symbol}"]
 
-                # Fetch Exchange Net Position Change (24h)
-                try:
-                    url = f"{base_url}/transactions/transfers_volume_exchanges_net"
-                    params = {"a": asset, "i": "24h", "f": "JSON"}
-                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data:
-                                metrics["exchange_netflow"] = data[-1].get("v", 0)
-                except Exception as e:
-                    logger.debug(f"Failed to fetch exchange netflow: {e}")
+            # Add Fear & Greed
+            fg = await self.get_fear_greed_index()
+            context_parts.append(f"Fear & Greed Index: {fg['value']} ({fg['classification']})")
 
-                # Fetch Active Addresses
-                try:
-                    url = f"{base_url}/addresses/active_count"
-                    params = {"a": asset, "i": "24h", "f": "JSON"}
-                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data and len(data) >= 2:
-                                current = data[-1].get("v", 0)
-                                previous = data[-2].get("v", 1)
-                                metrics["active_addresses"] = current
-                                metrics["active_addresses_change"] = (current - previous) / previous if previous else 0
-                except Exception as e:
-                    logger.debug(f"Failed to fetch active addresses: {e}")
+            # Add Finnhub sentiment if available
+            if self.finnhub_api_key:
+                finnhub = await self.get_finnhub_sentiment(symbol)
+                if finnhub.get("source") == "finnhub":
+                    context_parts.append(f"Finnhub Signals: {finnhub.get('signals', {})}")
 
-                # Fetch SOPR (Spent Output Profit Ratio)
-                try:
-                    url = f"{base_url}/indicators/sopr"
-                    params = {"a": asset, "i": "24h", "f": "JSON"}
-                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data:
-                                metrics["sopr"] = data[-1].get("v", 1.0)
-                except Exception as e:
-                    logger.debug(f"Failed to fetch SOPR: {e}")
+            # Add market data if provided
+            if market_data:
+                if "price" in market_data:
+                    context_parts.append(f"Current Price: ${market_data['price']:.2f}")
+                if "change_24h" in market_data:
+                    context_parts.append(f"24h Change: {market_data['change_24h']:.2f}%")
+                if "volume" in market_data:
+                    context_parts.append(f"Volume: {market_data['volume']}")
 
-                # Fetch NUPL (Net Unrealized Profit/Loss)
-                try:
-                    url = f"{base_url}/indicators/nupl"
-                    params = {"a": asset, "i": "24h", "f": "JSON"}
-                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data:
-                                metrics["nupl"] = data[-1].get("v", 0.5)
-                except Exception as e:
-                    logger.debug(f"Failed to fetch NUPL: {e}")
+            context = "\n".join(context_parts)
 
-                # Calculate combined signal
-                signal = 0
+            # Create Claude client
+            client = anthropic.Anthropic(api_key=self.anthropic_api_key)
 
-                # Exchange netflow signal
-                netflow = metrics.get("exchange_netflow", 0)
-                if netflow < -1000:  # Large outflow = bullish
-                    signal += 0.4
-                elif netflow < 0:
-                    signal += 0.2
-                elif netflow > 1000:  # Large inflow = bearish
-                    signal -= 0.4
-                elif netflow > 0:
-                    signal -= 0.2
+            # Generate alpha signal
+            prompt = f"""You are a quantitative trading analyst. Analyze this market data and provide a trading signal.
 
-                # SOPR signal
-                sopr = metrics.get("sopr", 1.0)
-                if sopr < 0.95:  # Capitulation
-                    signal += 0.3
-                elif sopr < 1.0:  # Mild losses
-                    signal += 0.1
-                elif sopr > 1.1:  # Strong profit taking
-                    signal -= 0.2
+MARKET DATA:
+{context}
 
-                # NUPL signal
-                nupl = metrics.get("nupl", 0.5)
-                if nupl < 0:  # Net loss = capitulation
-                    signal += 0.3
-                elif nupl < 0.25:  # Hope/Fear
-                    signal += 0.1
-                elif nupl > 0.75:  # Euphoria
-                    signal -= 0.3
+Provide your analysis in this EXACT JSON format (no markdown, just raw JSON):
+{{
+    "signal": <float between -1 (strong sell) and 1 (strong buy)>,
+    "confidence": <float between 0 and 1>,
+    "regime": "<trending_up|trending_down|ranging|volatile>",
+    "key_factors": ["<factor1>", "<factor2>", "<factor3>"],
+    "recommendation": "<strong_buy|buy|hold|sell|strong_sell>",
+    "reasoning": "<one sentence explanation>"
+}}
+
+Be contrarian when sentiment is extreme. Consider:
+- Fear & Greed extremes are often reversal signals
+- High confidence requires multiple confirming signals
+- Default to 'hold' (signal near 0) when uncertain"""
+
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            # Parse Claude's response
+            response_text = response.content[0].text.strip()
+
+            # Try to extract JSON from response
+            try:
+                import json
+                # Handle potential markdown code blocks
+                if "```" in response_text:
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+
+                analysis = json.loads(response_text)
 
                 result = {
                     "symbol": symbol,
-                    "exchange_netflow": metrics.get("exchange_netflow", 0),
-                    "active_addresses": metrics.get("active_addresses", 0),
-                    "active_addresses_change": metrics.get("active_addresses_change", 0),
-                    "sopr": metrics.get("sopr", 1.0),
-                    "nupl": metrics.get("nupl", 0.5),
-                    "signal": max(-1, min(1, signal)),
-                    "source": "glassnode",
+                    "signal": max(-1, min(1, float(analysis.get("signal", 0)))),
+                    "confidence": max(0, min(1, float(analysis.get("confidence", 0.5)))),
+                    "regime": analysis.get("regime", "unknown"),
+                    "key_factors": analysis.get("key_factors", []),
+                    "recommendation": analysis.get("recommendation", "hold"),
+                    "reasoning": analysis.get("reasoning", ""),
+                    "source": "claude",
                 }
 
-                # Cache the result
-                self.onchain_cache[cache_key] = {
+                self.claude_cache[cache_key] = {
                     "data": result,
                     "timestamp": datetime.now(),
                 }
 
+                logger.info(f"Claude alpha for {symbol}: signal={result['signal']:.2f}, conf={result['confidence']:.2f}")
                 return result
 
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse Claude response: {e}")
+                # Try to extract signal from text
+                if "buy" in response_text.lower():
+                    return {**default_response, "signal": 0.3, "source": "claude_fallback"}
+                elif "sell" in response_text.lower():
+                    return {**default_response, "signal": -0.3, "source": "claude_fallback"}
+
         except Exception as e:
-            logger.warning(f"Glassnode API error for {symbol}: {e}")
+            logger.warning(f"Claude alpha error for {symbol}: {e}")
 
         return default_response
 
     async def get_cross_asset_signals(self) -> Dict:
         """
-        Analyze cross-asset correlations for signals.
+        Analyze cross-asset correlations (free via Yahoo Finance).
 
-        Uses correlation breakdowns to detect regime changes:
-        - BTC/SPY decorrelation often precedes crypto rallies
-        - DXY (dollar) strength typically bearish for crypto
-        - Gold correlation indicates risk-off behavior
+        - DXY strength = bearish for risk assets
+        - VIX spikes = opportunity or danger
+        - Gold/BTC correlation for risk sentiment
         """
         import aiohttp
 
         try:
-            # Fetch current DXY (Dollar Index) from Yahoo Finance
+            # Fetch DXY (Dollar Index)
             url = "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB"
             params = {"interval": "1d", "range": "5d"}
             headers = {"User-Agent": "Mozilla/5.0"}
@@ -1566,15 +1567,14 @@ class AlphaSourceManager:
                             closes = quotes.get("close", [])
 
                             if len(closes) >= 2:
-                                # DXY change
                                 dxy_current = closes[-1]
                                 dxy_prev = closes[-2]
 
                                 if dxy_current and dxy_prev:
                                     dxy_change = (dxy_current - dxy_prev) / dxy_prev
 
-                                    # Strong dollar = bearish for crypto
-                                    if dxy_change > 0.005:  # >0.5% increase
+                                    # Strong dollar = bearish for risk assets
+                                    if dxy_change > 0.005:
                                         dxy_signal = -0.3
                                     elif dxy_change > 0:
                                         dxy_signal = -0.1
@@ -1584,62 +1584,62 @@ class AlphaSourceManager:
                                         dxy_signal = 0.1
 
                                     return {
-                                        "dxy_value": dxy_current,
-                                        "dxy_change": dxy_change,
+                                        "dxy_value": round(dxy_current, 2),
+                                        "dxy_change_pct": round(dxy_change * 100, 2),
                                         "regime": "risk_off" if dxy_signal < 0 else "risk_on",
                                         "signal": dxy_signal,
+                                        "source": "yahoo",
                                     }
 
         except Exception as e:
-            logger.debug(f"Failed to fetch cross-asset data: {e}")
+            logger.debug(f"Cross-asset data error: {e}")
 
-        return {
-            "dxy_value": 0,
-            "dxy_change": 0,
-            "regime": "neutral",
-            "signal": 0,
-        }
+        return {"dxy_value": 0, "dxy_change_pct": 0, "regime": "neutral", "signal": 0, "source": "default"}
 
-    async def get_combined_alpha(self, symbol: str) -> Dict:
+    async def get_combined_alpha(self, symbol: str, market_data: Optional[Dict] = None) -> Dict:
         """
         Combine all alpha sources into a single trading signal.
 
-        Weighting:
-        - Fear & Greed: 20% (broad market sentiment)
-        - LunarCrush Sentiment: 30% (coin-specific social)
-        - Glassnode On-Chain: 35% (fundamental on-chain)
-        - Cross-Asset: 15% (macro environment)
+        Weighting (adapts based on available data):
+        - Fear & Greed: 15% (always available)
+        - Finnhub Sentiment: 25% (if API key set)
+        - Claude AI Analysis: 40% (if API key set - this is your edge!)
+        - Cross-Asset: 20% (always available via Yahoo)
         """
         # Fetch all signals in parallel
-        fear_greed_task = self.get_fear_greed_index()
-        sentiment_task = self.get_crypto_sentiment(symbol)
-        onchain_task = self.get_onchain_metrics(symbol)
-        cross_asset_task = self.get_cross_asset_signals()
+        tasks = [
+            self.get_fear_greed_index(),
+            self.get_finnhub_sentiment(symbol),
+            self.get_claude_alpha(symbol, market_data),
+            self.get_cross_asset_signals(),
+        ]
 
-        fear_greed, sentiment, onchain, cross_asset = await asyncio.gather(
-            fear_greed_task, sentiment_task, onchain_task, cross_asset_task
-        )
+        fear_greed, finnhub, claude, cross_asset = await asyncio.gather(*tasks)
 
-        # Dynamic weighting based on data quality
+        # Dynamic weighting based on data availability
         weights = {
-            "fear_greed": 0.20,
-            "sentiment": 0.30 if sentiment.get("source") == "lunarcrush" else 0.10,
-            "onchain": 0.35 if onchain.get("source") == "glassnode" else 0.10,
-            "cross_asset": 0.15,
+            "fear_greed": 0.15,  # Always available
+            "finnhub": 0.25 if finnhub.get("source") == "finnhub" else 0.05,
+            "claude": 0.40 if claude.get("source") == "claude" else 0.10,
+            "cross_asset": 0.20 if cross_asset.get("source") == "yahoo" else 0.10,
         }
 
         # Normalize weights
         total_weight = sum(weights.values())
         weights = {k: v / total_weight for k, v in weights.items()}
 
+        # Combine signals
         combined_signal = (
             fear_greed["signal"] * weights["fear_greed"] +
-            sentiment["signal"] * weights["sentiment"] +
-            onchain["signal"] * weights["onchain"] +
+            finnhub["signal"] * weights["finnhub"] +
+            claude["signal"] * weights["claude"] +
             cross_asset["signal"] * weights["cross_asset"]
         )
 
-        # Determine recommendation with confidence
+        # Adjust confidence based on Claude's confidence
+        confidence = claude.get("confidence", 0.5) if claude.get("source") == "claude" else abs(combined_signal)
+
+        # Determine recommendation
         if combined_signal > 0.4:
             recommendation = "strong_buy"
         elif combined_signal > 0.2:
@@ -1654,15 +1654,15 @@ class AlphaSourceManager:
         return {
             "symbol": symbol,
             "combined_signal": round(combined_signal, 3),
+            "confidence": round(confidence, 2),
             "recommendation": recommendation,
-            "confidence": abs(combined_signal),
             "components": {
                 "fear_greed": fear_greed,
-                "sentiment": sentiment,
-                "onchain": onchain,
+                "finnhub": finnhub,
+                "claude": claude,
                 "cross_asset": cross_asset,
             },
-            "weights_used": weights,
+            "weights_used": {k: round(v, 2) for k, v in weights.items()},
             "timestamp": datetime.now().isoformat(),
         }
 
