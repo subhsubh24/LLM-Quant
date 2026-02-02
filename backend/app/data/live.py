@@ -559,25 +559,26 @@ class LiveMarketService:
     def _generate_demo_news(self) -> List[NewsItem]:
         """Generate demo news for when APIs are unavailable."""
         now = datetime.now()
+        # Headlines with source and URL
         demo_headlines = [
-            ("Markets Mixed as Investors Weigh Economic Data", "MarketWatch", ["SPY", "QQQ"]),
-            ("Tech Stocks Lead Early Trading Session", "Bloomberg", ["AAPL", "MSFT", "NVDA"]),
-            ("Fed Officials Signal Cautious Approach to Rate Policy", "Reuters", ["SPY", "TLT"]),
-            ("Crypto Markets See Increased Trading Volume", "CoinDesk", ["BTC", "ETH"]),
-            ("Energy Sector Gains on Supply Concerns", "CNBC", ["XLE", "XOM", "CVX"]),
-            ("Retail Sales Data Exceeds Expectations", "WSJ", ["XRT", "AMZN", "WMT"]),
-            ("AI Stocks Continue Strong Performance", "TechCrunch", ["NVDA", "AMD", "GOOGL"]),
-            ("Global Markets React to Economic Reports", "Financial Times", ["SPY", "EFA"]),
+            ("Markets Mixed as Investors Weigh Economic Data", "MarketWatch", "https://www.marketwatch.com/markets", ["SPY", "QQQ"]),
+            ("Tech Stocks Lead Early Trading Session", "Bloomberg", "https://www.bloomberg.com/markets", ["AAPL", "MSFT", "NVDA"]),
+            ("Fed Officials Signal Cautious Approach to Rate Policy", "Reuters", "https://www.reuters.com/markets/", ["SPY", "TLT"]),
+            ("Crypto Markets See Increased Trading Volume", "CoinDesk", "https://www.coindesk.com/markets/", ["BTC", "ETH"]),
+            ("Energy Sector Gains on Supply Concerns", "CNBC", "https://www.cnbc.com/energy/", ["XLE", "XOM", "CVX"]),
+            ("Retail Sales Data Exceeds Expectations", "WSJ", "https://www.wsj.com/news/markets", ["XRT", "AMZN", "WMT"]),
+            ("AI Stocks Continue Strong Performance", "TechCrunch", "https://techcrunch.com/category/artificial-intelligence/", ["NVDA", "AMD", "GOOGL"]),
+            ("Global Markets React to Economic Reports", "Financial Times", "https://www.ft.com/markets", ["SPY", "EFA"]),
         ]
 
         news = []
-        for i, (headline, source, symbols) in enumerate(demo_headlines):
+        for i, (headline, source, url, symbols) in enumerate(demo_headlines):
             news.append(NewsItem(
                 id=f"demo_{i}",
                 headline=headline,
                 summary=f"Market analysis and updates on {', '.join(symbols)}. This is demo content displayed when news APIs are unavailable.",
                 source=source,
-                url="",
+                url=url,
                 image=None,
                 published=now - timedelta(hours=i),
                 related_symbols=symbols,
