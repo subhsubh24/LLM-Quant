@@ -1997,6 +1997,18 @@ class MasterQuantBot:
         for pos_id, pos in list(self.engine.crypto_positions.items()):
             pos.current_price = await self.engine._get_crypto_price(pos.symbol)
 
+            # Skip if no valid price
+            if pos.current_price <= 0:
+                continue
+
+            # Minimum hold time before allowing stop/take-profit (prevent instant closes)
+            MIN_HOLD_MINUTES = 2
+            opened_at = getattr(pos, 'opened_at', None)
+            if opened_at:
+                hold_time = (datetime.now() - opened_at).total_seconds() / 60
+                if hold_time < MIN_HOLD_MINUTES:
+                    continue  # Don't check stops yet, position too new
+
             # Check stop loss / take profit
             close_reason = None
             if pos.side == "long":

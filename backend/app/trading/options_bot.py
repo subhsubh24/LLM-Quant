@@ -1447,16 +1447,50 @@ class OptionsQuantBot:
 
         position = self.crypto_positions[position_id]
 
-        # Get real current price from Binance
-        exit_price = await self._get_crypto_price(position.symbol)
-        if exit_price == 0:
-            exit_price = position.current_price if position.current_price > 0 else position.entry_price
+        # Parse option symbol: "ETH-30D-2200-P" -> base_asset, expiry, strike, type
+        parts = position.symbol.split("-")
+        base_asset = parts[0]
+        strike = float(parts[2]) if len(parts) > 2 else 0
+        option_type = "put" if parts[-1] == "P" else "call"
 
-        pnl = (exit_price - position.entry_price) * position.size
+        # Get UNDERLYING price from Binance
+        underlying_price = await self._get_crypto_price(base_asset)
+        if underlying_price == 0:
+            underlying_price = strike  # Fallback to strike if no price
+
+        # Calculate current OPTION price using Black-Scholes
+        # Use remaining time (simplified: assume some time passed)
+        import math
+        from scipy.stats import norm
+
+        iv = position.iv if position.iv > 0 else 0.80
+        r = 0.05
+        t = max(0.01, 7 / 365)  # Assume ~1 week left (simplified)
+
+        d1 = (math.log(underlying_price / strike) + (r + iv**2 / 2) * t) / (iv * math.sqrt(t))
+        d2 = d1 - iv * math.sqrt(t)
+
+        if option_type == "call":
+            exit_option_price = underlying_price * norm.cdf(d1) - strike * math.exp(-r * t) * norm.cdf(d2)
+        else:
+            exit_option_price = strike * math.exp(-r * t) * norm.cdf(-d2) - underlying_price * norm.cdf(-d1)
+
+        # Ensure option price is at least intrinsic value
+        if option_type == "call":
+            intrinsic = max(0, underlying_price - strike)
+        else:
+            intrinsic = max(0, strike - underlying_price)
+        exit_option_price = max(exit_option_price, intrinsic, 0.01)
+
+        # Calculate P&L based on option prices
+        pnl = (exit_option_price - position.entry_price) * position.size
         if position.side == "short":
             pnl = -pnl
 
         self.cash += abs(position.entry_price * position.size) + pnl
+
+        # Store the actual option exit price for logging
+        position.current_price = exit_option_price
 
         emoji = "💰" if pnl >= 0 else "📉"
         self._add_commentary(
