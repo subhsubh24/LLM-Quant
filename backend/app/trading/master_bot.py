@@ -1593,7 +1593,9 @@ class MasterQuantBot:
                     leverage=2.0,
                 )
                 if position:
-                    self._record_trade(opp, "crypto_perpetual")
+                    trade_id = self._record_trade(opp, "crypto_perpetual", position.entry_price, position.size)
+                    position.trade_id = trade_id
+                    position.opened_at = datetime.now()
                 return position is not None
 
             elif opp.asset_class == AssetClass.CRYPTO_OPTIONS:
@@ -1613,7 +1615,9 @@ class MasterQuantBot:
                     is_buy=is_buy,
                 )
                 if position:
-                    self._record_trade(opp, "crypto_option")
+                    trade_id = self._record_trade(opp, "crypto_option", position.entry_price, position.size)
+                    position.trade_id = trade_id
+                    position.opened_at = datetime.now()
                 return position is not None
 
             elif opp.asset_class == AssetClass.CRYPTO_SPOT:
@@ -1627,7 +1631,9 @@ class MasterQuantBot:
                     size_usd=size_usd,
                 )
                 if position:
-                    self._record_trade(opp, "crypto_spot")
+                    trade_id = self._record_trade(opp, "crypto_spot", position.entry_price, position.size)
+                    position.trade_id = trade_id
+                    position.opened_at = datetime.now()
                 return position is not None
 
         except Exception as e:
@@ -1636,8 +1642,8 @@ class MasterQuantBot:
 
         return False
 
-    def _record_trade(self, opp: Opportunity, trade_type: str, price: float = 0, size: float = 0):
-        """Record trade for RL training and analysis with LLM summary."""
+    def _record_trade(self, opp: Opportunity, trade_type: str, price: float = 0, size: float = 0) -> str:
+        """Record trade for RL training and analysis with LLM summary. Returns trade_id."""
         from ..llm.analyst import get_quant_analyst
 
         trade_id = str(uuid.uuid4())[:8]
@@ -1645,7 +1651,7 @@ class MasterQuantBot:
         trade_price = price or opp.max_profit / 100 if opp.max_profit else 0
         trade_size = size or min(5000, self.initial_capital * 0.05)
 
-        # Build comprehensive trade record
+        # Build comprehensive trade record with full details
         trade_record = {
             "id": trade_id,
             "timestamp": datetime.now().isoformat(),
@@ -1654,8 +1660,19 @@ class MasterQuantBot:
             "type": trade_type,
             "strategy": opp.strategy,
             "side": side,
-            "price": trade_price,
+            # Entry details
+            "entry_price": trade_price,
             "size": trade_size,
+            # Exit details (populated when position closes)
+            "status": "open",  # open, closed, stopped, target_hit
+            "exit_price": None,
+            "exit_timestamp": None,
+            "close_reason": None,
+            # P&L tracking
+            "realized_pnl": None,
+            "realized_pnl_pct": None,
+            "duration_minutes": None,
+            # ML/Analysis context
             "score": round(opp.score, 1),
             "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
             "iv_rank": opp.iv_rank,
@@ -1692,7 +1709,7 @@ class MasterQuantBot:
                 details={
                     "trade_id": trade_id,
                     "strategy": opp.strategy,
-                    "price": trade_price,
+                    "entry_price": trade_price,
                     "size": trade_size,
                     "score": opp.score,
                     "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
@@ -1703,6 +1720,54 @@ class MasterQuantBot:
             )
 
         asyncio.create_task(log_trade_activity())
+
+        return trade_id
+
+    def _update_trade_closed(
+        self,
+        trade_id: str,
+        exit_price: float,
+        realized_pnl: float,
+        close_reason: str,
+    ):
+        """Update a trade record when position is closed."""
+        for trade in self.trade_history:
+            if trade.get("id") == trade_id:
+                now = datetime.now()
+                entry_time = datetime.fromisoformat(trade["timestamp"])
+                duration_minutes = (now - entry_time).total_seconds() / 60
+
+                trade["status"] = "closed"
+                trade["exit_price"] = round(exit_price, 4)
+                trade["exit_timestamp"] = now.isoformat()
+                trade["close_reason"] = close_reason
+                trade["realized_pnl"] = round(realized_pnl, 2)
+                trade["realized_pnl_pct"] = round(realized_pnl / trade["size"] * 100, 2) if trade["size"] else 0
+                trade["duration_minutes"] = round(duration_minutes, 1)
+
+                # Log trade close to activity logger
+                async def log_close():
+                    emoji = "profit" if realized_pnl >= 0 else "loss"
+                    await self.activity_logger.log_trade(
+                        subtype=EventSubtype.FILL,
+                        symbol=trade["symbol"],
+                        asset_class=trade["asset_class"],
+                        message=f"Trade closed: {trade['symbol']} {close_reason} | P&L: ${realized_pnl:+,.2f}",
+                        broker="live" if trade["live_executed"] else "paper",
+                        value=realized_pnl,
+                        details={
+                            "trade_id": trade_id,
+                            "entry_price": trade["entry_price"],
+                            "exit_price": exit_price,
+                            "realized_pnl": realized_pnl,
+                            "realized_pnl_pct": trade["realized_pnl_pct"],
+                            "duration_minutes": duration_minutes,
+                            "close_reason": close_reason,
+                        }
+                    )
+
+                asyncio.create_task(log_close())
+                break
 
     def get_trade_log(self, limit: int = 50) -> List[Dict]:
         """Get formatted trade log for display."""
@@ -1943,16 +2008,35 @@ class MasterQuantBot:
             pos.current_price = await self.engine._get_crypto_price(pos.symbol)
 
             # Check stop loss / take profit
+            close_reason = None
             if pos.side == "long":
                 if pos.current_price <= pos.stop_loss:
-                    await self.engine.close_crypto_perpetual(pos_id, "Stop loss hit")
+                    close_reason = "Stop loss hit"
                 elif pos.current_price >= pos.take_profit:
-                    await self.engine.close_crypto_perpetual(pos_id, "Take profit hit")
+                    close_reason = "Take profit hit"
             else:
                 if pos.current_price >= pos.stop_loss:
-                    await self.engine.close_crypto_perpetual(pos_id, "Stop loss hit")
+                    close_reason = "Stop loss hit"
                 elif pos.current_price <= pos.take_profit:
-                    await self.engine.close_crypto_perpetual(pos_id, "Take profit hit")
+                    close_reason = "Take profit hit"
+
+            if close_reason:
+                # Calculate P&L before closing
+                realized_pnl = pos.calculate_pnl()
+                exit_price = pos.current_price
+                trade_id = getattr(pos, 'trade_id', None)
+
+                # Close the position
+                await self.engine.close_crypto_perpetual(pos_id, close_reason)
+
+                # Update trade record with exit details
+                if trade_id:
+                    self._update_trade_closed(
+                        trade_id=trade_id,
+                        exit_price=exit_price,
+                        realized_pnl=realized_pnl,
+                        close_reason=close_reason,
+                    )
 
     async def _train_rl_models(self):
         """Train RL models with current market feedback."""

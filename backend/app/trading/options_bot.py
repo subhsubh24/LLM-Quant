@@ -237,6 +237,10 @@ class CryptoDerivativePosition:
     take_profit: float = 0.0
     stop_loss: float = 0.0
 
+    # Trade tracking
+    trade_id: Optional[str] = None  # Links to master trade log
+    opened_at: Optional[datetime] = None
+
     def calculate_pnl(self) -> float:
         """Calculate current P&L including funding.
 
