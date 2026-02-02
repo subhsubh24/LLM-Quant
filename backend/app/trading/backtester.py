@@ -1410,7 +1410,7 @@ class ModelPreTrainer:
                 epoch_losses.append(vae_loss)
 
             # Validation (sample subset for speed - full validation takes too long)
-            val_sample_size = min(1000, len(X_val))  # Sample 1000 instead of all 650K
+            val_sample_size = min(10000, len(X_val))  # Sample 10K for rigorous validation
             val_indices = np.random.choice(len(X_val), val_sample_size, replace=False)
 
             val_preds = []
