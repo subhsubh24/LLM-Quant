@@ -351,16 +351,29 @@ class BinanceBroker:
         """Get timestamp adjusted for server time offset."""
         return int(datetime.now().timestamp() * 1000) + self._server_time_offset
 
-    def _get_signed_params(self, extra_params: Dict = None) -> Dict:
-        """Get params with timestamp, recvWindow, and signature."""
-        params = {
-            "timestamp": self._get_timestamp(),
-            "recvWindow": self._recv_window,
-        }
+    def _build_query_string(self, params: Dict) -> str:
+        """Build query string from params (maintains order, no sorting)."""
+        return "&".join([f"{k}={v}" for k, v in params.items()])
+
+    def _get_signed_params(self, extra_params: Dict = None) -> str:
+        """Get query string with timestamp, recvWindow, and signature.
+
+        Returns a query string (not a dict) to ensure proper parameter ordering.
+        Signature must be the LAST parameter per Binance API requirements.
+        """
+        # Build params in correct order
+        params = {}
         if extra_params:
             params.update(extra_params)
-        params["signature"] = self._sign(params)
-        return params
+        params["timestamp"] = self._get_timestamp()
+        params["recvWindow"] = self._recv_window
+
+        # Create query string and sign it
+        query_string = self._build_query_string(params)
+        signature = self._sign(query_string)
+
+        # Append signature (must be last)
+        return f"{query_string}&signature={signature}"
 
     async def _sync_server_time(self):
         """Sync local time with Binance server time to prevent timing errors."""
@@ -380,12 +393,11 @@ class BinanceBroker:
         except Exception as e:
             logger.debug(f"Failed to sync Binance server time: {e}")
 
-    def _sign(self, params: Dict) -> str:
-        """Sign request parameters."""
+    def _sign(self, query_string: str) -> str:
+        """Sign a query string using HMAC SHA256."""
         import hmac
         import hashlib
 
-        query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
         signature = hmac.new(
             self.api_secret.encode(),
             query_string.encode(),
@@ -417,12 +429,10 @@ class BinanceBroker:
             # Sync server time first to prevent timestamp errors
             await self._sync_server_time()
 
-            params = self._get_signed_params()
+            query_string = self._get_signed_params()
+            url = f"{self.spot_url}/api/v3/account?{query_string}"
 
-            async with session.get(
-                f"{self.spot_url}/api/v3/account",
-                params=params,
-            ) as resp:
+            async with session.get(url) as resp:
                 if resp.status == 200:
                     self._connected = True
                     logger.info("Binance connected successfully")
@@ -445,12 +455,10 @@ class BinanceBroker:
     async def get_account(self) -> Dict:
         """Get account information."""
         session = await self._get_session()
-        params = self._get_signed_params()
+        query_string = self._get_signed_params()
+        url = f"{self.spot_url}/api/v3/account?{query_string}"
 
-        async with session.get(
-            f"{self.spot_url}/api/v3/account",
-            params=params,
-        ) as resp:
+        async with session.get(url) as resp:
             if resp.status == 200:
                 return await resp.json()
             raise Exception(f"Failed to get account: {await resp.text()}")
@@ -458,12 +466,10 @@ class BinanceBroker:
     async def get_futures_account(self) -> Dict:
         """Get futures account information."""
         session = await self._get_session()
-        params = self._get_signed_params()
+        query_string = self._get_signed_params()
+        url = f"{self.futures_url}/fapi/v2/account?{query_string}"
 
-        async with session.get(
-            f"{self.futures_url}/fapi/v2/account",
-            params=params,
-        ) as resp:
+        async with session.get(url) as resp:
             if resp.status == 200:
                 return await resp.json()
             raise Exception(f"Failed to get futures account: {await resp.text()}")
@@ -525,12 +531,10 @@ class BinanceBroker:
     async def get_positions(self) -> List[LivePosition]:
         """Get all open positions (futures)."""
         session = await self._get_session()
-        params = self._get_signed_params()
+        query_string = self._get_signed_params()
+        url = f"{self.futures_url}/fapi/v2/positionRisk?{query_string}"
 
-        async with session.get(
-            f"{self.futures_url}/fapi/v2/positionRisk",
-            params=params,
-        ) as resp:
+        async with session.get(url) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 positions = []
@@ -572,12 +576,10 @@ class BinanceBroker:
             order_params["price"] = str(price)
             order_params["timeInForce"] = "GTC"
 
-        params = self._get_signed_params(order_params)
+        query_string = self._get_signed_params(order_params)
+        url = f"{self.spot_url}/api/v3/order?{query_string}"
 
-        async with session.post(
-            f"{self.spot_url}/api/v3/order",
-            params=params,
-        ) as resp:
+        async with session.post(url) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 return LiveOrder(
@@ -623,14 +625,10 @@ class BinanceBroker:
             order_params["price"] = str(price)
             order_params["timeInForce"] = "GTC"
 
-        params = self._get_signed_params(order_params)
+        query_string = self._get_signed_params(order_params)
+        url = f"{self.futures_url}/fapi/v1/order?{query_string}"
 
-        params["signature"] = self._sign(params)
-
-        async with session.post(
-            f"{self.futures_url}/fapi/v1/order",
-            params=params,
-        ) as resp:
+        async with session.post(url) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 return LiveOrder(
@@ -653,18 +651,10 @@ class BinanceBroker:
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
         """Set leverage for a futures symbol."""
         session = await self._get_session()
+        query_string = self._get_signed_params({"symbol": symbol, "leverage": leverage})
+        url = f"{self.futures_url}/fapi/v1/leverage?{query_string}"
 
-        params = {
-            "symbol": symbol,
-            "leverage": leverage,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-        }
-        params["signature"] = self._sign(params)
-
-        async with session.post(
-            f"{self.futures_url}/fapi/v1/leverage",
-            params=params,
-        ) as resp:
+        async with session.post(url) as resp:
             return resp.status == 200
 
     async def close_futures_position(self, symbol: str) -> bool:
