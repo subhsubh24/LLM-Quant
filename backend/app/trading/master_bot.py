@@ -1427,18 +1427,52 @@ class MasterQuantBot:
 
         return False
 
-    def _record_trade(self, opp: Opportunity, trade_type: str):
-        """Record trade for RL training and analysis."""
-        self.trade_history.append({
+    def _record_trade(self, opp: Opportunity, trade_type: str, price: float = 0, size: float = 0):
+        """Record trade for RL training and analysis with LLM summary."""
+        from ..llm.analyst import get_quant_analyst
+
+        # Build comprehensive trade record
+        trade_record = {
+            "id": str(uuid.uuid4())[:8],
             "timestamp": datetime.now().isoformat(),
             "symbol": opp.symbol,
+            "asset_class": opp.asset_class.value,
             "type": trade_type,
             "strategy": opp.strategy,
-            "score": opp.score,
+            "side": "long" if "Long" in opp.strategy or "Buy" in opp.strategy or "Call" in opp.strategy else "short",
+            "price": price or opp.max_profit / 100 if opp.max_profit else 0,
+            "size": size or min(5000, self.initial_capital * 0.05),
+            "score": round(opp.score, 1),
             "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
+            "iv_rank": opp.iv_rank,
             "regime": self.market_regime.value,
+            "rationale": opp.rationale,
             "live_executed": self.live_trading_enabled,
-        })
+            "llm_summary": "",  # Will be populated async
+        }
+
+        # Generate LLM summary asynchronously (non-blocking)
+        async def generate_summary():
+            try:
+                analyst = get_quant_analyst()
+                summary = await analyst.generate_trade_summary(trade_record)
+                trade_record["llm_summary"] = summary
+            except Exception as e:
+                logger.debug(f"LLM summary generation failed: {e}")
+                trade_record["llm_summary"] = f"{opp.strategy} - {opp.rationale[:80] if opp.rationale else 'ML signal'}"
+
+        # Schedule async summary generation
+        asyncio.create_task(generate_summary())
+
+        self.trade_history.append(trade_record)
+
+    def get_trade_log(self, limit: int = 50) -> List[Dict]:
+        """Get formatted trade log for display."""
+        return sorted(
+            self.trade_history[-limit:],
+            key=lambda x: x.get("timestamp", ""),
+            reverse=True
+        )
 
     async def _execute_live_trade(self, opp: Opportunity) -> bool:
         """Execute a trade on live exchanges via broker manager."""

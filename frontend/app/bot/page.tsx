@@ -22,6 +22,9 @@ import {
   BarChart3,
   Gauge,
   Eye,
+  FileText,
+  Clock,
+  Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -131,6 +134,25 @@ interface BotPerformance {
   opportunities_scanned: number;
 }
 
+interface TradeLogEntry {
+  id: string;
+  timestamp: string;
+  symbol: string;
+  asset_class: string;
+  type: string;
+  strategy: string;
+  side: string;
+  price: number;
+  size: number;
+  score: number;
+  ml_confidence: number;
+  iv_rank: number;
+  regime: string;
+  rationale: string;
+  live_executed: boolean;
+  llm_summary: string;
+}
+
 export default function MasterQuantBotPage() {
   const [status, setStatus] = useState<MasterBotStatus | null>(null);
   const [brokerStatus, setBrokerStatus] = useState<BrokerStatus | null>(null);
@@ -139,6 +161,7 @@ export default function MasterQuantBotPage() {
   const [cryptoPositions, setCryptoPositions] = useState<CryptoPosition[]>([]);
   const [commentary, setCommentary] = useState<CommentaryEntry[]>([]);
   const [performance, setPerformance] = useState<BotPerformance | null>(null);
+  const [tradeLog, setTradeLog] = useState<TradeLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
 
@@ -147,13 +170,14 @@ export default function MasterQuantBotPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, oppsRes, posRes, commentaryRes, perfRes, brokerRes] = await Promise.all([
+      const [statusRes, oppsRes, posRes, commentaryRes, perfRes, brokerRes, tradeLogRes] = await Promise.all([
         fetch(`${API_BASE}/api/master-bot/status`),
         fetch(`${API_BASE}/api/master-bot/opportunities?limit=10`),
         fetch(`${API_BASE}/api/master-bot/positions`),
         fetch(`${API_BASE}/api/master-bot/commentary?limit=20`),
         fetch(`${API_BASE}/api/master-bot/performance`),
         fetch(`${API_BASE}/api/broker/status`),
+        fetch(`${API_BASE}/api/master-bot/trade-log?limit=20`),
       ]);
 
       if (statusRes.ok) setStatus(await statusRes.json());
@@ -172,6 +196,10 @@ export default function MasterQuantBotPage() {
       }
       if (perfRes.ok) setPerformance(await perfRes.json());
       if (brokerRes.ok) setBrokerStatus(await brokerRes.json());
+      if (tradeLogRes.ok) {
+        const data = await tradeLogRes.json();
+        setTradeLog(data.trades || []);
+      }
     } catch (err) {
       console.error("Failed to fetch bot data:", err);
     } finally {
@@ -690,6 +718,113 @@ export default function MasterQuantBotPage() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Trade Log */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-indigo-500" />
+              Trade Log ({tradeLog.length})
+              <span className="ml-auto text-sm font-normal text-gray-500 flex items-center gap-1">
+                <Brain className="w-4 h-4" />
+                AI-Powered Rationale
+              </span>
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-100">
+                    <th className="pb-3 font-medium">Time</th>
+                    <th className="pb-3 font-medium">Asset</th>
+                    <th className="pb-3 font-medium">Strategy</th>
+                    <th className="pb-3 font-medium">Side</th>
+                    <th className="pb-3 font-medium">Size</th>
+                    <th className="pb-3 font-medium">Score</th>
+                    <th className="pb-3 font-medium min-w-[300px]">AI Rationale</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {tradeLog.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-gray-400">
+                        No trades recorded yet
+                      </td>
+                    </tr>
+                  ) : (
+                    tradeLog.map((trade) => (
+                      <tr key={trade.id} className="hover:bg-gray-50">
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-1 text-gray-600">
+                            <Clock className="w-3 h-3" />
+                            {new Date(trade.timestamp).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {new Date(trade.timestamp).toLocaleDateString()}
+                          </div>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "p-1.5 rounded-lg",
+                              getAssetClassColor(trade.asset_class)
+                            )}>
+                              {getAssetClassIcon(trade.asset_class)}
+                            </span>
+                            <div>
+                              <div className="font-semibold text-gray-900">{trade.symbol}</div>
+                              <div className="text-xs text-gray-500">{trade.asset_class.replace(/_/g, ' ')}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <div className="text-gray-900">{trade.strategy}</div>
+                          <div className="text-xs text-gray-500">IV: {trade.iv_rank?.toFixed(0)}%</div>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <span className={cn(
+                            "px-2 py-1 rounded-lg text-xs font-medium",
+                            trade.side === "long"
+                              ? "bg-green-50 text-green-700"
+                              : "bg-red-50 text-red-700"
+                          )}>
+                            {trade.side?.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <div className="font-mono text-gray-900">${trade.size?.toLocaleString()}</div>
+                          {trade.live_executed && (
+                            <div className="text-xs text-green-600 font-medium">LIVE</div>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4">
+                          <div className={cn(
+                            "font-semibold",
+                            trade.score >= 50 ? "text-green-600" :
+                            trade.score >= 30 ? "text-yellow-600" : "text-gray-600"
+                          )}>
+                            {trade.score?.toFixed(1)}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {(trade.ml_confidence * 100)?.toFixed(0)}% conf
+                          </div>
+                        </td>
+                        <td className="py-3">
+                          <div className="text-gray-700 text-sm leading-relaxed">
+                            {trade.llm_summary || trade.rationale || "Generating summary..."}
+                          </div>
+                          <div className="text-xs text-gray-400 mt-1">
+                            Regime: {trade.regime}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 

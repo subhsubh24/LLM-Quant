@@ -2317,6 +2317,18 @@ async def get_master_bot_performance():
     return bot.get_performance()
 
 
+@router.get("/master-bot/trade-log")
+async def get_master_bot_trade_log(limit: int = 50):
+    """Get the trade log with LLM-generated summaries."""
+    from ..trading.master_bot import get_master_bot
+
+    bot = get_master_bot()
+    return {
+        "trades": bot.get_trade_log(limit),
+        "total_trades": len(bot.trade_history),
+    }
+
+
 @router.post("/master-bot/scan")
 async def trigger_master_bot_scan():
     """Manually trigger a full market scan."""
