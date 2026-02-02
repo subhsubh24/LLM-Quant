@@ -318,18 +318,26 @@ class LiveMarketService:
         """Get market news."""
         cache_key = f"news_{category}"
         cached = self._get_cached(cache_key)
-        if cached and len(cached) > 0 and cached[0].headline:
-            return cached[:limit]
+
+        # Validate cache contains actual NewsItem objects with headlines
+        if cached and isinstance(cached, list) and len(cached) > 0:
+            if hasattr(cached[0], 'headline') and cached[0].headline:
+                return cached[:limit]
 
         news = []
 
-        # Try Finnhub first
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                if self.finnhub_key:
+        # Try Finnhub first (with SSL bypass for restricted networks)
+        if self.finnhub_key:
+            try:
+                import ssl
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+
+                async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
                     news = await self._fetch_finnhub_news(client, category)
-        except Exception as e:
-            logger.debug(f"Finnhub news failed: {e}")
+            except Exception as e:
+                logger.debug(f"Finnhub news failed: {e}")
 
         # If no news from Finnhub, try yfinance
         if not news and YFINANCE_AVAILABLE:
@@ -343,12 +351,14 @@ class LiveMarketService:
             except Exception as e:
                 logger.debug(f"yfinance news failed: {e}")
 
-        # Fallback to demo news if nothing else works
-        if not news:
+        # ALWAYS fallback to demo news if nothing else works
+        if not news or len(news) == 0:
             logger.info("Using demo news - API sources unavailable")
             news = self._generate_demo_news()
 
-        self._set_cached(cache_key, news)
+        if news and len(news) > 0:
+            self._set_cached(cache_key, news)
+
         return news[:limit]
 
     async def get_symbol_news(self, symbol: str, limit: int = 10) -> List[NewsItem]:

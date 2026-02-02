@@ -306,7 +306,7 @@ export default function MasterQuantBotPage() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Master Quant Bot</h1>
-              <p className="text-gray-500 text-sm">PhD-Level Autonomous Trading System</p>
+              <p className="text-gray-500 text-sm">Autonomous Trading System</p>
             </div>
           </div>
 
