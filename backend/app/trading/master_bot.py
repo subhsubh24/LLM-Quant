@@ -769,32 +769,12 @@ class MasterQuantBot:
         )
 
     def _initialize_price_history(self):
-        """Initialize price history - synthetic first, then real data async."""
-        np.random.seed(42)
-
-        all_symbols = (self.STOCK_OPTIONS + self.ETF_OPTIONS +
-                       self.COMMODITY_OPTIONS + self.CRYPTO_PERPETUALS)
-
-        # Initialize with synthetic data as fallback
-        for symbol in all_symbols:
-            # Generate 252 days of synthetic returns
-            if "BTC" in symbol or "ETH" in symbol:
-                vol = 0.04  # Higher crypto vol
-                drift = 0.0003
-            elif symbol in ["SPY", "QQQ", "IWM"]:
-                vol = 0.012
-                drift = 0.0004
-            else:
-                vol = 0.02
-                drift = 0.0003
-
-            returns = np.random.normal(drift, vol, 252)
-            prices = 100 * np.cumprod(1 + returns)
-
-            self.analytics.update_price_history(symbol, prices)
-
+        """Initialize price history tracking - NO synthetic data, requires REAL data."""
         # Flag to track if real data has been loaded
         self._real_data_loaded = False
+
+        # NO SYNTHETIC DATA - ML models will wait for real data
+        logger.info("Price history initialized - waiting for REAL market data (no synthetic fallback)")
 
     async def _load_real_market_data(self):
         """Load real historical data from Binance (crypto) and Alpaca (stocks)."""
@@ -889,14 +869,14 @@ class MasterQuantBot:
                     total_loaded += stock_loaded
             else:
                 self._add_commentary(
-                    "⚠️ Alpaca API keys not configured - stocks use synthetic data",
+                    "❌ Alpaca API keys not configured - stock data UNAVAILABLE",
                     "system"
                 )
 
         except Exception as e:
             logger.warning(f"Failed to load Alpaca stock data: {e}")
             self._add_commentary(
-                f"⚠️ Alpaca fetch failed: {str(e)[:40]}",
+                f"❌ Alpaca fetch failed: {str(e)[:40]}",
                 "system"
             )
 
@@ -909,9 +889,10 @@ class MasterQuantBot:
             )
         else:
             self._add_commentary(
-                "⚠️ No real data loaded - ML using synthetic fallback data",
+                "❌ NO REAL DATA LOADED - ML predictions may be unreliable! Check broker connections.",
                 "system"
             )
+            logger.error("No real market data loaded - synthetic fallback DISABLED")
 
     async def _update_live_prices(self):
         """Update price history with latest live data from Binance."""

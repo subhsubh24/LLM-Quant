@@ -1100,7 +1100,7 @@ class OptionsQuantBot:
         return pnl
 
     async def _get_underlying_price(self, symbol: str) -> float:
-        """Get current underlying price - uses LIVE data from Alpaca when available."""
+        """Get current underlying price - LIVE data only from Alpaca."""
         # Try to get live price from Alpaca broker
         try:
             from .live_brokers import get_broker_manager
@@ -1109,20 +1109,17 @@ class OptionsQuantBot:
                 live_price = await manager.get_live_price(symbol.upper(), "stock")
                 if live_price > 0:
                     return live_price
+                else:
+                    logger.warning(f"Alpaca returned zero price for {symbol}")
+            else:
+                logger.warning(f"Alpaca not connected - cannot get price for {symbol}")
         except Exception as e:
-            logger.debug(f"Live price unavailable for {symbol}: {e}")
+            logger.error(f"Failed to get live price for {symbol}: {e}")
 
-        # Fallback to base prices (simulated)
-        base_prices = {
-            "SPY": 480, "QQQ": 420, "IWM": 200, "AAPL": 185, "MSFT": 420,
-            "GOOGL": 155, "AMZN": 185, "NVDA": 880, "META": 500, "TSLA": 250,
-            "GLD": 195, "SLV": 22, "USO": 75, "XLE": 85, "VIX": 15,
-            "XLF": 40, "JPM": 195, "BAC": 35, "AMD": 165, "NFLX": 610,
-            "DIS": 110, "BA": 180, "V": 280, "MA": 460,
-        }
-        base = base_prices.get(symbol.upper(), 100)
-        # Add small random movement for simulation
-        return base * (1 + np.random.uniform(-0.01, 0.01))
+        # NO FALLBACK - Return 0 to indicate price unavailable
+        # Callers should handle this and skip the trade
+        logger.error(f"❌ NO LIVE PRICE for {symbol} - synthetic fallback DISABLED")
+        return 0
 
     def _add_commentary(self, message: str, category: str):
         """Add commentary entry."""
@@ -1140,7 +1137,7 @@ class OptionsQuantBot:
     # ======================
 
     async def _get_crypto_price(self, symbol: str) -> float:
-        """Get current crypto price - uses LIVE data from Binance when available."""
+        """Get current crypto price - LIVE data only from Binance."""
         # Extract base asset from derivative symbol
         base = symbol.split("-")[0].upper()
 
@@ -1156,18 +1153,17 @@ class OptionsQuantBot:
                     live_price = await manager.get_live_price(base, "crypto")
                 if live_price > 0:
                     return live_price
+                else:
+                    logger.warning(f"Binance returned zero price for {symbol}")
+            else:
+                logger.warning(f"Binance not connected - cannot get price for {symbol}")
         except Exception as e:
-            logger.debug(f"Live price unavailable for {symbol}: {e}")
+            logger.error(f"Failed to get live crypto price for {symbol}: {e}")
 
-        # Fallback to base prices (simulated)
-        base_prices = {
-            "BTC": 95000, "ETH": 3200, "SOL": 180,
-            "AVAX": 35, "MATIC": 0.85, "LINK": 22,
-            "ARB": 1.20, "OP": 2.50,
-        }
-        price = base_prices.get(base, 100)
-        # Add small random movement for simulation
-        return price * (1 + np.random.uniform(-0.02, 0.02))
+        # NO FALLBACK - Return 0 to indicate price unavailable
+        # Callers should handle this and skip the trade
+        logger.error(f"❌ NO LIVE PRICE for {symbol} - synthetic fallback DISABLED")
+        return 0
 
     async def open_crypto_perpetual(
         self,
