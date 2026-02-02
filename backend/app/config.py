@@ -12,17 +12,25 @@ from pydantic import Field
 
 def find_env_file():
     """Find .env file in multiple locations."""
+    # Get the directory where this config.py file is located
+    config_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.dirname(config_dir)  # backend/app -> backend
+
     possible_paths = [
-        ".env",                           # Current directory
-        "../.env",                         # Parent directory
-        "backend/.env",                    # If running from root
-        os.path.expanduser("~/.env"),      # Home directory
-        "/home/user/LLM-Quant/.env",       # Absolute path
-        "/home/user/LLM-Quant/backend/.env",  # Backend folder
+        os.path.join(backend_dir, ".env"),   # backend/.env (most likely)
+        ".env",                               # Current working directory
+        "../.env",                            # Parent directory
+        "backend/.env",                       # If running from root
+        os.path.expanduser("~/.env"),         # Home directory
     ]
+
     for path in possible_paths:
         if os.path.exists(path):
+            abs_path = os.path.abspath(path)
+            print(f"[CONFIG] Using .env file: {abs_path}")
             return path
+
+    print("[CONFIG] WARNING: No .env file found!")
     return ".env"  # Default
 
 
@@ -108,7 +116,23 @@ class Settings(BaseSettings):
         return bool(self.binance_api_key and self.binance_api_secret)
 
 
-@lru_cache
+_settings_instance: Settings = None
+
+
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+    """Get settings instance (reloads from .env on each call for development)."""
+    global _settings_instance
+
+    # In development, always reload to pick up .env changes
+    # For production, you could cache this
+    _settings_instance = Settings()
+
+    # Debug logging for API keys (masked)
+    if _settings_instance.alpaca_api_key:
+        masked = _settings_instance.alpaca_api_key[:4] + "..." + _settings_instance.alpaca_api_key[-4:]
+        print(f"[CONFIG] Alpaca API Key loaded: {masked}")
+    if _settings_instance.binance_api_key:
+        masked = _settings_instance.binance_api_key[:4] + "..." + _settings_instance.binance_api_key[-4:]
+        print(f"[CONFIG] Binance API Key loaded: {masked}")
+
+    return _settings_instance
