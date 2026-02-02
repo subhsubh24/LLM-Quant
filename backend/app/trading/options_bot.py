@@ -642,6 +642,17 @@ class OptionsQuantBot:
 
     async def _scan_opportunities(self):
         """Scan for new trading opportunities based on mode."""
+        # CRITICAL: Check if stock market is open before scanning stock options
+        from .quant_bot import is_market_open, get_market_status
+
+        if not is_market_open():
+            market_status = get_market_status()
+            self._add_commentary(
+                f"⛔ Stock market CLOSED ({market_status['message']}) - Skipping stock options scan",
+                "scan"
+            )
+            return  # Don't scan stock options when market is closed
+
         # Scan more symbols in aggressive mode
         scan_count = {
             OptionsMode.AGGRESSIVE: 30,
