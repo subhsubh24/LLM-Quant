@@ -16,6 +16,7 @@ import logging
 import os
 import json
 import pickle
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -1306,15 +1307,26 @@ class ModelPreTrainer:
         X_train, y_train, r_train = features[train_idx], labels[train_idx], rewards[train_idx]
         X_val, y_val, r_val = features[val_idx], labels[val_idx], rewards[val_idx]
 
+        total_batches = len(X_train) // batch_size
+        logger.info(f"Training config: {total_batches} batches/epoch, {len(X_val)} validation samples")
+
         for epoch in range(epochs):
+            epoch_start = time.time()
+
             # Shuffle training data
             perm = np.random.permutation(len(X_train))
             X_train, y_train, r_train = X_train[perm], y_train[perm], r_train[perm]
 
             epoch_losses = []
+            batch_count = 0
 
             # Mini-batch training
             for i in range(0, len(X_train), batch_size):
+                batch_count += 1
+
+                # Progress logging every 1000 batches
+                if batch_count % 1000 == 0:
+                    logger.info(f"  Epoch {epoch+1}: batch {batch_count}/{total_batches} ({100*batch_count/total_batches:.1f}%)")
                 batch_X = X_train[i:i+batch_size]
                 batch_y = y_train[i:i+batch_size]
                 batch_r = r_train[i:i+batch_size]
@@ -1397,13 +1409,17 @@ class ModelPreTrainer:
                 vae_loss = self.vae.train_step(batch_X, batch_y % 4)  # 4 regimes
                 epoch_losses.append(vae_loss)
 
-            # Validation
+            # Validation (sample subset for speed - full validation takes too long)
+            val_sample_size = min(1000, len(X_val))  # Sample 1000 instead of all 650K
+            val_indices = np.random.choice(len(X_val), val_sample_size, replace=False)
+
             val_preds = []
-            for state in X_val:
-                pred = self.predict(state)
+            for idx in val_indices:
+                pred = self.predict(X_val[idx])
                 val_preds.append(pred["action"])
 
-            val_accuracy = np.mean(np.array(val_preds) == y_val)
+            val_accuracy = np.mean(np.array(val_preds) == y_val[val_indices])
+            epoch_time = time.time() - epoch_start
 
             # Record metrics
             avg_loss = np.mean(epoch_losses) if epoch_losses else 0
@@ -1413,13 +1429,14 @@ class ModelPreTrainer:
             # Decay DQN epsilon
             self.dqn.epsilon = max(0.01, self.dqn.epsilon * 0.995)
 
-            if (epoch + 1) % 10 == 0:
-                logger.info(
-                    f"Epoch {epoch+1}/{epochs} | "
-                    f"Loss: {avg_loss:.4f} | "
-                    f"Val Acc: {val_accuracy:.2%} | "
-                    f"Epsilon: {self.dqn.epsilon:.3f}"
-                )
+            # Log every epoch for visibility
+            logger.info(
+                f"✓ Epoch {epoch+1}/{epochs} | "
+                f"Loss: {avg_loss:.4f} | "
+                f"Val Acc: {val_accuracy:.2%} | "
+                f"Epsilon: {self.dqn.epsilon:.3f} | "
+                f"Time: {epoch_time:.1f}s"
+            )
 
         self.training_metrics.epochs_completed = epochs
         self.training_metrics.total_samples = len(features)
