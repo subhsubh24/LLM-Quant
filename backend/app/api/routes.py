@@ -3446,7 +3446,7 @@ async def get_live_trading_status():
 @router.post("/master-bot/train")
 async def run_ml_training(
     days_of_data: int = 180,
-    training_epochs: int = 100,
+    training_epochs: int = 40,  # Optimized for ~1 hour training
     background_tasks: BackgroundTasks = None
 ):
     """

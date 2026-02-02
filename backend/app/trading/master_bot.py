@@ -2359,7 +2359,7 @@ def create_master_bot(
 
 async def run_training_pipeline(
     days_of_data: int = 180,
-    training_epochs: int = 100
+    training_epochs: int = 40  # Optimized for ~1 hour training
 ) -> Dict:
     """
     Run the full ML training pipeline.
