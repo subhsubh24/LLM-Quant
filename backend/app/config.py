@@ -26,11 +26,8 @@ def find_env_file():
 
     for path in possible_paths:
         if os.path.exists(path):
-            abs_path = os.path.abspath(path)
-            print(f"[CONFIG] Using .env file: {abs_path}")
             return path
 
-    print("[CONFIG] WARNING: No .env file found!")
     return ".env"  # Default
 
 
@@ -116,23 +113,7 @@ class Settings(BaseSettings):
         return bool(self.binance_api_key and self.binance_api_secret)
 
 
-_settings_instance: Settings = None
-
-
+@lru_cache
 def get_settings() -> Settings:
-    """Get settings instance (reloads from .env on each call for development)."""
-    global _settings_instance
-
-    # In development, always reload to pick up .env changes
-    # For production, you could cache this
-    _settings_instance = Settings()
-
-    # Debug logging for API keys (masked)
-    if _settings_instance.alpaca_api_key:
-        masked = _settings_instance.alpaca_api_key[:4] + "..." + _settings_instance.alpaca_api_key[-4:]
-        print(f"[CONFIG] Alpaca API Key loaded: {masked}")
-    if _settings_instance.binance_api_key:
-        masked = _settings_instance.binance_api_key[:4] + "..." + _settings_instance.binance_api_key[-4:]
-        print(f"[CONFIG] Binance API Key loaded: {masked}")
-
-    return _settings_instance
+    """Get cached settings instance."""
+    return Settings()
