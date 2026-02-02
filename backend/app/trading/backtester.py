@@ -1214,7 +1214,7 @@ class ModelPreTrainer:
 
         self.is_trained = False
         self.training_metrics = TrainingMetrics(epochs_completed=0, total_samples=0)
-        self.min_training_epochs = 50
+        self.min_training_epochs = 10  # Reduced - early stopping ensures quality
         self.min_training_samples = 10000
 
     def prepare_training_data(
@@ -1285,8 +1285,8 @@ class ModelPreTrainer:
         features: np.ndarray,
         labels: np.ndarray,
         rewards: np.ndarray,
-        epochs: int = 100,
-        batch_size: int = 64,
+        epochs: int = 25,
+        batch_size: int = 256,
         validation_split: float = 0.2
     ) -> TrainingMetrics:
         """
@@ -1296,7 +1296,17 @@ class ModelPreTrainer:
             logger.error("No training data provided")
             return self.training_metrics
 
-        logger.info(f"Training on {len(features)} samples for {epochs} epochs...")
+        # Cap training data at 500K samples for practical training time
+        # This is still plenty of data to learn patterns from 1,489 symbols
+        max_samples = 500000
+        if len(features) > max_samples:
+            logger.info(f"Sampling {max_samples:,} from {len(features):,} samples for efficient training...")
+            sample_idx = np.random.choice(len(features), max_samples, replace=False)
+            features = features[sample_idx]
+            labels = labels[sample_idx]
+            rewards = rewards[sample_idx]
+
+        logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
         # Split train/validation
         n_val = int(len(features) * validation_split)
@@ -1308,7 +1318,12 @@ class ModelPreTrainer:
         X_val, y_val, r_val = features[val_idx], labels[val_idx], rewards[val_idx]
 
         total_batches = len(X_train) // batch_size
-        logger.info(f"Training config: {total_batches} batches/epoch, {len(X_val)} validation samples")
+        logger.info(f"Training config: {total_batches:,} batches/epoch, {len(X_val):,} validation samples")
+
+        # Early stopping setup
+        best_val_accuracy = 0
+        patience = 5  # Stop if no improvement for 5 epochs
+        patience_counter = 0
 
         for epoch in range(epochs):
             epoch_start = time.time()
@@ -1438,7 +1453,18 @@ class ModelPreTrainer:
                 f"Time: {epoch_time:.1f}s"
             )
 
-        self.training_metrics.epochs_completed = epochs
+            # Early stopping check
+            if val_accuracy > best_val_accuracy:
+                best_val_accuracy = val_accuracy
+                patience_counter = 0
+                self.save_checkpoints()  # Save best model
+            else:
+                patience_counter += 1
+                if patience_counter >= patience and epoch >= 10:  # Minimum 10 epochs
+                    logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs")
+                    break
+
+        self.training_metrics.epochs_completed = epoch + 1  # Actual epochs completed
         self.training_metrics.total_samples = len(features)
         self.is_trained = True
 
@@ -2120,7 +2146,7 @@ def get_alpha_manager() -> AlphaSourceManager:
 
 async def run_full_training_pipeline(
     days_of_data: int = 180,
-    training_epochs: int = 100
+    training_epochs: int = 25  # Reduced from 100 - sufficient with large dataset
 ) -> Dict:
     """
     Run the complete pre-training pipeline:
@@ -2167,7 +2193,7 @@ async def run_full_training_pipeline(
     training_metrics = pretrainer.train(
         features, labels, rewards,
         epochs=training_epochs,
-        batch_size=64
+        batch_size=256  # Larger batch = faster training
     )
 
     # Step 4: Run backtest
