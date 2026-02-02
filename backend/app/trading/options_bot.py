@@ -14,12 +14,20 @@ This is for PAPER TRADING / EDUCATIONAL purposes only.
 
 import asyncio
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
+
+
+def _safe_float(value: float, default: float = 0.0) -> float:
+    """Sanitize float value for JSON serialization (handle inf/nan)."""
+    if value is None or math.isnan(value) or math.isinf(value):
+        return default
+    return value
 
 from .options import (
     OptionType,
@@ -79,12 +87,12 @@ class IVAnalysis:
     def to_dict(self) -> Dict:
         return {
             "symbol": self.symbol,
-            "current_iv": round(self.current_iv * 100, 1),
-            "iv_rank": round(self.iv_rank, 1),
-            "iv_percentile": round(self.iv_percentile, 1),
-            "iv_30_day_avg": round(self.iv_30_day_avg * 100, 1),
+            "current_iv": round(_safe_float(self.current_iv * 100), 1),
+            "iv_rank": round(_safe_float(self.iv_rank), 1),
+            "iv_percentile": round(_safe_float(self.iv_percentile), 1),
+            "iv_30_day_avg": round(_safe_float(self.iv_30_day_avg * 100), 1),
             "iv_trend": self.iv_trend,
-            "hv_iv_spread": round(self.hv_iv_spread * 100, 1),
+            "hv_iv_spread": round(_safe_float(self.hv_iv_spread * 100), 1),
             "is_high_iv": self.is_high_iv,
             "premium_selling_favorable": self.premium_selling_favorable,
         }
@@ -147,17 +155,17 @@ class OptionsPosition:
             "symbol": self.symbol,
             "strategy_name": self.strategy_name,
             "entry_time": self.entry_time.isoformat(),
-            "entry_iv": round(self.entry_iv * 100, 1),
-            "entry_price": round(self.entry_underlying_price, 2),
-            "current_price": round(self.current_underlying_price, 2),
-            "current_pnl": round(self.current_pnl, 2),
+            "entry_iv": round(_safe_float(self.entry_iv * 100), 1),
+            "entry_price": round(_safe_float(self.entry_underlying_price), 2),
+            "current_price": round(_safe_float(self.current_underlying_price), 2),
+            "current_pnl": round(_safe_float(self.current_pnl), 2),
             "days_in_trade": self.days_in_trade,
-            "max_profit": round(self.max_profit, 2),
-            "max_loss": round(self.max_loss, 2),
+            "max_profit": round(_safe_float(self.max_profit), 2),
+            "max_loss": round(_safe_float(self.max_loss), 2),
             "greeks": {
-                "delta": round(self.current_delta, 2),
-                "theta": round(self.current_theta, 2),
-                "vega": round(self.current_vega, 2),
+                "delta": round(_safe_float(self.current_delta), 2),
+                "theta": round(_safe_float(self.current_theta), 2),
+                "vega": round(_safe_float(self.current_vega), 2),
             },
             "legs_count": len(self.strategy.legs),
             "strategy_details": self.strategy.to_dict() if self.strategy else None,
@@ -187,11 +195,11 @@ class OptionsTrade:
             "strategy_name": self.strategy_name,
             "action": self.action,
             "legs": self.legs,
-            "net_premium": round(self.net_premium, 2),
-            "pnl": round(self.pnl, 2),
+            "net_premium": round(_safe_float(self.net_premium), 2),
+            "pnl": round(_safe_float(self.pnl), 2),
             "rationale": self.rationale,
-            "iv_at_trade": round(self.iv_at_trade * 100, 1),
-            "underlying_at_trade": round(self.underlying_at_trade, 2),
+            "iv_at_trade": round(_safe_float(self.iv_at_trade * 100), 1),
+            "underlying_at_trade": round(_safe_float(self.underlying_at_trade), 2),
         }
 
 
@@ -254,19 +262,19 @@ class CryptoDerivativePosition:
             "symbol": self.symbol,
             "derivative_type": self.derivative_type,
             "side": self.side,
-            "entry_price": round(self.entry_price, 2),
-            "size": round(self.size, 4),
-            "leverage": self.leverage,
-            "current_price": round(self.current_price, 2),
-            "unrealized_pnl": round(self.calculate_pnl(), 2),
-            "funding_received": round(self.funding_received, 2),
-            "liquidation_price": round(self.liquidation_price, 2),
+            "entry_price": round(_safe_float(self.entry_price), 2),
+            "size": round(_safe_float(self.size), 4),
+            "leverage": _safe_float(self.leverage, 1.0),
+            "current_price": round(_safe_float(self.current_price), 2),
+            "unrealized_pnl": round(_safe_float(self.calculate_pnl()), 2),
+            "funding_received": round(_safe_float(self.funding_received), 2),
+            "liquidation_price": round(_safe_float(self.liquidation_price), 2),
             "greeks": {
-                "delta": round(self.delta, 4),
-                "gamma": round(self.gamma, 6),
-                "theta": round(self.theta, 4),
-                "vega": round(self.vega, 4),
-                "iv": round(self.iv * 100, 1),
+                "delta": round(_safe_float(self.delta), 4),
+                "gamma": round(_safe_float(self.gamma), 6),
+                "theta": round(_safe_float(self.theta), 4),
+                "vega": round(_safe_float(self.vega), 4),
+                "iv": round(_safe_float(self.iv * 100), 1),
             },
         }
 
