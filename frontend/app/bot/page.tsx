@@ -228,6 +228,7 @@ export default function MasterQuantBotPage() {
         return <Globe className="w-4 h-4" />;
       case "crypto_perpetual":
       case "crypto_options":
+      case "crypto_spot":
         return <Bitcoin className="w-4 h-4" />;
       default:
         return <Activity className="w-4 h-4" />;
@@ -246,6 +247,8 @@ export default function MasterQuantBotPage() {
         return "text-orange-400 bg-orange-400/10";
       case "crypto_options":
         return "text-yellow-400 bg-yellow-400/10";
+      case "crypto_spot":
+        return "text-emerald-400 bg-emerald-400/10";
       default:
         return "text-gray-400 bg-gray-400/10";
     }
