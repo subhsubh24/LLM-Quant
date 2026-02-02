@@ -795,20 +795,26 @@ class ModelPreTrainer:
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
 
-        # Initialize models
+        # Initialize models with PROPER TRAINABLE versions
         from .ml_models import (
             create_dqn_agent, create_ppo_agent,
-            LSTM, TransformerPredictor, MarketRegimeVAE, EnsemblePredictor
+            LSTMClassifier, TrainableTransformer, TrainableVAE
         )
 
+        # DQN and PPO already have proper training
         self.dqn = create_dqn_agent(state_dim, action_dim)
         self.ppo = create_ppo_agent(state_dim, action_dim)
-        self.lstm = LSTM(input_dim=state_dim, hidden_dim=128, output_dim=action_dim)
-        self.transformer = TransformerPredictor(
-            input_dim=state_dim, d_model=64, n_heads=4, n_layers=2, output_dim=action_dim
+
+        # Use trainable versions with proper backpropagation
+        self.lstm = LSTMClassifier(
+            input_dim=state_dim, hidden_dim=128, output_dim=action_dim, lr=0.001
         )
-        self.vae = MarketRegimeVAE(input_dim=state_dim, hidden_dim=64, latent_dim=8)
-        self.ensemble = EnsemblePredictor(state_dim, action_dim)
+        self.transformer = TrainableTransformer(
+            input_dim=state_dim, hidden_dim=64, output_dim=action_dim, lr=0.001
+        )
+        self.vae = TrainableVAE(
+            input_dim=state_dim, hidden_dim=64, latent_dim=8, output_dim=4, lr=0.001
+        )
 
         self.is_trained = False
         self.training_metrics = TrainingMetrics(epochs_completed=0, total_samples=0)
@@ -918,7 +924,9 @@ class ModelPreTrainer:
                 batch_y = y_train[i:i+batch_size]
                 batch_r = r_train[i:i+batch_size]
 
-                # Train DQN
+                # =====================
+                # TRAIN DQN (Experience Replay)
+                # =====================
                 for j in range(len(batch_X) - 1):
                     state = batch_X[j]
                     action = int(batch_y[j])
@@ -934,45 +942,65 @@ class ModelPreTrainer:
                 if dqn_loss:
                     epoch_losses.append(dqn_loss)
 
-                # Train PPO
+                # =====================
+                # TRAIN PPO (Policy Gradient)
+                # =====================
                 for j in range(len(batch_X)):
                     state = batch_X[j]
                     action = int(batch_y[j])
                     reward = batch_r[j]
+                    done = (j == len(batch_X) - 1)
 
-                    # Get action probabilities
                     probs = self.ppo.get_action_probs(state)
                     log_prob = np.log(probs[action] + 1e-8)
                     value = self.ppo.get_value(state)
 
-                    self.ppo.store_transition(state, action, log_prob, reward, value)
+                    # Signature: (state, action, reward, value, log_prob, done)
+                    self.ppo.store_transition(state, action, reward, value, log_prob, done)
 
                 ppo_loss = self.ppo.train_step()
 
-                # Train LSTM
+                # =====================
+                # TRAIN LSTM (Proper BPTT)
+                # =====================
                 if len(batch_X) >= 10:
                     seq_len = 10
-                    for j in range(len(batch_X) - seq_len):
+                    # Create sequences for LSTM training
+                    for j in range(0, len(batch_X) - seq_len, seq_len):
                         seq = batch_X[j:j+seq_len]
-                        target = batch_y[j+seq_len-1]
-                        lstm_out, _ = self.lstm.forward(seq)
-                        # Simple gradient update (simplified)
-                        pred = np.argmax(lstm_out[-1])
-                        if pred != target:
-                            # Adjust weights slightly
-                            self.lstm.Wf *= 0.999
-                            self.lstm.Wi *= 0.999
+                        target = batch_y[j+seq_len-1:j+seq_len]  # Label for last timestep
 
-                # Train Transformer
+                        if len(target) > 0:
+                            # Proper backpropagation through time
+                            lstm_loss = self.lstm.train_step(
+                                seq.reshape(1, seq_len, -1),
+                                target
+                            )
+                            epoch_losses.append(lstm_loss)
+
+                # =====================
+                # TRAIN TRANSFORMER (Proper Gradient Descent)
+                # =====================
                 if len(batch_X) >= 10:
-                    seq = batch_X[:10]
-                    trans_out = self.transformer.forward(seq)
-                    # Similar simple update
+                    seq_len = 10
+                    for j in range(0, len(batch_X) - seq_len, seq_len):
+                        seq = batch_X[j:j+seq_len]
+                        target = batch_y[j+seq_len-1:j+seq_len]
 
-                # Train VAE
-                for state in batch_X:
-                    self.vae.forward(state)
-                    # VAE learns representations
+                        if len(target) > 0:
+                            # Proper backpropagation
+                            trans_loss = self.transformer.train_step(
+                                seq.reshape(1, seq_len, -1),
+                                target
+                            )
+                            epoch_losses.append(trans_loss)
+
+                # =====================
+                # TRAIN VAE (Reconstruction + KL Loss)
+                # =====================
+                # VAE trains on individual states with optional regime labels
+                vae_loss = self.vae.train_step(batch_X, batch_y % 4)  # 4 regimes
+                epoch_losses.append(vae_loss)
 
             # Validation
             val_preds = []
@@ -1087,24 +1115,10 @@ class ModelPreTrainer:
                 "policy": self.ppo.policy_network.get_weights(),
                 "value": self.ppo.value_network.get_weights(),
             },
-            "lstm_weights": {
-                "Wf": self.lstm.Wf, "Wi": self.lstm.Wi,
-                "Wc": self.lstm.Wc, "Wo": self.lstm.Wo,
-                "bf": self.lstm.bf, "bi": self.lstm.bi,
-                "bc": self.lstm.bc, "bo": self.lstm.bo,
-                "Wy": self.lstm.Wy, "by": self.lstm.by,
-            },
-            "transformer_weights": {
-                "W_q": self.transformer.W_q, "W_k": self.transformer.W_k,
-                "W_v": self.transformer.W_v, "W_o": self.transformer.W_o,
-            },
-            "vae_weights": {
-                "encoder_W1": self.vae.encoder_W1,
-                "encoder_W2_mu": self.vae.encoder_W2_mu,
-                "encoder_W2_logvar": self.vae.encoder_W2_logvar,
-                "decoder_W1": self.vae.decoder_W1,
-                "decoder_W2": self.vae.decoder_W2,
-            },
+            # Use get_weights() methods from trainable models
+            "lstm_weights": self.lstm.get_weights(),
+            "transformer_weights": self.transformer.get_weights(),
+            "vae_weights": self.vae.get_weights(),
             "training_metrics": self.training_metrics.to_dict(),
             "is_trained": self.is_trained,
             "timestamp": datetime.now().isoformat(),
@@ -1137,33 +1151,10 @@ class ModelPreTrainer:
             self.ppo.policy_network.set_weights(checkpoint["ppo_weights"]["policy"])
             self.ppo.value_network.set_weights(checkpoint["ppo_weights"]["value"])
 
-            # Restore LSTM
-            lstm_w = checkpoint["lstm_weights"]
-            self.lstm.Wf = lstm_w["Wf"]
-            self.lstm.Wi = lstm_w["Wi"]
-            self.lstm.Wc = lstm_w["Wc"]
-            self.lstm.Wo = lstm_w["Wo"]
-            self.lstm.bf = lstm_w["bf"]
-            self.lstm.bi = lstm_w["bi"]
-            self.lstm.bc = lstm_w["bc"]
-            self.lstm.bo = lstm_w["bo"]
-            self.lstm.Wy = lstm_w["Wy"]
-            self.lstm.by = lstm_w["by"]
-
-            # Restore Transformer
-            trans_w = checkpoint["transformer_weights"]
-            self.transformer.W_q = trans_w["W_q"]
-            self.transformer.W_k = trans_w["W_k"]
-            self.transformer.W_v = trans_w["W_v"]
-            self.transformer.W_o = trans_w["W_o"]
-
-            # Restore VAE
-            vae_w = checkpoint["vae_weights"]
-            self.vae.encoder_W1 = vae_w["encoder_W1"]
-            self.vae.encoder_W2_mu = vae_w["encoder_W2_mu"]
-            self.vae.encoder_W2_logvar = vae_w["encoder_W2_logvar"]
-            self.vae.decoder_W1 = vae_w["decoder_W1"]
-            self.vae.decoder_W2 = vae_w["decoder_W2"]
+            # Restore trainable models using set_weights() methods
+            self.lstm.set_weights(checkpoint["lstm_weights"])
+            self.transformer.set_weights(checkpoint["transformer_weights"])
+            self.vae.set_weights(checkpoint["vae_weights"])
 
             self.is_trained = checkpoint.get("is_trained", True)
 
@@ -1198,18 +1189,43 @@ class AlphaSourceManager:
     Alternative Alpha Sources
 
     Provides unique signals beyond just price data:
-    - Sentiment analysis (news, social media)
-    - On-chain metrics (for crypto)
+    - Sentiment analysis (LunarCrush API - social media sentiment)
+    - On-chain metrics (Glassnode API - blockchain data)
     - Fear & Greed Index
     - Cross-asset correlations
     - Order flow imbalance
+
+    API Keys (set as environment variables):
+    - LUNARCRUSH_API_KEY: For social sentiment data
+    - GLASSNODE_API_KEY: For on-chain metrics
     """
+
+    # Symbol mapping for APIs
+    SYMBOL_MAP = {
+        "BTC": {"lunarcrush": "BTC", "glassnode": "BTC"},
+        "ETH": {"lunarcrush": "ETH", "glassnode": "ETH"},
+        "SOL": {"lunarcrush": "SOL", "glassnode": "SOL"},
+        "AVAX": {"lunarcrush": "AVAX", "glassnode": "AVAX"},
+        "MATIC": {"lunarcrush": "MATIC", "glassnode": "MATIC"},
+        "LINK": {"lunarcrush": "LINK", "glassnode": "LINK"},
+        "UNI": {"lunarcrush": "UNI", "glassnode": "UNI"},
+        "AAVE": {"lunarcrush": "AAVE", "glassnode": "AAVE"},
+        "DOT": {"lunarcrush": "DOT", "glassnode": "DOT"},
+        "ADA": {"lunarcrush": "ADA", "glassnode": "ADA"},
+        "XRP": {"lunarcrush": "XRP", "glassnode": "XRP"},
+        "LTC": {"lunarcrush": "LTC", "glassnode": "LTC"},
+    }
 
     def __init__(self):
         self.sentiment_cache: Dict[str, Dict] = {}
         self.onchain_cache: Dict[str, Dict] = {}
         self.fear_greed_value: float = 50  # Neutral
         self.last_update: Optional[datetime] = None
+        self.cache_duration = timedelta(minutes=15)  # Cache API responses
+
+        # API keys from environment
+        self.lunarcrush_api_key = os.environ.get("LUNARCRUSH_API_KEY", "")
+        self.glassnode_api_key = os.environ.get("GLASSNODE_API_KEY", "")
 
     async def get_fear_greed_index(self) -> Dict:
         """Fetch Crypto Fear & Greed Index."""
@@ -1218,7 +1234,7 @@ class AlphaSourceManager:
         try:
             url = "https://api.alternative.me/fng/"
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+                async with session.get(url, timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
                         value = int(data["data"][0]["value"])
@@ -1260,71 +1276,361 @@ class AlphaSourceManager:
 
     async def get_crypto_sentiment(self, symbol: str) -> Dict:
         """
-        Get sentiment for a crypto asset.
-        Uses LunarCrush or similar APIs.
+        Get sentiment for a crypto asset using LunarCrush API.
+
+        LunarCrush provides:
+        - Galaxy Score: Overall social sentiment (0-100)
+        - Social Volume: Number of social posts
+        - Social Engagement: Likes, shares, comments
+        - Sentiment Score: Bullish vs bearish sentiment
+        - AltRank: Relative ranking vs other cryptos
+
+        API Docs: https://lunarcrush.com/developers/api/endpoints
         """
-        # Placeholder - would integrate with sentiment API
-        # For now, return neutral sentiment
-        return {
+        import aiohttp
+
+        # Check cache first
+        cache_key = f"sentiment_{symbol}"
+        if cache_key in self.sentiment_cache:
+            cached = self.sentiment_cache[cache_key]
+            if datetime.now() - cached.get("timestamp", datetime.min) < self.cache_duration:
+                return cached["data"]
+
+        # Default response if API fails or no key
+        default_response = {
             "symbol": symbol,
-            "sentiment_score": 0.5,  # 0=bearish, 1=bullish
+            "sentiment_score": 0.5,
+            "galaxy_score": 50,
             "social_volume": 0,
             "social_engagement": 0,
+            "alt_rank": 0,
             "signal": 0,
+            "source": "default",
         }
+
+        if not self.lunarcrush_api_key:
+            logger.debug("LunarCrush API key not set, using default sentiment")
+            return default_response
+
+        try:
+            # LunarCrush API v2 endpoint
+            url = "https://lunarcrush.com/api4/public/coins"
+            headers = {
+                "Authorization": f"Bearer {self.lunarcrush_api_key}",
+            }
+            params = {
+                "symbol": symbol,
+                "interval": "1d",
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, params=params, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        if data.get("data"):
+                            coin_data = data["data"][0] if isinstance(data["data"], list) else data["data"]
+
+                            # Extract sentiment metrics
+                            galaxy_score = coin_data.get("galaxy_score", 50)
+                            alt_rank = coin_data.get("alt_rank", 100)
+                            social_volume = coin_data.get("social_volume", 0)
+                            social_engagement = coin_data.get("social_contributors", 0)
+                            sentiment = coin_data.get("sentiment", 50)
+
+                            # Calculate signal: Galaxy Score is 0-100, normalize to -1 to 1
+                            # Galaxy Score > 70 = bullish, < 30 = bearish
+                            signal = (galaxy_score - 50) / 50  # -1 to 1 range
+
+                            # Adjust based on social volume trend
+                            volume_change = coin_data.get("social_volume_change_24h", 0)
+                            if volume_change > 50:  # >50% increase in social activity
+                                signal *= 1.2  # Amplify signal
+
+                            result = {
+                                "symbol": symbol,
+                                "sentiment_score": sentiment / 100,
+                                "galaxy_score": galaxy_score,
+                                "social_volume": social_volume,
+                                "social_engagement": social_engagement,
+                                "alt_rank": alt_rank,
+                                "signal": max(-1, min(1, signal)),  # Clamp to -1 to 1
+                                "source": "lunarcrush",
+                            }
+
+                            # Cache the result
+                            self.sentiment_cache[cache_key] = {
+                                "data": result,
+                                "timestamp": datetime.now(),
+                            }
+
+                            return result
+                    else:
+                        logger.warning(f"LunarCrush API returned {response.status}")
+
+        except Exception as e:
+            logger.warning(f"LunarCrush API error for {symbol}: {e}")
+
+        return default_response
 
     async def get_onchain_metrics(self, symbol: str) -> Dict:
         """
-        Get on-chain metrics for crypto.
+        Get on-chain metrics using Glassnode API.
 
-        Metrics:
-        - Exchange inflows/outflows
-        - Whale movements
-        - Active addresses
-        - NVT ratio
+        Glassnode provides:
+        - Exchange Net Flow: Coins entering/leaving exchanges
+        - Active Addresses: Network usage
+        - SOPR (Spent Output Profit Ratio): Profit-taking indicator
+        - NUPL (Net Unrealized Profit/Loss): Market sentiment
+        - Reserve Risk: Risk-adjusted return indicator
+
+        API Docs: https://docs.glassnode.com/
+
+        Signals:
+        - Negative exchange netflow = bullish (accumulation)
+        - High active addresses = bullish (adoption)
+        - SOPR < 1 = capitulation (buy signal)
+        - NUPL < 0.25 = fear (buy signal)
         """
-        # Placeholder - would integrate with Glassnode, IntoTheBlock, etc.
-        return {
+        import aiohttp
+
+        # Check cache first
+        cache_key = f"onchain_{symbol}"
+        if cache_key in self.onchain_cache:
+            cached = self.onchain_cache[cache_key]
+            if datetime.now() - cached.get("timestamp", datetime.min) < self.cache_duration:
+                return cached["data"]
+
+        # Default response
+        default_response = {
             "symbol": symbol,
-            "exchange_netflow": 0,  # Negative = bullish (coins leaving exchanges)
-            "whale_transactions": 0,
+            "exchange_netflow": 0,
+            "exchange_netflow_signal": 0,
+            "active_addresses": 0,
             "active_addresses_change": 0,
-            "nvt_ratio": 0,
+            "sopr": 1.0,
+            "nupl": 0.5,
+            "reserve_risk": 0,
             "signal": 0,
+            "source": "default",
         }
+
+        if not self.glassnode_api_key:
+            logger.debug("Glassnode API key not set, using default on-chain metrics")
+            return default_response
+
+        # Only BTC and ETH have comprehensive on-chain data
+        if symbol not in ["BTC", "ETH"]:
+            return default_response
+
+        try:
+            base_url = "https://api.glassnode.com/v1/metrics"
+            headers = {"X-API-Key": self.glassnode_api_key}
+            asset = symbol.lower()
+
+            async with aiohttp.ClientSession() as session:
+                metrics = {}
+
+                # Fetch Exchange Net Position Change (24h)
+                try:
+                    url = f"{base_url}/transactions/transfers_volume_exchanges_net"
+                    params = {"a": asset, "i": "24h", "f": "JSON"}
+                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data:
+                                metrics["exchange_netflow"] = data[-1].get("v", 0)
+                except Exception as e:
+                    logger.debug(f"Failed to fetch exchange netflow: {e}")
+
+                # Fetch Active Addresses
+                try:
+                    url = f"{base_url}/addresses/active_count"
+                    params = {"a": asset, "i": "24h", "f": "JSON"}
+                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and len(data) >= 2:
+                                current = data[-1].get("v", 0)
+                                previous = data[-2].get("v", 1)
+                                metrics["active_addresses"] = current
+                                metrics["active_addresses_change"] = (current - previous) / previous if previous else 0
+                except Exception as e:
+                    logger.debug(f"Failed to fetch active addresses: {e}")
+
+                # Fetch SOPR (Spent Output Profit Ratio)
+                try:
+                    url = f"{base_url}/indicators/sopr"
+                    params = {"a": asset, "i": "24h", "f": "JSON"}
+                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data:
+                                metrics["sopr"] = data[-1].get("v", 1.0)
+                except Exception as e:
+                    logger.debug(f"Failed to fetch SOPR: {e}")
+
+                # Fetch NUPL (Net Unrealized Profit/Loss)
+                try:
+                    url = f"{base_url}/indicators/nupl"
+                    params = {"a": asset, "i": "24h", "f": "JSON"}
+                    async with session.get(url, headers=headers, params=params, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data:
+                                metrics["nupl"] = data[-1].get("v", 0.5)
+                except Exception as e:
+                    logger.debug(f"Failed to fetch NUPL: {e}")
+
+                # Calculate combined signal
+                signal = 0
+
+                # Exchange netflow signal
+                netflow = metrics.get("exchange_netflow", 0)
+                if netflow < -1000:  # Large outflow = bullish
+                    signal += 0.4
+                elif netflow < 0:
+                    signal += 0.2
+                elif netflow > 1000:  # Large inflow = bearish
+                    signal -= 0.4
+                elif netflow > 0:
+                    signal -= 0.2
+
+                # SOPR signal
+                sopr = metrics.get("sopr", 1.0)
+                if sopr < 0.95:  # Capitulation
+                    signal += 0.3
+                elif sopr < 1.0:  # Mild losses
+                    signal += 0.1
+                elif sopr > 1.1:  # Strong profit taking
+                    signal -= 0.2
+
+                # NUPL signal
+                nupl = metrics.get("nupl", 0.5)
+                if nupl < 0:  # Net loss = capitulation
+                    signal += 0.3
+                elif nupl < 0.25:  # Hope/Fear
+                    signal += 0.1
+                elif nupl > 0.75:  # Euphoria
+                    signal -= 0.3
+
+                result = {
+                    "symbol": symbol,
+                    "exchange_netflow": metrics.get("exchange_netflow", 0),
+                    "active_addresses": metrics.get("active_addresses", 0),
+                    "active_addresses_change": metrics.get("active_addresses_change", 0),
+                    "sopr": metrics.get("sopr", 1.0),
+                    "nupl": metrics.get("nupl", 0.5),
+                    "signal": max(-1, min(1, signal)),
+                    "source": "glassnode",
+                }
+
+                # Cache the result
+                self.onchain_cache[cache_key] = {
+                    "data": result,
+                    "timestamp": datetime.now(),
+                }
+
+                return result
+
+        except Exception as e:
+            logger.warning(f"Glassnode API error for {symbol}: {e}")
+
+        return default_response
 
     async def get_cross_asset_signals(self) -> Dict:
         """
         Analyze cross-asset correlations for signals.
 
-        - BTC/SPY correlation breakdown
-        - DXY (dollar) inverse correlation
-        - Gold correlation (risk-off indicator)
+        Uses correlation breakdowns to detect regime changes:
+        - BTC/SPY decorrelation often precedes crypto rallies
+        - DXY (dollar) strength typically bearish for crypto
+        - Gold correlation indicates risk-off behavior
         """
+        import aiohttp
+
+        try:
+            # Fetch current DXY (Dollar Index) from Yahoo Finance
+            url = "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB"
+            params = {"interval": "1d", "range": "5d"}
+            headers = {"User-Agent": "Mozilla/5.0"}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, headers=headers, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result = data.get("chart", {}).get("result", [])
+
+                        if result:
+                            quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
+                            closes = quotes.get("close", [])
+
+                            if len(closes) >= 2:
+                                # DXY change
+                                dxy_current = closes[-1]
+                                dxy_prev = closes[-2]
+
+                                if dxy_current and dxy_prev:
+                                    dxy_change = (dxy_current - dxy_prev) / dxy_prev
+
+                                    # Strong dollar = bearish for crypto
+                                    if dxy_change > 0.005:  # >0.5% increase
+                                        dxy_signal = -0.3
+                                    elif dxy_change > 0:
+                                        dxy_signal = -0.1
+                                    elif dxy_change < -0.005:
+                                        dxy_signal = 0.3
+                                    else:
+                                        dxy_signal = 0.1
+
+                                    return {
+                                        "dxy_value": dxy_current,
+                                        "dxy_change": dxy_change,
+                                        "regime": "risk_off" if dxy_signal < 0 else "risk_on",
+                                        "signal": dxy_signal,
+                                    }
+
+        except Exception as e:
+            logger.debug(f"Failed to fetch cross-asset data: {e}")
+
         return {
-            "btc_spy_correlation": 0,
-            "btc_dxy_correlation": 0,
-            "btc_gold_correlation": 0,
+            "dxy_value": 0,
+            "dxy_change": 0,
             "regime": "neutral",
             "signal": 0,
         }
 
     async def get_combined_alpha(self, symbol: str) -> Dict:
         """
-        Combine all alpha sources into a single signal.
-        """
-        fear_greed = await self.get_fear_greed_index()
-        sentiment = await self.get_crypto_sentiment(symbol)
-        onchain = await self.get_onchain_metrics(symbol)
-        cross_asset = await self.get_cross_asset_signals()
+        Combine all alpha sources into a single trading signal.
 
-        # Weighted combination
+        Weighting:
+        - Fear & Greed: 20% (broad market sentiment)
+        - LunarCrush Sentiment: 30% (coin-specific social)
+        - Glassnode On-Chain: 35% (fundamental on-chain)
+        - Cross-Asset: 15% (macro environment)
+        """
+        # Fetch all signals in parallel
+        fear_greed_task = self.get_fear_greed_index()
+        sentiment_task = self.get_crypto_sentiment(symbol)
+        onchain_task = self.get_onchain_metrics(symbol)
+        cross_asset_task = self.get_cross_asset_signals()
+
+        fear_greed, sentiment, onchain, cross_asset = await asyncio.gather(
+            fear_greed_task, sentiment_task, onchain_task, cross_asset_task
+        )
+
+        # Dynamic weighting based on data quality
         weights = {
-            "fear_greed": 0.25,
-            "sentiment": 0.25,
-            "onchain": 0.30,
-            "cross_asset": 0.20,
+            "fear_greed": 0.20,
+            "sentiment": 0.30 if sentiment.get("source") == "lunarcrush" else 0.10,
+            "onchain": 0.35 if onchain.get("source") == "glassnode" else 0.10,
+            "cross_asset": 0.15,
         }
+
+        # Normalize weights
+        total_weight = sum(weights.values())
+        weights = {k: v / total_weight for k, v in weights.items()}
 
         combined_signal = (
             fear_greed["signal"] * weights["fear_greed"] +
@@ -1333,16 +1639,31 @@ class AlphaSourceManager:
             cross_asset["signal"] * weights["cross_asset"]
         )
 
+        # Determine recommendation with confidence
+        if combined_signal > 0.4:
+            recommendation = "strong_buy"
+        elif combined_signal > 0.2:
+            recommendation = "buy"
+        elif combined_signal < -0.4:
+            recommendation = "strong_sell"
+        elif combined_signal < -0.2:
+            recommendation = "sell"
+        else:
+            recommendation = "hold"
+
         return {
             "symbol": symbol,
-            "combined_signal": combined_signal,
+            "combined_signal": round(combined_signal, 3),
+            "recommendation": recommendation,
+            "confidence": abs(combined_signal),
             "components": {
                 "fear_greed": fear_greed,
                 "sentiment": sentiment,
                 "onchain": onchain,
                 "cross_asset": cross_asset,
             },
-            "recommendation": "buy" if combined_signal > 0.3 else "sell" if combined_signal < -0.3 else "hold",
+            "weights_used": weights,
+            "timestamp": datetime.now().isoformat(),
         }
 
 

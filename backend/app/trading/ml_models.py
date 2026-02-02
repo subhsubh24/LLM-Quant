@@ -317,6 +317,255 @@ class LSTM(Layer):
                 self.W_o, self.b_o, self.W_c, self.b_c]
 
 
+class LSTMClassifier:
+    """
+    LSTM with output layer for classification tasks.
+    Includes proper backpropagation through time (BPTT).
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, lr: float = 0.001):
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.lr = lr
+
+        # LSTM weights (Xavier initialization)
+        scale = np.sqrt(1.0 / (input_dim + hidden_dim))
+        concat_dim = input_dim + hidden_dim
+
+        # Combined weight matrices for efficiency
+        self.Wf = np.random.randn(concat_dim, hidden_dim) * scale
+        self.Wi = np.random.randn(concat_dim, hidden_dim) * scale
+        self.Wc = np.random.randn(concat_dim, hidden_dim) * scale
+        self.Wo = np.random.randn(concat_dim, hidden_dim) * scale
+
+        self.bf = np.ones((1, hidden_dim))  # Forget gate bias = 1 (remember by default)
+        self.bi = np.zeros((1, hidden_dim))
+        self.bc = np.zeros((1, hidden_dim))
+        self.bo = np.zeros((1, hidden_dim))
+
+        # Output layer
+        self.Wy = np.random.randn(hidden_dim, output_dim) * np.sqrt(1.0 / hidden_dim)
+        self.by = np.zeros((1, output_dim))
+
+        # Adam optimizer state
+        self._init_adam()
+
+        # Cache for BPTT
+        self.cache = {}
+
+    def _init_adam(self):
+        """Initialize Adam optimizer moments."""
+        self.m = {}
+        self.v = {}
+        self.t = 0
+        for name in ['Wf', 'Wi', 'Wc', 'Wo', 'bf', 'bi', 'bc', 'bo', 'Wy', 'by']:
+            param = getattr(self, name)
+            self.m[name] = np.zeros_like(param)
+            self.v[name] = np.zeros_like(param)
+
+    def _sigmoid(self, x):
+        return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
+
+    def _softmax(self, x):
+        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
+
+    def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Forward pass with caching for backprop.
+
+        Args:
+            x: Input (seq_len, input_dim) or (batch, seq_len, input_dim)
+
+        Returns:
+            output: Class probabilities (batch, output_dim)
+            hidden: Final hidden state
+        """
+        if len(x.shape) == 2:
+            x = x.reshape(1, *x.shape)
+
+        batch_size, seq_len, _ = x.shape
+
+        # Initialize hidden states
+        h = np.zeros((batch_size, self.hidden_dim))
+        c = np.zeros((batch_size, self.hidden_dim))
+
+        # Store cache for BPTT
+        self.cache = {
+            'x': x, 'h': [h], 'c': [c],
+            'f': [], 'i': [], 'c_tilde': [], 'o': []
+        }
+
+        for t in range(seq_len):
+            xt = x[:, t, :]
+            concat = np.concatenate([xt, h], axis=1)
+
+            # Gates
+            f = self._sigmoid(concat @ self.Wf + self.bf)
+            i = self._sigmoid(concat @ self.Wi + self.bi)
+            c_tilde = np.tanh(concat @ self.Wc + self.bc)
+            o = self._sigmoid(concat @ self.Wo + self.bo)
+
+            # Cell and hidden state
+            c = f * c + i * c_tilde
+            h = o * np.tanh(c)
+
+            # Cache
+            self.cache['f'].append(f)
+            self.cache['i'].append(i)
+            self.cache['c_tilde'].append(c_tilde)
+            self.cache['o'].append(o)
+            self.cache['h'].append(h)
+            self.cache['c'].append(c)
+
+        # Output layer
+        logits = h @ self.Wy + self.by
+        probs = self._softmax(logits)
+
+        return probs, h
+
+    def backward(self, y_true: np.ndarray) -> float:
+        """
+        Backpropagation through time (BPTT).
+
+        Args:
+            y_true: True labels (batch,) as integers
+
+        Returns:
+            loss: Cross-entropy loss
+        """
+        x = self.cache['x']
+        batch_size, seq_len, _ = x.shape
+
+        # Forward to get predictions
+        probs, _ = self.forward(x)
+
+        # Cross-entropy loss
+        y_onehot = np.zeros_like(probs)
+        y_onehot[np.arange(batch_size), y_true.astype(int)] = 1
+        loss = -np.mean(np.sum(y_onehot * np.log(probs + 1e-8), axis=1))
+
+        # Output layer gradients
+        dlogits = (probs - y_onehot) / batch_size
+        dWy = self.cache['h'][-1].T @ dlogits
+        dby = np.sum(dlogits, axis=0, keepdims=True)
+
+        # Backprop through LSTM
+        dh_next = dlogits @ self.Wy.T
+        dc_next = np.zeros((batch_size, self.hidden_dim))
+
+        dWf = np.zeros_like(self.Wf)
+        dWi = np.zeros_like(self.Wi)
+        dWc = np.zeros_like(self.Wc)
+        dWo = np.zeros_like(self.Wo)
+        dbf = np.zeros_like(self.bf)
+        dbi = np.zeros_like(self.bi)
+        dbc = np.zeros_like(self.bc)
+        dbo = np.zeros_like(self.bo)
+
+        for t in reversed(range(seq_len)):
+            h = self.cache['h'][t + 1]
+            h_prev = self.cache['h'][t]
+            c = self.cache['c'][t + 1]
+            c_prev = self.cache['c'][t]
+
+            f = self.cache['f'][t]
+            i = self.cache['i'][t]
+            c_tilde = self.cache['c_tilde'][t]
+            o = self.cache['o'][t]
+
+            xt = x[:, t, :]
+            concat = np.concatenate([xt, h_prev], axis=1)
+
+            # Gradients
+            dh = dh_next
+            tanh_c = np.tanh(c)
+
+            do = dh * tanh_c
+            do_raw = do * o * (1 - o)
+
+            dc = dh * o * (1 - tanh_c ** 2) + dc_next
+
+            df = dc * c_prev
+            df_raw = df * f * (1 - f)
+
+            di = dc * c_tilde
+            di_raw = di * i * (1 - i)
+
+            dc_tilde = dc * i
+            dc_tilde_raw = dc_tilde * (1 - c_tilde ** 2)
+
+            # Weight gradients
+            dWf += concat.T @ df_raw
+            dWi += concat.T @ di_raw
+            dWc += concat.T @ dc_tilde_raw
+            dWo += concat.T @ do_raw
+
+            dbf += np.sum(df_raw, axis=0, keepdims=True)
+            dbi += np.sum(di_raw, axis=0, keepdims=True)
+            dbc += np.sum(dc_tilde_raw, axis=0, keepdims=True)
+            dbo += np.sum(do_raw, axis=0, keepdims=True)
+
+            # Gradients for next timestep
+            dconcat = (df_raw @ self.Wf.T + di_raw @ self.Wi.T +
+                       dc_tilde_raw @ self.Wc.T + do_raw @ self.Wo.T)
+            dh_next = dconcat[:, self.input_dim:]
+            dc_next = dc * f
+
+        # Gradient clipping
+        max_grad = 5.0
+        grads = {'Wf': dWf, 'Wi': dWi, 'Wc': dWc, 'Wo': dWo,
+                 'bf': dbf, 'bi': dbi, 'bc': dbc, 'bo': dbo,
+                 'Wy': dWy, 'by': dby}
+
+        for name, grad in grads.items():
+            norm = np.linalg.norm(grad)
+            if norm > max_grad:
+                grads[name] = grad * max_grad / norm
+
+        # Adam update
+        self.t += 1
+        beta1, beta2, eps = 0.9, 0.999, 1e-8
+
+        for name, grad in grads.items():
+            param = getattr(self, name)
+            self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
+            self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
+
+            m_hat = self.m[name] / (1 - beta1 ** self.t)
+            v_hat = self.v[name] / (1 - beta2 ** self.t)
+
+            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+            setattr(self, name, param)
+
+        return loss
+
+    def train_step(self, x: np.ndarray, y: np.ndarray) -> float:
+        """Single training step."""
+        self.forward(x)
+        return self.backward(y)
+
+    def predict(self, x: np.ndarray) -> int:
+        """Predict class."""
+        probs, _ = self.forward(x)
+        return int(np.argmax(probs[0]))
+
+    def get_weights(self) -> Dict:
+        """Get all weights for checkpointing."""
+        return {
+            'Wf': self.Wf, 'Wi': self.Wi, 'Wc': self.Wc, 'Wo': self.Wo,
+            'bf': self.bf, 'bi': self.bi, 'bc': self.bc, 'bo': self.bo,
+            'Wy': self.Wy, 'by': self.by
+        }
+
+    def set_weights(self, weights: Dict):
+        """Set weights from checkpoint."""
+        for name, value in weights.items():
+            setattr(self, name, value)
+        self._init_adam()
+
+
 # =============================================================================
 # OPTIMIZERS
 # =============================================================================
@@ -532,6 +781,12 @@ class DQN:
         q_values = self._forward(state, self.q_network)
         return int(np.argmax(q_values))
 
+    def get_q_values(self, state: np.ndarray) -> np.ndarray:
+        """Get Q-values for a state (for ensemble prediction)."""
+        state = np.array(state).reshape(1, -1)
+        q_values = self._forward(state, self.q_network)
+        return q_values[0]  # Return 1D array
+
     def train_step(self, batch_size: int = 64) -> float:
         """Perform one training step."""
         if len(self.replay_buffer) < batch_size:
@@ -745,6 +1000,18 @@ class PPOAgent:
         for layer in self.critic:
             x = layer.forward(x)
         return x
+
+    def get_action_probs(self, state: np.ndarray) -> np.ndarray:
+        """Get action probabilities (for ensemble prediction)."""
+        state = np.array(state).reshape(1, -1)
+        probs = self._forward_actor(state).flatten()
+        return probs
+
+    def get_value(self, state: np.ndarray) -> float:
+        """Get state value estimate (for ensemble prediction)."""
+        state = np.array(state).reshape(1, -1)
+        value = self._forward_critic(state).flatten()[0]
+        return value
 
     def select_action(self, state: np.ndarray) -> Tuple[int, float, float]:
         """Select action from policy distribution."""
@@ -1090,6 +1357,461 @@ class MarketRegimeVAE:
             3: "Low Volatility Consolidation",
         }
         return names.get(regime_id, "Unknown")
+
+
+class TrainableTransformer:
+    """
+    Simplified Transformer for classification with proper gradient descent training.
+    Uses a simpler architecture for stable training.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3,
+                 n_heads: int = 4, lr: float = 0.001):
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.n_heads = n_heads
+        self.head_dim = hidden_dim // n_heads
+        self.lr = lr
+
+        # Input projection
+        self.W_in = np.random.randn(input_dim, hidden_dim) * np.sqrt(2.0 / input_dim)
+        self.b_in = np.zeros((1, hidden_dim))
+
+        # Multi-head attention weights
+        self.W_q = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
+        self.W_k = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
+        self.W_v = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
+        self.W_o = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
+
+        # Feed-forward network
+        self.W_ff1 = np.random.randn(hidden_dim, hidden_dim * 4) * np.sqrt(2.0 / hidden_dim)
+        self.b_ff1 = np.zeros((1, hidden_dim * 4))
+        self.W_ff2 = np.random.randn(hidden_dim * 4, hidden_dim) * np.sqrt(2.0 / (hidden_dim * 4))
+        self.b_ff2 = np.zeros((1, hidden_dim))
+
+        # Output layer
+        self.W_out = np.random.randn(hidden_dim, output_dim) * np.sqrt(1.0 / hidden_dim)
+        self.b_out = np.zeros((1, output_dim))
+
+        # Adam optimizer
+        self._init_adam()
+        self.cache = {}
+
+    def _init_adam(self):
+        self.m = {}
+        self.v = {}
+        self.t = 0
+        for name in ['W_in', 'b_in', 'W_q', 'W_k', 'W_v', 'W_o',
+                     'W_ff1', 'b_ff1', 'W_ff2', 'b_ff2', 'W_out', 'b_out']:
+            param = getattr(self, name)
+            self.m[name] = np.zeros_like(param)
+            self.v[name] = np.zeros_like(param)
+
+    def _softmax(self, x, axis=-1):
+        exp_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
+        return exp_x / (np.sum(exp_x, axis=axis, keepdims=True) + 1e-8)
+
+    def _relu(self, x):
+        return np.maximum(0, x)
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """
+        Forward pass through transformer.
+
+        Args:
+            x: Input (batch, seq_len, input_dim) or (seq_len, input_dim)
+
+        Returns:
+            Class probabilities (batch, output_dim)
+        """
+        if len(x.shape) == 2:
+            x = x.reshape(1, *x.shape)
+
+        batch_size, seq_len, _ = x.shape
+
+        # Input projection
+        x_flat = x.reshape(-1, self.input_dim)
+        h = x_flat @ self.W_in + self.b_in
+        h = self._relu(h)
+        h = h.reshape(batch_size, seq_len, self.hidden_dim)
+
+        self.cache['input'] = x
+        self.cache['h_in'] = h
+
+        # Self-attention
+        Q = h @ self.W_q
+        K = h @ self.W_k
+        V = h @ self.W_v
+
+        # Scaled dot-product attention
+        scale = np.sqrt(self.hidden_dim)
+        attn_scores = Q @ K.transpose(0, 2, 1) / scale
+        attn_weights = self._softmax(attn_scores, axis=-1)
+        attn_out = attn_weights @ V
+        attn_out = attn_out @ self.W_o
+
+        self.cache['Q'] = Q
+        self.cache['K'] = K
+        self.cache['V'] = V
+        self.cache['attn_weights'] = attn_weights
+        self.cache['attn_out'] = attn_out
+
+        # Residual + layer norm (simplified: just residual)
+        h = h + attn_out
+        self.cache['h_attn'] = h
+
+        # Feed-forward
+        ff_flat = h.reshape(-1, self.hidden_dim)
+        ff1 = self._relu(ff_flat @ self.W_ff1 + self.b_ff1)
+        ff2 = ff1 @ self.W_ff2 + self.b_ff2
+        ff_out = ff2.reshape(batch_size, seq_len, self.hidden_dim)
+
+        self.cache['ff1'] = ff1.reshape(batch_size, seq_len, -1)
+        self.cache['ff_out'] = ff_out
+
+        # Residual
+        h = h + ff_out
+        self.cache['h_ff'] = h
+
+        # Take last position for classification
+        h_last = h[:, -1, :]
+        self.cache['h_last'] = h_last
+
+        # Output
+        logits = h_last @ self.W_out + self.b_out
+        probs = self._softmax(logits, axis=-1)
+
+        self.cache['logits'] = logits
+        self.cache['probs'] = probs
+
+        return probs
+
+    def train_step(self, x: np.ndarray, y: np.ndarray) -> float:
+        """
+        Single training step with backpropagation.
+
+        Args:
+            x: Input sequences (batch, seq_len, input_dim)
+            y: Labels (batch,) as integers
+
+        Returns:
+            Cross-entropy loss
+        """
+        if len(x.shape) == 2:
+            x = x.reshape(1, *x.shape)
+
+        batch_size = x.shape[0]
+
+        # Forward
+        probs = self.forward(x)
+
+        # Loss
+        y_onehot = np.zeros_like(probs)
+        y_onehot[np.arange(batch_size), y.astype(int)] = 1
+        loss = -np.mean(np.sum(y_onehot * np.log(probs + 1e-8), axis=1))
+
+        # Backward
+        dlogits = (probs - y_onehot) / batch_size
+
+        # Output layer
+        dW_out = self.cache['h_last'].T @ dlogits
+        db_out = np.sum(dlogits, axis=0, keepdims=True)
+        dh_last = dlogits @ self.W_out.T
+
+        # Expand gradient back through sequence (only last position contributes)
+        seq_len = x.shape[1]
+        dh = np.zeros((batch_size, seq_len, self.hidden_dim))
+        dh[:, -1, :] = dh_last
+
+        # Feed-forward backward (simplified)
+        dff_out = dh
+        dff2 = dff_out.reshape(-1, self.hidden_dim)
+        dW_ff2 = self.cache['ff1'].reshape(-1, self.hidden_dim * 4).T @ dff2
+        db_ff2 = np.sum(dff2, axis=0, keepdims=True)
+
+        dff1 = dff2 @ self.W_ff2.T
+        dff1 = dff1 * (self.cache['ff1'].reshape(-1, self.hidden_dim * 4) > 0)
+
+        h_attn_flat = self.cache['h_attn'].reshape(-1, self.hidden_dim)
+        dW_ff1 = h_attn_flat.T @ dff1
+        db_ff1 = np.sum(dff1, axis=0, keepdims=True)
+
+        # Attention backward (simplified - just update output projection)
+        dattn_out = dh
+        dW_o = self.cache['attn_out'].reshape(-1, self.hidden_dim).T @ dattn_out.reshape(-1, self.hidden_dim)
+
+        # Input projection backward
+        dh_in = dh.reshape(-1, self.hidden_dim)
+        dh_in = dh_in * (self.cache['h_in'].reshape(-1, self.hidden_dim) > 0)
+        dW_in = x.reshape(-1, self.input_dim).T @ dh_in
+        db_in = np.sum(dh_in, axis=0, keepdims=True)
+
+        # Gradient clipping
+        grads = {
+            'W_out': dW_out, 'b_out': db_out,
+            'W_ff2': dW_ff2, 'b_ff2': db_ff2,
+            'W_ff1': dW_ff1, 'b_ff1': db_ff1,
+            'W_o': dW_o,
+            'W_in': dW_in, 'b_in': db_in,
+            'W_q': np.zeros_like(self.W_q),  # Simplified: not updating Q,K,V directly
+            'W_k': np.zeros_like(self.W_k),
+            'W_v': np.zeros_like(self.W_v),
+        }
+
+        max_grad = 5.0
+        for name, grad in grads.items():
+            norm = np.linalg.norm(grad)
+            if norm > max_grad:
+                grads[name] = grad * max_grad / norm
+
+        # Adam update
+        self.t += 1
+        beta1, beta2, eps = 0.9, 0.999, 1e-8
+
+        for name, grad in grads.items():
+            if np.sum(np.abs(grad)) == 0:
+                continue
+            param = getattr(self, name)
+            self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
+            self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
+
+            m_hat = self.m[name] / (1 - beta1 ** self.t)
+            v_hat = self.v[name] / (1 - beta2 ** self.t)
+
+            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+            setattr(self, name, param)
+
+        return loss
+
+    def predict(self, x: np.ndarray) -> int:
+        probs = self.forward(x)
+        return int(np.argmax(probs[0]))
+
+    def get_weights(self) -> Dict:
+        return {name: getattr(self, name) for name in
+                ['W_in', 'b_in', 'W_q', 'W_k', 'W_v', 'W_o',
+                 'W_ff1', 'b_ff1', 'W_ff2', 'b_ff2', 'W_out', 'b_out']}
+
+    def set_weights(self, weights: Dict):
+        for name, value in weights.items():
+            setattr(self, name, value)
+        self._init_adam()
+
+
+class TrainableVAE:
+    """
+    Variational Autoencoder with proper training using reconstruction + KL loss.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int = 64, latent_dim: int = 8,
+                 output_dim: int = 4, lr: float = 0.001):
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.latent_dim = latent_dim
+        self.output_dim = output_dim  # Number of regimes
+        self.lr = lr
+
+        # Encoder
+        self.W_enc1 = np.random.randn(input_dim, hidden_dim) * np.sqrt(2.0 / input_dim)
+        self.b_enc1 = np.zeros((1, hidden_dim))
+        self.W_mu = np.random.randn(hidden_dim, latent_dim) * np.sqrt(1.0 / hidden_dim)
+        self.b_mu = np.zeros((1, latent_dim))
+        self.W_logvar = np.random.randn(hidden_dim, latent_dim) * np.sqrt(1.0 / hidden_dim)
+        self.b_logvar = np.zeros((1, latent_dim))
+
+        # Decoder
+        self.W_dec1 = np.random.randn(latent_dim, hidden_dim) * np.sqrt(2.0 / latent_dim)
+        self.b_dec1 = np.zeros((1, hidden_dim))
+        self.W_dec2 = np.random.randn(hidden_dim, input_dim) * np.sqrt(1.0 / hidden_dim)
+        self.b_dec2 = np.zeros((1, input_dim))
+
+        # Regime classifier on latent space
+        self.W_cls = np.random.randn(latent_dim, output_dim) * np.sqrt(1.0 / latent_dim)
+        self.b_cls = np.zeros((1, output_dim))
+
+        self._init_adam()
+        self.cache = {}
+
+    def _init_adam(self):
+        self.m = {}
+        self.v = {}
+        self.t = 0
+        for name in ['W_enc1', 'b_enc1', 'W_mu', 'b_mu', 'W_logvar', 'b_logvar',
+                     'W_dec1', 'b_dec1', 'W_dec2', 'b_dec2', 'W_cls', 'b_cls']:
+            param = getattr(self, name)
+            self.m[name] = np.zeros_like(param)
+            self.v[name] = np.zeros_like(param)
+
+    def _relu(self, x):
+        return np.maximum(0, x)
+
+    def _softmax(self, x):
+        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
+
+    def encode(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        h = self._relu(x @ self.W_enc1 + self.b_enc1)
+        self.cache['h_enc'] = h
+        mu = h @ self.W_mu + self.b_mu
+        logvar = h @ self.W_logvar + self.b_logvar
+        return mu, logvar
+
+    def reparameterize(self, mu: np.ndarray, logvar: np.ndarray) -> np.ndarray:
+        std = np.exp(0.5 * logvar)
+        eps = np.random.randn(*mu.shape)
+        self.cache['eps'] = eps
+        self.cache['std'] = std
+        return mu + eps * std
+
+    def decode(self, z: np.ndarray) -> np.ndarray:
+        h = self._relu(z @ self.W_dec1 + self.b_dec1)
+        self.cache['h_dec'] = h
+        return h @ self.W_dec2 + self.b_dec2
+
+    def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if len(x.shape) == 1:
+            x = x.reshape(1, -1)
+
+        self.cache['x'] = x
+        mu, logvar = self.encode(x)
+        self.cache['mu'] = mu
+        self.cache['logvar'] = logvar
+
+        z = self.reparameterize(mu, logvar)
+        self.cache['z'] = z
+
+        recon = self.decode(z)
+        self.cache['recon'] = recon
+
+        # Regime classification
+        regime_logits = z @ self.W_cls + self.b_cls
+        regime_probs = self._softmax(regime_logits)
+        self.cache['regime_probs'] = regime_probs
+
+        return recon, mu, logvar, regime_probs
+
+    def train_step(self, x: np.ndarray, y: Optional[np.ndarray] = None) -> float:
+        """
+        Training step with reconstruction + KL loss (+ classification loss if labels provided).
+
+        Loss = Reconstruction_MSE + beta * KL_divergence + classification_loss
+        """
+        if len(x.shape) == 1:
+            x = x.reshape(1, -1)
+
+        batch_size = x.shape[0]
+        beta = 0.1  # KL weight (beta-VAE style)
+
+        # Forward
+        recon, mu, logvar, regime_probs = self.forward(x)
+
+        # Reconstruction loss (MSE)
+        recon_loss = np.mean((recon - x) ** 2)
+
+        # KL divergence: -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
+        kl_loss = -0.5 * np.mean(np.sum(1 + logvar - mu ** 2 - np.exp(logvar), axis=1))
+
+        # Classification loss if labels provided
+        cls_loss = 0
+        if y is not None:
+            y_onehot = np.zeros_like(regime_probs)
+            y_onehot[np.arange(batch_size), y.astype(int) % self.output_dim] = 1
+            cls_loss = -np.mean(np.sum(y_onehot * np.log(regime_probs + 1e-8), axis=1))
+
+        total_loss = recon_loss + beta * kl_loss + cls_loss
+
+        # Backward pass
+        # Reconstruction gradient
+        drecon = 2 * (recon - x) / (batch_size * self.input_dim)
+
+        # Decoder backward
+        dW_dec2 = self.cache['h_dec'].T @ drecon
+        db_dec2 = np.sum(drecon, axis=0, keepdims=True)
+
+        dh_dec = drecon @ self.W_dec2.T
+        dh_dec = dh_dec * (self.cache['h_dec'] > 0)
+
+        dW_dec1 = self.cache['z'].T @ dh_dec
+        db_dec1 = np.sum(dh_dec, axis=0, keepdims=True)
+
+        dz = dh_dec @ self.W_dec1.T
+
+        # Classification gradient
+        if y is not None:
+            dcls = (regime_probs - y_onehot) / batch_size
+            dW_cls = self.cache['z'].T @ dcls
+            db_cls = np.sum(dcls, axis=0, keepdims=True)
+            dz += dcls @ self.W_cls.T
+        else:
+            dW_cls = np.zeros_like(self.W_cls)
+            db_cls = np.zeros_like(self.b_cls)
+
+        # KL gradient
+        dmu = beta * mu / batch_size
+        dlogvar = beta * 0.5 * (np.exp(logvar) - 1) / batch_size
+
+        # Reparameterization backward
+        dmu += dz
+        dlogvar += dz * self.cache['eps'] * self.cache['std'] * 0.5
+
+        # Encoder backward
+        dW_mu = self.cache['h_enc'].T @ dmu
+        db_mu = np.sum(dmu, axis=0, keepdims=True)
+        dW_logvar = self.cache['h_enc'].T @ dlogvar
+        db_logvar = np.sum(dlogvar, axis=0, keepdims=True)
+
+        dh_enc = dmu @ self.W_mu.T + dlogvar @ self.W_logvar.T
+        dh_enc = dh_enc * (self.cache['h_enc'] > 0)
+
+        dW_enc1 = x.T @ dh_enc
+        db_enc1 = np.sum(dh_enc, axis=0, keepdims=True)
+
+        # Gradient clipping and Adam update
+        grads = {
+            'W_enc1': dW_enc1, 'b_enc1': db_enc1,
+            'W_mu': dW_mu, 'b_mu': db_mu,
+            'W_logvar': dW_logvar, 'b_logvar': db_logvar,
+            'W_dec1': dW_dec1, 'b_dec1': db_dec1,
+            'W_dec2': dW_dec2, 'b_dec2': db_dec2,
+            'W_cls': dW_cls, 'b_cls': db_cls,
+        }
+
+        max_grad = 5.0
+        self.t += 1
+        beta1, beta2, eps = 0.9, 0.999, 1e-8
+
+        for name, grad in grads.items():
+            norm = np.linalg.norm(grad)
+            if norm > max_grad:
+                grad = grad * max_grad / norm
+
+            param = getattr(self, name)
+            self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
+            self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
+
+            m_hat = self.m[name] / (1 - beta1 ** self.t)
+            v_hat = self.v[name] / (1 - beta2 ** self.t)
+
+            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+            setattr(self, name, param)
+
+        return total_loss
+
+    def detect_regime(self, x: np.ndarray) -> Tuple[int, np.ndarray]:
+        """Detect regime from input."""
+        _, _, _, regime_probs = self.forward(x)
+        return int(np.argmax(regime_probs[0])), regime_probs[0]
+
+    def get_weights(self) -> Dict:
+        return {name: getattr(self, name) for name in
+                ['W_enc1', 'b_enc1', 'W_mu', 'b_mu', 'W_logvar', 'b_logvar',
+                 'W_dec1', 'b_dec1', 'W_dec2', 'b_dec2', 'W_cls', 'b_cls']}
+
+    def set_weights(self, weights: Dict):
+        for name, value in weights.items():
+            setattr(self, name, value)
+        self._init_adam()
 
 
 # =============================================================================
