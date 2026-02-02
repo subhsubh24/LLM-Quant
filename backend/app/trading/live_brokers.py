@@ -689,7 +689,11 @@ class BrokerManager:
             is_paper=is_paper,
             additional_config=additional_config or {},
         )
+        # Debug: show masked key values
+        key_masked = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
+        secret_masked = f"{api_secret[:4]}...{api_secret[-4:]}" if len(api_secret) > 8 else "***"
         logger.info(f"Credentials set for {broker.value}: {'PAPER' if is_paper else 'LIVE'}")
+        print(f"[BROKER] {broker.value} key={key_masked}, secret={secret_masked}")
 
     async def connect_all(self) -> Dict[str, bool]:
         """Connect to all configured brokers."""
