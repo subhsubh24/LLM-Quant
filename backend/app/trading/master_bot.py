@@ -645,34 +645,33 @@ class MasterQuantBot:
         "GLD", "SLV", "GDX", "USO", "UNG", "WEAT", "CORN",
     ]
 
-    # Expanded crypto perpetuals - 50+ liquid coins for maximum opportunities
+    # Binance Futures USDT-M Perpetuals (verified available on Binance)
+    # Symbol format: "XXX-PERP" -> converted to "XXXUSDT" for Binance API
     CRYPTO_PERPETUALS = [
-        # Tier 1 - Blue Chips (highest liquidity, tightest spreads)
-        "BTC-PERP", "ETH-PERP", "SOL-PERP", "BNB-PERP", "XRP-PERP",
-        # Tier 2 - Major Alts (high liquidity)
-        "AVAX-PERP", "LINK-PERP", "DOGE-PERP", "ADA-PERP", "DOT-PERP",
-        "MATIC-PERP", "LTC-PERP", "ATOM-PERP", "UNI-PERP", "NEAR-PERP",
-        # Tier 3 - L2s & Infrastructure
-        "ARB-PERP", "OP-PERP", "INJ-PERP", "SUI-PERP", "SEI-PERP",
-        "APT-PERP", "FTM-PERP", "RUNE-PERP", "AAVE-PERP", "MKR-PERP",
-        # Tier 4 - DeFi & GameFi
-        "CRV-PERP", "LDO-PERP", "SNX-PERP", "COMP-PERP", "GMX-PERP",
-        "DYDX-PERP", "1INCH-PERP", "SUSHI-PERP", "YFI-PERP", "BAL-PERP",
-        # Tier 5 - AI & Computing
-        "FET-PERP", "RNDR-PERP", "AGIX-PERP", "OCEAN-PERP", "TAO-PERP",
-        "AR-PERP", "FIL-PERP", "GRT-PERP", "THETA-PERP", "HNT-PERP",
-        # Tier 6 - Memes & High Volatility (use smaller position sizes)
+        # Tier 1 - Blue Chips (highest liquidity)
+        "BTC-PERP", "ETH-PERP", "BNB-PERP", "SOL-PERP", "XRP-PERP",
+        # Tier 2 - Major Alts (all verified on Binance Futures)
+        "DOGE-PERP", "ADA-PERP", "AVAX-PERP", "LINK-PERP", "DOT-PERP",
+        "MATIC-PERP", "LTC-PERP", "ATOM-PERP", "UNI-PERP", "ETC-PERP",
+        "FIL-PERP", "NEAR-PERP", "APT-PERP", "ARB-PERP", "OP-PERP",
+        # Tier 3 - DeFi & L2s (verified on Binance Futures)
+        "INJ-PERP", "SUI-PERP", "SEI-PERP", "TIA-PERP", "FTM-PERP",
+        "AAVE-PERP", "MKR-PERP", "LDO-PERP", "CRV-PERP", "SNX-PERP",
+        "COMP-PERP", "DYDX-PERP", "GMX-PERP", "GRT-PERP", "IMX-PERP",
+        # Tier 4 - AI & Storage (verified on Binance Futures)
+        "FET-PERP", "RNDR-PERP", "AR-PERP", "THETA-PERP", "STX-PERP",
+        # Tier 5 - Memes (verified, use smaller sizes due to volatility)
         "PEPE-PERP", "SHIB-PERP", "FLOKI-PERP", "BONK-PERP", "WIF-PERP",
-        "MEME-PERP", "TURBO-PERP", "BOME-PERP", "ORDI-PERP", "SATS-PERP",
-        # Tier 7 - Emerging & New Listings
-        "TIA-PERP", "STRK-PERP", "PYTH-PERP", "JUP-PERP", "JTO-PERP",
-        "W-PERP", "ENA-PERP", "ETHFI-PERP", "ONDO-PERP", "PENDLE-PERP",
+        "MEME-PERP", "ORDI-PERP",
+        # Tier 6 - Recent Listings (verified on Binance Futures)
+        "JTO-PERP", "PYTH-PERP", "JUP-PERP", "STRK-PERP", "W-PERP",
+        "ENA-PERP", "ONDO-PERP", "PENDLE-PERP", "NOT-PERP", "WLD-PERP",
     ]
 
-    # Expanded crypto options - 15 underlyings for puts/calls (30 instruments total)
+    # Crypto options - for paper trading all work; live trading limited to BTC/ETH
     CRYPTO_OPTIONS = [
         "BTC", "ETH", "SOL", "BNB", "XRP", "AVAX", "LINK", "DOGE",
-        "ADA", "DOT", "MATIC", "LTC", "ATOM", "UNI", "NEAR",
+        "ADA", "DOT", "MATIC", "LTC",
     ]
 
     def __init__(
