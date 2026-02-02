@@ -244,8 +244,9 @@ class CryptoDerivativePosition:
     def calculate_pnl(self) -> float:
         """Calculate current P&L including funding.
 
-        Note: self.size is in USD (position value), not quantity.
-        PnL = percentage_change * position_size * leverage
+        Note: self.size is in USD (full position value, NOT margin).
+        For a $500 position with 5x leverage, size=$500, margin=$100.
+        PnL = percentage_change * position_size (NOT multiplied by leverage again!)
         """
         if self.entry_price <= 0:
             return 0.0
@@ -257,8 +258,9 @@ class CryptoDerivativePosition:
         if self.side == "short":
             pct_change = -pct_change
 
-        # PnL = percentage change * position size * leverage + funding
-        return pct_change * self.size * self.leverage + self.funding_received
+        # PnL = percentage change * position size + funding
+        # size is already the full leveraged position, don't multiply by leverage again!
+        return pct_change * self.size + self.funding_received
 
     def to_dict(self) -> Dict:
         return {
