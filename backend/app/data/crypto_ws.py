@@ -319,8 +319,8 @@ class BinanceUSProvider(BinanceProvider):
 
 class MultiProviderWebSocket:
     """
-    Multi-provider WebSocket client.
-    Tries providers in order until one connects successfully.
+    Binance WebSocket client for crypto price streaming.
+    Uses Binance only to ensure consistent data format for derivatives trading.
     """
 
     def __init__(self):
@@ -332,15 +332,13 @@ class MultiProviderWebSocket:
         self._current_provider: Optional[str] = None
         self._last_update: Optional[datetime] = None
         self._update_count = 0
-        self._reconnect_delay = 1
-        self._max_reconnect_delay = 60
+        self._reconnect_delay = 1  # Start with 1 second
+        self._max_reconnect_delay = 10  # Max 10 seconds (quick reconnect)
 
-        # Providers to try in order - Binance.US first for US users
+        # Only use Binance providers for consistent derivatives data format
         self._providers: List[WebSocketProvider] = [
-            BinanceUSProvider(),  # Priority for US users with Binance.US accounts
-            CoinbaseProvider(),
-            KrakenProvider(),
-            BinanceProvider(),
+            BinanceUSProvider(),  # Try Binance.US first
+            BinanceProvider(),    # Fallback to international Binance
         ]
 
     @property
@@ -359,7 +357,7 @@ class MultiProviderWebSocket:
             return
         self._running = True
         self._task = asyncio.create_task(self._run())
-        logger.info("🚀 Multi-provider WebSocket started")
+        logger.info("🚀 Binance WebSocket started")
 
     async def stop(self):
         """Stop the WebSocket connection."""
@@ -376,7 +374,7 @@ class MultiProviderWebSocket:
         logger.info("🛑 WebSocket stopped")
 
     async def _run(self):
-        """Main loop - try providers until one works."""
+        """Main loop - connect to Binance with quick reconnection."""
         while self._running:
             connected = False
 
@@ -385,25 +383,28 @@ class MultiProviderWebSocket:
                     break
 
                 try:
-                    logger.info(f"Trying {provider.name} WebSocket...")
+                    logger.info(f"Connecting to {provider.name}...")
                     await self._connect_to_provider(provider)
                     connected = True
+                    self._reconnect_delay = 1  # Reset delay on successful connection
                     break
                 except Exception as e:
                     error_str = str(e)
                     if "451" in error_str:
-                        logger.warning(f"{provider.name} blocked (HTTP 451). Trying next...")
+                        logger.debug(f"{provider.name} blocked (HTTP 451), trying fallback...")
                     elif "403" in error_str or "401" in error_str:
-                        logger.warning(f"{provider.name} access denied. Trying next...")
+                        logger.debug(f"{provider.name} access denied, trying fallback...")
+                    elif "1011" in error_str or "ping timeout" in error_str.lower():
+                        logger.debug(f"{provider.name} connection lost, reconnecting...")
                     else:
-                        logger.warning(f"{provider.name} error: {e}. Trying next...")
+                        logger.debug(f"{provider.name} disconnected: {e}")
                     continue
 
             if self._running and not connected:
                 self._connected = False
-                logger.warning(f"All providers failed. Retrying in {self._reconnect_delay}s...")
+                # Quick reconnection - don't wait long
                 await asyncio.sleep(self._reconnect_delay)
-                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+                self._reconnect_delay = min(self._reconnect_delay * 1.5, self._max_reconnect_delay)
 
     async def _connect_to_provider(self, provider: WebSocketProvider):
         """Connect to a specific provider."""
