@@ -286,7 +286,7 @@ export default function MasterQuantBotPage() {
 
     try {
       const res = await fetch(
-        `${API_BASE}/api/master-bot/train?days_of_data=180&training_epochs=100`,
+        `${API_BASE}/api/master-bot/train?days_of_data=180&training_epochs=40`,
         { method: "POST" }
       );
 
