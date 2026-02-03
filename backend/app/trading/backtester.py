@@ -1495,7 +1495,8 @@ class ModelPreTrainer:
         # DQN prediction
         q_values = self.dqn.get_q_values(state)
         dqn_action = np.argmax(q_values)
-        dqn_conf = np.exp(q_values[dqn_action]) / np.sum(np.exp(q_values))
+        dqn_probs = self._softmax(q_values)  # Use numerically stable softmax
+        dqn_conf = dqn_probs[dqn_action]
         predictions.append(dqn_action)
         confidences.append(dqn_conf)
 
