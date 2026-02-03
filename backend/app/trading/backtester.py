@@ -1252,11 +1252,13 @@ class ModelPreTrainer:
                         future_return = (closes[i + 5] - closes[i]) / closes[i]
                         # Reward alignment: +1 for correct direction, -1 for wrong
                         if labels[i] == 2:  # Predicted buy
-                            rewards.append(future_return * 10)  # Scale for learning
+                            reward = future_return * 10  # Scale for learning
                         elif labels[i] == 0:  # Predicted sell
-                            rewards.append(-future_return * 10)
+                            reward = -future_return * 10
                         else:
-                            rewards.append(0)
+                            reward = 0
+                        # Clip rewards to [-1, 1] to prevent DQN Q-value explosion
+                        rewards.append(np.clip(reward, -1.0, 1.0))
                     else:
                         rewards.append(0)
 

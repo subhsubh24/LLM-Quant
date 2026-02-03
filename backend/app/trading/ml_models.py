@@ -821,8 +821,11 @@ class DQN:
         next_q_target = self._forward(next_states, self._target_network)
         next_q_values = next_q_target[np.arange(batch_size), next_actions]
 
-        # Compute targets
+        # Compute targets with value clipping to prevent explosion
+        # Clip next_q_values to reasonable range before computing targets
+        next_q_values = np.clip(next_q_values, -10, 10)
         targets = rewards + self.gamma * next_q_values * (1 - dones)
+        targets = np.clip(targets, -10, 10)  # Final target clipping
 
         # TD error for prioritized replay
         td_errors = targets - current_q_actions
