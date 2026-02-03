@@ -1122,6 +1122,66 @@ class PPOAgent:
                 # Entropy bonus
                 entropy = -np.mean(np.sum(probs * np.log(probs + 1e-10), axis=1))
 
+                # ============ ACTOR BACKWARD PASS ============
+                # Gradient of policy loss w.r.t. log_probs
+                # d(policy_loss)/d(log_prob) = -advantage * d(clipped_ratio)/d(log_prob)
+                # For clipped surrogate: use ratio where not clipped
+                clipped = (ratio < 1 - self.clip_epsilon) | (ratio > 1 + self.clip_epsilon)
+                d_ratio = np.where(clipped, 0, batch_advantages)
+                d_log_probs = -ratio * d_ratio / len(batch_actions)
+
+                # Gradient through log(prob) -> prob: d(log(p))/d(p) = 1/p
+                # So d(loss)/d(prob) = d(loss)/d(log_prob) * 1/prob
+                d_probs = np.zeros_like(probs)
+                d_probs[np.arange(len(batch_actions)), batch_actions] = d_log_probs / (probs[np.arange(len(batch_actions)), batch_actions] + 1e-10)
+
+                # Add entropy gradient (entropy bonus encourages exploration)
+                d_entropy = -self.entropy_coef * (np.log(probs + 1e-10) + 1) / len(batch_actions)
+                d_probs += d_entropy
+
+                # Softmax backward: d_logits = probs * (d_probs - sum(probs * d_probs))
+                sum_dp = np.sum(probs * d_probs, axis=1, keepdims=True)
+                d_logits = probs * (d_probs - sum_dp)
+
+                # Backward through actor layers
+                grad = d_logits
+                for layer in reversed(self.actor):
+                    grad = layer.backward(grad)
+
+                # Collect actor gradients and update
+                actor_grads = []
+                for layer in self.actor:
+                    actor_grads.extend(layer.gradients())
+
+                # Gradient clipping
+                grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in actor_grads) + 1e-8)
+                if grad_norm > self.max_grad_norm:
+                    actor_grads = [g * self.max_grad_norm / grad_norm for g in actor_grads]
+
+                self.actor_optimizer.step(actor_grads)
+
+                # ============ CRITIC BACKWARD PASS ============
+                # Gradient of value loss: d(MSE)/d(values) = 2 * (values - returns) / batch_size
+                d_values = 2 * (values - batch_returns) / len(batch_returns)
+                d_values = d_values.reshape(-1, 1)  # Shape for backward pass
+
+                # Backward through critic layers
+                grad = d_values
+                for layer in reversed(self.critic):
+                    grad = layer.backward(grad)
+
+                # Collect critic gradients and update
+                critic_grads = []
+                for layer in self.critic:
+                    critic_grads.extend(layer.gradients())
+
+                # Gradient clipping
+                grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in critic_grads) + 1e-8)
+                if grad_norm > self.max_grad_norm:
+                    critic_grads = [g * self.max_grad_norm / grad_norm for g in critic_grads]
+
+                self.critic_optimizer.step(critic_grads)
+
                 total_policy_loss += policy_loss
                 total_value_loss += value_loss
                 total_entropy += entropy
@@ -1596,9 +1656,55 @@ class TrainableTransformer:
         dW_ff1 = h_attn_flat.T @ dff1
         db_ff1 = np.sum(dff1, axis=0, keepdims=True)
 
-        # Attention backward (simplified - just update output projection)
+        # Attention backward - compute gradients for Q, K, V projections
         dattn_out = dh
         dW_o = self.cache['attn_out'].reshape(-1, self.hidden_dim).T @ dattn_out.reshape(-1, self.hidden_dim)
+
+        # Backprop through attention output projection: attn_out = (attn_weights @ V) @ W_o
+        # d_attn_values = dattn_out @ W_o.T (gradient before W_o)
+        d_attn_weighted = dattn_out.reshape(batch_size, seq_len, -1)  # (batch, seq, hidden)
+
+        # Simplified attention backward:
+        # Q, K, V came from h_in projections
+        # We use a simplified gradient: propagate error through V directly
+        # d_V = attn_weights.T @ d_attn_weighted (approximate)
+        attn_weights = self.cache['attn_weights']  # (batch, seq, seq)
+        V = self.cache['V']  # (batch, seq, hidden)
+
+        # Gradient for V: dV = attn_weights.T @ d_weighted_V
+        d_weighted_V = d_attn_weighted @ self.W_o.T
+        dV = np.zeros_like(V)
+        for b in range(batch_size):
+            dV[b] = attn_weights[b].T @ d_weighted_V[b]
+
+        # Gradient for W_v: dW_v = h_in.T @ dV
+        h_in = self.cache['h_in']  # (batch, seq, hidden)
+        dW_v = h_in.reshape(-1, self.hidden_dim).T @ dV.reshape(-1, self.hidden_dim)
+
+        # For Q and K, use simplified gradient (approximate but updates weights)
+        # Gradient flows back through attention scores
+        Q = self.cache['Q']
+        K = self.cache['K']
+        scale = np.sqrt(self.hidden_dim)
+
+        # d_scores = d_softmax(attn_weights) (simplified: use attn_weights * (1-attn_weights) approx)
+        d_scores = np.zeros((batch_size, seq_len, seq_len))
+        for b in range(batch_size):
+            # Approximate softmax gradient
+            d_scores[b] = attn_weights[b] * (d_weighted_V[b] @ V[b].T)
+
+        # dQ = d_scores @ K / scale
+        dQ = np.zeros_like(Q)
+        for b in range(batch_size):
+            dQ[b] = d_scores[b] @ K[b] / scale
+
+        # dK = d_scores.T @ Q / scale
+        dK = np.zeros_like(K)
+        for b in range(batch_size):
+            dK[b] = d_scores[b].T @ Q[b] / scale
+
+        dW_q = h_in.reshape(-1, self.hidden_dim).T @ dQ.reshape(-1, self.hidden_dim)
+        dW_k = h_in.reshape(-1, self.hidden_dim).T @ dK.reshape(-1, self.hidden_dim)
 
         # Input projection backward
         dh_in = dh.reshape(-1, self.hidden_dim)
@@ -1613,9 +1719,9 @@ class TrainableTransformer:
             'W_ff1': dW_ff1, 'b_ff1': db_ff1,
             'W_o': dW_o,
             'W_in': dW_in, 'b_in': db_in,
-            'W_q': np.zeros_like(self.W_q),  # Simplified: not updating Q,K,V directly
-            'W_k': np.zeros_like(self.W_k),
-            'W_v': np.zeros_like(self.W_v),
+            'W_q': dW_q,
+            'W_k': dW_k,
+            'W_v': dW_v,
         }
 
         max_grad = 5.0
