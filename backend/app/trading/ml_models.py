@@ -1567,13 +1567,14 @@ class TrainableTransformer:
         scale = np.sqrt(self.hidden_dim)
         attn_scores = Q @ K.transpose(0, 2, 1) / scale
         attn_weights = self._softmax(attn_scores, axis=-1)
-        attn_out = attn_weights @ V
-        attn_out = attn_out @ self.W_o
+        attn_values = attn_weights @ V  # Before W_o projection
+        attn_out = attn_values @ self.W_o  # After W_o projection
 
         self.cache['Q'] = Q
         self.cache['K'] = K
         self.cache['V'] = V
         self.cache['attn_weights'] = attn_weights
+        self.cache['attn_values'] = attn_values  # Store pre-W_o for backward
         self.cache['attn_out'] = attn_out
 
         # Residual + layer norm (simplified: just residual)
@@ -1657,41 +1658,47 @@ class TrainableTransformer:
         db_ff1 = np.sum(dff1, axis=0, keepdims=True)
 
         # Attention backward - compute gradients for Q, K, V projections
-        dattn_out = dh
-        dW_o = self.cache['attn_out'].reshape(-1, self.hidden_dim).T @ dattn_out.reshape(-1, self.hidden_dim)
+        dattn_out = dh  # Gradient w.r.t. attention output (after W_o)
 
-        # Backprop through attention output projection: attn_out = (attn_weights @ V) @ W_o
-        # d_attn_values = dattn_out @ W_o.T (gradient before W_o)
-        d_attn_weighted = dattn_out.reshape(batch_size, seq_len, -1)  # (batch, seq, hidden)
+        # Gradient for W_o: dW_o = attn_values.T @ dattn_out
+        attn_values = self.cache['attn_values']  # (batch, seq, hidden) - BEFORE W_o
+        dW_o = attn_values.reshape(-1, self.hidden_dim).T @ dattn_out.reshape(-1, self.hidden_dim)
 
-        # Simplified attention backward:
-        # Q, K, V came from h_in projections
-        # We use a simplified gradient: propagate error through V directly
-        # d_V = attn_weights.T @ d_attn_weighted (approximate)
+        # Gradient w.r.t. attn_values (before W_o): d_attn_values = dattn_out @ W_o.T
+        d_attn_values = dattn_out.reshape(batch_size, seq_len, -1) @ self.W_o.T
+
+        # Attention backward through: attn_values = attn_weights @ V
+        # d_attn_weights = d_attn_values @ V.T
+        # d_V = attn_weights.T @ d_attn_values
         attn_weights = self.cache['attn_weights']  # (batch, seq, seq)
         V = self.cache['V']  # (batch, seq, hidden)
 
-        # Gradient for V: dV = attn_weights.T @ d_weighted_V
-        d_weighted_V = d_attn_weighted @ self.W_o.T
+        # Gradient for V: dV = attn_weights.T @ d_attn_values
         dV = np.zeros_like(V)
         for b in range(batch_size):
-            dV[b] = attn_weights[b].T @ d_weighted_V[b]
+            dV[b] = attn_weights[b].T @ d_attn_values[b]
 
         # Gradient for W_v: dW_v = h_in.T @ dV
         h_in = self.cache['h_in']  # (batch, seq, hidden)
         dW_v = h_in.reshape(-1, self.hidden_dim).T @ dV.reshape(-1, self.hidden_dim)
 
-        # For Q and K, use simplified gradient (approximate but updates weights)
-        # Gradient flows back through attention scores
+        # Gradient for attn_weights: d_attn_weights = d_attn_values @ V.T
+        d_attn_weights = np.zeros_like(attn_weights)
+        for b in range(batch_size):
+            d_attn_weights[b] = d_attn_values[b] @ V[b].T
+
+        # Softmax backward: d_scores[i,j] = attn_weights[i,j] * (d_attn_weights[i,j] - sum_k(attn_weights[i,k] * d_attn_weights[i,k]))
+        d_scores = np.zeros_like(attn_weights)
+        for b in range(batch_size):
+            for i in range(seq_len):
+                s = attn_weights[b, i, :]  # softmax output for row i
+                dy = d_attn_weights[b, i, :]  # gradient for row i
+                d_scores[b, i, :] = s * (dy - np.sum(s * dy))
+
+        # Gradient for Q and K through: scores = Q @ K.T / scale
         Q = self.cache['Q']
         K = self.cache['K']
         scale = np.sqrt(self.hidden_dim)
-
-        # d_scores = d_softmax(attn_weights) (simplified: use attn_weights * (1-attn_weights) approx)
-        d_scores = np.zeros((batch_size, seq_len, seq_len))
-        for b in range(batch_size):
-            # Approximate softmax gradient
-            d_scores[b] = attn_weights[b] * (d_weighted_V[b] @ V[b].T)
 
         # dQ = d_scores @ K / scale
         dQ = np.zeros_like(Q)
