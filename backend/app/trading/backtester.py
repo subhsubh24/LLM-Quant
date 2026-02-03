@@ -1441,8 +1441,8 @@ class ModelPreTrainer:
             self.training_metrics.training_loss.append(avg_loss)
             self.training_metrics.prediction_accuracy.append(val_accuracy)
 
-            # Decay DQN epsilon
-            self.dqn.epsilon = max(0.01, self.dqn.epsilon * 0.995)
+            # Note: DQN epsilon decay happens automatically in DQN.train_step()
+            # No additional decay needed here
 
             # Log every epoch for visibility
             logger.info(

@@ -704,7 +704,7 @@ class DQN:
         tau: float = 0.005,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.9995,
+        epsilon_decay: float = 0.99995,  # Slower decay: reaches 0.01 around epoch 30 of 40
     ):
         self.state_dim = state_dim
         self.action_dim = action_dim
