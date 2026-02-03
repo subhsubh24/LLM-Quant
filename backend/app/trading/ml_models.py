@@ -1717,6 +1717,8 @@ class TrainableVAE:
         return mu, logvar
 
     def reparameterize(self, mu: np.ndarray, logvar: np.ndarray) -> np.ndarray:
+        # Clip logvar to prevent exp() overflow
+        logvar = np.clip(logvar, -20, 2)
         std = np.exp(0.5 * logvar)
         eps = np.random.randn(*mu.shape)
         self.cache['eps'] = eps
@@ -1769,7 +1771,9 @@ class TrainableVAE:
         recon_loss = np.mean((recon - x) ** 2)
 
         # KL divergence: -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
-        kl_loss = -0.5 * np.mean(np.sum(1 + logvar - mu ** 2 - np.exp(logvar), axis=1))
+        # Clip logvar to prevent exp() overflow
+        logvar_clipped = np.clip(logvar, -20, 2)
+        kl_loss = -0.5 * np.mean(np.sum(1 + logvar_clipped - mu ** 2 - np.exp(logvar_clipped), axis=1))
 
         # Classification loss if labels provided
         cls_loss = 0
