@@ -1333,6 +1333,8 @@ class ModelPreTrainer:
             X_train, y_train, r_train = X_train[perm], y_train[perm], r_train[perm]
 
             epoch_losses = []
+            # Per-model loss tracking for debugging
+            dqn_losses, lstm_losses, trans_losses, vae_losses = [], [], [], []
             batch_count = 0
 
             # Mini-batch training
@@ -1363,6 +1365,7 @@ class ModelPreTrainer:
                 dqn_loss = self.dqn.train_step(batch_size=min(32, len(batch_X)))
                 if dqn_loss:
                     epoch_losses.append(dqn_loss)
+                    dqn_losses.append(dqn_loss)
 
                 # =====================
                 # TRAIN PPO (Policy Gradient)
@@ -1399,6 +1402,7 @@ class ModelPreTrainer:
                                 target
                             )
                             epoch_losses.append(lstm_loss)
+                            lstm_losses.append(lstm_loss)
 
                 # =====================
                 # TRAIN TRANSFORMER (Proper Gradient Descent)
@@ -1416,6 +1420,7 @@ class ModelPreTrainer:
                                 target
                             )
                             epoch_losses.append(trans_loss)
+                            trans_losses.append(trans_loss)
 
                 # =====================
                 # TRAIN VAE (Reconstruction + KL Loss)
@@ -1423,6 +1428,7 @@ class ModelPreTrainer:
                 # VAE trains on individual states with optional regime labels
                 vae_loss = self.vae.train_step(batch_X, batch_y % 4)  # 4 regimes
                 epoch_losses.append(vae_loss)
+                vae_losses.append(vae_loss)
 
             # Validation (sample subset for speed - full validation takes too long)
             val_sample_size = min(10000, len(X_val))  # Sample 10K for rigorous validation
@@ -1451,6 +1457,13 @@ class ModelPreTrainer:
                 f"Val Acc: {val_accuracy:.2%} | "
                 f"Epsilon: {self.dqn.epsilon:.3f} | "
                 f"Time: {epoch_time:.1f}s"
+            )
+            # Per-model loss breakdown for debugging
+            logger.info(
+                f"  📊 Loss breakdown: DQN={np.mean(dqn_losses):.2f}, "
+                f"LSTM={np.mean(lstm_losses):.2f}, "
+                f"Trans={np.mean(trans_losses):.2f}, "
+                f"VAE={np.mean(vae_losses):.2f}"
             )
 
             # Early stopping check
