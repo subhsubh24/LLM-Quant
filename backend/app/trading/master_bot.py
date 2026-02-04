@@ -1643,6 +1643,46 @@ class MasterQuantBot:
                     "scan"
                 )
 
+    def _vol_adjusted_size(self, symbol: str, base_pct: float, max_usd: float,
+                              leverage: float = 1.0) -> float:
+        """
+        Compute volatility-adjusted position size.
+
+        Instead of fixed % of cash, targets a fixed dollar-risk per position
+        by scaling inversely with the asset's volatility.
+
+        Higher vol → smaller position, Lower vol → larger position.
+        This normalizes the risk contribution of each trade.
+
+        Args:
+            symbol: Asset symbol
+            base_pct: Base position size as fraction of cash (e.g. 0.05)
+            max_usd: Hard dollar cap
+            leverage: Position leverage multiplier
+        """
+        base_size = self.engine.cash * base_pct
+
+        # Get asset volatility from return history
+        base_symbol = symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
+        vol_annual = 0.40  # Default: 40% annualized
+
+        for sym, returns in self.analytics.return_history.items():
+            if base_symbol in sym and len(returns) >= 20:
+                vol_annual = float(np.std(returns[-60:]) * np.sqrt(252))
+                break
+
+        # Target volatility: 20% annualized (moderate risk)
+        # Scale: position shrinks when asset vol > target, grows when below
+        target_vol = 0.20
+        vol_scalar = target_vol / max(vol_annual, 0.05)  # Floor at 5% vol
+        vol_scalar = np.clip(vol_scalar, 0.25, 2.0)  # Don't go below 25% or above 200% of base
+
+        # Account for leverage (higher leverage → smaller base position)
+        leverage_adj = 1.0 / max(leverage, 1.0)
+
+        adjusted_size = base_size * vol_scalar * leverage_adj
+        return min(adjusted_size, max_usd)
+
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
         """Execute a single opportunity."""
         try:
@@ -1677,10 +1717,11 @@ class MasterQuantBot:
 
             elif opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
                 side = "long" if "Long" in opp.strategy else "short"
+                perp_size = self._vol_adjusted_size(opp.symbol, base_pct=0.05, max_usd=5000, leverage=2.0)
                 position = await self.engine.open_crypto_perpetual(
                     symbol=opp.symbol,
                     side=side,
-                    size_usd=min(5000, self.engine.cash * 0.05),
+                    size_usd=perp_size,
                     leverage=2.0,
                 )
                 if position:
@@ -1697,12 +1738,13 @@ class MasterQuantBot:
                 price = await self.engine._get_crypto_price(f"{base}-OPT")
                 strike = round(price * (1.05 if opt_type == "call" else 0.95), -2)
 
+                opt_size = self._vol_adjusted_size(opp.symbol, base_pct=0.03, max_usd=3000)
                 position = await self.engine.open_crypto_option(
                     base_asset=base,
                     option_type=opt_type,
                     strike=strike,
                     expiry_days=30,
-                    size_usd=min(3000, self.engine.cash * 0.03),
+                    size_usd=opt_size,
                     is_buy=is_buy,
                 )
                 if position:
@@ -1714,7 +1756,7 @@ class MasterQuantBot:
             elif opp.asset_class == AssetClass.CRYPTO_SPOT:
                 # Crypto spot buy/sell
                 side = "buy" if "Long" in opp.strategy else "sell"
-                size_usd = min(2000, self.engine.cash * 0.02)  # 2% position
+                size_usd = self._vol_adjusted_size(opp.symbol, base_pct=0.02, max_usd=2000)
 
                 position = await self.engine.open_crypto_spot(
                     symbol=opp.symbol,

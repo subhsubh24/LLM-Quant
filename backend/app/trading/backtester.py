@@ -1312,21 +1312,22 @@ class ModelPreTrainer:
         max_samples = 1000000
         if len(features) > max_samples:
             logger.info(f"Sampling {max_samples:,} from {len(features):,} samples for efficient training...")
-            sample_idx = np.random.choice(len(features), max_samples, replace=False)
+            # Sort indices to preserve temporal order within each symbol's block
+            sample_idx = np.sort(np.random.choice(len(features), max_samples, replace=False))
             features = features[sample_idx]
             labels = labels[sample_idx]
             rewards = rewards[sample_idx]
 
         logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
-        # Split train/validation
+        # Temporal train/validation split (NOT random)
+        # Data is ordered per-symbol chronologically, so taking the last 20%
+        # ensures we validate on later time periods — no look-ahead bias.
+        # Random splits let the model train on 2024 data and validate on 2022,
+        # artificially inflating accuracy.
         n_val = int(len(features) * validation_split)
-        indices = np.random.permutation(len(features))
-        train_idx = indices[n_val:]
-        val_idx = indices[:n_val]
-
-        X_train, y_train, r_train = features[train_idx], labels[train_idx], rewards[train_idx]
-        X_val, y_val, r_val = features[val_idx], labels[val_idx], rewards[val_idx]
+        X_train, y_train, r_train = features[:-n_val], labels[:-n_val], rewards[:-n_val]
+        X_val, y_val, r_val = features[-n_val:], labels[-n_val:], rewards[-n_val:]
 
         total_batches = len(X_train) // batch_size
         logger.info(f"Training config: {total_batches:,} batches/epoch, {len(X_val):,} validation samples")
@@ -1618,17 +1619,31 @@ class ModelPreTrainer:
         predictions.append(trans_action)
         confidences.append(trans_probs[trans_action])
 
-        # Ensemble vote (weighted by confidence)
+        # Ensemble vote (weighted by per-model confidence)
         action_votes = {0: 0, 1: 0, 2: 0}
         for pred, conf in zip(predictions, confidences):
             action_votes[pred] += conf
 
         final_action = max(action_votes, key=action_votes.get)
-        final_confidence = action_votes[final_action] / sum(confidences)
+
+        # Confidence = model agreement * average confidence of agreeing models
+        # This captures BOTH "how many models agree" and "how sure are they"
+        # - 4/4 agree at 80% each → 1.0 * 0.80 = 0.80
+        # - 3/4 agree at 70% each → 0.75 * 0.70 = 0.52
+        # - 2/4 agree at 50% each → 0.50 * 0.50 = 0.25
+        n_models = len(predictions)
+        n_agree = sum(1 for p in predictions if p == final_action)
+        agreement = n_agree / n_models
+
+        agreeing_confs = [c for p, c in zip(predictions, confidences) if p == final_action]
+        avg_conf = float(np.mean(agreeing_confs)) if agreeing_confs else 0
+
+        final_confidence = agreement * avg_conf
 
         return {
             "action": final_action,
             "confidence": float(final_confidence),
+            "agreement": float(agreement),
             "q_values": q_values.tolist(),
             "predictions": predictions,
         }
