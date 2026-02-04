@@ -766,6 +766,10 @@ class MasterQuantBot:
         # Activity logger for comprehensive event tracking
         self.activity_logger = get_activity_logger()
 
+        # Funding rate cache: {symbol: (rate, timestamp)}
+        self._funding_rate_cache: Dict[str, Tuple[float, datetime]] = {}
+        self._funding_rate_cache_ttl = timedelta(minutes=30)
+
         # Pre-training integration - CRITICAL for intelligent trading
         self.model_pretrainer = get_model_pretrainer()
         self.alpha_manager = get_alpha_manager()
@@ -1388,6 +1392,43 @@ class MasterQuantBot:
             rationale=rationale,
         )
 
+    async def _fetch_funding_rate(self, symbol: str) -> float:
+        """
+        Fetch real funding rate from Binance Futures API.
+
+        Falls back to a neutral estimate on failure. Caches results
+        for 30 minutes to avoid excessive API calls.
+        """
+        base = symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
+        cache_key = base
+
+        # Check cache
+        if cache_key in self._funding_rate_cache:
+            rate, ts = self._funding_rate_cache[cache_key]
+            if datetime.now() - ts < self._funding_rate_cache_ttl:
+                return rate
+
+        try:
+            import httpx
+            binance_symbol = f"{base}USDT"
+            url = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={binance_symbol}&limit=1"
+
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and len(data) > 0:
+                        rate = float(data[0]["fundingRate"])
+                        self._funding_rate_cache[cache_key] = (rate, datetime.now())
+                        return rate
+        except Exception as e:
+            logger.debug(f"Funding rate API failed for {symbol}: {e}")
+
+        # Fallback: neutral funding rate (typical average ~0.01% per 8h)
+        fallback = 0.0001
+        self._funding_rate_cache[cache_key] = (fallback, datetime.now())
+        return fallback
+
     async def _score_crypto_perpetual(self, symbol: str) -> Optional[Opportunity]:
         """Score crypto perpetual with ML enhancement."""
         base = symbol.split("-")[0]
@@ -1401,7 +1442,7 @@ class MasterQuantBot:
         # Get ML prediction for crypto
         ml_pred = self.analytics.get_ml_prediction(symbol)
 
-        funding_rate = np.random.uniform(-0.001, 0.003)
+        funding_rate = await self._fetch_funding_rate(symbol)
 
         if ml_pred.action == 0:  # Sell signal
             strategy = "Short Perpetual"
@@ -1569,8 +1610,10 @@ class MasterQuantBot:
             # 4. Optional: alpha sources support the trade
 
             ml_agrees = action != 1  # Not hold
-            ml_confident = confidence >= 0.6
-            score_sufficient = opp.score >= 35
+            score_threshold = self._get_dynamic_score_threshold()
+            conf_threshold = self._get_dynamic_confidence_threshold()
+            ml_confident = confidence >= conf_threshold
+            score_sufficient = opp.score >= score_threshold
             alpha_supports = (
                 (action == 2 and alpha_boost > 0) or  # Buy + bullish alpha
                 (action == 0 and alpha_boost < 0) or  # Sell + bearish alpha
@@ -1613,9 +1656,9 @@ class MasterQuantBot:
                 if not ml_agrees:
                     rejection = "ML says HOLD"
                 elif not ml_confident:
-                    rejection = f"Low confidence ({confidence:.1%})"
+                    rejection = f"Low confidence ({confidence:.1%} < {conf_threshold:.0%})"
                 elif not score_sufficient:
-                    rejection = f"Score too low ({opp.score:.1f})"
+                    rejection = f"Score too low ({opp.score:.1f} < {score_threshold:.0f})"
                 else:
                     rejection = "Alpha signal conflicts"
 
@@ -1642,6 +1685,41 @@ class MasterQuantBot:
                     f"⏸️ No trades executed. Top opportunities: {', '.join(rejection_reasons)}",
                     "scan"
                 )
+
+    def _get_dynamic_score_threshold(self) -> float:
+        """
+        Regime-adjusted score threshold for trade execution.
+
+        Instead of a fixed score >= 35, adapts to market conditions:
+        - High volatility: very selective (50) — only high-conviction trades
+        - Bear market: cautious (45) — tighter filter
+        - Range-bound: default (35) — normal selectivity
+        - Bull market: more aggressive (30) — capture momentum
+        - Low volatility: slightly aggressive (28) — more opportunities
+        """
+        thresholds = {
+            MarketRegime.HIGH_VOLATILITY: 50,
+            MarketRegime.BEAR_MARKET: 45,
+            MarketRegime.RANGE_BOUND: 35,
+            MarketRegime.BULL_MARKET: 30,
+            MarketRegime.LOW_VOLATILITY: 28,
+        }
+        return thresholds.get(self.market_regime, 35)
+
+    def _get_dynamic_confidence_threshold(self) -> float:
+        """
+        Regime-adjusted ML confidence threshold.
+
+        Higher bar in dangerous regimes, lower in favorable ones.
+        """
+        thresholds = {
+            MarketRegime.HIGH_VOLATILITY: 0.75,
+            MarketRegime.BEAR_MARKET: 0.70,
+            MarketRegime.RANGE_BOUND: 0.60,
+            MarketRegime.BULL_MARKET: 0.55,
+            MarketRegime.LOW_VOLATILITY: 0.50,
+        }
+        return thresholds.get(self.market_regime, 0.60)
 
     def _vol_adjusted_size(self, symbol: str, base_pct: float, max_usd: float,
                               leverage: float = 1.0) -> float:

@@ -930,6 +930,12 @@ class WalkForwardBacktester:
         equity_curve = [(all_candles[0][0], capital)]
         trades = []
 
+        # Slippage and commission modeling
+        # Realistic costs: ~5 bps slippage + ~5 bps commission per side = ~20 bps round trip
+        SLIPPAGE_BPS = 5    # 0.05% per side
+        COMMISSION_BPS = 5  # 0.05% per side
+        COST_PER_SIDE = (SLIPPAGE_BPS + COMMISSION_BPS) / 10000  # 0.001 per side
+
         # Walk through time
         window_data: Dict[str, List[OHLCV]] = {sym: [] for sym in data.keys()}
 
@@ -974,7 +980,9 @@ class WalkForwardBacktester:
                     exit_reason = "time_exit"
 
                 if should_exit:
-                    realized_pnl = pos["size"] * pnl_pct
+                    # Apply exit-side slippage + commission
+                    exit_cost = pos["size"] * COST_PER_SIDE
+                    realized_pnl = pos["size"] * pnl_pct - exit_cost
                     capital += pos["size"] + realized_pnl
 
                     trades.append({
@@ -987,6 +995,7 @@ class WalkForwardBacktester:
                         "pnl": realized_pnl,
                         "pnl_pct": pnl_pct * 100,
                         "exit_reason": exit_reason,
+                        "trade_costs": pos.get("entry_cost", 0) + exit_cost,
                     })
 
                     del positions[symbol]
@@ -1009,11 +1018,16 @@ class WalkForwardBacktester:
                             if position_size > 100:  # Minimum position
                                 side = "long" if prediction["action"] == 2 else "short"
 
+                                # Apply entry-side slippage + commission
+                                entry_cost = position_size * COST_PER_SIDE
+                                effective_size = position_size - entry_cost
+
                                 positions[symbol] = {
                                     "side": side,
                                     "entry_price": candle.close,
                                     "entry_time": timestamp,
-                                    "size": position_size,
+                                    "size": effective_size,
+                                    "entry_cost": entry_cost,
                                 }
 
                                 capital -= position_size
@@ -1044,7 +1058,8 @@ class WalkForwardBacktester:
                 else:
                     pnl_pct = (entry_price - current_price) / entry_price
 
-                realized_pnl = pos["size"] * pnl_pct
+                exit_cost = pos["size"] * COST_PER_SIDE
+                realized_pnl = pos["size"] * pnl_pct - exit_cost
                 capital += pos["size"] + realized_pnl
 
                 trades.append({
@@ -1057,6 +1072,7 @@ class WalkForwardBacktester:
                     "pnl": realized_pnl,
                     "pnl_pct": pnl_pct * 100,
                     "exit_reason": "backtest_end",
+                    "trade_costs": pos.get("entry_cost", 0) + exit_cost,
                 })
 
         # Calculate final metrics
@@ -1320,26 +1336,64 @@ class ModelPreTrainer:
 
         logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
-        # Temporal train/validation split (NOT random)
-        # Data is ordered per-symbol chronologically, so taking the last 20%
-        # ensures we validate on later time periods — no look-ahead bias.
-        # Random splits let the model train on 2024 data and validate on 2022,
-        # artificially inflating accuracy.
-        n_val = int(len(features) * validation_split)
-        X_train, y_train, r_train = features[:-n_val], labels[:-n_val], rewards[:-n_val]
-        X_val, y_val, r_val = features[-n_val:], labels[-n_val:], rewards[-n_val:]
+        # ============================================================
+        # WALK-FORWARD VALIDATION (expanding window)
+        # ============================================================
+        # Instead of a single 80/20 split, progressively expand the training
+        # window and validate on the next temporal segment. This:
+        # 1. Prevents look-ahead bias (always validates on future data)
+        # 2. Gives robust out-of-sample performance across multiple periods
+        # 3. Detects concept drift if later folds degrade
+        # 4. Model adapts to evolving market regimes via warm-start
+        #
+        # Fold structure (5 folds, expanding window):
+        # Fold 0: Train [0:50%], Val [50:60%]
+        # Fold 1: Train [0:60%], Val [60:70%]
+        # Fold 2: Train [0:70%], Val [70:80%]
+        # Fold 3: Train [0:80%], Val [80:90%]
+        # Fold 4: Train [0:90%], Val [90:100%]
+        n_wf_folds = 5
+        epochs_per_fold = max(epochs // n_wf_folds, 4)
+        wf_fold = 0
+        wf_fold_accuracies = []
+
+        n = len(features)
+        wf_boundaries = []
+        for f in range(n_wf_folds):
+            train_frac = 0.50 + f * 0.10
+            val_end_frac = min(train_frac + 0.10, 1.0)
+            wf_boundaries.append((
+                int(n * train_frac),       # train_end
+                int(n * val_end_frac),      # val_end
+            ))
+
+        # If resuming, advance to correct fold
+        wf_fold = min(start_epoch // epochs_per_fold, n_wf_folds - 1)
+
+        # Initialize current fold
+        train_end, val_end = wf_boundaries[wf_fold]
+        X_train = features[:train_end]
+        y_train = labels[:train_end]
+        r_train = rewards[:train_end]
+        X_val = features[train_end:val_end]
+        y_val = labels[train_end:val_end]
+        r_val = rewards[train_end:val_end]
+
+        def _compute_sample_indices(X_tr, X_vl):
+            """Fixed sample indices for consistent accuracy measurement."""
+            val_sz = min(10000, len(X_vl))
+            train_sz = min(10000, len(X_tr))
+            np.random.seed(42)
+            vi = np.random.choice(len(X_vl), val_sz, replace=False)
+            ti = np.random.choice(len(X_tr), train_sz, replace=False)
+            np.random.seed(None)
+            return ti, vi
+
+        fixed_train_indices, fixed_val_indices = _compute_sample_indices(X_train, X_val)
 
         total_batches = len(X_train) // batch_size
-        logger.info(f"Training config: {total_batches:,} batches/epoch, {len(X_val):,} validation samples")
-
-        # Fix validation and training sample indices for consistent accuracy measurement
-        # This prevents random sampling variance between epochs
-        val_sample_size = min(10000, len(X_val))
-        train_sample_size = min(10000, len(X_train))
-        np.random.seed(42)  # Fixed seed for reproducible sampling
-        fixed_val_indices = np.random.choice(len(X_val), val_sample_size, replace=False)
-        fixed_train_indices = np.random.choice(len(X_train), train_sample_size, replace=False)
-        np.random.seed(None)  # Reset to random
+        logger.info(f"Walk-forward training: {n_wf_folds} folds, {epochs_per_fold} epochs/fold")
+        logger.info(f"Fold 1/{n_wf_folds}: train={len(X_train):,}, val={len(X_val):,}")
 
         # Early stopping setup - check for resume state
         start_epoch = getattr(self, '_last_epoch', 0)
@@ -1352,6 +1406,28 @@ class ModelPreTrainer:
 
         for epoch in range(start_epoch, epochs):
             epoch_start = time.time()
+
+            # Walk-forward: advance fold when crossing epoch boundary
+            target_fold = min(epoch // epochs_per_fold, n_wf_folds - 1)
+            if target_fold > wf_fold:
+                wf_fold_accuracies.append(best_val_accuracy)
+                wf_fold = target_fold
+                train_end, val_end = wf_boundaries[wf_fold]
+                X_train = features[:train_end]
+                y_train = labels[:train_end]
+                r_train = rewards[:train_end]
+                X_val = features[train_end:val_end]
+                y_val = labels[train_end:val_end]
+                r_val = rewards[train_end:val_end]
+                total_batches = len(X_train) // batch_size
+                fixed_train_indices, fixed_val_indices = _compute_sample_indices(X_train, X_val)
+                # Reset patience for new validation window (keep model weights)
+                patience_counter = 0
+                best_val_accuracy = 0
+                logger.info(
+                    f"📊 Walk-forward fold {wf_fold+1}/{n_wf_folds}: "
+                    f"train={len(X_train):,}, val={len(X_val):,}"
+                )
 
             # Shuffle training data
             perm = np.random.permutation(len(X_train))
@@ -1536,6 +1612,24 @@ class ModelPreTrainer:
             self.save_checkpoints()
         else:
             logger.info(f"Keeping best checkpoint (acc={best_val_accuracy:.2%}) over final (acc={val_accuracy:.2%})")
+
+        # Walk-forward summary
+        wf_fold_accuracies.append(best_val_accuracy)
+        if len(wf_fold_accuracies) > 1:
+            logger.info(
+                f"📊 Walk-forward summary: {[f'{a:.2%}' for a in wf_fold_accuracies]}"
+                f" | Mean: {np.mean(wf_fold_accuracies):.2%}"
+                f" | Std: {np.std(wf_fold_accuracies):.2%}"
+            )
+            # Detect concept drift: later folds significantly worse than earlier
+            if len(wf_fold_accuracies) >= 4:
+                early_avg = np.mean(wf_fold_accuracies[:2])
+                late_avg = np.mean(wf_fold_accuracies[-2:])
+                if late_avg < early_avg - 0.05:
+                    logger.warning(
+                        f"⚠️ Concept drift detected: early folds avg {early_avg:.2%} "
+                        f"vs late folds avg {late_avg:.2%}"
+                    )
 
         logger.info(f"Training complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
