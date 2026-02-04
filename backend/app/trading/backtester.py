@@ -1322,12 +1322,16 @@ class ModelPreTrainer:
         total_batches = len(X_train) // batch_size
         logger.info(f"Training config: {total_batches:,} batches/epoch, {len(X_val):,} validation samples")
 
-        # Early stopping setup
-        best_val_accuracy = 0
+        # Early stopping setup - check for resume state
+        start_epoch = getattr(self, '_last_epoch', 0)
+        best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
         patience = 8  # Stop if no improvement for 8 epochs (more thorough)
-        patience_counter = 0
+        patience_counter = getattr(self, '_patience_counter', 0)
 
-        for epoch in range(epochs):
+        if start_epoch > 0:
+            logger.info(f"📥 Resuming training from epoch {start_epoch + 1}, best_acc={best_val_accuracy:.2%}")
+
+        for epoch in range(start_epoch, epochs):
             epoch_start = time.time()
 
             # Shuffle training data
@@ -1468,13 +1472,21 @@ class ModelPreTrainer:
                 f"VAE={np.mean(vae_losses):.2f}"
             )
 
+            # Update resume state
+            self._last_epoch = epoch + 1
+            self._best_val_accuracy = best_val_accuracy
+            self._patience_counter = patience_counter
+
             # Early stopping check
             if val_accuracy > best_val_accuracy:
                 best_val_accuracy = val_accuracy
+                self._best_val_accuracy = best_val_accuracy
                 patience_counter = 0
+                self._patience_counter = 0
                 self.save_checkpoints()  # Save best model
             else:
                 patience_counter += 1
+                self._patience_counter = patience_counter
                 if patience_counter >= patience and epoch >= 10:  # Minimum 10 epochs
                     logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs")
                     break
@@ -1483,7 +1495,8 @@ class ModelPreTrainer:
         self.training_metrics.total_samples = len(features)
         self.is_trained = True
 
-        # Save checkpoints
+        # Save final checkpoints with resume state
+        self._last_epoch = epoch + 1
         self.save_checkpoints()
 
         logger.info(f"Training complete! Final accuracy: {val_accuracy:.2%}")
@@ -1576,6 +1589,10 @@ class ModelPreTrainer:
             "training_metrics": self.training_metrics.to_dict(),
             "is_trained": self.is_trained,
             "timestamp": datetime.now().isoformat(),
+            # Resume support
+            "last_epoch": getattr(self, '_last_epoch', 0),
+            "best_val_accuracy": getattr(self, '_best_val_accuracy', 0),
+            "patience_counter": getattr(self, '_patience_counter', 0),
         }
 
         checkpoint_path = CHECKPOINT_DIR / "model_checkpoint.pkl"
@@ -1612,8 +1629,15 @@ class ModelPreTrainer:
 
             self.is_trained = checkpoint.get("is_trained", True)
 
+            # Resume support
+            self._last_epoch = checkpoint.get("last_epoch", 0)
+            self._best_val_accuracy = checkpoint.get("best_val_accuracy", 0)
+            self._patience_counter = checkpoint.get("patience_counter", 0)
+
             logger.info(f"Loaded checkpoint from {checkpoint['timestamp']}")
             logger.info(f"DQN epsilon: {self.dqn.epsilon:.4f}")
+            if self._last_epoch > 0:
+                logger.info(f"Resume info: epoch {self._last_epoch}, best_acc={self._best_val_accuracy:.2%}, patience={self._patience_counter}")
 
             return True
 
