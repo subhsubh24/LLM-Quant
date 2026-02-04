@@ -1322,6 +1322,15 @@ class ModelPreTrainer:
         total_batches = len(X_train) // batch_size
         logger.info(f"Training config: {total_batches:,} batches/epoch, {len(X_val):,} validation samples")
 
+        # Fix validation and training sample indices for consistent accuracy measurement
+        # This prevents random sampling variance between epochs
+        val_sample_size = min(10000, len(X_val))
+        train_sample_size = min(10000, len(X_train))
+        np.random.seed(42)  # Fixed seed for reproducible sampling
+        fixed_val_indices = np.random.choice(len(X_val), val_sample_size, replace=False)
+        fixed_train_indices = np.random.choice(len(X_train), train_sample_size, replace=False)
+        np.random.seed(None)  # Reset to random
+
         # Early stopping setup - check for resume state
         start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
@@ -1436,17 +1445,24 @@ class ModelPreTrainer:
                 epoch_losses.append(vae_loss)
                 vae_losses.append(vae_loss)
 
-            # Validation (sample subset for speed - full validation takes too long)
-            val_sample_size = min(10000, len(X_val))  # Sample 10K for rigorous validation
-            val_indices = np.random.choice(len(X_val), val_sample_size, replace=False)
+            # Training accuracy (sample subset for speed)
+            train_preds = []
+            for idx in fixed_train_indices:
+                pred = self.predict(X_train[idx])
+                train_preds.append(pred["action"])
+            train_accuracy = np.mean(np.array(train_preds) == y_train[fixed_train_indices])
 
+            # Validation accuracy (fixed indices for consistency)
             val_preds = []
-            for idx in val_indices:
+            for idx in fixed_val_indices:
                 pred = self.predict(X_val[idx])
                 val_preds.append(pred["action"])
+            val_accuracy = np.mean(np.array(val_preds) == y_val[fixed_val_indices])
 
-            val_accuracy = np.mean(np.array(val_preds) == y_val[val_indices])
             epoch_time = time.time() - epoch_start
+
+            # Overfitting indicator: train_acc >> val_acc
+            overfit_gap = train_accuracy - val_accuracy
 
             # Record metrics
             avg_loss = np.mean(epoch_losses) if epoch_losses else 0
@@ -1457,10 +1473,12 @@ class ModelPreTrainer:
             # No additional decay needed here
 
             # Log every epoch for visibility
+            overfit_warning = " ⚠️ OVERFITTING" if overfit_gap > 0.10 else ""
             logger.info(
                 f"✓ Epoch {epoch+1}/{epochs} | "
                 f"Loss: {avg_loss:.4f} | "
-                f"Val Acc: {val_accuracy:.2%} | "
+                f"Train: {train_accuracy:.2%} | Val: {val_accuracy:.2%} | "
+                f"Gap: {overfit_gap:+.1%}{overfit_warning} | "
                 f"Epsilon: {self.dqn.epsilon:.3f} | "
                 f"Time: {epoch_time:.1f}s"
             )
