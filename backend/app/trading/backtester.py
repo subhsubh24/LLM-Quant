@@ -1191,6 +1191,9 @@ class ModelPreTrainer:
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
 
+        # Sequence length for LSTM/Transformer (must match training)
+        self.seq_len = 10
+
         # Initialize models with PROPER TRAINABLE versions
         from .ml_models import (
             create_dqn_agent, create_ppo_agent,
@@ -1211,6 +1214,12 @@ class ModelPreTrainer:
         self.vae = TrainableVAE(
             input_dim=state_dim, hidden_dim=64, latent_dim=8, output_dim=4, lr=0.001
         )
+
+        # State buffer for sequential prediction (LSTM/Transformer)
+        # Stores recent states so LSTM/Transformer see seq_len context
+        # instead of a single state (matching training conditions)
+        from collections import deque
+        self.state_buffer = deque(maxlen=self.seq_len)
 
         self.is_trained = False
         self.training_metrics = TrainingMetrics(epochs_completed=0, total_samples=0)
@@ -1448,6 +1457,8 @@ class ModelPreTrainer:
                 vae_losses.append(vae_loss)
 
             # Training accuracy (sample subset for speed)
+            # Reset buffer and iterate so LSTM/Transformer get sequential context
+            self.reset_state_buffer()
             train_preds = []
             for idx in fixed_train_indices:
                 pred = self.predict(X_train[idx])
@@ -1455,11 +1466,13 @@ class ModelPreTrainer:
             train_accuracy = np.mean(np.array(train_preds) == y_train[fixed_train_indices])
 
             # Validation accuracy (fixed indices for consistency)
+            self.reset_state_buffer()
             val_preds = []
             for idx in fixed_val_indices:
                 pred = self.predict(X_val[idx])
                 val_preds.append(pred["action"])
             val_accuracy = np.mean(np.array(val_preds) == y_val[fixed_val_indices])
+            self.reset_state_buffer()  # Clean up after validation
 
             epoch_time = time.time() - epoch_start
 
@@ -1526,9 +1539,39 @@ class ModelPreTrainer:
         logger.info(f"Training complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
 
+    def reset_state_buffer(self):
+        """Reset the state buffer (call between episodes/symbols)."""
+        self.state_buffer.clear()
+
+    def _get_sequence(self, state: np.ndarray) -> np.ndarray:
+        """
+        Build a sequence from the state buffer for LSTM/Transformer.
+
+        Pushes the current state to the buffer and returns a
+        (1, seq_len, state_dim) array. If the buffer has fewer than
+        seq_len states, left-pads with zeros (the models learn to
+        handle partial context via the zero-padded positions).
+        """
+        self.state_buffer.append(state.copy())
+
+        buf_len = len(self.state_buffer)
+        if buf_len >= self.seq_len:
+            # Full sequence available
+            seq = np.array(list(self.state_buffer))
+        else:
+            # Pad with zeros on the left for incomplete sequences
+            padding = np.zeros((self.seq_len - buf_len, self.state_dim))
+            seq = np.vstack([padding, np.array(list(self.state_buffer))])
+
+        return seq.reshape(1, self.seq_len, self.state_dim)
+
     def predict(self, state: np.ndarray) -> Dict:
         """
         Get ensemble prediction from all models.
+
+        LSTM and Transformer receive a sequence of the last seq_len states
+        (from the state buffer) instead of a single state, matching
+        how they were trained.
 
         Returns:
             action: 0=sell, 1=hold, 2=buy
@@ -1541,32 +1584,35 @@ class ModelPreTrainer:
             elif len(state) > self.state_dim:
                 state = state[:self.state_dim]
 
+        # Build sequence for sequential models
+        seq = self._get_sequence(state)
+
         predictions = []
         confidences = []
 
-        # DQN prediction
+        # DQN prediction (single state)
         q_values = self.dqn.get_q_values(state)
         dqn_action = np.argmax(q_values)
-        dqn_probs = self._softmax(q_values)  # Use numerically stable softmax
+        dqn_probs = self._softmax(q_values)
         dqn_conf = dqn_probs[dqn_action]
         predictions.append(dqn_action)
         confidences.append(dqn_conf)
 
-        # PPO prediction
+        # PPO prediction (single state)
         ppo_probs = self.ppo.get_action_probs(state)
         ppo_action = np.argmax(ppo_probs)
         predictions.append(ppo_action)
         confidences.append(ppo_probs[ppo_action])
 
-        # LSTM prediction
-        lstm_out, _ = self.lstm.forward(state.reshape(1, -1))
+        # LSTM prediction (full sequence)
+        lstm_out, _ = self.lstm.forward(seq)
         lstm_probs = self._softmax(lstm_out[-1])
         lstm_action = np.argmax(lstm_probs)
         predictions.append(lstm_action)
         confidences.append(lstm_probs[lstm_action])
 
-        # Transformer prediction
-        trans_out = self.transformer.forward(state.reshape(1, -1))
+        # Transformer prediction (full sequence)
+        trans_out = self.transformer.forward(seq)
         trans_probs = self._softmax(trans_out[-1])
         trans_action = np.argmax(trans_probs)
         predictions.append(trans_action)
