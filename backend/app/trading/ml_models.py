@@ -1666,8 +1666,12 @@ class TrainableTransformer:
         dh = np.zeros((batch_size, seq_len, self.hidden_dim))
         dh[:, -1, :] = dh_last
 
-        # Feed-forward backward (simplified)
-        dff_out = dh
+        # ========= SECOND RESIDUAL: h_ff = h_attn + ff_out =========
+        # Gradient flows to BOTH h_attn and ff_out
+        dh_attn = dh.copy()  # Residual path
+        dff_out = dh.copy()  # FF path
+
+        # Feed-forward backward
         dff2 = dff_out.reshape(-1, self.hidden_dim)
         dW_ff2 = self.cache['ff1'].reshape(-1, self.hidden_dim * 4).T @ dff2
         db_ff2 = np.sum(dff2, axis=0, keepdims=True)
@@ -1679,9 +1683,16 @@ class TrainableTransformer:
         dW_ff1 = h_attn_flat.T @ dff1
         db_ff1 = np.sum(dff1, axis=0, keepdims=True)
 
-        # Attention backward - compute gradients for Q, K, V projections
-        dattn_out = dh  # Gradient w.r.t. attention output (after W_o)
+        # FF gradient flows back to h_attn through the FF input
+        dh_attn_from_ff = (dff1 @ self.W_ff1.T).reshape(batch_size, seq_len, self.hidden_dim)
+        dh_attn += dh_attn_from_ff  # Add FF contribution to residual
 
+        # ========= FIRST RESIDUAL: h_attn = h + attn_out =========
+        # Gradient flows to BOTH h (input proj) and attn_out
+        dh_input = dh_attn.copy()  # Residual path to input projection
+        dattn_out = dh_attn.copy()  # Attention path
+
+        # Attention backward - compute gradients for Q, K, V projections
         # Gradient for W_o: dW_o = attn_values.T @ dattn_out
         attn_values = self.cache['attn_values']  # (batch, seq, hidden) - BEFORE W_o
         dW_o = attn_values.reshape(-1, self.hidden_dim).T @ dattn_out.reshape(-1, self.hidden_dim)
@@ -1735,8 +1746,12 @@ class TrainableTransformer:
         dW_q = h_in.reshape(-1, self.hidden_dim).T @ dQ.reshape(-1, self.hidden_dim)
         dW_k = h_in.reshape(-1, self.hidden_dim).T @ dK.reshape(-1, self.hidden_dim)
 
-        # Input projection backward
-        dh_in = dh.reshape(-1, self.hidden_dim)
+        # Attention gradient flows back to h_in through Q, K, V projections
+        dh_from_attn = (dQ @ self.W_q.T + dK @ self.W_k.T + dV @ self.W_v.T)
+        dh_input += dh_from_attn  # Add attention contribution to input gradient
+
+        # Input projection backward (with full gradient from both residuals)
+        dh_in = dh_input.reshape(-1, self.hidden_dim)
         dh_in = dh_in * (self.cache['h_in'].reshape(-1, self.hidden_dim) > 0)
         dW_in = x.reshape(-1, self.input_dim).T @ dh_in
         db_in = np.sum(dh_in, axis=0, keepdims=True)

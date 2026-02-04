@@ -1399,6 +1399,8 @@ class ModelPreTrainer:
                     self.ppo.store_transition(state, action, reward, value, log_prob, done)
 
                 ppo_loss = self.ppo.train_step()
+                if ppo_loss:
+                    epoch_losses.append(ppo_loss)
 
                 # =====================
                 # TRAIN LSTM (Proper BPTT)
@@ -1513,11 +1515,15 @@ class ModelPreTrainer:
         self.training_metrics.total_samples = len(features)
         self.is_trained = True
 
-        # Save final checkpoints with resume state
+        # Save resume state (but don't overwrite best checkpoint if early stopping occurred)
         self._last_epoch = epoch + 1
-        self.save_checkpoints()
+        if val_accuracy >= best_val_accuracy:
+            # Only save final checkpoint if it's at least as good as the best
+            self.save_checkpoints()
+        else:
+            logger.info(f"Keeping best checkpoint (acc={best_val_accuracy:.2%}) over final (acc={val_accuracy:.2%})")
 
-        logger.info(f"Training complete! Final accuracy: {val_accuracy:.2%}")
+        logger.info(f"Training complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
 
     def predict(self, state: np.ndarray) -> Dict:
