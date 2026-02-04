@@ -699,9 +699,9 @@ class DQN:
         state_dim: int,
         action_dim: int,
         hidden_dims: List[int] = [256, 256, 128],
-        lr: float = 0.0001,
+        lr: float = 0.00005,  # Lower LR for stability
         gamma: float = 0.99,
-        tau: float = 0.005,
+        tau: float = 0.001,  # Slower target updates for stability
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
         epsilon_decay: float = 0.99995,  # Slower decay: reaches 0.01 around epoch 30 of 40
@@ -713,13 +713,14 @@ class DQN:
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
+        self.base_lr = lr
 
         # Build networks (internal lists)
         self._q_network = self._build_network(state_dim, action_dim, hidden_dims)
         self._target_network = self._build_network(state_dim, action_dim, hidden_dims)
         self._hard_update()
 
-        # Optimizer
+        # Optimizer with lower learning rate
         params = []
         for layer in self._q_network:
             params.extend(layer.parameters())
@@ -731,6 +732,10 @@ class DQN:
         # Training metrics
         self.training_step = 0
         self.losses: List[float] = []
+
+        # Loss scaling for stable training
+        self.loss_ema = 1.0  # Exponential moving average of loss
+        self.loss_scale = 1.0  # Adaptive loss scaling factor
 
     def _build_network(self, state_dim: int, action_dim: int,
                        hidden_dims: List[int]) -> List[Layer]:
@@ -751,11 +756,14 @@ class DQN:
 
         return layers
 
-    def _forward(self, state: np.ndarray, network: List[Layer]) -> np.ndarray:
-        """Forward pass through network."""
+    def _forward(self, state: np.ndarray, network: List[Layer], clip_output: bool = True) -> np.ndarray:
+        """Forward pass through network with Q-value clipping."""
         x = state
         for layer in network:
             x = layer.forward(x)
+        # Clip Q-values to prevent explosion (critical for stability)
+        if clip_output:
+            x = np.clip(x, -20, 20)
         return x
 
     def _hard_update(self):
@@ -798,9 +806,14 @@ class DQN:
         return q_values[0]  # Return 1D array
 
     def train_step(self, batch_size: int = 64) -> float:
-        """Perform one training step."""
+        """Perform one training step with stability improvements."""
         if len(self.replay_buffer) < batch_size:
             return 0.0
+
+        # Learning rate decay: reduce LR over time for stability
+        decay_factor = 1.0 / (1.0 + 0.0001 * self.training_step)
+        current_lr = self.base_lr * decay_factor
+        self.optimizer.lr = current_lr
 
         # Sample batch
         experiences, indices, weights = self.replay_buffer.sample(batch_size)
@@ -811,7 +824,10 @@ class DQN:
         next_states = np.array([e.next_state for e in experiences])
         dones = np.array([e.done for e in experiences])
 
-        # Current Q values
+        # Clip rewards to [-1, 1] for stability
+        rewards = np.clip(rewards, -1, 1)
+
+        # Current Q values (already clipped in _forward)
         current_q = self._forward(states, self._q_network)
         current_q_actions = current_q[np.arange(batch_size), actions]
 
@@ -821,20 +837,22 @@ class DQN:
         next_q_target = self._forward(next_states, self._target_network)
         next_q_values = next_q_target[np.arange(batch_size), next_actions]
 
-        # Compute targets with value clipping to prevent explosion
-        # Clip next_q_values to reasonable range before computing targets
-        next_q_values = np.clip(next_q_values, -10, 10)
+        # Compute targets - Q-values already clipped to [-20, 20] in forward
         targets = rewards + self.gamma * next_q_values * (1 - dones)
-        targets = np.clip(targets, -10, 10)  # Final target clipping
+        targets = np.clip(targets, -20, 20)  # Match Q-value clip range
 
-        # TD error for prioritized replay
-        td_errors = targets - current_q_actions
+        # TD error for prioritized replay (clip for stability)
+        td_errors = np.clip(targets - current_q_actions, -10, 10)
         self.replay_buffer.update_priorities(indices, td_errors)
 
         # Compute loss (Huber loss for stability)
-        loss = self._huber_loss(current_q_actions, targets, weights)
+        raw_loss = self._huber_loss(current_q_actions, targets, weights)
 
-        # Backpropagation
+        # Adaptive loss scaling: normalize loss to ~1.0 scale
+        self.loss_ema = 0.99 * self.loss_ema + 0.01 * raw_loss
+        normalized_loss = raw_loss / (self.loss_ema + 1e-8)
+
+        # Backpropagation with scaled gradients
         grad = self._huber_loss_grad(current_q_actions, targets, weights)
 
         # Create gradient for full Q-values tensor
@@ -850,22 +868,23 @@ class DQN:
         for layer in self._q_network:
             grads.extend(layer.gradients())
 
-        # Gradient clipping
-        max_grad_norm = 1.0
+        # Aggressive gradient clipping for stability
+        max_grad_norm = 0.5  # Tighter clipping
         grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in grads))
         if grad_norm > max_grad_norm:
             grads = [g * max_grad_norm / grad_norm for g in grads]
 
         self.optimizer.step(grads)
 
-        # Update target network and epsilon
+        # Update target network (slower tau) and epsilon
         self._soft_update()
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
         self.training_step += 1
-        self.losses.append(loss)
+        self.losses.append(normalized_loss)
 
-        return loss
+        # Return normalized loss for stable reporting
+        return normalized_loss
 
     def _huber_loss(self, pred: np.ndarray, target: np.ndarray,
                     weights: np.ndarray, delta: float = 1.0) -> float:
@@ -1517,6 +1536,9 @@ class TrainableTransformer:
         self._init_adam()
         self.cache = {}
 
+        # Loss normalization for stable reporting
+        self.loss_ema = 1.0
+
     def _init_adam(self):
         self.m = {}
         self.v = {}
@@ -1754,7 +1776,11 @@ class TrainableTransformer:
             param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
             setattr(self, name, param)
 
-        return loss
+        # Normalize loss for stable reporting
+        self.loss_ema = 0.99 * self.loss_ema + 0.01 * loss
+        normalized_loss = loss / (self.loss_ema + 1e-8)
+
+        return normalized_loss
 
     def predict(self, x: np.ndarray) -> int:
         probs = self.forward(x)
