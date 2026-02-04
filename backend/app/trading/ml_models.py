@@ -796,13 +796,29 @@ class DQN:
             return np.random.randint(self.action_dim)
 
         state = np.array(state).reshape(1, -1)
+        self._set_eval_mode(self._q_network)
         q_values = self._forward(state, self._q_network)
+        self._set_train_mode(self._q_network)
         return int(np.argmax(q_values))
+
+    def _set_eval_mode(self, network: List[Layer]):
+        """Set network layers to eval mode (disables dropout)."""
+        for layer in network:
+            if isinstance(layer, Dropout):
+                layer.training = False
+
+    def _set_train_mode(self, network: List[Layer]):
+        """Set network layers to train mode (enables dropout)."""
+        for layer in network:
+            if isinstance(layer, Dropout):
+                layer.training = True
 
     def get_q_values(self, state: np.ndarray) -> np.ndarray:
         """Get Q-values for a state (for ensemble prediction)."""
         state = np.array(state).reshape(1, -1)
+        self._set_eval_mode(self._q_network)
         q_values = self._forward(state, self._q_network)
+        self._set_train_mode(self._q_network)
         return q_values[0]  # Return 1D array
 
     def train_step(self, batch_size: int = 64) -> float:
@@ -1248,26 +1264,40 @@ class PPOAgent:
 
 
 class _NetworkWrapper:
-    """Wrapper to provide get_weights/set_weights for PPO networks."""
+    """Wrapper to provide get_weights/set_weights for networks."""
 
     def __init__(self, layers: List[Layer]):
         self.layers = layers
 
     def get_weights(self) -> List[Dict]:
-        """Get all layer weights."""
+        """Get all layer weights (Dense + LayerNorm)."""
         weights = []
         for layer in self.layers:
             if hasattr(layer, 'W') and hasattr(layer, 'b'):
-                weights.append({'W': layer.W.copy(), 'b': layer.b.copy()})
+                weights.append({'type': 'dense', 'W': layer.W.copy(), 'b': layer.b.copy()})
+            elif hasattr(layer, 'gamma') and hasattr(layer, 'beta'):
+                weights.append({'type': 'layernorm', 'gamma': layer.gamma.copy(), 'beta': layer.beta.copy()})
         return weights
 
     def set_weights(self, weights: List[Dict]):
-        """Set all layer weights."""
+        """Set all layer weights (Dense + LayerNorm)."""
         weight_idx = 0
         for layer in self.layers:
-            if hasattr(layer, 'W') and hasattr(layer, 'b') and weight_idx < len(weights):
-                layer.W = weights[weight_idx]['W'].copy()
-                layer.b = weights[weight_idx]['b'].copy()
+            if weight_idx >= len(weights):
+                break
+            w = weights[weight_idx]
+            if hasattr(layer, 'W') and hasattr(layer, 'b') and w.get('type', 'dense') == 'dense':
+                layer.W = w['W'].copy()
+                layer.b = w['b'].copy()
+                weight_idx += 1
+            elif hasattr(layer, 'gamma') and hasattr(layer, 'beta') and w.get('type') == 'layernorm':
+                layer.gamma = w['gamma'].copy()
+                layer.beta = w['beta'].copy()
+                weight_idx += 1
+            elif hasattr(layer, 'W') and hasattr(layer, 'b') and 'W' in w:
+                # Backward compat: old checkpoints without 'type' field
+                layer.W = w['W'].copy()
+                layer.b = w['b'].copy()
                 weight_idx += 1
 
 
