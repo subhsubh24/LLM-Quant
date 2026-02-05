@@ -1,5 +1,14 @@
 """Portfolio management subsystem."""
 
+from .optimizer import (
+    PortfolioConfig,
+    MeanVarianceOptimizer,
+)
+
+from .risk import (
+    RiskManager,
+)
+
 from .institutional_risk import (
     CircuitBreakerLevel,
     CircuitBreakerThresholds,
@@ -42,7 +51,11 @@ from .predictive_risk import (
 )
 
 __all__ = [
+    # Optimizer
+    "PortfolioConfig",
+    "MeanVarianceOptimizer",
     # Risk Management
+    "RiskManager",
     "CircuitBreakerLevel",
     "CircuitBreakerThresholds",
     "PositionLimit",
