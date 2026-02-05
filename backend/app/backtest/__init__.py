@@ -14,6 +14,13 @@ from .strategy_tester import (
     StrategyBacktestResult,
     get_strategy_backtester,
 )
+from .enhanced_validation import (
+    ExpandingWindowValidator,
+    BootstrapValidator,
+    GaussianCopulaStressTester,
+    FeatureEngineeringPipeline,
+    ComprehensiveBacktestValidator,
+)
 
 __all__ = [
     "BacktestConfig",
@@ -27,4 +34,10 @@ __all__ = [
     "StrategyType",
     "StrategyBacktestResult",
     "get_strategy_backtester",
+    # Enhanced Validation - Phase 14
+    "ExpandingWindowValidator",
+    "BootstrapValidator",
+    "GaussianCopulaStressTester",
+    "FeatureEngineeringPipeline",
+    "ComprehensiveBacktestValidator",
 ]
