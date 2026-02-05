@@ -147,60 +147,9 @@ class SignalEngine:
         "technical": 0.20,
     }
 
-    # Sector/asset-class specific weight overrides
-    # Different asset types respond to different factors:
-    # - Crypto: momentum-driven, high vol sensitivity, less fundamental value
-    # - Tech: momentum + technical dominated, moderate value
-    # - Defensive (utilities, staples): value + quality dominated
-    # - Commodities: volatility + momentum driven
-    # - Financials: value + quality sensitive
-    SECTOR_WEIGHTS = {
-        "crypto": {"momentum": 0.35, "value": 0.05, "quality": 0.05, "volatility": 0.30, "technical": 0.25},
-        "tech": {"momentum": 0.30, "value": 0.10, "quality": 0.15, "volatility": 0.15, "technical": 0.30},
-        "defensive": {"momentum": 0.10, "value": 0.30, "quality": 0.30, "volatility": 0.15, "technical": 0.15},
-        "commodity": {"momentum": 0.25, "value": 0.10, "quality": 0.05, "volatility": 0.30, "technical": 0.30},
-        "financial": {"momentum": 0.20, "value": 0.30, "quality": 0.25, "volatility": 0.10, "technical": 0.15},
-    }
-
-    # Symbol-to-sector mapping for known tickers
-    SYMBOL_SECTOR = {
-        # Crypto
-        "BTC": "crypto", "ETH": "crypto", "SOL": "crypto", "ADA": "crypto",
-        "DOT": "crypto", "AVAX": "crypto", "LINK": "crypto", "DOGE": "crypto",
-        "XRP": "crypto", "BNB": "crypto", "MATIC": "crypto", "ATOM": "crypto",
-        "UNI": "crypto", "LTC": "crypto", "FIL": "crypto", "NEAR": "crypto",
-        # Tech
-        "AAPL": "tech", "MSFT": "tech", "GOOGL": "tech", "GOOG": "tech",
-        "AMZN": "tech", "META": "tech", "NVDA": "tech", "TSLA": "tech",
-        "AMD": "tech", "INTC": "tech", "CRM": "tech", "NFLX": "tech",
-        "ADBE": "tech", "PYPL": "tech", "SQ": "tech", "SHOP": "tech",
-        "QQQ": "tech",
-        # Defensive (utilities, staples, healthcare)
-        "JNJ": "defensive", "PG": "defensive", "KO": "defensive", "PEP": "defensive",
-        "MRK": "defensive", "UNH": "defensive", "WMT": "defensive", "COST": "defensive",
-        "XLU": "defensive", "XLP": "defensive",
-        # Commodities
-        "GLD": "commodity", "SLV": "commodity", "USO": "commodity", "GDX": "commodity",
-        "XLE": "commodity", "XOP": "commodity",
-        # Financials
-        "JPM": "financial", "BAC": "financial", "GS": "financial", "MS": "financial",
-        "XLF": "financial", "V": "financial", "MA": "financial",
-        # Broad market ETFs use defaults
-        "SPY": None, "IWM": None, "DIA": None,
-    }
-
     def __init__(self, factor_weights: Optional[Dict[str, float]] = None):
         self.factor_weights = factor_weights or self.DEFAULT_WEIGHTS
         self.settings = get_settings()
-
-    def get_sector_weights(self, ticker: str) -> Dict[str, float]:
-        """Get sector-specific factor weights for a ticker."""
-        # Strip common suffixes to get base symbol
-        base = ticker.split("-")[0].replace("USDT", "").replace("/USD", "").replace("-PERP", "")
-        sector = self.SYMBOL_SECTOR.get(base)
-        if sector and sector in self.SECTOR_WEIGHTS:
-            return self.SECTOR_WEIGHTS[sector]
-        return self.factor_weights  # Fall back to default/configured weights
 
     def generate_signals(
         self,
@@ -231,25 +180,13 @@ class SignalEngine:
         # Detect market regime
         market_regime, regime_conf = self._detect_regime(prices)
 
-        # Adjust base weights for regime
-        regime_weights = self._adjust_weights_for_regime(market_regime)
+        # Adjust weights based on regime
+        adjusted_weights = self._adjust_weights_for_regime(market_regime)
 
-        # Generate individual signals with per-sector factor weights
+        # Generate individual signals
         signals = []
         for ticker in prices.columns:
             try:
-                # Merge sector-specific weights with regime adjustments
-                sector_base = self.get_sector_weights(ticker)
-                # Apply regime scaling on top of sector weights
-                ticker_weights = {}
-                for factor in sector_base:
-                    regime_scale = regime_weights.get(factor, 0.20) / self.DEFAULT_WEIGHTS.get(factor, 0.20)
-                    ticker_weights[factor] = sector_base[factor] * regime_scale
-                # Renormalize
-                total_w = sum(ticker_weights.values())
-                if total_w > 0:
-                    ticker_weights = {k: v / total_w for k, v in ticker_weights.items()}
-
                 signal = self._create_stock_signal(
                     ticker=ticker,
                     prices=prices[ticker],
@@ -258,7 +195,7 @@ class SignalEngine:
                     quality=quality_scores.get(ticker, 0),
                     volatility=volatility_scores.get(ticker, 0),
                     technical=technical_scores.get(ticker, 0),
-                    weights=ticker_weights,
+                    weights=adjusted_weights,
                 )
                 signals.append(signal)
             except Exception as e:

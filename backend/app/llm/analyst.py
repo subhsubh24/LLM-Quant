@@ -438,48 +438,6 @@ Key factors to consider:
             "n_positions": len(positions)
         }
 
-    async def generate_trade_summary(
-        self,
-        trade_info: Dict[str, Any]
-    ) -> str:
-        """Generate a concise LLM summary of why a trade was made."""
-        symbol = trade_info.get("symbol", "Unknown")
-        asset_class = trade_info.get("asset_class", "unknown")
-        strategy = trade_info.get("strategy", "")
-        side = trade_info.get("side", "")
-        price = trade_info.get("price", 0)
-        size = trade_info.get("size", 0)
-        score = trade_info.get("score", 0)
-        ml_confidence = trade_info.get("ml_confidence", 0)
-        iv_rank = trade_info.get("iv_rank", 0)
-        regime = trade_info.get("regime", "unknown")
-        rationale = trade_info.get("rationale", "")
-
-        prompt = f"""Summarize this trade decision in 1-2 sentences for a trading log:
-
-**Trade Details:**
-- Symbol: {symbol}
-- Asset Class: {asset_class}
-- Strategy: {strategy}
-- Side: {side}
-- Entry Price: ${price:.2f}
-- Position Size: ${size:,.0f}
-- ML Score: {score:.1f}
-- ML Confidence: {ml_confidence:.1%}
-- IV Rank: {iv_rank:.0f}%
-- Market Regime: {regime}
-- Original Rationale: {rationale}
-
-Write a brief, professional summary explaining why this trade was taken. Include the key factors (IV levels, technical setup, ML signals) in plain English. Keep it under 50 words."""
-
-        response = self._call_claude(prompt, max_tokens=150)
-
-        if response:
-            return response.strip()
-
-        # Fallback if LLM not available
-        return f"{strategy} on {symbol} - {rationale[:100] if rationale else 'ML score: ' + str(round(score, 1))}"
-
     def _template_learning_path(self) -> Dict[str, Any]:
         """Fallback learning path."""
         return {

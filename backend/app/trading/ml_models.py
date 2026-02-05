@@ -317,255 +317,6 @@ class LSTM(Layer):
                 self.W_o, self.b_o, self.W_c, self.b_c]
 
 
-class LSTMClassifier:
-    """
-    LSTM with output layer for classification tasks.
-    Includes proper backpropagation through time (BPTT).
-    """
-
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, lr: float = 0.001):
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
-        self.lr = lr
-
-        # LSTM weights (Xavier initialization)
-        scale = np.sqrt(1.0 / (input_dim + hidden_dim))
-        concat_dim = input_dim + hidden_dim
-
-        # Combined weight matrices for efficiency
-        self.Wf = np.random.randn(concat_dim, hidden_dim) * scale
-        self.Wi = np.random.randn(concat_dim, hidden_dim) * scale
-        self.Wc = np.random.randn(concat_dim, hidden_dim) * scale
-        self.Wo = np.random.randn(concat_dim, hidden_dim) * scale
-
-        self.bf = np.ones((1, hidden_dim))  # Forget gate bias = 1 (remember by default)
-        self.bi = np.zeros((1, hidden_dim))
-        self.bc = np.zeros((1, hidden_dim))
-        self.bo = np.zeros((1, hidden_dim))
-
-        # Output layer
-        self.Wy = np.random.randn(hidden_dim, output_dim) * np.sqrt(1.0 / hidden_dim)
-        self.by = np.zeros((1, output_dim))
-
-        # Adam optimizer state
-        self._init_adam()
-
-        # Cache for BPTT
-        self.cache = {}
-
-    def _init_adam(self):
-        """Initialize Adam optimizer moments."""
-        self.m = {}
-        self.v = {}
-        self.t = 0
-        for name in ['Wf', 'Wi', 'Wc', 'Wo', 'bf', 'bi', 'bc', 'bo', 'Wy', 'by']:
-            param = getattr(self, name)
-            self.m[name] = np.zeros_like(param)
-            self.v[name] = np.zeros_like(param)
-
-    def _sigmoid(self, x):
-        return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
-
-    def _softmax(self, x):
-        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
-        return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
-
-    def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Forward pass with caching for backprop.
-
-        Args:
-            x: Input (seq_len, input_dim) or (batch, seq_len, input_dim)
-
-        Returns:
-            output: Class probabilities (batch, output_dim)
-            hidden: Final hidden state
-        """
-        if len(x.shape) == 2:
-            x = x.reshape(1, *x.shape)
-
-        batch_size, seq_len, _ = x.shape
-
-        # Initialize hidden states
-        h = np.zeros((batch_size, self.hidden_dim))
-        c = np.zeros((batch_size, self.hidden_dim))
-
-        # Store cache for BPTT
-        self.cache = {
-            'x': x, 'h': [h], 'c': [c],
-            'f': [], 'i': [], 'c_tilde': [], 'o': []
-        }
-
-        for t in range(seq_len):
-            xt = x[:, t, :]
-            concat = np.concatenate([xt, h], axis=1)
-
-            # Gates
-            f = self._sigmoid(concat @ self.Wf + self.bf)
-            i = self._sigmoid(concat @ self.Wi + self.bi)
-            c_tilde = np.tanh(concat @ self.Wc + self.bc)
-            o = self._sigmoid(concat @ self.Wo + self.bo)
-
-            # Cell and hidden state
-            c = f * c + i * c_tilde
-            h = o * np.tanh(c)
-
-            # Cache
-            self.cache['f'].append(f)
-            self.cache['i'].append(i)
-            self.cache['c_tilde'].append(c_tilde)
-            self.cache['o'].append(o)
-            self.cache['h'].append(h)
-            self.cache['c'].append(c)
-
-        # Output layer
-        logits = h @ self.Wy + self.by
-        probs = self._softmax(logits)
-
-        return probs, h
-
-    def backward(self, y_true: np.ndarray) -> float:
-        """
-        Backpropagation through time (BPTT).
-
-        Args:
-            y_true: True labels (batch,) as integers
-
-        Returns:
-            loss: Cross-entropy loss
-        """
-        x = self.cache['x']
-        batch_size, seq_len, _ = x.shape
-
-        # Forward to get predictions
-        probs, _ = self.forward(x)
-
-        # Cross-entropy loss
-        y_onehot = np.zeros_like(probs)
-        y_onehot[np.arange(batch_size), y_true.astype(int)] = 1
-        loss = -np.mean(np.sum(y_onehot * np.log(probs + 1e-8), axis=1))
-
-        # Output layer gradients
-        dlogits = (probs - y_onehot) / batch_size
-        dWy = self.cache['h'][-1].T @ dlogits
-        dby = np.sum(dlogits, axis=0, keepdims=True)
-
-        # Backprop through LSTM
-        dh_next = dlogits @ self.Wy.T
-        dc_next = np.zeros((batch_size, self.hidden_dim))
-
-        dWf = np.zeros_like(self.Wf)
-        dWi = np.zeros_like(self.Wi)
-        dWc = np.zeros_like(self.Wc)
-        dWo = np.zeros_like(self.Wo)
-        dbf = np.zeros_like(self.bf)
-        dbi = np.zeros_like(self.bi)
-        dbc = np.zeros_like(self.bc)
-        dbo = np.zeros_like(self.bo)
-
-        for t in reversed(range(seq_len)):
-            h = self.cache['h'][t + 1]
-            h_prev = self.cache['h'][t]
-            c = self.cache['c'][t + 1]
-            c_prev = self.cache['c'][t]
-
-            f = self.cache['f'][t]
-            i = self.cache['i'][t]
-            c_tilde = self.cache['c_tilde'][t]
-            o = self.cache['o'][t]
-
-            xt = x[:, t, :]
-            concat = np.concatenate([xt, h_prev], axis=1)
-
-            # Gradients
-            dh = dh_next
-            tanh_c = np.tanh(c)
-
-            do = dh * tanh_c
-            do_raw = do * o * (1 - o)
-
-            dc = dh * o * (1 - tanh_c ** 2) + dc_next
-
-            df = dc * c_prev
-            df_raw = df * f * (1 - f)
-
-            di = dc * c_tilde
-            di_raw = di * i * (1 - i)
-
-            dc_tilde = dc * i
-            dc_tilde_raw = dc_tilde * (1 - c_tilde ** 2)
-
-            # Weight gradients
-            dWf += concat.T @ df_raw
-            dWi += concat.T @ di_raw
-            dWc += concat.T @ dc_tilde_raw
-            dWo += concat.T @ do_raw
-
-            dbf += np.sum(df_raw, axis=0, keepdims=True)
-            dbi += np.sum(di_raw, axis=0, keepdims=True)
-            dbc += np.sum(dc_tilde_raw, axis=0, keepdims=True)
-            dbo += np.sum(do_raw, axis=0, keepdims=True)
-
-            # Gradients for next timestep
-            dconcat = (df_raw @ self.Wf.T + di_raw @ self.Wi.T +
-                       dc_tilde_raw @ self.Wc.T + do_raw @ self.Wo.T)
-            dh_next = dconcat[:, self.input_dim:]
-            dc_next = dc * f
-
-        # Gradient clipping
-        max_grad = 5.0
-        grads = {'Wf': dWf, 'Wi': dWi, 'Wc': dWc, 'Wo': dWo,
-                 'bf': dbf, 'bi': dbi, 'bc': dbc, 'bo': dbo,
-                 'Wy': dWy, 'by': dby}
-
-        for name, grad in grads.items():
-            norm = np.linalg.norm(grad)
-            if norm > max_grad:
-                grads[name] = grad * max_grad / norm
-
-        # Adam update
-        self.t += 1
-        beta1, beta2, eps = 0.9, 0.999, 1e-8
-
-        for name, grad in grads.items():
-            param = getattr(self, name)
-            self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
-            self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
-
-            m_hat = self.m[name] / (1 - beta1 ** self.t)
-            v_hat = self.v[name] / (1 - beta2 ** self.t)
-
-            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
-            setattr(self, name, param)
-
-        return loss
-
-    def train_step(self, x: np.ndarray, y: np.ndarray) -> float:
-        """Single training step."""
-        self.forward(x)
-        return self.backward(y)
-
-    def predict(self, x: np.ndarray) -> int:
-        """Predict class."""
-        probs, _ = self.forward(x)
-        return int(np.argmax(probs[0]))
-
-    def get_weights(self) -> Dict:
-        """Get all weights for checkpointing."""
-        return {
-            'Wf': self.Wf, 'Wi': self.Wi, 'Wc': self.Wc, 'Wo': self.Wo,
-            'bf': self.bf, 'bi': self.bi, 'bc': self.bc, 'bo': self.bo,
-            'Wy': self.Wy, 'by': self.by
-        }
-
-    def set_weights(self, weights: Dict):
-        """Set weights from checkpoint."""
-        for name, value in weights.items():
-            setattr(self, name, value)
-        self._init_adam()
-
-
 # =============================================================================
 # OPTIMIZERS
 # =============================================================================
@@ -699,12 +450,12 @@ class DQN:
         state_dim: int,
         action_dim: int,
         hidden_dims: List[int] = [256, 256, 128],
-        lr: float = 0.00005,  # Lower LR for stability
+        lr: float = 0.0001,
         gamma: float = 0.99,
-        tau: float = 0.001,  # Slower target updates for stability
+        tau: float = 0.005,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.99995,  # Slower decay: reaches 0.01 around epoch 30 of 40
+        epsilon_decay: float = 0.9995,
     ):
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -713,16 +464,15 @@ class DQN:
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
-        self.base_lr = lr
 
-        # Build networks (internal lists)
-        self._q_network = self._build_network(state_dim, action_dim, hidden_dims)
-        self._target_network = self._build_network(state_dim, action_dim, hidden_dims)
+        # Build networks
+        self.q_network = self._build_network(state_dim, action_dim, hidden_dims)
+        self.target_network = self._build_network(state_dim, action_dim, hidden_dims)
         self._hard_update()
 
-        # Optimizer with lower learning rate
+        # Optimizer
         params = []
-        for layer in self._q_network:
+        for layer in self.q_network:
             params.extend(layer.parameters())
         self.optimizer = Adam(params, lr=lr)
 
@@ -732,10 +482,6 @@ class DQN:
         # Training metrics
         self.training_step = 0
         self.losses: List[float] = []
-
-        # Loss scaling for stable training
-        self.loss_ema = 1.0  # Exponential moving average of loss
-        self.loss_scale = 1.0  # Adaptive loss scaling factor
 
     def _build_network(self, state_dim: int, action_dim: int,
                        hidden_dims: List[int]) -> List[Layer]:
@@ -756,39 +502,26 @@ class DQN:
 
         return layers
 
-    def _forward(self, state: np.ndarray, network: List[Layer], clip_output: bool = True) -> np.ndarray:
-        """Forward pass through network with Q-value clipping."""
+    def _forward(self, state: np.ndarray, network: List[Layer]) -> np.ndarray:
+        """Forward pass through network."""
         x = state
         for layer in network:
             x = layer.forward(x)
-        # Clip Q-values to prevent explosion (critical for stability)
-        if clip_output:
-            x = np.clip(x, -20, 20)
         return x
 
     def _hard_update(self):
         """Copy Q-network to target network."""
-        for q_layer, target_layer in zip(self._q_network, self._target_network):
+        for q_layer, target_layer in zip(self.q_network, self.target_network):
             for q_param, target_param in zip(q_layer.parameters(),
                                               target_layer.parameters()):
                 target_param[:] = q_param
 
     def _soft_update(self):
         """Soft update target network (Polyak averaging)."""
-        for q_layer, target_layer in zip(self._q_network, self._target_network):
+        for q_layer, target_layer in zip(self.q_network, self.target_network):
             for q_param, target_param in zip(q_layer.parameters(),
                                               target_layer.parameters()):
                 target_param[:] = self.tau * q_param + (1 - self.tau) * target_param
-
-    @property
-    def q_network(self):
-        """Property wrapper for checkpoint compatibility."""
-        return _NetworkWrapper(self._q_network)
-
-    @property
-    def target_network(self):
-        """Property wrapper for checkpoint compatibility."""
-        return _NetworkWrapper(self._target_network)
 
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
         """Select action using epsilon-greedy policy."""
@@ -796,40 +529,13 @@ class DQN:
             return np.random.randint(self.action_dim)
 
         state = np.array(state).reshape(1, -1)
-        self._set_eval_mode(self._q_network)
-        q_values = self._forward(state, self._q_network)
-        self._set_train_mode(self._q_network)
+        q_values = self._forward(state, self.q_network)
         return int(np.argmax(q_values))
 
-    def _set_eval_mode(self, network: List[Layer]):
-        """Set network layers to eval mode (disables dropout)."""
-        for layer in network:
-            if isinstance(layer, Dropout):
-                layer.training = False
-
-    def _set_train_mode(self, network: List[Layer]):
-        """Set network layers to train mode (enables dropout)."""
-        for layer in network:
-            if isinstance(layer, Dropout):
-                layer.training = True
-
-    def get_q_values(self, state: np.ndarray) -> np.ndarray:
-        """Get Q-values for a state (for ensemble prediction)."""
-        state = np.array(state).reshape(1, -1)
-        self._set_eval_mode(self._q_network)
-        q_values = self._forward(state, self._q_network)
-        self._set_train_mode(self._q_network)
-        return q_values[0]  # Return 1D array
-
     def train_step(self, batch_size: int = 64) -> float:
-        """Perform one training step with stability improvements."""
+        """Perform one training step."""
         if len(self.replay_buffer) < batch_size:
             return 0.0
-
-        # Learning rate decay: reduce LR over time for stability
-        decay_factor = 1.0 / (1.0 + 0.0001 * self.training_step)
-        current_lr = self.base_lr * decay_factor
-        self.optimizer.lr = current_lr
 
         # Sample batch
         experiences, indices, weights = self.replay_buffer.sample(batch_size)
@@ -840,42 +546,27 @@ class DQN:
         next_states = np.array([e.next_state for e in experiences])
         dones = np.array([e.done for e in experiences])
 
-        # Clip rewards to [-1, 1] for stability
-        rewards = np.clip(rewards, -1, 1)
-
-        # Current Q values (already clipped in _forward)
-        current_q = self._forward(states, self._q_network)
+        # Current Q values
+        current_q = self._forward(states, self.q_network)
         current_q_actions = current_q[np.arange(batch_size), actions]
 
         # Double DQN: select action with online network, evaluate with target
-        # Target network must be in eval mode — dropout would make targets noisy,
-        # causing the online network to chase a randomly-corrupted signal.
-        self._set_eval_mode(self._q_network)
-        next_q_online = self._forward(next_states, self._q_network)
-        self._set_train_mode(self._q_network)
+        next_q_online = self._forward(next_states, self.q_network)
         next_actions = np.argmax(next_q_online, axis=1)
-
-        self._set_eval_mode(self._target_network)
-        next_q_target = self._forward(next_states, self._target_network)
-        self._set_train_mode(self._target_network)
+        next_q_target = self._forward(next_states, self.target_network)
         next_q_values = next_q_target[np.arange(batch_size), next_actions]
 
-        # Compute targets - Q-values already clipped to [-20, 20] in forward
+        # Compute targets
         targets = rewards + self.gamma * next_q_values * (1 - dones)
-        targets = np.clip(targets, -20, 20)  # Match Q-value clip range
 
-        # TD error for prioritized replay (clip for stability)
-        td_errors = np.clip(targets - current_q_actions, -10, 10)
+        # TD error for prioritized replay
+        td_errors = targets - current_q_actions
         self.replay_buffer.update_priorities(indices, td_errors)
 
         # Compute loss (Huber loss for stability)
-        raw_loss = self._huber_loss(current_q_actions, targets, weights)
+        loss = self._huber_loss(current_q_actions, targets, weights)
 
-        # Adaptive loss scaling: normalize loss to ~1.0 scale
-        self.loss_ema = 0.99 * self.loss_ema + 0.01 * raw_loss
-        normalized_loss = raw_loss / (self.loss_ema + 1e-8)
-
-        # Backpropagation with scaled gradients
+        # Backpropagation
         grad = self._huber_loss_grad(current_q_actions, targets, weights)
 
         # Create gradient for full Q-values tensor
@@ -883,31 +574,30 @@ class DQN:
         full_grad[np.arange(batch_size), actions] = grad
 
         # Backward pass through layers
-        for layer in reversed(self._q_network):
+        for layer in reversed(self.q_network):
             full_grad = layer.backward(full_grad)
 
         # Collect gradients and update
         grads = []
-        for layer in self._q_network:
+        for layer in self.q_network:
             grads.extend(layer.gradients())
 
-        # Aggressive gradient clipping for stability
-        max_grad_norm = 0.5  # Tighter clipping
+        # Gradient clipping
+        max_grad_norm = 1.0
         grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in grads))
         if grad_norm > max_grad_norm:
             grads = [g * max_grad_norm / grad_norm for g in grads]
 
         self.optimizer.step(grads)
 
-        # Update target network (slower tau) and epsilon
+        # Update target network and epsilon
         self._soft_update()
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
         self.training_step += 1
-        self.losses.append(normalized_loss)
+        self.losses.append(loss)
 
-        # Return normalized loss for stable reporting
-        return normalized_loss
+        return loss
 
     def _huber_loss(self, pred: np.ndarray, target: np.ndarray,
                     weights: np.ndarray, delta: float = 1.0) -> float:
@@ -929,7 +619,7 @@ class DQN:
     def save(self, path: str):
         """Save model parameters."""
         params = {}
-        for i, layer in enumerate(self._q_network):
+        for i, layer in enumerate(self.q_network):
             for j, param in enumerate(layer.parameters()):
                 params[f"layer_{i}_param_{j}"] = param
         np.savez(path, **params)
@@ -938,7 +628,7 @@ class DQN:
         """Load model parameters."""
         data = np.load(path)
         idx = 0
-        for layer in self._q_network:
+        for layer in self.q_network:
             for param in layer.parameters():
                 key = f"layer_{idx}_param_{0}"
                 if key in data:
@@ -1056,18 +746,6 @@ class PPOAgent:
             x = layer.forward(x)
         return x
 
-    def get_action_probs(self, state: np.ndarray) -> np.ndarray:
-        """Get action probabilities (for ensemble prediction)."""
-        state = np.array(state).reshape(1, -1)
-        probs = self._forward_actor(state).flatten()
-        return probs
-
-    def get_value(self, state: np.ndarray) -> float:
-        """Get state value estimate (for ensemble prediction)."""
-        state = np.array(state).reshape(1, -1)
-        value = self._forward_critic(state).flatten()[0]
-        return value
-
     def select_action(self, state: np.ndarray) -> Tuple[int, float, float]:
         """Select action from policy distribution."""
         state = np.array(state).reshape(1, -1)
@@ -1164,66 +842,6 @@ class PPOAgent:
                 # Entropy bonus
                 entropy = -np.mean(np.sum(probs * np.log(probs + 1e-10), axis=1))
 
-                # ============ ACTOR BACKWARD PASS ============
-                # Gradient of policy loss w.r.t. log_probs
-                # d(policy_loss)/d(log_prob) = -advantage * d(clipped_ratio)/d(log_prob)
-                # For clipped surrogate: use ratio where not clipped
-                clipped = (ratio < 1 - self.clip_epsilon) | (ratio > 1 + self.clip_epsilon)
-                d_ratio = np.where(clipped, 0, batch_advantages)
-                d_log_probs = -ratio * d_ratio / len(batch_actions)
-
-                # Gradient through log(prob) -> prob: d(log(p))/d(p) = 1/p
-                # So d(loss)/d(prob) = d(loss)/d(log_prob) * 1/prob
-                d_probs = np.zeros_like(probs)
-                d_probs[np.arange(len(batch_actions)), batch_actions] = d_log_probs / (probs[np.arange(len(batch_actions)), batch_actions] + 1e-10)
-
-                # Add entropy gradient (entropy bonus encourages exploration)
-                d_entropy = -self.entropy_coef * (np.log(probs + 1e-10) + 1) / len(batch_actions)
-                d_probs += d_entropy
-
-                # Softmax backward: d_logits = probs * (d_probs - sum(probs * d_probs))
-                sum_dp = np.sum(probs * d_probs, axis=1, keepdims=True)
-                d_logits = probs * (d_probs - sum_dp)
-
-                # Backward through actor layers
-                grad = d_logits
-                for layer in reversed(self.actor):
-                    grad = layer.backward(grad)
-
-                # Collect actor gradients and update
-                actor_grads = []
-                for layer in self.actor:
-                    actor_grads.extend(layer.gradients())
-
-                # Gradient clipping
-                grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in actor_grads) + 1e-8)
-                if grad_norm > self.max_grad_norm:
-                    actor_grads = [g * self.max_grad_norm / grad_norm for g in actor_grads]
-
-                self.actor_optimizer.step(actor_grads)
-
-                # ============ CRITIC BACKWARD PASS ============
-                # Gradient of value loss: d(MSE)/d(values) = 2 * (values - returns) / batch_size
-                d_values = 2 * (values - batch_returns) / len(batch_returns)
-                d_values = d_values.reshape(-1, 1)  # Shape for backward pass
-
-                # Backward through critic layers
-                grad = d_values
-                for layer in reversed(self.critic):
-                    grad = layer.backward(grad)
-
-                # Collect critic gradients and update
-                critic_grads = []
-                for layer in self.critic:
-                    critic_grads.extend(layer.gradients())
-
-                # Gradient clipping
-                grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in critic_grads) + 1e-8)
-                if grad_norm > self.max_grad_norm:
-                    critic_grads = [g * self.max_grad_norm / grad_norm for g in critic_grads]
-
-                self.critic_optimizer.step(critic_grads)
-
                 total_policy_loss += policy_loss
                 total_value_loss += value_loss
                 total_entropy += entropy
@@ -1246,66 +864,6 @@ class PPOAgent:
             "value_loss": total_value_loss / n_updates,
             "entropy": total_entropy / n_updates,
         }
-
-    def train_step(self, next_value: float = 0) -> float:
-        """
-        Single training step (alias for train() for consistency with other models).
-        Returns total loss.
-        """
-        if len(self.states) < 10:
-            return 0.0
-
-        result = self.train(next_value=next_value, n_epochs=4, batch_size=32)
-        return result.get("policy_loss", 0) + result.get("value_loss", 0)
-
-    # Aliases for checkpoint save/load compatibility
-    @property
-    def policy_network(self):
-        """Alias for actor network (for checkpoint compatibility)."""
-        return _NetworkWrapper(self.actor)
-
-    @property
-    def value_network(self):
-        """Alias for critic network (for checkpoint compatibility)."""
-        return _NetworkWrapper(self.critic)
-
-
-class _NetworkWrapper:
-    """Wrapper to provide get_weights/set_weights for networks."""
-
-    def __init__(self, layers: List[Layer]):
-        self.layers = layers
-
-    def get_weights(self) -> List[Dict]:
-        """Get all layer weights (Dense + LayerNorm)."""
-        weights = []
-        for layer in self.layers:
-            if hasattr(layer, 'W') and hasattr(layer, 'b'):
-                weights.append({'type': 'dense', 'W': layer.W.copy(), 'b': layer.b.copy()})
-            elif hasattr(layer, 'gamma') and hasattr(layer, 'beta'):
-                weights.append({'type': 'layernorm', 'gamma': layer.gamma.copy(), 'beta': layer.beta.copy()})
-        return weights
-
-    def set_weights(self, weights: List[Dict]):
-        """Set all layer weights (Dense + LayerNorm)."""
-        weight_idx = 0
-        for layer in self.layers:
-            if weight_idx >= len(weights):
-                break
-            w = weights[weight_idx]
-            if hasattr(layer, 'W') and hasattr(layer, 'b') and w.get('type', 'dense') == 'dense':
-                layer.W = w['W'].copy()
-                layer.b = w['b'].copy()
-                weight_idx += 1
-            elif hasattr(layer, 'gamma') and hasattr(layer, 'beta') and w.get('type') == 'layernorm':
-                layer.gamma = w['gamma'].copy()
-                layer.beta = w['beta'].copy()
-                weight_idx += 1
-            elif hasattr(layer, 'W') and hasattr(layer, 'b') and 'W' in w:
-                # Backward compat: old checkpoints without 'type' field
-                layer.W = w['W'].copy()
-                layer.b = w['b'].copy()
-                weight_idx += 1
 
 
 # =============================================================================
@@ -1408,12 +966,10 @@ class TransformerPredictor:
             x = self.layer_norms[i][0].forward(x + attn_out)
 
             # Feed-forward with residual
-            # Flatten to (batch*seq, d_model) for the FF layers
-            ff_out = x.reshape(-1, self.d_model)
+            ff_out = x
             for ff_layer in self.ff_layers[i]:
-                ff_out = ff_layer.forward(ff_out)
-            # Reshape back to (batch, seq_len, d_model) after FF block
-            ff_out = ff_out.reshape(batch_size, seq_len, self.d_model)
+                ff_out = ff_layer.forward(ff_out.reshape(-1, self.d_model))
+                ff_out = ff_out.reshape(batch_size, seq_len, self.d_model)
             x = self.layer_norms[i][1].forward(x + ff_out)
 
         # Take last position for prediction
@@ -1532,540 +1088,6 @@ class MarketRegimeVAE:
             3: "Low Volatility Consolidation",
         }
         return names.get(regime_id, "Unknown")
-
-
-class TrainableTransformer:
-    """
-    Simplified Transformer for classification with proper gradient descent training.
-    Uses a simpler architecture for stable training.
-    """
-
-    def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3,
-                 n_heads: int = 4, lr: float = 0.001):
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
-        self.n_heads = n_heads
-        self.head_dim = hidden_dim // n_heads
-        self.lr = lr
-
-        # Input projection
-        self.W_in = np.random.randn(input_dim, hidden_dim) * np.sqrt(2.0 / input_dim)
-        self.b_in = np.zeros((1, hidden_dim))
-
-        # Multi-head attention weights
-        self.W_q = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
-        self.W_k = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
-        self.W_v = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
-        self.W_o = np.random.randn(hidden_dim, hidden_dim) * np.sqrt(1.0 / hidden_dim)
-
-        # Feed-forward network
-        self.W_ff1 = np.random.randn(hidden_dim, hidden_dim * 4) * np.sqrt(2.0 / hidden_dim)
-        self.b_ff1 = np.zeros((1, hidden_dim * 4))
-        self.W_ff2 = np.random.randn(hidden_dim * 4, hidden_dim) * np.sqrt(2.0 / (hidden_dim * 4))
-        self.b_ff2 = np.zeros((1, hidden_dim))
-
-        # Output layer
-        self.W_out = np.random.randn(hidden_dim, output_dim) * np.sqrt(1.0 / hidden_dim)
-        self.b_out = np.zeros((1, output_dim))
-
-        # Adam optimizer
-        self._init_adam()
-        self.cache = {}
-
-        # Loss normalization for stable reporting
-        self.loss_ema = 1.0
-
-    def _init_adam(self):
-        self.m = {}
-        self.v = {}
-        self.t = 0
-        for name in ['W_in', 'b_in', 'W_q', 'W_k', 'W_v', 'W_o',
-                     'W_ff1', 'b_ff1', 'W_ff2', 'b_ff2', 'W_out', 'b_out']:
-            param = getattr(self, name)
-            self.m[name] = np.zeros_like(param)
-            self.v[name] = np.zeros_like(param)
-
-    def _softmax(self, x, axis=-1):
-        exp_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
-        return exp_x / (np.sum(exp_x, axis=axis, keepdims=True) + 1e-8)
-
-    def _relu(self, x):
-        return np.maximum(0, x)
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        """
-        Forward pass through transformer.
-
-        Args:
-            x: Input (batch, seq_len, input_dim) or (seq_len, input_dim)
-
-        Returns:
-            Class probabilities (batch, output_dim)
-        """
-        if len(x.shape) == 2:
-            x = x.reshape(1, *x.shape)
-
-        batch_size, seq_len, _ = x.shape
-
-        # Input projection
-        x_flat = x.reshape(-1, self.input_dim)
-        h = x_flat @ self.W_in + self.b_in
-        h = self._relu(h)
-        h = h.reshape(batch_size, seq_len, self.hidden_dim)
-
-        self.cache['input'] = x
-        self.cache['h_in'] = h
-
-        # Self-attention
-        Q = h @ self.W_q
-        K = h @ self.W_k
-        V = h @ self.W_v
-
-        # Scaled dot-product attention
-        scale = np.sqrt(self.hidden_dim)
-        attn_scores = Q @ K.transpose(0, 2, 1) / scale
-        attn_weights = self._softmax(attn_scores, axis=-1)
-        attn_values = attn_weights @ V  # Before W_o projection
-        attn_out = attn_values @ self.W_o  # After W_o projection
-
-        self.cache['Q'] = Q
-        self.cache['K'] = K
-        self.cache['V'] = V
-        self.cache['attn_weights'] = attn_weights
-        self.cache['attn_values'] = attn_values  # Store pre-W_o for backward
-        self.cache['attn_out'] = attn_out
-
-        # Residual + layer norm (simplified: just residual)
-        h = h + attn_out
-        self.cache['h_attn'] = h
-
-        # Feed-forward
-        ff_flat = h.reshape(-1, self.hidden_dim)
-        ff1 = self._relu(ff_flat @ self.W_ff1 + self.b_ff1)
-        ff2 = ff1 @ self.W_ff2 + self.b_ff2
-        ff_out = ff2.reshape(batch_size, seq_len, self.hidden_dim)
-
-        self.cache['ff1'] = ff1.reshape(batch_size, seq_len, -1)
-        self.cache['ff_out'] = ff_out
-
-        # Residual
-        h = h + ff_out
-        self.cache['h_ff'] = h
-
-        # Take last position for classification
-        h_last = h[:, -1, :]
-        self.cache['h_last'] = h_last
-
-        # Output
-        logits = h_last @ self.W_out + self.b_out
-        probs = self._softmax(logits, axis=-1)
-
-        self.cache['logits'] = logits
-        self.cache['probs'] = probs
-
-        return probs
-
-    def train_step(self, x: np.ndarray, y: np.ndarray) -> float:
-        """
-        Single training step with backpropagation.
-
-        Args:
-            x: Input sequences (batch, seq_len, input_dim)
-            y: Labels (batch,) as integers
-
-        Returns:
-            Cross-entropy loss
-        """
-        if len(x.shape) == 2:
-            x = x.reshape(1, *x.shape)
-
-        batch_size = x.shape[0]
-
-        # Forward
-        probs = self.forward(x)
-
-        # Loss
-        y_onehot = np.zeros_like(probs)
-        y_onehot[np.arange(batch_size), y.astype(int)] = 1
-        loss = -np.mean(np.sum(y_onehot * np.log(probs + 1e-8), axis=1))
-
-        # Backward
-        dlogits = (probs - y_onehot) / batch_size
-
-        # Output layer
-        dW_out = self.cache['h_last'].T @ dlogits
-        db_out = np.sum(dlogits, axis=0, keepdims=True)
-        dh_last = dlogits @ self.W_out.T
-
-        # Expand gradient back through sequence (only last position contributes)
-        seq_len = x.shape[1]
-        dh = np.zeros((batch_size, seq_len, self.hidden_dim))
-        dh[:, -1, :] = dh_last
-
-        # ========= SECOND RESIDUAL: h_ff = h_attn + ff_out =========
-        # Gradient flows to BOTH h_attn and ff_out
-        dh_attn = dh.copy()  # Residual path
-        dff_out = dh.copy()  # FF path
-
-        # Feed-forward backward
-        dff2 = dff_out.reshape(-1, self.hidden_dim)
-        dW_ff2 = self.cache['ff1'].reshape(-1, self.hidden_dim * 4).T @ dff2
-        db_ff2 = np.sum(dff2, axis=0, keepdims=True)
-
-        dff1 = dff2 @ self.W_ff2.T
-        dff1 = dff1 * (self.cache['ff1'].reshape(-1, self.hidden_dim * 4) > 0)
-
-        h_attn_flat = self.cache['h_attn'].reshape(-1, self.hidden_dim)
-        dW_ff1 = h_attn_flat.T @ dff1
-        db_ff1 = np.sum(dff1, axis=0, keepdims=True)
-
-        # FF gradient flows back to h_attn through the FF input
-        dh_attn_from_ff = (dff1 @ self.W_ff1.T).reshape(batch_size, seq_len, self.hidden_dim)
-        dh_attn += dh_attn_from_ff  # Add FF contribution to residual
-
-        # ========= FIRST RESIDUAL: h_attn = h + attn_out =========
-        # Gradient flows to BOTH h (input proj) and attn_out
-        dh_input = dh_attn.copy()  # Residual path to input projection
-        dattn_out = dh_attn.copy()  # Attention path
-
-        # Attention backward - compute gradients for Q, K, V projections
-        # Gradient for W_o: dW_o = attn_values.T @ dattn_out
-        attn_values = self.cache['attn_values']  # (batch, seq, hidden) - BEFORE W_o
-        dW_o = attn_values.reshape(-1, self.hidden_dim).T @ dattn_out.reshape(-1, self.hidden_dim)
-
-        # Gradient w.r.t. attn_values (before W_o): d_attn_values = dattn_out @ W_o.T
-        d_attn_values = dattn_out.reshape(batch_size, seq_len, -1) @ self.W_o.T
-
-        # Attention backward through: attn_values = attn_weights @ V
-        # d_attn_weights = d_attn_values @ V.T
-        # d_V = attn_weights.T @ d_attn_values
-        attn_weights = self.cache['attn_weights']  # (batch, seq, seq)
-        V = self.cache['V']  # (batch, seq, hidden)
-
-        # Gradient for V: dV = attn_weights.T @ d_attn_values
-        dV = np.zeros_like(V)
-        for b in range(batch_size):
-            dV[b] = attn_weights[b].T @ d_attn_values[b]
-
-        # Gradient for W_v: dW_v = h_in.T @ dV
-        h_in = self.cache['h_in']  # (batch, seq, hidden)
-        dW_v = h_in.reshape(-1, self.hidden_dim).T @ dV.reshape(-1, self.hidden_dim)
-
-        # Gradient for attn_weights: d_attn_weights = d_attn_values @ V.T
-        d_attn_weights = np.zeros_like(attn_weights)
-        for b in range(batch_size):
-            d_attn_weights[b] = d_attn_values[b] @ V[b].T
-
-        # Softmax backward: d_scores[i,j] = attn_weights[i,j] * (d_attn_weights[i,j] - sum_k(attn_weights[i,k] * d_attn_weights[i,k]))
-        d_scores = np.zeros_like(attn_weights)
-        for b in range(batch_size):
-            for i in range(seq_len):
-                s = attn_weights[b, i, :]  # softmax output for row i
-                dy = d_attn_weights[b, i, :]  # gradient for row i
-                d_scores[b, i, :] = s * (dy - np.sum(s * dy))
-
-        # Gradient for Q and K through: scores = Q @ K.T / scale
-        Q = self.cache['Q']
-        K = self.cache['K']
-        scale = np.sqrt(self.hidden_dim)
-
-        # dQ = d_scores @ K / scale
-        dQ = np.zeros_like(Q)
-        for b in range(batch_size):
-            dQ[b] = d_scores[b] @ K[b] / scale
-
-        # dK = d_scores.T @ Q / scale
-        dK = np.zeros_like(K)
-        for b in range(batch_size):
-            dK[b] = d_scores[b].T @ Q[b] / scale
-
-        dW_q = h_in.reshape(-1, self.hidden_dim).T @ dQ.reshape(-1, self.hidden_dim)
-        dW_k = h_in.reshape(-1, self.hidden_dim).T @ dK.reshape(-1, self.hidden_dim)
-
-        # Attention gradient flows back to h_in through Q, K, V projections
-        dh_from_attn = (dQ @ self.W_q.T + dK @ self.W_k.T + dV @ self.W_v.T)
-        dh_input += dh_from_attn  # Add attention contribution to input gradient
-
-        # Input projection backward (with full gradient from both residuals)
-        dh_in = dh_input.reshape(-1, self.hidden_dim)
-        dh_in = dh_in * (self.cache['h_in'].reshape(-1, self.hidden_dim) > 0)
-        dW_in = x.reshape(-1, self.input_dim).T @ dh_in
-        db_in = np.sum(dh_in, axis=0, keepdims=True)
-
-        # Gradient clipping
-        grads = {
-            'W_out': dW_out, 'b_out': db_out,
-            'W_ff2': dW_ff2, 'b_ff2': db_ff2,
-            'W_ff1': dW_ff1, 'b_ff1': db_ff1,
-            'W_o': dW_o,
-            'W_in': dW_in, 'b_in': db_in,
-            'W_q': dW_q,
-            'W_k': dW_k,
-            'W_v': dW_v,
-        }
-
-        max_grad = 5.0
-        for name, grad in grads.items():
-            norm = np.linalg.norm(grad)
-            if norm > max_grad:
-                grads[name] = grad * max_grad / norm
-
-        # Adam update
-        self.t += 1
-        beta1, beta2, eps = 0.9, 0.999, 1e-8
-
-        for name, grad in grads.items():
-            if np.sum(np.abs(grad)) == 0:
-                continue
-            param = getattr(self, name)
-            self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
-            self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
-
-            m_hat = self.m[name] / (1 - beta1 ** self.t)
-            v_hat = self.v[name] / (1 - beta2 ** self.t)
-
-            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
-            setattr(self, name, param)
-
-        # Normalize loss for stable reporting
-        self.loss_ema = 0.99 * self.loss_ema + 0.01 * loss
-        normalized_loss = loss / (self.loss_ema + 1e-8)
-
-        return normalized_loss
-
-    def predict(self, x: np.ndarray) -> int:
-        probs = self.forward(x)
-        return int(np.argmax(probs[0]))
-
-    def get_weights(self) -> Dict:
-        return {name: getattr(self, name) for name in
-                ['W_in', 'b_in', 'W_q', 'W_k', 'W_v', 'W_o',
-                 'W_ff1', 'b_ff1', 'W_ff2', 'b_ff2', 'W_out', 'b_out']}
-
-    def set_weights(self, weights: Dict):
-        for name, value in weights.items():
-            setattr(self, name, value)
-        self._init_adam()
-
-
-class TrainableVAE:
-    """
-    Variational Autoencoder with proper training using reconstruction + KL loss.
-    """
-
-    def __init__(self, input_dim: int, hidden_dim: int = 64, latent_dim: int = 8,
-                 output_dim: int = 4, lr: float = 0.001):
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.latent_dim = latent_dim
-        self.output_dim = output_dim  # Number of regimes
-        self.lr = lr
-
-        # Encoder
-        self.W_enc1 = np.random.randn(input_dim, hidden_dim) * np.sqrt(2.0 / input_dim)
-        self.b_enc1 = np.zeros((1, hidden_dim))
-        self.W_mu = np.random.randn(hidden_dim, latent_dim) * np.sqrt(1.0 / hidden_dim)
-        self.b_mu = np.zeros((1, latent_dim))
-        self.W_logvar = np.random.randn(hidden_dim, latent_dim) * np.sqrt(1.0 / hidden_dim)
-        self.b_logvar = np.zeros((1, latent_dim))
-
-        # Decoder
-        self.W_dec1 = np.random.randn(latent_dim, hidden_dim) * np.sqrt(2.0 / latent_dim)
-        self.b_dec1 = np.zeros((1, hidden_dim))
-        self.W_dec2 = np.random.randn(hidden_dim, input_dim) * np.sqrt(1.0 / hidden_dim)
-        self.b_dec2 = np.zeros((1, input_dim))
-
-        # Regime classifier on latent space
-        self.W_cls = np.random.randn(latent_dim, output_dim) * np.sqrt(1.0 / latent_dim)
-        self.b_cls = np.zeros((1, output_dim))
-
-        self._init_adam()
-        self.cache = {}
-
-    def _init_adam(self):
-        self.m = {}
-        self.v = {}
-        self.t = 0
-        for name in ['W_enc1', 'b_enc1', 'W_mu', 'b_mu', 'W_logvar', 'b_logvar',
-                     'W_dec1', 'b_dec1', 'W_dec2', 'b_dec2', 'W_cls', 'b_cls']:
-            param = getattr(self, name)
-            self.m[name] = np.zeros_like(param)
-            self.v[name] = np.zeros_like(param)
-
-    def _relu(self, x):
-        return np.maximum(0, x)
-
-    def _softmax(self, x):
-        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
-        return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
-
-    def encode(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        h = self._relu(x @ self.W_enc1 + self.b_enc1)
-        self.cache['h_enc'] = h
-        mu = h @ self.W_mu + self.b_mu
-        logvar = h @ self.W_logvar + self.b_logvar
-        return mu, logvar
-
-    def reparameterize(self, mu: np.ndarray, logvar: np.ndarray) -> np.ndarray:
-        # Clip logvar to prevent exp() overflow
-        logvar = np.clip(logvar, -20, 2)
-        std = np.exp(0.5 * logvar)
-        eps = np.random.randn(*mu.shape)
-        self.cache['eps'] = eps
-        self.cache['std'] = std
-        return mu + eps * std
-
-    def decode(self, z: np.ndarray) -> np.ndarray:
-        h = self._relu(z @ self.W_dec1 + self.b_dec1)
-        self.cache['h_dec'] = h
-        return h @ self.W_dec2 + self.b_dec2
-
-    def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        if len(x.shape) == 1:
-            x = x.reshape(1, -1)
-
-        self.cache['x'] = x
-        mu, logvar = self.encode(x)
-        self.cache['mu'] = mu
-        self.cache['logvar'] = logvar
-
-        z = self.reparameterize(mu, logvar)
-        self.cache['z'] = z
-
-        recon = self.decode(z)
-        self.cache['recon'] = recon
-
-        # Regime classification
-        regime_logits = z @ self.W_cls + self.b_cls
-        regime_probs = self._softmax(regime_logits)
-        self.cache['regime_probs'] = regime_probs
-
-        return recon, mu, logvar, regime_probs
-
-    def train_step(self, x: np.ndarray, y: Optional[np.ndarray] = None) -> float:
-        """
-        Training step with reconstruction + KL loss (+ classification loss if labels provided).
-
-        Loss = Reconstruction_MSE + beta * KL_divergence + classification_loss
-        """
-        if len(x.shape) == 1:
-            x = x.reshape(1, -1)
-
-        batch_size = x.shape[0]
-        beta = 0.1  # KL weight (beta-VAE style)
-
-        # Forward
-        recon, mu, logvar, regime_probs = self.forward(x)
-
-        # Reconstruction loss (MSE)
-        recon_loss = np.mean((recon - x) ** 2)
-
-        # KL divergence: -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
-        # Clip logvar to prevent exp() overflow
-        logvar_clipped = np.clip(logvar, -20, 2)
-        kl_loss = -0.5 * np.mean(np.sum(1 + logvar_clipped - mu ** 2 - np.exp(logvar_clipped), axis=1))
-
-        # Classification loss if labels provided
-        cls_loss = 0
-        if y is not None:
-            y_onehot = np.zeros_like(regime_probs)
-            y_onehot[np.arange(batch_size), y.astype(int) % self.output_dim] = 1
-            cls_loss = -np.mean(np.sum(y_onehot * np.log(regime_probs + 1e-8), axis=1))
-
-        total_loss = recon_loss + beta * kl_loss + cls_loss
-
-        # Backward pass
-        # Reconstruction gradient
-        drecon = 2 * (recon - x) / (batch_size * self.input_dim)
-
-        # Decoder backward
-        dW_dec2 = self.cache['h_dec'].T @ drecon
-        db_dec2 = np.sum(drecon, axis=0, keepdims=True)
-
-        dh_dec = drecon @ self.W_dec2.T
-        dh_dec = dh_dec * (self.cache['h_dec'] > 0)
-
-        dW_dec1 = self.cache['z'].T @ dh_dec
-        db_dec1 = np.sum(dh_dec, axis=0, keepdims=True)
-
-        dz = dh_dec @ self.W_dec1.T
-
-        # Classification gradient
-        if y is not None:
-            dcls = (regime_probs - y_onehot) / batch_size
-            dW_cls = self.cache['z'].T @ dcls
-            db_cls = np.sum(dcls, axis=0, keepdims=True)
-            dz += dcls @ self.W_cls.T
-        else:
-            dW_cls = np.zeros_like(self.W_cls)
-            db_cls = np.zeros_like(self.b_cls)
-
-        # KL gradient
-        dmu = beta * mu / batch_size
-        dlogvar = beta * 0.5 * (np.exp(logvar) - 1) / batch_size
-
-        # Reparameterization backward
-        dmu += dz
-        dlogvar += dz * self.cache['eps'] * self.cache['std'] * 0.5
-
-        # Encoder backward
-        dW_mu = self.cache['h_enc'].T @ dmu
-        db_mu = np.sum(dmu, axis=0, keepdims=True)
-        dW_logvar = self.cache['h_enc'].T @ dlogvar
-        db_logvar = np.sum(dlogvar, axis=0, keepdims=True)
-
-        dh_enc = dmu @ self.W_mu.T + dlogvar @ self.W_logvar.T
-        dh_enc = dh_enc * (self.cache['h_enc'] > 0)
-
-        dW_enc1 = x.T @ dh_enc
-        db_enc1 = np.sum(dh_enc, axis=0, keepdims=True)
-
-        # Gradient clipping and Adam update
-        grads = {
-            'W_enc1': dW_enc1, 'b_enc1': db_enc1,
-            'W_mu': dW_mu, 'b_mu': db_mu,
-            'W_logvar': dW_logvar, 'b_logvar': db_logvar,
-            'W_dec1': dW_dec1, 'b_dec1': db_dec1,
-            'W_dec2': dW_dec2, 'b_dec2': db_dec2,
-            'W_cls': dW_cls, 'b_cls': db_cls,
-        }
-
-        max_grad = 5.0
-        self.t += 1
-        beta1, beta2, eps = 0.9, 0.999, 1e-8
-
-        for name, grad in grads.items():
-            norm = np.linalg.norm(grad)
-            if norm > max_grad:
-                grad = grad * max_grad / norm
-
-            param = getattr(self, name)
-            self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
-            self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
-
-            m_hat = self.m[name] / (1 - beta1 ** self.t)
-            v_hat = self.v[name] / (1 - beta2 ** self.t)
-
-            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
-            setattr(self, name, param)
-
-        return total_loss
-
-    def detect_regime(self, x: np.ndarray) -> Tuple[int, np.ndarray]:
-        """Detect regime from input."""
-        _, _, _, regime_probs = self.forward(x)
-        return int(np.argmax(regime_probs[0])), regime_probs[0]
-
-    def get_weights(self) -> Dict:
-        return {name: getattr(self, name) for name in
-                ['W_enc1', 'b_enc1', 'W_mu', 'b_mu', 'W_logvar', 'b_logvar',
-                 'W_dec1', 'b_dec1', 'W_dec2', 'b_dec2', 'W_cls', 'b_cls']}
-
-    def set_weights(self, weights: Dict):
-        for name, value in weights.items():
-            setattr(self, name, value)
-        self._init_adam()
 
 
 # =============================================================================
