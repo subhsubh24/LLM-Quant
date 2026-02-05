@@ -547,8 +547,13 @@ class GARCH:
             else:
                 # EGARCH forecast (simplified)
                 persistence = self.beta[0]
-                unconditional = np.exp(self.omega / (1 - persistence))
-                forecast_var[h] = unconditional + persistence ** h * (current_var - unconditional)
+                denom = 1 - persistence
+                if abs(denom) < 1e-8:
+                    # Near unit-root: variance doesn't revert, use current
+                    forecast_var[h] = current_var
+                else:
+                    unconditional = np.exp(self.omega / denom)
+                    forecast_var[h] = unconditional + persistence ** h * (current_var - unconditional)
 
         # Compute fit metrics
         k = 3 if self.model_type == "garch" else 4
@@ -797,6 +802,7 @@ class ExtremeValueAnalyzer:
         # Method of moments estimators for GPD
         # E[X] = σ/(1-ξ), Var[X] = σ²/((1-ξ)²(1-2ξ))
         # ⇒ E²/Var = 1-2ξ  ⇒  ξ = (1 - E²/Var) / 2
+        var_excess = max(var_excess, 1e-10)  # guard against zero variance
         self.shape_xi = 0.5 * (1 - mean_excess ** 2 / var_excess)
         self.scale_sigma = mean_excess * (1 - self.shape_xi)
 

@@ -1691,7 +1691,8 @@ class TrainableTransformer:
 
         # Loss
         y_onehot = np.zeros_like(probs)
-        y_onehot[np.arange(batch_size), y.astype(int)] = 1
+        y_safe = np.clip(y.astype(int), 0, self.output_dim - 1)
+        y_onehot[np.arange(batch_size), y_safe] = 1
         loss = -np.mean(np.sum(y_onehot * np.log(probs + 1e-8), axis=1))
 
         # Backward
