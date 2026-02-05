@@ -153,7 +153,9 @@ class OptionsPremiumStrategy(BaseStrategy):
         from ...master_bot import Opportunity, AssetClass
 
         risk = store.get_risk_metrics(base_asset)
-        iv = min(1.0, max(0.3, risk.volatility_forecast + np.random.uniform(-0.1, 0.2)))
+        # Use realised vol as IV proxy (crypto IV typically trades at a
+        # premium to realised, so scale up slightly).
+        iv = min(1.5, max(0.3, risk.volatility_forecast * 1.2))
 
         if iv > 0.70:
             strategy = f"Sell {base_asset} {option_type.title()}"

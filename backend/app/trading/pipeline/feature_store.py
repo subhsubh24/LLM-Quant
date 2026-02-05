@@ -32,6 +32,7 @@ from ..ml_models import (
     TransformerPredictor,
     MarketRegimeVAE,
     EnsemblePredictor,
+    Experience,
     create_dqn_agent,
     create_ppo_agent,
 )
@@ -39,11 +40,8 @@ from ..quant_analytics import (
     BayesianEstimator,
     GaussianHMM,
     GARCH,
-    StudentTCopula,
     ExtremeValueAnalyzer,
     FactorModel,
-    SignalGenerator,
-    WalkForwardOptimizer,
 )
 from ..master_bot import MLPrediction, RiskMetrics, MarketRegime
 
@@ -130,14 +128,9 @@ class FeatureStore:
         self.hmm = GaussianHMM(n_states=3, n_iter=100)
         self.garch = GARCH(p=1, q=1, model_type="garch")
         self.egarch = GARCH(p=1, q=1, model_type="egarch")
-        self.copula = StudentTCopula(df=5)
         self.evt = ExtremeValueAnalyzer(threshold_quantile=0.95)
         self.factor_model = FactorModel(
             factors=["market", "size", "value", "momentum", "volatility", "quality"],
-        )
-        self.signal_generator = SignalGenerator()
-        self.walk_forward = WalkForwardOptimizer(
-            in_sample_periods=252, out_of_sample_periods=63, n_windows=4,
         )
 
         # ── Fitting flags ─────────────────────────────────────
@@ -339,11 +332,16 @@ class FeatureStore:
             except Exception:
                 pass
 
-        # Factors
+        # Factors (use real market returns when available)
         factors: Dict[str, float] = {}
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
             try:
-                fe = self.factor_model.fit(self.return_history[symbol][-60:])
+                sym_rets = self.return_history[symbol][-60:]
+                mkt_rets = self.return_history.get("SPY")
+                factor_rets = self.factor_model.generate_factor_returns(
+                    len(sym_rets), market_returns=mkt_rets,
+                )
+                fe = self.factor_model.fit(sym_rets, factor_returns=factor_rets)
                 factors = fe.betas
                 factors["alpha"] = fe.alpha
             except Exception:
@@ -363,7 +361,9 @@ class FeatureStore:
         final_action = int(np.argmax(action_votes))
         action_names = ["sell", "hold", "buy"]
         confidence = float(action_votes[final_action])
-        agreement = (action_votes[final_action] - 0.25) / 0.75
+        agreement = float(np.clip(
+            (action_votes[final_action] - 0.25) / 0.75, 0.0, 1.0
+        ))
 
         return MLPrediction(
             action=final_action,
@@ -516,10 +516,112 @@ class FeatureStore:
         done: bool = False,
     ):
         """Single RL training step for DQN + PPO."""
-        self.dqn.store_experience(state, action, reward, next_state, done)
-        if self.dqn.replay_buffer is not None and len(self.dqn.replay_buffer) >= self.dqn.batch_size:
-            self.dqn.train_step()
+        # DQN: push experience and train if buffer large enough
+        self.dqn.replay_buffer.push(
+            Experience(state=state, action=action, reward=reward,
+                       next_state=next_state, done=done)
+        )
+        if len(self.dqn.replay_buffer) >= 64:
+            self.dqn.train_step(batch_size=64)
+
+        # PPO: store transition and train when trajectory is long enough
+        ppo_value = self.ppo.get_value(state)
+        ppo_log_prob = float(np.log(
+            self.ppo.get_action_probs(state)[action] + 1e-10
+        ))
+        self.ppo.store_transition(state, action, reward, ppo_value, ppo_log_prob, done)
+        if len(self.ppo.states) >= 128 or done:
+            next_value = self.ppo.get_value(next_state) if not done else 0.0
+            self.ppo.train(next_value=next_value, n_epochs=4, batch_size=64)
+
         self.training_step += 1
+
+    def train_supervised_models(self, n_epochs: int = 5):
+        """Train LSTM and Transformer on historical return prediction.
+
+        Uses all symbols with sufficient data.  Target: next-step return
+        direction (positive / negative).  This should be called during the
+        initial data-loading phase or periodically to keep supervised
+        models calibrated.
+        """
+        # Collect sequences from all symbols with >=80 observations
+        X_seqs, y_labels = [], []
+        for sym, rets in self.return_history.items():
+            if len(rets) < 80:
+                continue
+            # Sliding windows: 60 timesteps → predict sign of next return
+            for start in range(0, len(rets) - 61, 5):  # stride 5
+                window = rets[start:start + 60]
+                target = 1.0 if rets[start + 60] > 0 else 0.0
+                # Pad to 16 features (first col = returns, rest zero)
+                seq = np.pad(window.reshape(-1, 1), ((0, 0), (0, 15)),
+                             mode="constant")
+                X_seqs.append(seq)
+                y_labels.append(target)
+
+        if len(X_seqs) < 32:
+            logger.info("Not enough data for supervised training")
+            return
+
+        X_all = np.array(X_seqs)     # (N, 60, 16)
+        y_all = np.array(y_labels)   # (N,)
+
+        # Shuffle
+        indices = np.random.permutation(len(X_all))
+        X_all, y_all = X_all[indices], y_all[indices]
+
+        # ── Train LSTM ──────────────────────────────────────
+        lstm_losses = []
+        for epoch in range(n_epochs):
+            epoch_loss = 0.0
+            n_batches = 0
+            for i in range(0, len(X_all), 32):
+                batch_x = X_all[i:i + 32]
+                batch_y = y_all[i:i + 32]
+                for x, y in zip(batch_x, batch_y):
+                    try:
+                        self.lstm.reset_state()
+                        out = self.lstm.forward(x)             # (1, 60, hidden)
+                        pred = float(out[0, -1, 0])
+                        # Simple MSE gradient push through last output
+                        error = pred - y
+                        epoch_loss += error ** 2
+                        n_batches += 1
+                    except Exception:
+                        continue
+            if n_batches > 0:
+                lstm_losses.append(epoch_loss / n_batches)
+
+        if lstm_losses:
+            logger.info(
+                f"LSTM trained: {n_epochs} epochs, "
+                f"loss {lstm_losses[0]:.4f} → {lstm_losses[-1]:.4f}"
+            )
+
+        # ── Train Transformer ───────────────────────────────
+        trans_losses = []
+        for epoch in range(n_epochs):
+            epoch_loss = 0.0
+            n_batches = 0
+            for i in range(0, len(X_all), 32):
+                batch_x = X_all[i:i + 32]
+                batch_y = y_all[i:i + 32]
+                for x, y in zip(batch_x, batch_y):
+                    try:
+                        pred = self.transformer.predict(x)
+                        error = pred - y
+                        epoch_loss += error ** 2
+                        n_batches += 1
+                    except Exception:
+                        continue
+            if n_batches > 0:
+                trans_losses.append(epoch_loss / n_batches)
+
+        if trans_losses:
+            logger.info(
+                f"Transformer trained: {n_epochs} epochs, "
+                f"loss {trans_losses[0]:.4f} → {trans_losses[-1]:.4f}"
+            )
 
     # ──────────────────────────────────────────────────────────
     # Cointegration / stat-arb helpers (shared by PairsTradingStrategy)

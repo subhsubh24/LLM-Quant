@@ -59,7 +59,8 @@ class MomentumStrategy(BaseStrategy):
         elif ml_pred.action == 0:
             strategy, direction = "Spot Short", "bearish"
         else:
-            strategy, direction = "Spot Long", "neutral"
+            # Neutral signal — no directional edge, skip
+            return None
 
         base_score = ml_pred.confidence * 100
 

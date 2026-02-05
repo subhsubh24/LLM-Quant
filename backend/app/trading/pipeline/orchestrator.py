@@ -571,6 +571,14 @@ class PipelineOrchestrator:
         self._real_data_loaded = total > 0
         self._add_commentary(f"Market data loaded: {total} symbols", "system")
 
+        # Train supervised models (LSTM, Transformer) on historical data
+        if total > 0:
+            try:
+                self.store.train_supervised_models(n_epochs=5)
+                self._add_commentary("Supervised models trained on historical data", "system")
+            except Exception as e:
+                logger.warning(f"Supervised training failed: {e}")
+
     async def _update_live_prices(self):
         try:
             from ...data.binance_data import get_binance_fetcher

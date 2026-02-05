@@ -794,8 +794,10 @@ class ExtremeValueAnalyzer:
         mean_excess = np.mean(exceedances)
         var_excess = np.var(exceedances)
 
-        # Method of moments estimators
-        self.shape_xi = 0.5 * (mean_excess ** 2 / var_excess - 1)
+        # Method of moments estimators for GPD
+        # E[X] = σ/(1-ξ), Var[X] = σ²/((1-ξ)²(1-2ξ))
+        # ⇒ E²/Var = 1-2ξ  ⇒  ξ = (1 - E²/Var) / 2
+        self.shape_xi = 0.5 * (1 - mean_excess ** 2 / var_excess)
         self.scale_sigma = mean_excess * (1 - self.shape_xi)
 
         # Constrain shape parameter
@@ -902,32 +904,59 @@ class FactorModel:
         self.alpha: float = 0
         self.residuals: np.ndarray = np.array([])
 
-    def generate_factor_returns(self, n_periods: int) -> Dict[str, np.ndarray]:
+    def generate_factor_returns(
+        self,
+        n_periods: int,
+        market_returns: Optional[np.ndarray] = None,
+    ) -> Dict[str, np.ndarray]:
         """
-        Generate synthetic factor returns for demonstration.
-        In production, these would come from a data provider.
+        Construct empirical factor proxies from market data.
+
+        When *market_returns* is provided (SPY daily returns), size/value/
+        momentum/volatility/quality are derived as rolling statistics of
+        actual returns rather than synthetic noise.  This ensures factor
+        betas reflect real market dynamics.
         """
-        np.random.seed(42)
+        factor_returns: Dict[str, np.ndarray] = {}
 
-        factor_returns = {}
+        if market_returns is not None and len(market_returns) >= n_periods:
+            mkt = market_returns[-n_periods:]
+        else:
+            # No real data — generate from scratch (no fixed seed so
+            # results are not deterministic-but-fictional).
+            mkt = np.random.normal(0.0004, 0.01, n_periods)
 
-        # Market factor
-        factor_returns["market"] = np.random.normal(0.0004, 0.01, n_periods)  # ~10% annual
+        factor_returns["market"] = mkt
 
-        # Size factor (SMB)
-        factor_returns["size"] = np.random.normal(0.0001, 0.006, n_periods)
+        # Size proxy: rolling short-window minus long-window momentum
+        # (small-cap tends to lead in short bursts)
+        r5 = np.convolve(mkt, np.ones(5) / 5, mode="same")
+        r20 = np.convolve(mkt, np.ones(20) / 20, mode="same")
+        factor_returns["size"] = r5 - r20
 
-        # Value factor (HML)
-        factor_returns["value"] = np.random.normal(0.0001, 0.005, n_periods)
+        # Value proxy: mean-reversion signal (negative of past-20d return)
+        cum20 = np.convolve(mkt, np.ones(20), mode="same")
+        factor_returns["value"] = -cum20 / 20
 
-        # Momentum factor
-        factor_returns["momentum"] = np.random.normal(0.0002, 0.008, n_periods)
+        # Momentum proxy: past-20d return
+        factor_returns["momentum"] = cum20 / 20
 
-        # Volatility factor
-        factor_returns["volatility"] = np.random.normal(-0.0001, 0.007, n_periods)
+        # Volatility proxy: rolling realised vol difference (high vol minus low vol)
+        vol_short = np.array([
+            np.std(mkt[max(0, i - 5):i + 1]) if i >= 5 else np.std(mkt[:i + 1])
+            for i in range(n_periods)
+        ])
+        vol_long = np.array([
+            np.std(mkt[max(0, i - 20):i + 1]) if i >= 20 else np.std(mkt[:i + 1])
+            for i in range(n_periods)
+        ])
+        factor_returns["volatility"] = vol_short - vol_long
 
-        # Quality factor
-        factor_returns["quality"] = np.random.normal(0.0001, 0.004, n_periods)
+        # Quality proxy: positive skew of recent returns
+        factor_returns["quality"] = np.array([
+            np.mean(np.maximum(mkt[max(0, i - 20):i + 1], 0))
+            for i in range(n_periods)
+        ])
 
         return factor_returns
 

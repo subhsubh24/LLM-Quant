@@ -83,10 +83,8 @@ class PerpetualStrategy(BaseStrategy):
                 f"Regime: {ml.regime}"
             )
         else:
-            strategy = "Long Perpetual"
-            expected_return = 15
-            probability = 0.50
-            rationale = f"Neutral ML | {symbol}"
+            # Neutral signal — no directional edge, skip
+            return None
 
         max_profit = 100 * 0.10
         max_loss = 100 * 0.05
