@@ -860,7 +860,30 @@ class WalkForwardBacktester:
 
             features.append(feature_vector)
 
-        return np.array(features)
+        if not features:
+            return np.array(features)
+
+        result = np.array(features)
+
+        # Sanitize: replace NaN/Inf with 0 (can arise from zero-variance
+        # windows, missing data, or division edge cases)
+        result = np.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Per-feature robust clipping: cap at ±5 median-absolute-deviations
+        # This removes extreme outliers while preserving the distribution shape.
+        # Unlike z-score clipping, MAD is robust to the very outliers we want to clip.
+        for col in range(result.shape[1]):
+            col_data = result[:, col]
+            median = np.median(col_data)
+            mad = np.median(np.abs(col_data - median))
+            if mad < 1e-8:
+                # Near-constant feature: clip to ±1 around median
+                result[:, col] = np.clip(col_data, median - 1, median + 1)
+            else:
+                limit = 5 * mad
+                result[:, col] = np.clip(col_data, median - limit, median + limit)
+
+        return result
 
     def _ema(self, data: np.ndarray, period: int) -> float:
         """Calculate EMA."""

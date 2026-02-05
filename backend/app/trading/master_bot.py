@@ -1567,8 +1567,32 @@ class MasterQuantBot:
                     "system"
                 )
 
-        executed = 0
+        # ============================================================
+        # DRAWDOWN CIRCUIT BREAKER
+        # ============================================================
+        # Halt new positions when portfolio drawdown exceeds thresholds.
+        # - Soft limit (10%): reduce max new positions from 3 to 1
+        # - Hard limit (20%): halt ALL new position opening
+        # This prevents compounding losses during adverse regimes.
+        portfolio_drawdown = -self.engine.total_pnl / self.initial_capital
         max_new_positions = 3
+
+        if portfolio_drawdown >= 0.20:
+            self._add_commentary(
+                f"🛑 CIRCUIT BREAKER: Portfolio drawdown {portfolio_drawdown:.1%} "
+                f"exceeds 20% hard limit — halting new trades until recovery",
+                "risk"
+            )
+            return
+        elif portfolio_drawdown >= 0.10:
+            max_new_positions = 1
+            self._add_commentary(
+                f"⚠️ DRAWDOWN WARNING: {portfolio_drawdown:.1%} — "
+                f"reducing max new positions to {max_new_positions}",
+                "risk"
+            )
+
+        executed = 0
 
         for opp in self.opportunities[:10]:
             if executed >= max_new_positions:
@@ -1623,12 +1647,17 @@ class MasterQuantBot:
             # Adjusted score with alpha
             adjusted_score = opp.score + alpha_boost
 
+            # Correlation concentration check: max 3 same-sector same-direction
+            trade_side = "long" if action == 2 else "short"
+            corr_ok = self._check_correlation_limit(opp.symbol, trade_side)
+
             # Execute only with proper ML support (NO RANDOM TRADING!)
             should_execute = (
                 ml_agrees and
                 ml_confident and
                 score_sufficient and
-                alpha_supports
+                alpha_supports and
+                corr_ok
             )
 
             if should_execute:
@@ -1659,6 +1688,8 @@ class MasterQuantBot:
                     rejection = f"Low confidence ({confidence:.1%} < {conf_threshold:.0%})"
                 elif not score_sufficient:
                     rejection = f"Score too low ({opp.score:.1f} < {score_threshold:.0f})"
+                elif not corr_ok:
+                    rejection = "Sector concentration limit reached"
                 else:
                     rejection = "Alpha signal conflicts"
 
@@ -2095,6 +2126,56 @@ class MasterQuantBot:
                 return True
 
         return False
+
+    def _check_correlation_limit(self, symbol: str, side: str, max_correlated: int = 3) -> bool:
+        """
+        Check if opening a new position would exceed correlation concentration limits.
+
+        Prevents stacking multiple highly-correlated bets (e.g., 3 long crypto
+        positions are effectively 3x the same directional trade).
+
+        Uses sector classification as a proxy for correlation. Assets in the same
+        sector (crypto, tech, etc.) are assumed to be correlated at ~0.7+.
+
+        Args:
+            symbol: The asset to trade
+            side: "long" or "short" (or "buy"/"sell")
+            max_correlated: Max same-sector same-direction positions allowed
+
+        Returns:
+            True if the trade is allowed, False if it would exceed limits.
+        """
+        from ..signals.engine import MultiFactorSignalEngine
+
+        base = symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
+        new_sector = MultiFactorSignalEngine.SYMBOL_SECTOR.get(base)
+
+        # If no sector mapping, allow the trade (unknown correlation)
+        if new_sector is None:
+            return True
+
+        is_long = side in ("long", "buy")
+
+        # Count existing positions in the same sector + same direction
+        same_sector_count = 0
+
+        for pos in self.engine.crypto_positions.values():
+            pos_base = pos.symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
+            pos_sector = MultiFactorSignalEngine.SYMBOL_SECTOR.get(pos_base)
+
+            if pos_sector == new_sector:
+                pos_is_long = getattr(pos, 'side', 'long') == 'long'
+                if pos_is_long == is_long:
+                    same_sector_count += 1
+
+        for pos in self.engine.positions.values():
+            pos_base = pos.symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
+            pos_sector = MultiFactorSignalEngine.SYMBOL_SECTOR.get(pos_base)
+
+            if pos_sector == new_sector:
+                same_sector_count += 1  # Options are directional by nature
+
+        return same_sector_count < max_correlated
 
     # ===================
     # BOT LIFECYCLE
