@@ -287,6 +287,17 @@ class QuantAnalyticsEngine:
         self.cumulative_reward = 0.0
         self.episode_rewards: List[float] = []
 
+        # ============================================================
+        # STATISTICAL ARBITRAGE ENGINE
+        # ============================================================
+        # Cointegrated pairs: {(sym_a, sym_b): {hedge_ratio, half_life, last_test}}
+        self.cointegrated_pairs: Dict[Tuple[str, str], Dict] = {}
+        # Spread z-scores for active pairs
+        self.spread_history: Dict[Tuple[str, str], List[float]] = {}
+        # Last full cointegration scan timestamp
+        self._last_coint_scan: Optional[datetime] = None
+        self._coint_scan_interval = timedelta(hours=4)  # Rescan every 4h
+
         logger.info("QuantAnalyticsEngine initialized with full ML/stats suite")
 
     def update_price_history(self, symbol: str, prices: np.ndarray):
@@ -402,6 +413,344 @@ class QuantAnalyticsEngine:
         state = np.clip(state, -10, 10)
 
         return state
+
+    # ============================================================
+    # STATISTICAL ARBITRAGE METHODS
+    # ============================================================
+
+    def adf_test(self, series: np.ndarray) -> Tuple[float, bool]:
+        """
+        Augmented Dickey-Fuller test for stationarity (numpy-only).
+
+        Regresses ΔY_t = α + β·Y_{t-1} + Σ(γ_i·ΔY_{t-i}) + ε_t
+        Tests H0: β=0 (unit root / non-stationary).
+
+        Returns:
+            (t_statistic, is_stationary_at_5pct)
+        """
+        series = np.asarray(series, dtype=float)
+        if len(series) < 20:
+            return (0.0, False)
+
+        # Include 1 lag of differences for augmentation
+        dy = np.diff(series)
+        n = len(dy)
+        y_lag = series[:-1]  # Y_{t-1}
+
+        # Build regression matrix: [constant, Y_{t-1}, ΔY_{t-1}]
+        # Use at least 1 lag to control for serial correlation
+        y_dep = dy[1:]       # ΔY_t (from t=1 onward)
+        X = np.column_stack([
+            np.ones(n - 1),   # constant
+            y_lag[1:],        # Y_{t-1}
+            dy[:-1],          # ΔY_{t-1} (first lag of differences)
+        ])
+
+        # OLS: β = (X'X)^{-1} X'y
+        try:
+            XtX = X.T @ X
+            Xty = X.T @ y_dep
+            beta = np.linalg.solve(XtX, Xty)
+        except np.linalg.LinAlgError:
+            return (0.0, False)
+
+        # Residuals and standard error
+        residuals = y_dep - X @ beta
+        s2 = np.sum(residuals ** 2) / (len(y_dep) - X.shape[1])
+        try:
+            var_beta = s2 * np.linalg.inv(XtX)
+        except np.linalg.LinAlgError:
+            return (0.0, False)
+
+        # t-statistic for the Y_{t-1} coefficient (index 1)
+        se_beta1 = np.sqrt(max(var_beta[1, 1], 1e-16))
+        t_stat = beta[1] / se_beta1
+
+        # MacKinnon critical values (with constant, no trend)
+        # 5% ≈ -2.86 for large samples
+        is_stationary = t_stat < -2.86
+
+        return (float(t_stat), is_stationary)
+
+    def test_cointegration(
+        self, sym_a: str, sym_b: str, min_obs: int = 60
+    ) -> Optional[Dict]:
+        """
+        Engle-Granger two-step cointegration test.
+
+        Step 1: Regress Y = α + β·X + ε (OLS)
+        Step 2: Test residuals ε for stationarity (ADF)
+
+        If residuals are stationary, the pair is cointegrated and the
+        spread S_t = Y_t - β·X_t is mean-reverting.
+
+        Returns:
+            Dict with hedge_ratio, half_life, t_stat, is_cointegrated
+            or None if insufficient data.
+        """
+        prices_a = self.price_history.get(sym_a)
+        prices_b = self.price_history.get(sym_b)
+
+        if prices_a is None or prices_b is None:
+            return None
+
+        # Align lengths
+        min_len = min(len(prices_a), len(prices_b))
+        if min_len < min_obs:
+            return None
+
+        pa = prices_a[-min_len:].astype(float)
+        pb = prices_b[-min_len:].astype(float)
+
+        # Step 1: OLS regression Y=a+b*X
+        X = np.column_stack([np.ones(min_len), pb])
+        try:
+            beta = np.linalg.lstsq(X, pa, rcond=None)[0]
+        except np.linalg.LinAlgError:
+            return None
+
+        intercept, hedge_ratio = beta[0], beta[1]
+
+        # Step 2: Get residuals (spread)
+        spread = pa - intercept - hedge_ratio * pb
+
+        # Step 3: ADF test on spread
+        t_stat, is_cointegrated = self.adf_test(spread)
+
+        # Step 4: Estimate half-life of mean reversion
+        half_life = self.estimate_half_life(spread)
+
+        return {
+            "hedge_ratio": float(hedge_ratio),
+            "intercept": float(intercept),
+            "half_life": half_life,
+            "t_stat": float(t_stat),
+            "is_cointegrated": is_cointegrated,
+            "spread_mean": float(np.mean(spread)),
+            "spread_std": float(np.std(spread)),
+        }
+
+    def estimate_half_life(self, spread: np.ndarray) -> float:
+        """
+        Estimate half-life of mean reversion via Ornstein-Uhlenbeck model.
+
+        Fits: ΔS_t = θ·(μ - S_{t-1}) + ε  →  ΔS = a + b·S_{t-1}
+        Half-life = -ln(2) / b   (b must be negative for mean reversion)
+
+        Returns:
+            half_life in periods (positive float). Returns 999 if not mean-reverting.
+        """
+        spread = np.asarray(spread, dtype=float)
+        if len(spread) < 10:
+            return 999.0
+
+        ds = np.diff(spread)
+        s_lag = spread[:-1]
+
+        # OLS: ΔS = a + b·S_{t-1}
+        X = np.column_stack([np.ones(len(s_lag)), s_lag])
+        try:
+            beta = np.linalg.lstsq(X, ds, rcond=None)[0]
+        except np.linalg.LinAlgError:
+            return 999.0
+
+        b = beta[1]
+
+        if b >= 0:
+            return 999.0  # Not mean-reverting
+
+        half_life = -np.log(2) / b
+        return max(float(half_life), 1.0)  # Floor at 1 period
+
+    def find_cointegrated_pairs(self, min_obs: int = 100) -> List[Dict]:
+        """
+        Scan all tracked assets for cointegrated pairs.
+
+        Tests all possible pairs (O(n²)) and returns those passing
+        the ADF test at 5% significance with a reasonable half-life
+        (between 1 and 60 periods).
+        """
+        now = datetime.now()
+        # Throttle: don't rescan more often than every 4 hours
+        if (self._last_coint_scan and
+                now - self._last_coint_scan < self._coint_scan_interval):
+            return list(self.cointegrated_pairs.values())
+
+        self._last_coint_scan = now
+
+        symbols = [s for s, p in self.price_history.items() if len(p) >= min_obs]
+        new_pairs = {}
+        results = []
+
+        for i in range(len(symbols)):
+            for j in range(i + 1, len(symbols)):
+                sym_a, sym_b = symbols[i], symbols[j]
+                result = self.test_cointegration(sym_a, sym_b, min_obs)
+
+                if result and result["is_cointegrated"]:
+                    hl = result["half_life"]
+                    # Only keep pairs with reasonable half-life (1-60 periods)
+                    if 1 < hl < 60:
+                        pair_key = (sym_a, sym_b)
+                        pair_info = {
+                            "sym_a": sym_a,
+                            "sym_b": sym_b,
+                            "last_test": now,
+                            **result,
+                        }
+                        new_pairs[pair_key] = pair_info
+                        results.append(pair_info)
+
+        self.cointegrated_pairs = new_pairs
+        if results:
+            logger.info(
+                f"📊 Cointegration scan: found {len(results)} pairs "
+                f"from {len(symbols)} assets"
+            )
+        return results
+
+    def get_spread_zscore(
+        self, sym_a: str, sym_b: str
+    ) -> Optional[Dict]:
+        """
+        Compute current spread z-score for a cointegrated pair.
+
+        Uses the pair's half-life to set an adaptive lookback window
+        (2× half-life), then computes z-score of the current spread
+        relative to that window.
+
+        Returns:
+            Dict with zscore, spread, half_life, signal, entry_size
+            or None if pair not tracked.
+        """
+        pair_key = (sym_a, sym_b)
+        pair_info = self.cointegrated_pairs.get(pair_key)
+        if not pair_info:
+            return None
+
+        prices_a = self.price_history.get(sym_a)
+        prices_b = self.price_history.get(sym_b)
+        if prices_a is None or prices_b is None:
+            return None
+
+        hedge_ratio = pair_info["hedge_ratio"]
+        intercept = pair_info["intercept"]
+        half_life = pair_info["half_life"]
+
+        # Adaptive lookback: 2× half-life (minimum 10, maximum 120)
+        lookback = int(np.clip(half_life * 2, 10, 120))
+
+        # Compute spread over lookback window
+        min_len = min(len(prices_a), len(prices_b), lookback)
+        pa = prices_a[-min_len:].astype(float)
+        pb = prices_b[-min_len:].astype(float)
+        spread = pa - intercept - hedge_ratio * pb
+
+        current_spread = spread[-1]
+        spread_mean = np.mean(spread)
+        spread_std = np.std(spread)
+
+        if spread_std < 1e-10:
+            return None
+
+        zscore = (current_spread - spread_mean) / spread_std
+
+        # Generate trading signal
+        #   z < -2.0: BUY spread  (long A, short B) — strong entry
+        #   z < -1.0: BUY spread  (long A, short B) — mild entry
+        #   z >  2.0: SELL spread (short A, long B) — strong entry
+        #   z >  1.0: SELL spread (short A, long B) — mild entry
+        #   |z| < 0.5: EXIT (spread has reverted to mean)
+        #   |z| > 4.0: STOP (spread blown out, cut losses)
+        signal = "hold"
+        confidence = 0.0
+        if zscore < -2.0:
+            signal = "buy_spread"
+            confidence = min(abs(zscore) / 3.0, 1.0)
+        elif zscore < -1.0:
+            signal = "buy_spread"
+            confidence = abs(zscore) / 4.0
+        elif zscore > 2.0:
+            signal = "sell_spread"
+            confidence = min(abs(zscore) / 3.0, 1.0)
+        elif zscore > 1.0:
+            signal = "sell_spread"
+            confidence = abs(zscore) / 4.0
+        elif abs(zscore) < 0.5:
+            signal = "exit"
+            confidence = 1.0 - abs(zscore)
+        if abs(zscore) > 4.0:
+            signal = "stop"
+            confidence = 1.0
+
+        # Track spread history
+        if pair_key not in self.spread_history:
+            self.spread_history[pair_key] = []
+        self.spread_history[pair_key].append(float(current_spread))
+        # Keep last 500 spread values
+        if len(self.spread_history[pair_key]) > 500:
+            self.spread_history[pair_key] = self.spread_history[pair_key][-500:]
+
+        return {
+            "zscore": float(zscore),
+            "spread": float(current_spread),
+            "spread_mean": float(spread_mean),
+            "spread_std": float(spread_std),
+            "half_life": float(half_life),
+            "hedge_ratio": float(hedge_ratio),
+            "signal": signal,
+            "confidence": float(confidence),
+            "lookback": lookback,
+        }
+
+    def get_funding_rate_arb_signal(
+        self, symbol: str, funding_rate: float, spot_price: float, perp_price: float
+    ) -> Dict:
+        """
+        Generate funding rate arbitrage signal.
+
+        Funding rate arb: when funding is abnormally high/low, the
+        cost of holding a perp position creates a carry opportunity.
+
+        Strategy:
+        - High positive funding (>0.05%): Short perp earns funding
+        - High negative funding (<-0.01%): Long perp earns funding
+        - Combine with spot hedge for market-neutral carry
+
+        Returns:
+            Dict with signal, annualized_carry, confidence
+        """
+        # Basis: (perp - spot) / spot
+        basis = 0.0
+        if spot_price > 0:
+            basis = (perp_price - spot_price) / spot_price
+
+        # Annualize funding rate (8h periods → yearly)
+        annual_funding = funding_rate * 3 * 365  # 3 periods/day × 365 days
+
+        signal = "neutral"
+        confidence = 0.0
+        annualized_carry = 0.0
+
+        # High positive funding: short perp (earn funding) + long spot (hedge)
+        if funding_rate > 0.0005:  # >0.05% per 8h ≈ 54% annualized
+            signal = "short_perp_long_spot"
+            annualized_carry = abs(annual_funding)
+            confidence = min(abs(funding_rate) / 0.002, 1.0)
+
+        # High negative funding: long perp (earn funding) + short spot (hedge)
+        elif funding_rate < -0.0001:  # <-0.01% per 8h
+            signal = "long_perp_short_spot"
+            annualized_carry = abs(annual_funding)
+            confidence = min(abs(funding_rate) / 0.001, 1.0)
+
+        return {
+            "signal": signal,
+            "funding_rate": float(funding_rate),
+            "basis": float(basis),
+            "annualized_carry": float(annualized_carry),
+            "confidence": float(confidence),
+        }
 
     def get_ml_prediction(
         self,
@@ -1092,6 +1441,10 @@ class MasterQuantBot:
         crypto_spot_opps = await self._scan_crypto_spot()
         opportunities.extend(crypto_spot_opps)
 
+        # 7. Statistical Arbitrage (pairs trading + funding rate arb)
+        stat_arb_opps = await self._scan_stat_arb()
+        opportunities.extend(stat_arb_opps)
+
         # Re-rank using ML composite score
         for opp in opportunities:
             opp.score = self._compute_ml_score(opp)
@@ -1175,6 +1528,17 @@ class MasterQuantBot:
     def _compute_regime_alignment(self, opp: Opportunity) -> float:
         """Compute how well opportunity aligns with current regime."""
         alignment = 0.5  # Neutral
+
+        # Statistical arbitrage strategies are market-neutral → good in all regimes
+        if "Pairs" in opp.strategy or "Funding Arb" in opp.strategy:
+            # Pairs trading works best in range-bound / high-vol (more reversion)
+            if self.market_regime == MarketRegime.RANGE_BOUND:
+                alignment = 0.95
+            elif self.market_regime == MarketRegime.HIGH_VOLATILITY:
+                alignment = 0.85  # Wider spreads = bigger opportunity but riskier
+            else:
+                alignment = 0.75  # Still works, just fewer signals
+            return alignment
 
         if self.market_regime == MarketRegime.HIGH_VOLATILITY:
             # Prefer premium selling
@@ -1282,6 +1646,161 @@ class MasterQuantBot:
             # Lower threshold (30) for spot - we want more activity
             if opp and opp.score > 30:
                 opportunities.append(opp)
+
+        return opportunities
+
+    async def _scan_stat_arb(self) -> List[Opportunity]:
+        """
+        Scan for statistical arbitrage opportunities.
+
+        Two strategies:
+        1. Pairs Trading — find cointegrated pairs, generate spread z-score
+           signals, create Opportunity for entry/exit.
+        2. Funding Rate Arbitrage — detect abnormally high/low funding rates
+           on perpetuals and create carry-trade Opportunities.
+        """
+        opportunities = []
+
+        # ── Pairs Trading ─────────────────────────────────
+        try:
+            coint_pairs = self.analytics.find_cointegrated_pairs(min_obs=60)
+
+            for pair_info in coint_pairs:
+                sym_a = pair_info["sym_a"]
+                sym_b = pair_info["sym_b"]
+                zscore_data = self.analytics.get_spread_zscore(sym_a, sym_b)
+                if zscore_data is None:
+                    continue
+
+                signal = zscore_data["signal"]
+                if signal in ("hold", "exit"):
+                    continue  # No actionable entry
+
+                zscore = zscore_data["zscore"]
+                confidence = zscore_data["confidence"]
+                half_life = zscore_data["half_life"]
+                hedge_ratio = zscore_data["hedge_ratio"]
+
+                # Determine strategy name and rationale
+                if signal == "buy_spread":
+                    strategy = f"Pairs Long {sym_a} / Short {sym_b}"
+                    rationale = (
+                        f"Cointegrated pair: z={zscore:+.2f} (entry <-1.0) | "
+                        f"Half-life: {half_life:.1f} periods | "
+                        f"Hedge ratio: {hedge_ratio:.3f}"
+                    )
+                elif signal == "sell_spread":
+                    strategy = f"Pairs Short {sym_a} / Long {sym_b}"
+                    rationale = (
+                        f"Cointegrated pair: z={zscore:+.2f} (entry >+1.0) | "
+                        f"Half-life: {half_life:.1f} periods | "
+                        f"Hedge ratio: {hedge_ratio:.3f}"
+                    )
+                elif signal == "stop":
+                    strategy = f"Pairs STOP {sym_a}/{sym_b}"
+                    rationale = (
+                        f"Spread blown out: z={zscore:+.2f} (>4σ) | "
+                        f"Close position immediately"
+                    )
+                else:
+                    continue
+
+                # Estimate P&L: spread mean reversion over half-life
+                spread_std = zscore_data["spread_std"]
+                position_size = self.initial_capital * 0.02  # 2% per leg
+                # Expected profit: spread reverts ~1 std ≈ hedge-ratio-adjusted move
+                expected_return = min(abs(zscore) * 5, 30.0)  # Cap at 30%
+                max_profit = position_size * 0.08  # 8% upside from reversion
+                max_loss = position_size * 0.04    # 4% stop (spread keeps diverging)
+
+                # Use CRYPTO_SPOT for pairs (market-neutral, not directional)
+                opp = Opportunity(
+                    symbol=f"{sym_a}/{sym_b}",
+                    asset_class=AssetClass.CRYPTO_SPOT,
+                    strategy=strategy,
+                    expected_return=expected_return,
+                    max_profit=max_profit,
+                    max_loss=max_loss,
+                    probability_of_profit=0.55 + confidence * 0.20,
+                    risk_reward_ratio=max_profit / max_loss if max_loss > 0 else 2.0,
+                    iv_rank=50.0,  # Neutral (not IV-driven)
+                    score=35.0 + confidence * 30 + min(abs(zscore), 3) * 5,
+                    rationale=rationale,
+                )
+                opportunities.append(opp)
+
+            if coint_pairs:
+                logger.info(
+                    f"Stat arb scan: {len(coint_pairs)} cointegrated pairs, "
+                    f"{len(opportunities)} actionable signals"
+                )
+        except Exception as e:
+            logger.debug(f"Pairs scan error: {e}")
+
+        # ── Funding Rate Arbitrage ────────────────────────
+        try:
+            funding_opps = 0
+            for symbol in self.CRYPTO_PERPETUALS[:20]:  # Top-20 liquid perps
+                base = symbol.split("-")[0]
+                funding_rate = await self._fetch_funding_rate(symbol)
+
+                spot_price = await self.engine._get_crypto_price(base)
+                perp_price = await self.engine._get_crypto_price(symbol)
+                if spot_price <= 0 or perp_price <= 0:
+                    continue
+
+                arb_signal = self.analytics.get_funding_rate_arb_signal(
+                    symbol, funding_rate, spot_price, perp_price
+                )
+
+                if arb_signal["signal"] == "neutral":
+                    continue
+                if arb_signal["confidence"] < 0.3:
+                    continue
+
+                annual_carry = arb_signal["annualized_carry"]
+                position_size = self.initial_capital * 0.02
+
+                if arb_signal["signal"] == "short_perp_long_spot":
+                    strategy = f"Funding Arb: Short {symbol} + Long {base}"
+                    rationale = (
+                        f"High funding rate: {funding_rate*100:.4f}% per 8h "
+                        f"({annual_carry:.1f}% annualized carry) | "
+                        f"Basis: {arb_signal['basis']*100:.3f}%"
+                    )
+                else:  # long_perp_short_spot
+                    strategy = f"Funding Arb: Long {symbol} + Short {base}"
+                    rationale = (
+                        f"Negative funding: {funding_rate*100:.4f}% per 8h "
+                        f"({annual_carry:.1f}% annualized carry) | "
+                        f"Basis: {arb_signal['basis']*100:.3f}%"
+                    )
+
+                # Carry trade: expected return is the annualized carry (pro-rated)
+                expected_return = min(annual_carry / 12, 10.0)  # Monthly, capped
+                max_profit = position_size * expected_return / 100
+                max_loss = position_size * 0.02  # 2% stop if basis blows out
+
+                opp = Opportunity(
+                    symbol=f"{base}-FUNDING",
+                    asset_class=AssetClass.CRYPTO_PERPETUAL,
+                    strategy=strategy,
+                    expected_return=expected_return,
+                    max_profit=max_profit,
+                    max_loss=max_loss,
+                    probability_of_profit=0.70 + arb_signal["confidence"] * 0.15,
+                    risk_reward_ratio=max_profit / max_loss if max_loss > 0 else 3.0,
+                    iv_rank=40.0,
+                    score=40.0 + arb_signal["confidence"] * 25 + min(annual_carry, 100) * 0.2,
+                    rationale=rationale,
+                )
+                opportunities.append(opp)
+                funding_opps += 1
+
+            if funding_opps > 0:
+                logger.info(f"Funding rate arb: {funding_opps} opportunities")
+        except Exception as e:
+            logger.debug(f"Funding arb scan error: {e}")
 
         return opportunities
 
