@@ -12,8 +12,20 @@ from .institutional_risk import (
     VaRCalculator,
     PortfolioRiskManager,
 )
+from .strategy_weighting import (
+    WeightingMethod,
+    StrategyAllocation,
+    StrategyPerformance,
+    EqualWeightingOptimizer,
+    PerformanceBasedOptimizer,
+    RiskParityOptimizer,
+    RegimeBasedOptimizer,
+    CorrelationConstraint,
+    StrategyWeightingEngine,
+)
 
 __all__ = [
+    # Risk Management
     "CircuitBreakerLevel",
     "CircuitBreakerThresholds",
     "PositionLimit",
@@ -24,4 +36,14 @@ __all__ = [
     "CorrelationMonitor",
     "VaRCalculator",
     "PortfolioRiskManager",
+    # Strategy Weighting
+    "WeightingMethod",
+    "StrategyAllocation",
+    "StrategyPerformance",
+    "EqualWeightingOptimizer",
+    "PerformanceBasedOptimizer",
+    "RiskParityOptimizer",
+    "RegimeBasedOptimizer",
+    "CorrelationConstraint",
+    "StrategyWeightingEngine",
 ]
