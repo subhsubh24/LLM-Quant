@@ -313,6 +313,64 @@ class LSTMEnhanced:
         return self.model.predict(X, verbose=0).flatten()
 
 
+class ExtraTreesEnhanced:
+    """Extra Trees (Extremely Randomized Trees) model for diversity"""
+
+    def __init__(self, n_estimators: int = 100, max_depth: int = 10):
+        """Initialize Extra Trees.
+
+        Args:
+            n_estimators: Number of trees
+            max_depth: Maximum depth
+        """
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.model = None
+        self.feature_importance = None
+
+    def train(self, X: np.ndarray, y: np.ndarray, eval_set: Optional[Tuple] = None):
+        """Train Extra Trees.
+
+        Args:
+            X: Features (n_samples, n_features)
+            y: Target (n_samples,)
+            eval_set: Not used for Extra Trees
+        """
+        try:
+            from sklearn.ensemble import ExtraTreesRegressor
+
+            self.model = ExtraTreesRegressor(
+                n_estimators=self.n_estimators,
+                max_depth=self.max_depth,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1,
+            )
+
+            self.model.fit(X, y)
+            self.feature_importance = self.model.feature_importances_
+            logger.info("✓ Extra Trees trained")
+
+        except ImportError:
+            logger.warning("sklearn not available, skipping")
+            self.model = None
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predict using Extra Trees.
+
+        Args:
+            X: Features (n_samples, n_features)
+
+        Returns:
+            Predictions (n_samples,)
+        """
+        if self.model is None:
+            return np.zeros(len(X))
+
+        return self.model.predict(X)
+
+
 class NeuralNetMetaLearner:
     """Neural network meta-learner (replaces logistic regression)"""
 
@@ -394,7 +452,7 @@ class EnhancedMLEnsemble:
         self.xgboost = XGBoostEnhanced()
         self.lstm = LSTMEnhanced()
         self.rf = RandomForestEnhanced()
-        self.extra = LightGBMEnhanced(n_leaves=15)  # Lightweight extra model
+        self.extra = ExtraTreesEnhanced()  # Extra Trees for diversity
 
         self.meta_learner = NeuralNetMetaLearner(input_size=5)
 
