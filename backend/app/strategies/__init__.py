@@ -24,6 +24,14 @@ from .counter_cyclical_strategies import (
     EnhancedFactorRotationStrategy,
     KalmanFilterStatArbStrategy,
 )
+from .enhanced_mean_reversion import (
+    EnhancedMeanReversionStrategy,
+    AdaptiveVolatilityMeanReversionStrategy,
+)
+from .sentiment_strategy import (
+    SentimentAnalysisStrategy as SentimentTradingStrategy,
+    MultiSourceSentimentStrategy,
+)
 
 __all__ = [
     # Framework
@@ -47,4 +55,10 @@ __all__ = [
     "IntradayMeanReversionStrategy",
     "EnhancedFactorRotationStrategy",
     "KalmanFilterStatArbStrategy",
+    # Enhanced Mean Reversion (2)
+    "EnhancedMeanReversionStrategy",
+    "AdaptiveVolatilityMeanReversionStrategy",
+    # Sentiment Trading (2)
+    "SentimentTradingStrategy",
+    "MultiSourceSentimentStrategy",
 ]

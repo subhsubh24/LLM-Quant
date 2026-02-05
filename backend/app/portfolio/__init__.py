@@ -23,6 +23,15 @@ from .strategy_weighting import (
     CorrelationConstraint,
     StrategyWeightingEngine,
 )
+from .sentiment_integration import (
+    SentimentLevel,
+    SentimentScore,
+    CompositeSentiment,
+    NewsSentimentAnalyzer,
+    OptionsSentimentAnalyzer,
+    SocialSentimentAnalyzer,
+    CompositeSentimentEngine,
+)
 
 __all__ = [
     # Risk Management
@@ -46,4 +55,12 @@ __all__ = [
     "RegimeBasedOptimizer",
     "CorrelationConstraint",
     "StrategyWeightingEngine",
+    # Sentiment Integration
+    "SentimentLevel",
+    "SentimentScore",
+    "CompositeSentiment",
+    "NewsSentimentAnalyzer",
+    "OptionsSentimentAnalyzer",
+    "SocialSentimentAnalyzer",
+    "CompositeSentimentEngine",
 ]
