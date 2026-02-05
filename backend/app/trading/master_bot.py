@@ -772,7 +772,7 @@ class QuantAnalyticsEngine:
 
         # DQN prediction
         dqn_action = self.dqn.select_action(state, training=False)
-        dqn_q_values = self.dqn._forward(state.reshape(1, -1), self.dqn.q_network)
+        dqn_q_values = self.dqn._forward(state.reshape(1, -1), self.dqn._q_network)
         dqn_q = float(np.max(dqn_q_values))
 
         # PPO prediction
@@ -3070,10 +3070,15 @@ _master_bot: Optional[MasterQuantBot] = None
 
 
 def get_master_bot() -> MasterQuantBot:
-    """Get or create the Master Quant Bot singleton."""
+    """Get or create the trading bot singleton.
+
+    Returns a PipelineOrchestrator (new architecture) by default.
+    The orchestrator exposes the same public API as MasterQuantBot
+    so all existing API routes keep working.
+    """
     global _master_bot
     if _master_bot is None:
-        _master_bot = MasterQuantBot()
+        _master_bot = _create_pipeline_bot()
     return _master_bot
 
 
@@ -3081,10 +3086,19 @@ def create_master_bot(
     capital: float = 100000,
     mode: str = "balanced"
 ) -> MasterQuantBot:
-    """Create a new Master Quant Bot instance."""
+    """Create a new trading bot instance (pipeline architecture)."""
     global _master_bot
-    _master_bot = MasterQuantBot(initial_capital=capital, mode=mode)
+    _master_bot = _create_pipeline_bot(capital=capital, mode=mode)
     return _master_bot
+
+
+def _create_pipeline_bot(
+    capital: float = 100000,
+    mode: str = "balanced",
+):
+    """Instantiate PipelineOrchestrator with all strategies registered."""
+    from .pipeline.orchestrator import PipelineOrchestrator
+    return PipelineOrchestrator(initial_capital=capital, mode=mode)
 
 
 async def run_training_pipeline(
