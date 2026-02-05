@@ -18,6 +18,16 @@ from .enhanced_ml_ensemble import (
     EnhancedMLEnsemble,
 )
 
+from .framework import (
+    ModelConfig,
+    ModelTrainer,
+)
+
+from .estimators import (
+    BaseRanker,
+    EnsembleRanker,
+)
+
 __all__ = [
     # Phase 1-9: Simplified ensemble
     "ModelMetrics",
@@ -33,4 +43,9 @@ __all__ = [
     "ExtraTreesEnhanced",
     "NeuralNetMetaLearner",
     "EnhancedMLEnsemble",
+    # Framework and estimators
+    "ModelConfig",
+    "ModelTrainer",
+    "BaseRanker",
+    "EnsembleRanker",
 ]
