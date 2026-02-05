@@ -13,8 +13,18 @@ from .smart_order_execution import (
     SmartOrderExecutor,
     ExecutionCostAnalyzer,
 )
+from .adaptive_execution import (
+    MarketProfile,
+    TimeOfDayProfiles,
+    AdaptiveProfile,
+    AdaptiveExecutionProfiles,
+    RealisticCostModel,
+    VolatilityAdaptiveRebalancing,
+    OptimizedAdaptiveExecutor,
+)
 
 __all__ = [
+    # Phase 1-9: Smart Order Execution
     "OrderType",
     "OrderSide",
     "ExecutionParameters",
@@ -26,4 +36,12 @@ __all__ = [
     "TWAPExecutor",
     "SmartOrderExecutor",
     "ExecutionCostAnalyzer",
+    # Phase 13: Adaptive Execution
+    "MarketProfile",
+    "TimeOfDayProfiles",
+    "AdaptiveProfile",
+    "AdaptiveExecutionProfiles",
+    "RealisticCostModel",
+    "VolatilityAdaptiveRebalancing",
+    "OptimizedAdaptiveExecutor",
 ]
