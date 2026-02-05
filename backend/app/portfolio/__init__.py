@@ -32,6 +32,14 @@ from .sentiment_integration import (
     SocialSentimentAnalyzer,
     CompositeSentimentEngine,
 )
+from .predictive_risk import (
+    PortfolioRiskLevel,
+    WarningSignal,
+    RiskAdjustments,
+    PredictiveCircuitBreaker,
+    KellyCriterion,
+    SmoothModeTransitions,
+)
 
 __all__ = [
     # Risk Management
@@ -63,4 +71,11 @@ __all__ = [
     "OptionsSentimentAnalyzer",
     "SocialSentimentAnalyzer",
     "CompositeSentimentEngine",
+    # Predictive Risk - Phase 12
+    "PortfolioRiskLevel",
+    "WarningSignal",
+    "RiskAdjustments",
+    "PredictiveCircuitBreaker",
+    "KellyCriterion",
+    "SmoothModeTransitions",
 ]
