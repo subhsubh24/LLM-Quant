@@ -13,6 +13,13 @@ from .health_system import (
     DataFeedHealthMonitor,
     SystemHealthDashboard,
 )
+from .anomaly_detector import (
+    AnomalyEvent,
+    StatisticalAnomalyDetector,
+    FeatureImportanceTracker,
+    CostAttributionEngine,
+    ComprehensiveAnomalyMonitor,
+)
 
 __all__ = [
     # Enums
@@ -30,4 +37,10 @@ __all__ = [
     "DataFeedHealthMonitor",
     # Master dashboard
     "SystemHealthDashboard",
+    # Anomaly Detection - Phase 15
+    "AnomalyEvent",
+    "StatisticalAnomalyDetector",
+    "FeatureImportanceTracker",
+    "CostAttributionEngine",
+    "ComprehensiveAnomalyMonitor",
 ]
