@@ -3,10 +3,32 @@ Configuration management for QuantLab.
 Uses pydantic-settings for type-safe configuration.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+
+def find_env_file():
+    """Find .env file in multiple locations."""
+    # Get the directory where this config.py file is located
+    config_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.dirname(config_dir)  # backend/app -> backend
+
+    possible_paths = [
+        os.path.join(backend_dir, ".env"),   # backend/.env (most likely)
+        ".env",                               # Current working directory
+        "../.env",                            # Parent directory
+        "backend/.env",                       # If running from root
+        os.path.expanduser("~/.env"),         # Home directory
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+
+    return ".env"  # Default
 
 
 class Settings(BaseSettings):
@@ -51,16 +73,17 @@ class Settings(BaseSettings):
     alpaca_api_secret: str = ""
     alpaca_paper_mode: bool = True  # True = paper trading, False = live
 
-    # Binance (Crypto) - Testnet
+    # Binance (Crypto)
     binance_api_key: str = ""
     binance_api_secret: str = ""
     binance_testnet_mode: bool = True  # True = testnet, False = live
+    binance_us_mode: bool = True  # True = Binance.US, False = Binance Global (non-US)
 
     # Auto-connect to brokers on startup
     auto_connect_brokers: bool = True
 
     class Config:
-        env_file = ".env"
+        env_file = find_env_file()
         env_file_encoding = "utf-8"
         extra = "ignore"
 

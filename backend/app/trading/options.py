@@ -15,9 +15,17 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, date, timedelta
 from enum import Enum
+import math
 import numpy as np
 from scipy.stats import norm
 from scipy.optimize import brentq
+
+
+def _safe_float(value: float, default: float = 0.0) -> float:
+    """Sanitize float value for JSON serialization (handle inf/nan)."""
+    if value is None or math.isnan(value) or math.isinf(value):
+        return default
+    return value
 import uuid
 import logging
 
@@ -45,11 +53,11 @@ class Greeks:
 
     def to_dict(self) -> Dict:
         return {
-            "delta": round(self.delta, 4),
-            "gamma": round(self.gamma, 4),
-            "theta": round(self.theta, 4),
-            "vega": round(self.vega, 4),
-            "rho": round(self.rho, 4),
+            "delta": round(_safe_float(self.delta), 4),
+            "gamma": round(_safe_float(self.gamma), 4),
+            "theta": round(_safe_float(self.theta), 4),
+            "vega": round(_safe_float(self.vega), 4),
+            "rho": round(_safe_float(self.rho), 4),
         }
 
 
@@ -126,22 +134,22 @@ class OptionContract:
             "id": self.id,
             "symbol": self.symbol,
             "option_type": self.option_type.value,
-            "strike": self.strike,
+            "strike": _safe_float(self.strike),
             "expiration": self.expiration.isoformat(),
             "days_to_expiry": self.days_to_expiry(),
-            "underlying_price": round(self.underlying_price, 2),
-            "premium": round(self.premium, 2),
-            "bid": round(self.bid, 2),
-            "ask": round(self.ask, 2),
-            "implied_volatility": round(self.implied_volatility, 4),
+            "underlying_price": round(_safe_float(self.underlying_price), 2),
+            "premium": round(_safe_float(self.premium), 2),
+            "bid": round(_safe_float(self.bid), 2),
+            "ask": round(_safe_float(self.ask), 2),
+            "implied_volatility": round(_safe_float(self.implied_volatility), 4),
             "greeks": self.greeks.to_dict() if self.greeks else None,
-            "intrinsic_value": round(self.intrinsic_value(), 2),
-            "time_value": round(self.time_value(), 2),
+            "intrinsic_value": round(_safe_float(self.intrinsic_value()), 2),
+            "time_value": round(_safe_float(self.time_value()), 2),
             "moneyness": self.moneyness(),
             "open_interest": self.open_interest,
             "volume": self.volume,
             "quantity": self.quantity,
-            "avg_cost": round(self.avg_cost, 2),
+            "avg_cost": round(_safe_float(self.avg_cost), 2),
         }
 
 
@@ -344,11 +352,13 @@ class OptionsStrategy:
             return []
 
         current_price = self.legs[0].underlying_price
+        if current_price <= 0:
+            return []
         low = current_price * (1 - price_range_pct)
         high = current_price * (1 + price_range_pct)
 
         prices = np.linspace(low, high, num_points)
-        return [(float(p), self.calculate_pnl_at_price(p)) for p in prices]
+        return [(_safe_float(float(p)), _safe_float(self.calculate_pnl_at_price(p))) for p in prices]
 
     def portfolio_greeks(self) -> Greeks:
         """Calculate aggregate Greeks for the strategy."""
@@ -380,10 +390,10 @@ class OptionsStrategy:
             "id": self.id,
             "name": self.name,
             "legs": [leg.to_dict() for leg in self.legs],
-            "net_premium": round(self.net_premium, 2),
-            "max_profit": round(self.max_profit, 2) if self.max_profit else None,
-            "max_loss": round(self.max_loss, 2) if self.max_loss else None,
-            "breakeven_prices": [round(p, 2) for p in self.breakeven_prices],
+            "net_premium": round(_safe_float(self.net_premium), 2),
+            "max_profit": round(_safe_float(self.max_profit), 2) if self.max_profit else None,
+            "max_loss": round(_safe_float(self.max_loss), 2) if self.max_loss else None,
+            "breakeven_prices": [round(_safe_float(p), 2) for p in self.breakeven_prices],
             "portfolio_greeks": self.portfolio_greeks().to_dict(),
             "pnl_profile": self.get_pnl_profile(),
         }

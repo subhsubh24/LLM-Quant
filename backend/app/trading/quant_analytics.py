@@ -786,7 +786,8 @@ class ExtremeValueAnalyzer:
         exceedances = losses[losses > self.threshold] - self.threshold
 
         if len(exceedances) < 10:
-            logger.warning("Too few exceedances for reliable EVT fit")
+            # Use debug level - this is expected with limited data
+            logger.debug("Too few exceedances for reliable EVT fit")
             return self
 
         # Fit GPD using method of moments (Hill estimator for shape)
