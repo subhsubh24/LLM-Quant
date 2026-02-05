@@ -14,12 +14,20 @@ This is for PAPER TRADING / EDUCATIONAL purposes only.
 
 import asyncio
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
+
+
+def _safe_float(value: float, default: float = 0.0) -> float:
+    """Sanitize float value for JSON serialization (handle inf/nan)."""
+    if value is None or math.isnan(value) or math.isinf(value):
+        return default
+    return value
 
 from .options import (
     OptionType,
@@ -79,12 +87,12 @@ class IVAnalysis:
     def to_dict(self) -> Dict:
         return {
             "symbol": self.symbol,
-            "current_iv": round(self.current_iv * 100, 1),
-            "iv_rank": round(self.iv_rank, 1),
-            "iv_percentile": round(self.iv_percentile, 1),
-            "iv_30_day_avg": round(self.iv_30_day_avg * 100, 1),
+            "current_iv": round(_safe_float(self.current_iv * 100), 1),
+            "iv_rank": round(_safe_float(self.iv_rank), 1),
+            "iv_percentile": round(_safe_float(self.iv_percentile), 1),
+            "iv_30_day_avg": round(_safe_float(self.iv_30_day_avg * 100), 1),
             "iv_trend": self.iv_trend,
-            "hv_iv_spread": round(self.hv_iv_spread * 100, 1),
+            "hv_iv_spread": round(_safe_float(self.hv_iv_spread * 100), 1),
             "is_high_iv": self.is_high_iv,
             "premium_selling_favorable": self.premium_selling_favorable,
         }
@@ -147,17 +155,17 @@ class OptionsPosition:
             "symbol": self.symbol,
             "strategy_name": self.strategy_name,
             "entry_time": self.entry_time.isoformat(),
-            "entry_iv": round(self.entry_iv * 100, 1),
-            "entry_price": round(self.entry_underlying_price, 2),
-            "current_price": round(self.current_underlying_price, 2),
-            "current_pnl": round(self.current_pnl, 2),
+            "entry_iv": round(_safe_float(self.entry_iv * 100), 1),
+            "entry_price": round(_safe_float(self.entry_underlying_price), 2),
+            "current_price": round(_safe_float(self.current_underlying_price), 2),
+            "current_pnl": round(_safe_float(self.current_pnl), 2),
             "days_in_trade": self.days_in_trade,
-            "max_profit": round(self.max_profit, 2),
-            "max_loss": round(self.max_loss, 2),
+            "max_profit": round(_safe_float(self.max_profit), 2),
+            "max_loss": round(_safe_float(self.max_loss), 2),
             "greeks": {
-                "delta": round(self.current_delta, 2),
-                "theta": round(self.current_theta, 2),
-                "vega": round(self.current_vega, 2),
+                "delta": round(_safe_float(self.current_delta), 2),
+                "theta": round(_safe_float(self.current_theta), 2),
+                "vega": round(_safe_float(self.current_vega), 2),
             },
             "legs_count": len(self.strategy.legs),
             "strategy_details": self.strategy.to_dict() if self.strategy else None,
@@ -187,11 +195,11 @@ class OptionsTrade:
             "strategy_name": self.strategy_name,
             "action": self.action,
             "legs": self.legs,
-            "net_premium": round(self.net_premium, 2),
-            "pnl": round(self.pnl, 2),
+            "net_premium": round(_safe_float(self.net_premium), 2),
+            "pnl": round(_safe_float(self.pnl), 2),
             "rationale": self.rationale,
-            "iv_at_trade": round(self.iv_at_trade * 100, 1),
-            "underlying_at_trade": round(self.underlying_at_trade, 2),
+            "iv_at_trade": round(_safe_float(self.iv_at_trade * 100), 1),
+            "underlying_at_trade": round(_safe_float(self.underlying_at_trade), 2),
         }
 
 
@@ -229,12 +237,30 @@ class CryptoDerivativePosition:
     take_profit: float = 0.0
     stop_loss: float = 0.0
 
+    # Trade tracking
+    trade_id: Optional[str] = None  # Links to master trade log
+    opened_at: Optional[datetime] = None
+
     def calculate_pnl(self) -> float:
-        """Calculate current P&L including funding."""
-        price_pnl = (self.current_price - self.entry_price) * self.size
+        """Calculate current P&L including funding.
+
+        Note: self.size is in USD (full position value, NOT margin).
+        For a $500 position with 5x leverage, size=$500, margin=$100.
+        PnL = percentage_change * position_size (NOT multiplied by leverage again!)
+        """
+        if self.entry_price <= 0:
+            return 0.0
+
+        # Calculate percentage change
+        pct_change = (self.current_price - self.entry_price) / self.entry_price
+
+        # For short positions, profit when price goes down
         if self.side == "short":
-            price_pnl = -price_pnl
-        return price_pnl * self.leverage + self.funding_received
+            pct_change = -pct_change
+
+        # PnL = percentage change * position size + funding
+        # size is already the full leveraged position, don't multiply by leverage again!
+        return pct_change * self.size + self.funding_received
 
     def to_dict(self) -> Dict:
         return {
@@ -242,19 +268,19 @@ class CryptoDerivativePosition:
             "symbol": self.symbol,
             "derivative_type": self.derivative_type,
             "side": self.side,
-            "entry_price": round(self.entry_price, 2),
-            "size": round(self.size, 4),
-            "leverage": self.leverage,
-            "current_price": round(self.current_price, 2),
-            "unrealized_pnl": round(self.calculate_pnl(), 2),
-            "funding_received": round(self.funding_received, 2),
-            "liquidation_price": round(self.liquidation_price, 2),
+            "entry_price": round(_safe_float(self.entry_price), 2),
+            "size": round(_safe_float(self.size), 4),
+            "leverage": _safe_float(self.leverage, 1.0),
+            "current_price": round(_safe_float(self.current_price), 2),
+            "unrealized_pnl": round(_safe_float(self.calculate_pnl()), 2),
+            "funding_received": round(_safe_float(self.funding_received), 2),
+            "liquidation_price": round(_safe_float(self.liquidation_price), 2),
             "greeks": {
-                "delta": round(self.delta, 4),
-                "gamma": round(self.gamma, 6),
-                "theta": round(self.theta, 4),
-                "vega": round(self.vega, 4),
-                "iv": round(self.iv * 100, 1),
+                "delta": round(_safe_float(self.delta), 4),
+                "gamma": round(_safe_float(self.gamma), 6),
+                "theta": round(_safe_float(self.theta), 4),
+                "vega": round(_safe_float(self.vega), 4),
+                "iv": round(_safe_float(self.iv * 100), 1),
             },
         }
 
@@ -295,11 +321,22 @@ class OptionsRiskManager:
         # Risk mode
         self.risk_mode = "NORMAL"  # NORMAL, REDUCED, DEFENSIVE
 
-    def update_portfolio_greeks(self, positions: List[OptionsPosition]):
-        """Update aggregate portfolio Greeks."""
-        self.current_delta = sum(p.current_delta for p in positions)
-        self.current_theta = sum(p.current_theta for p in positions)
-        self.current_vega = sum(p.current_vega for p in positions)
+    def update_portfolio_greeks(
+        self,
+        options_positions: List[OptionsPosition],
+        crypto_positions: Optional[List] = None
+    ):
+        """Update aggregate portfolio Greeks including crypto positions."""
+        # Options Greeks
+        self.current_delta = sum(p.current_delta for p in options_positions)
+        self.current_theta = sum(p.current_theta for p in options_positions)
+        self.current_vega = sum(p.current_vega for p in options_positions)
+
+        # Add crypto position deltas (perpetuals have delta of position size)
+        if crypto_positions:
+            crypto_delta = sum(p.delta for p in crypto_positions if hasattr(p, 'delta'))
+            self.current_delta += crypto_delta
+            # Crypto perpetuals have no theta (no time decay) and no vega (no IV sensitivity)
 
         # Update risk mode based on exposure
         if abs(self.current_delta) > self.max_portfolio_delta * 0.8:
@@ -605,8 +642,11 @@ class OptionsQuantBot:
             except Exception as e:
                 logger.error(f"Failed to update position {position.symbol}: {e}")
 
-        # Update risk manager
-        self.risk_manager.update_portfolio_greeks(list(self.positions.values()))
+        # Update risk manager with both options and crypto positions
+        self.risk_manager.update_portfolio_greeks(
+            list(self.positions.values()),
+            list(self.crypto_positions.values())
+        )
 
     async def _check_exits(self):
         """Check all positions for exit signals."""
@@ -622,6 +662,17 @@ class OptionsQuantBot:
 
     async def _scan_opportunities(self):
         """Scan for new trading opportunities based on mode."""
+        # CRITICAL: Check if stock market is open before scanning stock options
+        from .quant_bot import is_market_open, get_market_status
+
+        if not is_market_open():
+            market_status = get_market_status()
+            self._add_commentary(
+                f"⛔ Stock market CLOSED ({market_status['message']}) - Skipping stock options scan",
+                "scan"
+            )
+            return  # Don't scan stock options when market is closed
+
         # Scan more symbols in aggressive mode
         scan_count = {
             OptionsMode.AGGRESSIVE: 30,
@@ -650,40 +701,93 @@ class OptionsQuantBot:
 
     async def _analyze_iv(self, symbol: str) -> IVAnalysis:
         """
-        Analyze implied volatility for a symbol.
+        Analyze volatility for a symbol using REAL historical data.
 
-        In production, this would use historical IV data.
-        For now, we simulate based on recent price movements.
+        Calculates Historical Volatility (HV) from actual price movements.
+        For crypto, uses real Binance data. For stocks, uses yfinance data.
         """
         # Get current price
         current_price = await self._get_underlying_price(symbol)
 
-        # Simulate IV (in real system, use options chain data)
-        # Base IV varies by symbol type
+        # Try to get real historical volatility from price data
+        try:
+            from .master_bot import get_master_bot
+            bot = get_master_bot()
+            if bot and hasattr(bot, 'analytics'):
+                # Get price history for volatility calculation
+                price_key = symbol.replace("-PERP", "") if "-PERP" in symbol else symbol
+                if price_key in bot.analytics.price_history:
+                    prices = bot.analytics.price_history[price_key]
+                    if len(prices) >= 20:
+                        # Calculate actual historical volatility
+                        returns = np.diff(prices) / prices[:-1]
+                        hv_20d = float(np.std(returns[-20:]) * np.sqrt(252))  # 20-day HV annualized
+                        hv_60d = float(np.std(returns[-60:]) * np.sqrt(252)) if len(returns) >= 60 else hv_20d
+
+                        # IV is typically HV + premium (we estimate)
+                        base_iv = hv_20d * 1.15  # IV typically trades at premium to HV
+
+                        # Calculate IV rank from historical HV range
+                        if len(returns) >= 252:
+                            hv_series = [float(np.std(returns[i:i+20]) * np.sqrt(252))
+                                        for i in range(0, len(returns)-20, 5)]
+                            hv_min = min(hv_series)
+                            hv_max = max(hv_series)
+                            iv_rank = ((base_iv - hv_min) / (hv_max - hv_min) * 100
+                                       if hv_max > hv_min else 50)
+                        else:
+                            # Limited data - estimate rank
+                            iv_rank = 50 + (base_iv - 0.25) * 100  # Centered at 25% vol
+
+                        # Clamp iv_rank to valid range
+                        iv_rank = max(0, min(100, iv_rank))
+
+                        # Calculate trend from recent vs older HV
+                        if len(returns) >= 40:
+                            recent_hv = float(np.std(returns[-10:]) * np.sqrt(252))
+                            older_hv = float(np.std(returns[-40:-30]) * np.sqrt(252))
+                            if recent_hv > older_hv * 1.1:
+                                iv_trend = "rising"
+                            elif recent_hv < older_hv * 0.9:
+                                iv_trend = "falling"
+                            else:
+                                iv_trend = "stable"
+                        else:
+                            iv_trend = "stable"
+
+                        return IVAnalysis(
+                            symbol=symbol,
+                            current_iv=base_iv,
+                            iv_rank=iv_rank,
+                            iv_percentile=iv_rank * 0.95,
+                            iv_30_day_avg=hv_60d * 1.1,
+                            iv_trend=iv_trend,
+                            hv_iv_spread=base_iv - hv_20d,
+                        )
+        except Exception as e:
+            logger.debug(f"Could not calculate real IV for {symbol}: {e}")
+
+        # Fallback: Use realistic base IV by asset class (no randomness)
         if symbol in ["SPY", "QQQ", "IWM"]:
-            base_iv = 0.15 + np.random.uniform(-0.03, 0.05)
+            base_iv = 0.16  # Typical ETF IV
         elif symbol == "VIX":
-            base_iv = 0.80 + np.random.uniform(-0.10, 0.20)
+            base_iv = 0.80  # VIX is inherently high vol
         elif symbol in ["TSLA", "NVDA", "AMD"]:
-            base_iv = 0.40 + np.random.uniform(-0.08, 0.12)
+            base_iv = 0.45  # High-vol tech stocks
+        elif "BTC" in symbol or "ETH" in symbol:
+            base_iv = 0.55  # Crypto typically higher vol
         else:
-            base_iv = 0.25 + np.random.uniform(-0.05, 0.08)
+            base_iv = 0.28  # Average stock vol
 
-        # Simulate IV rank (would use 52-week data in production)
-        iv_rank = np.random.uniform(20, 80)
-
-        # Simulate HV-IV spread
-        hv = base_iv * (0.8 + np.random.uniform(0, 0.4))
-        hv_iv_spread = base_iv - hv
-
+        hv = base_iv * 0.90  # Estimate HV at 90% of IV
         return IVAnalysis(
             symbol=symbol,
             current_iv=base_iv,
-            iv_rank=iv_rank,
-            iv_percentile=iv_rank * 0.95,  # Simplified
+            iv_rank=50,  # Default to middle rank without data
+            iv_percentile=47.5,
             iv_30_day_avg=base_iv * 0.95,
-            iv_trend="stable" if abs(np.random.randn()) < 1 else ("rising" if np.random.randn() > 0 else "falling"),
-            hv_iv_spread=hv_iv_spread,
+            iv_trend="stable",
+            hv_iv_spread=base_iv - hv,
         )
 
     def _generate_signal(
@@ -932,8 +1036,11 @@ class OptionsQuantBot:
             "trade"
         )
 
-        # Update portfolio-level Greeks
-        self.risk_manager.update_portfolio_greeks(list(self.positions.values()))
+        # Update portfolio-level Greeks with both options and crypto
+        self.risk_manager.update_portfolio_greeks(
+            list(self.positions.values()),
+            list(self.crypto_positions.values())
+        )
 
     async def _close_position(self, position_id: str, reason: str):
         """Close an options position."""
@@ -995,7 +1102,7 @@ class OptionsQuantBot:
         return pnl
 
     async def _get_underlying_price(self, symbol: str) -> float:
-        """Get current underlying price - uses LIVE data from Alpaca when available."""
+        """Get current underlying price - LIVE data only from Alpaca."""
         # Try to get live price from Alpaca broker
         try:
             from .live_brokers import get_broker_manager
@@ -1004,20 +1111,17 @@ class OptionsQuantBot:
                 live_price = await manager.get_live_price(symbol.upper(), "stock")
                 if live_price > 0:
                     return live_price
+                else:
+                    logger.warning(f"Alpaca returned zero price for {symbol}")
+            else:
+                logger.warning(f"Alpaca not connected - cannot get price for {symbol}")
         except Exception as e:
-            logger.debug(f"Live price unavailable for {symbol}: {e}")
+            logger.error(f"Failed to get live price for {symbol}: {e}")
 
-        # Fallback to base prices (simulated)
-        base_prices = {
-            "SPY": 480, "QQQ": 420, "IWM": 200, "AAPL": 185, "MSFT": 420,
-            "GOOGL": 155, "AMZN": 185, "NVDA": 880, "META": 500, "TSLA": 250,
-            "GLD": 195, "SLV": 22, "USO": 75, "XLE": 85, "VIX": 15,
-            "XLF": 40, "JPM": 195, "BAC": 35, "AMD": 165, "NFLX": 610,
-            "DIS": 110, "BA": 180, "V": 280, "MA": 460,
-        }
-        base = base_prices.get(symbol.upper(), 100)
-        # Add small random movement for simulation
-        return base * (1 + np.random.uniform(-0.01, 0.01))
+        # NO FALLBACK - Return 0 to indicate price unavailable
+        # Callers should handle this and skip the trade
+        logger.error(f"❌ NO LIVE PRICE for {symbol} - synthetic fallback DISABLED")
+        return 0
 
     def _add_commentary(self, message: str, category: str):
         """Add commentary entry."""
@@ -1035,7 +1139,7 @@ class OptionsQuantBot:
     # ======================
 
     async def _get_crypto_price(self, symbol: str) -> float:
-        """Get current crypto price - uses LIVE data from Binance when available."""
+        """Get current crypto price - LIVE data only from Binance."""
         # Extract base asset from derivative symbol
         base = symbol.split("-")[0].upper()
 
@@ -1051,18 +1155,17 @@ class OptionsQuantBot:
                     live_price = await manager.get_live_price(base, "crypto")
                 if live_price > 0:
                     return live_price
+                else:
+                    logger.warning(f"Binance returned zero price for {symbol}")
+            else:
+                logger.warning(f"Binance not connected - cannot get price for {symbol}")
         except Exception as e:
-            logger.debug(f"Live price unavailable for {symbol}: {e}")
+            logger.error(f"Failed to get live crypto price for {symbol}: {e}")
 
-        # Fallback to base prices (simulated)
-        base_prices = {
-            "BTC": 95000, "ETH": 3200, "SOL": 180,
-            "AVAX": 35, "MATIC": 0.85, "LINK": 22,
-            "ARB": 1.20, "OP": 2.50,
-        }
-        price = base_prices.get(base, 100)
-        # Add small random movement for simulation
-        return price * (1 + np.random.uniform(-0.02, 0.02))
+        # NO FALLBACK - Return 0 to indicate price unavailable
+        # Callers should handle this and skip the trade
+        logger.error(f"❌ NO LIVE PRICE for {symbol} - synthetic fallback DISABLED")
+        return 0
 
     async def open_crypto_perpetual(
         self,
@@ -1112,6 +1215,11 @@ class OptionsQuantBot:
             take_profit_price = current_price * (1 - take_profit_pct)
             stop_loss_price = current_price * (1 + stop_loss_pct)
 
+        # Calculate effective delta for the perpetual
+        # Long = positive delta, Short = negative delta
+        # Delta represents USD exposure per $1 move in underlying
+        effective_delta = size_usd / current_price if side == "long" else -size_usd / current_price
+
         position = CryptoDerivativePosition(
             id=position_id,
             symbol=symbol,
@@ -1124,6 +1232,7 @@ class OptionsQuantBot:
             liquidation_price=liq_price,
             take_profit=take_profit_price,
             stop_loss=stop_loss_price,
+            delta=effective_delta,  # Set delta for portfolio Greeks
         )
 
         self.crypto_positions[position_id] = position
@@ -1159,6 +1268,74 @@ class OptionsQuantBot:
         )
 
         del self.crypto_positions[position_id]
+
+    async def open_crypto_spot(
+        self,
+        symbol: str,
+        side: str,
+        size_usd: float,
+        take_profit_pct: float = 0.10,
+        stop_loss_pct: float = 0.05,
+    ) -> Optional[CryptoDerivativePosition]:
+        """
+        Open a crypto spot position (buy/sell actual crypto).
+
+        Args:
+            symbol: e.g., "BTC", "ETH", "SOL"
+            side: "buy" or "sell"
+            size_usd: Position size in USD
+            take_profit_pct: Take profit percentage
+            stop_loss_pct: Stop loss percentage
+        """
+        # Get current price
+        current_price = await self._get_crypto_price(symbol)
+        if current_price <= 0:
+            self._add_commentary(f"⚠️ Could not get price for {symbol}", "error")
+            return None
+
+        if size_usd > self.cash:
+            self._add_commentary(
+                f"⚠️ Insufficient funds for {symbol}: need ${size_usd:,.0f}, have ${self.cash:,.0f}",
+                "risk"
+            )
+            return None
+
+        # Calculate position
+        position_id = str(uuid.uuid4())[:8]
+        quantity = size_usd / current_price
+
+        # Calculate take profit and stop loss prices
+        if side == "buy":
+            take_profit_price = current_price * (1 + take_profit_pct)
+            stop_loss_price = current_price * (1 - stop_loss_pct)
+        else:  # sell (shorting spot - would need borrowed crypto)
+            take_profit_price = current_price * (1 - take_profit_pct)
+            stop_loss_price = current_price * (1 + stop_loss_pct)
+
+        position = CryptoDerivativePosition(
+            id=position_id,
+            symbol=symbol,
+            derivative_type="spot",
+            side=side,
+            entry_price=current_price,
+            size=size_usd,
+            leverage=1.0,  # No leverage for spot
+            current_price=current_price,
+            liquidation_price=0,  # No liquidation for spot
+            take_profit=take_profit_price,
+            stop_loss=stop_loss_price,
+        )
+
+        self.crypto_positions[position_id] = position
+        self.cash -= size_usd
+
+        self._add_commentary(
+            f"✅ SPOT {side.upper()} {quantity:.6f} {symbol} @ ${current_price:,.2f} | "
+            f"Value: ${size_usd:,.0f} | TP: ${take_profit_price:,.2f} | SL: ${stop_loss_price:,.2f}",
+            "trade"
+        )
+
+        return position
 
     async def open_crypto_option(
         self,
@@ -1272,13 +1449,50 @@ class OptionsQuantBot:
 
         position = self.crypto_positions[position_id]
 
-        # Simulate exit price (would use Deribit in production)
-        exit_price = position.entry_price * (1 + np.random.uniform(-0.3, 0.3))
-        pnl = (exit_price - position.entry_price) * position.size
+        # Parse option symbol: "ETH-30D-2200-P" -> base_asset, expiry, strike, type
+        parts = position.symbol.split("-")
+        base_asset = parts[0]
+        strike = float(parts[2]) if len(parts) > 2 else 0
+        option_type = "put" if parts[-1] == "P" else "call"
+
+        # Get UNDERLYING price from Binance
+        underlying_price = await self._get_crypto_price(base_asset)
+        if underlying_price == 0:
+            underlying_price = strike  # Fallback to strike if no price
+
+        # Calculate current OPTION price using Black-Scholes
+        # Use remaining time (simplified: assume some time passed)
+        import math
+        from scipy.stats import norm
+
+        iv = position.iv if position.iv > 0 else 0.80
+        r = 0.05
+        t = max(0.01, 7 / 365)  # Assume ~1 week left (simplified)
+
+        d1 = (math.log(underlying_price / strike) + (r + iv**2 / 2) * t) / (iv * math.sqrt(t))
+        d2 = d1 - iv * math.sqrt(t)
+
+        if option_type == "call":
+            exit_option_price = underlying_price * norm.cdf(d1) - strike * math.exp(-r * t) * norm.cdf(d2)
+        else:
+            exit_option_price = strike * math.exp(-r * t) * norm.cdf(-d2) - underlying_price * norm.cdf(-d1)
+
+        # Ensure option price is at least intrinsic value
+        if option_type == "call":
+            intrinsic = max(0, underlying_price - strike)
+        else:
+            intrinsic = max(0, strike - underlying_price)
+        exit_option_price = max(exit_option_price, intrinsic, 0.01)
+
+        # Calculate P&L based on option prices
+        pnl = (exit_option_price - position.entry_price) * position.size
         if position.side == "short":
             pnl = -pnl
 
         self.cash += abs(position.entry_price * position.size) + pnl
+
+        # Store the actual option exit price for logging
+        position.current_price = exit_option_price
 
         emoji = "💰" if pnl >= 0 else "📉"
         self._add_commentary(
