@@ -30,8 +30,8 @@ from ..ml_models import (
     PPOAgent,
     LSTM,
     LSTMClassifier,
-    TransformerPredictor,
-    MarketRegimeVAE,
+    TrainableTransformer,
+    TrainableVAE,
     EnsemblePredictor,
     Experience,
     Adam,
@@ -75,6 +75,14 @@ def _momentum(prices: np.ndarray, lookback: int = 20) -> float:
     """Simple momentum: current / past - 1."""
     ref = max(prices[-lookback], 1e-8)
     return float(prices[-1] / ref - 1)
+
+
+_VAE_REGIME_NAMES = {
+    0: "Bull Market (Risk-On)",
+    1: "Bear Market (Risk-Off)",
+    2: "High Volatility Crisis",
+    3: "Low Volatility Consolidation",
+}
 
 
 def _build_seq_features(returns: np.ndarray, n_features: int = 16) -> np.ndarray:
@@ -186,14 +194,14 @@ class FeatureStore:
         self.lstm_classifier = LSTMClassifier(
             input_dim=16, hidden_dim=128, output_dim=2, lr=0.001,
         )
-        self.transformer = TransformerPredictor(
-            input_dim=16, d_model=64, n_heads=4, n_layers=3,
+        # TrainableTransformer: full backprop through attention + FFN
+        self.transformer = TrainableTransformer(
+            input_dim=16, hidden_dim=64, output_dim=3, n_heads=4, lr=0.001,
         )
-        # Transformer output projection optimizer (for supervised gradient descent)
-        self._transformer_opt = Adam(
-            self.transformer.output_projection.parameters(), lr=0.001,
+        # TrainableVAE: reconstruction + KL + regime classification
+        self.regime_vae = TrainableVAE(
+            input_dim=32, hidden_dim=64, latent_dim=8, output_dim=4, lr=0.001,
         )
-        self.regime_vae = MarketRegimeVAE(input_dim=32, latent_dim=8)
         self.ensemble = EnsemblePredictor(
             state_dim=STATE_DIM, action_dim=N_ACTIONS, seq_len=60,
         )
@@ -453,8 +461,10 @@ class FeatureStore:
                     if len(r30) >= 32
                     else np.pad(r30, (0, 32 - len(r30))).reshape(1, -1)
                 )
-                regime_id, regime_probs, latent = self.regime_vae.detect_regime(r_input)
-                state[55:59] = regime_probs
+                _, mu, _, regime_probs_full = self.regime_vae.forward(r_input)
+                regime_probs = regime_probs_full[0]
+                latent = mu[0]
+                state[55:59] = regime_probs[:4]
                 state[59:63] = latent[:4] if len(latent) >= 4 else latent
             except Exception:
                 pass
@@ -497,13 +507,15 @@ class FeatureStore:
             except Exception:
                 pass
 
-        # Transformer
+        # Transformer (output_dim=3: [down, hold, up])
         transformer_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
             try:
                 r60 = np.array(self.return_history[symbol][-60:]).flatten()
                 t_input = _build_seq_features(r60)  # (60, 16) rich features
-                transformer_pred = self.transformer.predict(t_input)
+                t_probs = self.transformer.forward(t_input)  # (1, 3)
+                # Directional signal: P(up) - P(down), range [-1, +1]
+                transformer_pred = float(t_probs[0, 2] - t_probs[0, 0])
             except Exception:
                 pass
 
@@ -512,8 +524,8 @@ class FeatureStore:
         if symbol in self.return_history and len(self.return_history[symbol]) >= 32:
             try:
                 r32 = self.return_history[symbol][-32:]
-                rid, rp, _ = self.regime_vae.detect_regime(r32.reshape(1, -1))
-                regime = self.regime_vae.get_regime_name(rid)
+                rid, rp = self.regime_vae.detect_regime(r32.reshape(1, -1))
+                regime = _VAE_REGIME_NAMES.get(rid, "Unknown")
                 regime_confidence = float(np.max(rp))
             except Exception:
                 pass
@@ -665,7 +677,7 @@ class FeatureStore:
         vae_regime, vae_probs = 1, np.array([0.25, 0.25, 0.25, 0.25])
         if len(spy_returns) >= 32:
             try:
-                vae_regime, vae_probs, _ = self.regime_vae.detect_regime(
+                vae_regime, vae_probs = self.regime_vae.detect_regime(
                     spy_returns[-32:].reshape(1, -1)
                 )
             except Exception:
@@ -790,40 +802,77 @@ class FeatureStore:
                 f"val acc {lstm_val_losses[-1]:.1%}"
             )
 
-        # ── Train Transformer (gradient descent on output projection) ──
+        # ── Train Transformer (full backprop through attention + FFN) ──
+        # TrainableTransformer uses output_dim=3 → remap binary labels:
+        #   label 0 (down) → class 0,  label 1 (up) → class 2
+        y_train_3 = np.where(y_train == 1, 2, 0).astype(int)
+        y_val_3 = np.where(y_val == 1, 2, 0).astype(int)
+
         trans_train_losses = []
         for epoch in range(n_epochs):
             perm = np.random.permutation(len(X_train))
             epoch_loss, n = 0.0, 0
             for idx in perm:
                 try:
-                    x = X_train[idx]
-                    y_target = float(y_train[idx])  # 0 or 1
-                    pred = self.transformer.predict(x)
-                    error = pred - y_target
-                    epoch_loss += error ** 2
+                    loss = self.transformer.train_step(
+                        X_train[idx], np.array([y_train_3[idx]]),
+                    )
+                    epoch_loss += loss
                     n += 1
-
-                    # Backprop through output projection (Dense layer)
-                    # Gradient of MSE: d_loss/d_pred = 2 * error / 1
-                    grad_out = np.array([[2 * error]])
-                    self.transformer.output_projection.backward(grad_out)
-                    grads = self.transformer.output_projection.gradients()
-                    # Clip gradients
-                    grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in grads) + 1e-8)
-                    if grad_norm > 1.0:
-                        grads = [g * 1.0 / grad_norm for g in grads]
-                    self._transformer_opt.step(grads)
                 except Exception:
                     continue
             if n > 0:
                 trans_train_losses.append(epoch_loss / n)
 
+        # Transformer validation
+        t_correct = 0
+        for idx in range(len(X_val)):
+            try:
+                tp = self.transformer.predict(X_val[idx])
+                # Map back: class 0 = down → 0, class 2 = up → 1
+                if (tp == 2 and y_val[idx] == 1) or (tp == 0 and y_val[idx] == 0):
+                    t_correct += 1
+            except Exception:
+                continue
+        t_val_acc = t_correct / max(len(X_val), 1)
+
         if trans_train_losses:
             logger.info(
                 f"Transformer trained: {n_epochs} epochs, "
-                f"loss {trans_train_losses[0]:.4f} → {trans_train_losses[-1]:.4f}"
+                f"loss {trans_train_losses[0]:.4f} → {trans_train_losses[-1]:.4f}, "
+                f"val acc {t_val_acc:.1%}"
             )
+
+        # ── Train VAE (unsupervised reconstruction + KL) ─────────
+        # Collect 32-dim return windows for VAE input
+        vae_windows = []
+        for sym, rets in self.return_history.items():
+            if len(rets) < 32:
+                continue
+            for start in range(0, len(rets) - 32, 10):  # stride 10
+                vae_windows.append(rets[start:start + 32])
+        if len(vae_windows) >= 32:
+            X_vae = np.array(vae_windows)
+            split_v = int(len(X_vae) * 0.8)
+            X_vae_train = X_vae[:split_v]
+            vae_losses = []
+            for epoch in range(n_epochs):
+                perm = np.random.permutation(len(X_vae_train))
+                epoch_loss, n = 0.0, 0
+                for idx in perm:
+                    try:
+                        loss = self.regime_vae.train_step(X_vae_train[idx])
+                        epoch_loss += loss
+                        n += 1
+                    except Exception:
+                        continue
+                if n > 0:
+                    vae_losses.append(epoch_loss / n)
+            if vae_losses:
+                logger.info(
+                    f"VAE trained: {n_epochs} epochs, "
+                    f"loss {vae_losses[0]:.4f} → {vae_losses[-1]:.4f}"
+                )
 
     # ──────────────────────────────────────────────────────────
     # Cointegration / stat-arb helpers (shared by PairsTradingStrategy)

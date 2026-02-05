@@ -38,6 +38,7 @@ from ..master_bot import (
 from ..activity_logger import get_activity_logger, EventSubtype
 
 from .feature_store import FeatureStore
+from .persistence import TradePersistence, ModelCheckpointer
 from .risk_gate import RiskGate
 from .strategies.base import BaseStrategy
 from .strategies.pairs_trading import PairsTradingStrategy
@@ -101,16 +102,24 @@ class PipelineOrchestrator:
         self.regime_confidence: float = 0.5
         self.vix_level: float = 18.0
 
+        # ── Persistence ────────────────────────────────────────
+        self.persistence = TradePersistence()
+        self.checkpointer = ModelCheckpointer()
+
         # ── Opportunity / trade tracking ──────────────────────
         self.opportunities: List[Opportunity] = []
         self.last_full_scan: Optional[datetime] = None
-        self.trade_history: List[Dict] = []
+        self.trade_history: List[Dict] = self.persistence.load_trades()
         self.daily_pnl: List[Tuple[datetime, float]] = []
         self.commentary: List[Dict] = []
 
         self.current_allocations: Dict[AssetClass, float] = {
             ac: 0.0 for ac in AssetClass
         }
+
+        # ── Order lifecycle tracking ──────────────────────────
+        # Maps order_id → {status, symbol, side, broker_order_id, ...}
+        self.pending_orders: Dict[str, Dict] = {}
 
         # ── RL state ──────────────────────────────────────────
         self.last_state: Optional[np.ndarray] = None
@@ -385,7 +394,7 @@ class PipelineOrchestrator:
             )
 
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
-        """Execute a single opportunity (delegates to engine)."""
+        """Execute a single opportunity (delegates to engine + broker)."""
         try:
             # Market-hours check for equity options
             if opp.asset_class in (
@@ -397,6 +406,18 @@ class PipelineOrchestrator:
                         return False
                 except Exception:
                     pass
+
+            # Live order submission (in parallel with engine paper trade)
+            if self.live_trading_enabled and self.broker_manager is not None:
+                base_sym = opp.symbol.split("-")[0].split("/")[0]
+                side = "buy" if "Long" in opp.strategy or "Buy" in opp.strategy else "sell"
+                is_futures = opp.asset_class == AssetClass.CRYPTO_PERPETUAL
+                await self._submit_live_order(
+                    base_sym, side,
+                    self._vol_size(opp.symbol, 0.02, 2000),
+                    asset_type="crypto" if "CRYPTO" in opp.asset_class.value else "stock",
+                    is_futures=is_futures,
+                )
 
             if opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
                 side = "long" if "Long" in opp.strategy else "short"
@@ -577,11 +598,17 @@ class PipelineOrchestrator:
         self._real_data_loaded = total > 0
         self._add_commentary(f"Market data loaded: {total} symbols", "system")
 
-        # Train supervised models (LSTM, Transformer) on historical data
+        # Load model checkpoint if available
+        self.checkpointer.load(self.store)
+
+        # Train supervised models (LSTM, Transformer, VAE) on historical data
         if total > 0:
             try:
                 self.store.train_supervised_models(n_epochs=5)
-                self._add_commentary("Supervised models trained on historical data", "system")
+                self.save_checkpoint()
+                self._add_commentary(
+                    "Supervised models trained + checkpoint saved", "system",
+                )
             except Exception as e:
                 logger.warning(f"Supervised training failed: {e}")
 
@@ -654,7 +681,7 @@ class PipelineOrchestrator:
     ) -> str:
         tid = str(uuid.uuid4())[:8]
         side = "long" if "Long" in opp.strategy or "Buy" in opp.strategy else "short"
-        self.trade_history.append({
+        trade = {
             "id": tid,
             "timestamp": datetime.now().isoformat(),
             "symbol": opp.symbol,
@@ -678,7 +705,9 @@ class PipelineOrchestrator:
             "regime": self.market_regime.value,
             "rationale": opp.rationale,
             "live_executed": self.live_trading_enabled,
-        })
+        }
+        self.trade_history.append(trade)
+        self.persistence.save_trades(self.trade_history)
         return tid
 
     def _update_trade_closed(
@@ -705,6 +734,7 @@ class PipelineOrchestrator:
                     except Exception:
                         pass
                 break
+        self.persistence.save_trades(self.trade_history)
 
     # ──────────────────────────────────────────────────────────
     # Public API  (same surface as MasterQuantBot)
@@ -800,3 +830,229 @@ class PipelineOrchestrator:
                 "sharpe_ratio": risk.sharpe_ratio,
             },
         }
+
+    # ──────────────────────────────────────────────────────────
+    # Broker integration
+    # ──────────────────────────────────────────────────────────
+
+    async def initialize_broker(self) -> bool:
+        """Connect to configured brokers (Alpaca, Binance)."""
+        try:
+            from ..live_brokers import get_broker_manager, auto_initialize_brokers
+            self.broker_manager = get_broker_manager()
+            result = await auto_initialize_brokers()
+            connected = sum(1 for v in result.values() if v is True)
+            if connected > 0:
+                self._add_commentary(
+                    f"Broker connected: {connected} broker(s)", "system",
+                )
+                return True
+            logger.warning("No brokers connected — paper trading only")
+        except Exception as e:
+            logger.warning(f"Broker init failed: {e}")
+        return False
+
+    async def enable_live_trading(self) -> Tuple[bool, str]:
+        """Enable live trading after validating all prerequisites.
+
+        Checks:
+          1. At least one broker is connected
+          2. Models meet training requirements
+          3. No active circuit breaker
+        """
+        if self.broker_manager is None:
+            return False, "No broker manager — call initialize_broker() first"
+        status = self.broker_manager.get_status()
+        if not any(v.get("connected") for v in status.get("brokers", {}).values()):
+            return False, "No brokers connected"
+
+        meets, reason = self.model_pretrainer.meets_training_requirements()
+        if not meets:
+            return False, f"Models not ready: {reason}"
+
+        drawdown = -self.engine.total_pnl / self.initial_capital
+        if drawdown >= self.risk_gate.drawdown_hard:
+            return False, f"Circuit breaker active: drawdown {drawdown:.1%}"
+
+        self.live_trading_enabled = True
+        self.models_trained = True
+        self._add_commentary("Live trading ENABLED", "system")
+        return True, "Live trading enabled"
+
+    # ──────────────────────────────────────────────────────────
+    # Order lifecycle
+    # ──────────────────────────────────────────────────────────
+
+    async def _submit_live_order(
+        self, symbol: str, side: str, size_usd: float,
+        asset_type: str = "crypto", is_futures: bool = False,
+    ) -> Optional[str]:
+        """Submit a live order through the broker manager.
+
+        Returns broker order ID on success, None on failure.
+        """
+        if not self.live_trading_enabled or self.broker_manager is None:
+            return None
+
+        try:
+            # Calculate quantity from USD size
+            price = await self.broker_manager.get_live_price(
+                symbol, asset_type,
+            )
+            if price <= 0:
+                return None
+            qty = size_usd / price
+
+            if asset_type == "crypto":
+                order = await self.broker_manager.submit_crypto_order(
+                    symbol=symbol, quantity=qty, side=side,
+                    is_futures=is_futures,
+                )
+            else:
+                order = await self.broker_manager.submit_stock_order(
+                    symbol=symbol, quantity=qty, side=side,
+                )
+
+            if order:
+                self.pending_orders[order.order_id] = {
+                    "status": order.status,
+                    "symbol": symbol,
+                    "side": side,
+                    "quantity": qty,
+                    "submitted_at": datetime.now().isoformat(),
+                    "broker_order_id": order.order_id,
+                }
+                return order.order_id
+        except Exception as e:
+            logger.error(f"Live order failed {symbol}: {e}")
+        return None
+
+    # ──────────────────────────────────────────────────────────
+    # Position reconciliation
+    # ──────────────────────────────────────────────────────────
+
+    async def reconcile_positions(self) -> Dict:
+        """Compare engine positions with broker positions.
+
+        Returns discrepancies for manual review.
+        """
+        if self.broker_manager is None:
+            return {"status": "no_broker", "discrepancies": []}
+
+        try:
+            broker_positions = await self.broker_manager.get_all_positions()
+        except Exception as e:
+            return {"status": "error", "error": str(e), "discrepancies": []}
+
+        broker_syms = {p.symbol: p for p in broker_positions}
+        engine_syms = set()
+        for p in self.engine.crypto_positions.values():
+            engine_syms.add(p.symbol.replace("-PERP", ""))
+
+        discrepancies = []
+
+        # Positions in engine but not on broker
+        for sym in engine_syms:
+            if sym not in broker_syms:
+                discrepancies.append({
+                    "type": "engine_only",
+                    "symbol": sym,
+                    "action": "Position exists in engine but not on broker",
+                })
+
+        # Positions on broker but not in engine
+        for sym, bp in broker_syms.items():
+            if sym not in engine_syms and abs(bp.quantity) > 0:
+                discrepancies.append({
+                    "type": "broker_only",
+                    "symbol": sym,
+                    "quantity": bp.quantity,
+                    "action": "Position exists on broker but not in engine",
+                })
+
+        return {
+            "status": "ok",
+            "engine_count": len(engine_syms),
+            "broker_count": len(broker_positions),
+            "discrepancies": discrepancies,
+        }
+
+    # ──────────────────────────────────────────────────────────
+    # Walk-forward backtesting
+    # ──────────────────────────────────────────────────────────
+
+    async def backtest(
+        self,
+        symbols: Optional[List[str]] = None,
+        days: int = 252,
+    ) -> Dict:
+        """Run walk-forward backtest using the pipeline's trained models.
+
+        This validates strategy performance on historical data before
+        enabling live trading.
+        """
+        from ..backtester import get_backtester
+
+        bt = get_backtester()
+        data = {}
+
+        # Use already-loaded price history
+        target_syms = symbols or list(self.store.price_history.keys())[:10]
+        for sym in target_syms:
+            prices = self.store.price_history.get(sym)
+            if prices is not None and len(prices) >= 60:
+                from ..backtester import OHLCV
+                candles = []
+                for i, p in enumerate(prices):
+                    candles.append(OHLCV(
+                        timestamp=datetime(2024, 1, 1),  # placeholder
+                        open=p, high=p * 1.01, low=p * 0.99,
+                        close=p, volume=1000,
+                    ))
+                data[sym] = candles
+
+        if not data:
+            return {"error": "No price data available for backtesting"}
+
+        try:
+            result = bt.run_backtest(data, self.model_pretrainer)
+            self._add_commentary(
+                f"Backtest complete: Sharpe={result.sharpe_ratio:.2f}, "
+                f"return={result.total_return:.1%}, "
+                f"max DD={result.max_drawdown:.1%}",
+                "system",
+            )
+            return {
+                "sharpe_ratio": result.sharpe_ratio,
+                "sortino_ratio": result.sortino_ratio,
+                "total_return": result.total_return,
+                "max_drawdown": result.max_drawdown,
+                "win_rate": result.win_rate,
+                "total_trades": result.total_trades,
+                "equity_curve_length": len(result.equity_curve),
+            }
+        except Exception as e:
+            logger.error(f"Backtest failed: {e}")
+            return {"error": str(e)}
+
+    # ──────────────────────────────────────────────────────────
+    # Model checkpointing
+    # ──────────────────────────────────────────────────────────
+
+    def save_checkpoint(self, tag: str = "latest"):
+        """Save model weights + portfolio state to disk."""
+        self.checkpointer.save(self.store, tag)
+        self.persistence.save_portfolio_state({
+            "total_pnl": self.engine.total_pnl,
+            "cash": self.engine.cash,
+            "total_value": self.engine.total_value,
+            "regime": self.market_regime.value,
+            "training_step": self.store.training_step,
+            "dqn_epsilon": self.store.dqn.epsilon,
+            "episode_reward": self.episode_reward,
+            "allocations": {ac.value: v for ac, v in self.current_allocations.items()},
+        })
+
+    def load_checkpoint(self, tag: str = "latest") -> bool:
+        """Load model weights from disk."""
+        return self.checkpointer.load(self.store, tag)
