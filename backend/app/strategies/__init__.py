@@ -18,6 +18,12 @@ from .core_strategies import (
     SentimentAnalysisStrategy,
     FactorRotationStrategy,
 )
+from .counter_cyclical_strategies import (
+    LongVolatilityStrategy,
+    IntradayMeanReversionStrategy,
+    EnhancedFactorRotationStrategy,
+    KalmanFilterStatArbStrategy,
+)
 
 __all__ = [
     # Framework
@@ -27,7 +33,7 @@ __all__ = [
     "StrategyStatus",
     "StrategyRegistry",
     "StrategyExecutor",
-    # Core Strategies
+    # Core Strategies (8)
     "TrendFollowingStrategy",
     "MeanReversionStrategy",
     "VolatilityTradingStrategy",
@@ -36,4 +42,9 @@ __all__ = [
     "TechnicalPatternsStrategy",
     "SentimentAnalysisStrategy",
     "FactorRotationStrategy",
+    # Counter-Cyclical & Enhanced (4)
+    "LongVolatilityStrategy",
+    "IntradayMeanReversionStrategy",
+    "EnhancedFactorRotationStrategy",
+    "KalmanFilterStatArbStrategy",
 ]
