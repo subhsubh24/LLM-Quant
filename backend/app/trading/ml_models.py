@@ -848,9 +848,16 @@ class DQN:
         current_q_actions = current_q[np.arange(batch_size), actions]
 
         # Double DQN: select action with online network, evaluate with target
+        # Target network must be in eval mode — dropout would make targets noisy,
+        # causing the online network to chase a randomly-corrupted signal.
+        self._set_eval_mode(self._q_network)
         next_q_online = self._forward(next_states, self._q_network)
+        self._set_train_mode(self._q_network)
         next_actions = np.argmax(next_q_online, axis=1)
+
+        self._set_eval_mode(self._target_network)
         next_q_target = self._forward(next_states, self._target_network)
+        self._set_train_mode(self._target_network)
         next_q_values = next_q_target[np.arange(batch_size), next_actions]
 
         # Compute targets - Q-values already clipped to [-20, 20] in forward

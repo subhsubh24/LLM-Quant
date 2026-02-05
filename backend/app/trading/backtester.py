@@ -1447,6 +1447,11 @@ class ModelPreTrainer:
                 # Reset patience for new validation window (keep model weights)
                 patience_counter = 0
                 best_val_accuracy = 0
+                # Reset loss EMA so normalized loss isn't distorted by
+                # the previous fold's loss scale
+                self.dqn.loss_ema = 1.0
+                if hasattr(self.transformer, 'loss_ema'):
+                    self.transformer.loss_ema = 1.0
                 logger.info(
                     f"📊 Walk-forward fold {wf_fold+1}/{n_wf_folds}: "
                     f"train={len(X_train):,}, val={len(X_val):,}"

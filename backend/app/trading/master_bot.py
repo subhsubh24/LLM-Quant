@@ -293,7 +293,12 @@ class QuantAnalyticsEngine:
         """Update price history for a symbol."""
         self.price_history[symbol] = prices
         if len(prices) > 1:
-            self.return_history[symbol] = np.diff(prices) / prices[:-1]
+            denom = prices[:-1]
+            # Guard against zero/negative prices from data glitches
+            safe_denom = np.where(denom > 0, denom, 1.0)
+            returns = np.diff(prices) / safe_denom
+            # Sanitize any NaN/Inf that slipped through
+            self.return_history[symbol] = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _construct_state(self, symbol: str, additional_features: Optional[Dict] = None) -> np.ndarray:
         """
@@ -357,12 +362,12 @@ class QuantAnalyticsEngine:
                 std20 = np.std(prices[-20:])
                 state[21] = (prices[-1] - ma20) / (2 * std20 + 1e-8)  # BB position
 
-                # Momentum
-                state[22] = prices[-1] / prices[-5] - 1  # 5-day momentum
-                state[23] = prices[-1] / prices[-20] - 1  # 20-day momentum
+                # Momentum (guard against zero historical prices from data glitches)
+                state[22] = prices[-1] / max(prices[-5], 1e-8) - 1  # 5-day momentum
+                state[23] = prices[-1] / max(prices[-20], 1e-8) - 1  # 20-day momentum
 
                 if len(prices) >= 60:
-                    state[24] = prices[-1] / prices[-60] - 1  # 60-day momentum
+                    state[24] = prices[-1] / max(prices[-60], 1e-8) - 1  # 60-day momentum
 
         # Add additional features if provided
         if additional_features:
@@ -390,6 +395,11 @@ class QuantAnalyticsEngine:
                 state[59:63] = latent[:4] if len(latent) >= 4 else latent
             except Exception:
                 pass
+
+        # Final sanitization: ensure no NaN/Inf reaches the models
+        state = np.nan_to_num(state, nan=0.0, posinf=0.0, neginf=0.0)
+        # Clip extreme values (>10 std from 0 is almost certainly a data glitch)
+        state = np.clip(state, -10, 10)
 
         return state
 
