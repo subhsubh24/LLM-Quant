@@ -77,30 +77,56 @@ class StatisticalAnomalyDetector:
         """Add observation to history.
 
         Args:
-            metric_name: Name of metric
-            value: Metric value
+            metric_name: Name of metric (non-empty string)
+            value: Metric value (must be numeric)
             timestamp: Observation timestamp
+
+        Raises:
+            ValueError: If inputs invalid
         """
+        # Input validation
+        if not isinstance(metric_name, str) or len(metric_name) == 0:
+            logger.error(f"Invalid metric_name {metric_name}, must be non-empty string")
+            raise ValueError(f"metric_name must be non-empty string, got {metric_name}")
+        if not isinstance(value, (int, float)):
+            logger.error(f"Invalid value type for {metric_name}: {type(value)}, expected numeric")
+            raise ValueError(f"value must be numeric, got {type(value)}")
+
         if metric_name not in self.metric_history:
             self.metric_history[metric_name] = deque(maxlen=self.lookback_window)
+            logger.debug(f"Created new metric history for {metric_name}")
 
         self.metric_history[metric_name].append(value)
+        logger.debug(f"Recorded {metric_name}={value:.4f}, history length={len(self.metric_history[metric_name])}")
 
     def detect_anomaly(self, metric_name: str, value: float) -> Optional[AnomalyEvent]:
         """Detect if value is anomalous.
 
         Args:
-            metric_name: Name of metric
-            value: Current value
+            metric_name: Name of metric (non-empty string)
+            value: Current value (must be numeric)
 
         Returns:
             AnomalyEvent if anomaly detected, else None
+
+        Raises:
+            ValueError: If inputs invalid
         """
+        # Input validation
+        if not isinstance(metric_name, str) or len(metric_name) == 0:
+            logger.error(f"Invalid metric_name {metric_name}, must be non-empty string")
+            raise ValueError(f"metric_name must be non-empty string, got {metric_name}")
+        if not isinstance(value, (int, float)):
+            logger.error(f"Invalid value type for {metric_name}: {type(value)}, expected numeric")
+            raise ValueError(f"value must be numeric, got {type(value)}")
+
         if metric_name not in self.metric_history:
+            logger.debug(f"No history for metric {metric_name}, skipping anomaly detection")
             return None
 
         history = list(self.metric_history[metric_name])
         if len(history) < self.min_history:
+            logger.debug(f"Insufficient history for {metric_name}: {len(history)}/{self.min_history}")
             return None
 
         # Compute statistics (ignoring current value)
@@ -120,7 +146,7 @@ class StatisticalAnomalyDetector:
             z_score = (value - mean) / std
             severity = min((z_score - self.num_sigmas) / self.num_sigmas, 1.0)
 
-            return AnomalyEvent(
+            event = AnomalyEvent(
                 timestamp=datetime.now(),
                 metric_name=metric_name,
                 value=value,
@@ -129,12 +155,14 @@ class StatisticalAnomalyDetector:
                 severity=severity,
                 description=f"{metric_name} abnormally high: {value:.2f} (threshold: {threshold_upper:.2f})",
             )
+            logger.warning(f"ANOMALY DETECTED: {metric_name}={value:.2f} (HIGH), zscore={z_score:.2f}, severity={severity:.2f}")
+            return event
 
         elif value < threshold_lower:
             z_score = (mean - value) / std
             severity = min((z_score - self.num_sigmas) / self.num_sigmas, 1.0)
 
-            return AnomalyEvent(
+            event = AnomalyEvent(
                 timestamp=datetime.now(),
                 metric_name=metric_name,
                 value=value,
@@ -143,34 +171,49 @@ class StatisticalAnomalyDetector:
                 severity=severity,
                 description=f"{metric_name} abnormally low: {value:.2f} (threshold: {threshold_lower:.2f})",
             )
+            logger.warning(f"ANOMALY DETECTED: {metric_name}={value:.2f} (LOW), zscore={z_score:.2f}, severity={severity:.2f}")
+            return event
 
+        logger.debug(f"{metric_name}={value:.2f} within normal range [{threshold_lower:.2f}, {threshold_upper:.2f}]")
         return None
 
     def get_thresholds(self, metric_name: str) -> Optional[Dict]:
         """Get current thresholds for metric.
 
         Args:
-            metric_name: Name of metric
+            metric_name: Name of metric (non-empty string)
 
         Returns:
-            Dict with mean, std, upper, lower thresholds
+            Dict with mean, std, upper, lower thresholds, or None if insufficient data
+
+        Raises:
+            ValueError: If metric_name invalid
         """
+        # Input validation
+        if not isinstance(metric_name, str) or len(metric_name) == 0:
+            logger.error(f"Invalid metric_name {metric_name}, must be non-empty string")
+            raise ValueError(f"metric_name must be non-empty string, got {metric_name}")
+
         if metric_name not in self.metric_history:
+            logger.debug(f"No history for metric {metric_name}")
             return None
 
         history = list(self.metric_history[metric_name])
         if len(history) < self.min_history:
+            logger.debug(f"Insufficient history for {metric_name}: {len(history)}/{self.min_history}")
             return None
 
         mean = np.mean(history)
         std = np.std(history)
 
-        return {
+        thresholds = {
             'mean': float(mean),
             'std': float(std),
             'upper_threshold': float(mean + self.num_sigmas * std),
             'lower_threshold': float(mean - self.num_sigmas * std),
         }
+        logger.debug(f"Thresholds for {metric_name}: mean={mean:.4f}, std={std:.4f}, bounds=[{thresholds['lower_threshold']:.4f}, {thresholds['upper_threshold']:.4f}]")
+        return thresholds
 
 
 class FeatureImportanceTracker:
@@ -194,9 +237,28 @@ class FeatureImportanceTracker:
         """Add feature importance snapshot.
 
         Args:
-            importances: Dict of feature -> importance
+            importances: Dict of feature -> importance (0-1)
             timestamp: Timestamp of snapshot
+
+        Raises:
+            ValueError: If importances invalid
         """
+        # Input validation
+        if not isinstance(importances, dict):
+            logger.error(f"Invalid importances type: {type(importances)}, expected dict")
+            raise ValueError(f"importances must be dict, got {type(importances)}")
+        if len(importances) == 0:
+            logger.warning("Empty importances dict provided")
+            return
+
+        for feature, importance in importances.items():
+            if not isinstance(feature, str):
+                logger.error(f"Invalid feature name type: {type(feature)}, expected str")
+                raise ValueError(f"Feature names must be str, got {type(feature)}")
+            if not isinstance(importance, (int, float)) or not 0 <= importance <= 1:
+                logger.error(f"Invalid importance for {feature}: {importance}, must be 0-1")
+                raise ValueError(f"Importance for {feature} must be 0-1, got {importance}")
+
         if timestamp is None:
             timestamp = datetime.now()
 
@@ -205,8 +267,11 @@ class FeatureImportanceTracker:
         for feature, importance in importances.items():
             if feature not in self.importance_history:
                 self.importance_history[feature] = []
+                logger.debug(f"Created new feature importance history for {feature}")
 
             self.importance_history[feature].append(importance)
+
+        logger.debug(f"Added importance snapshot: {len(importances)} features at {timestamp.isoformat()}")
 
     def get_average_importance(self) -> Dict[str, float]:
         """Get average feature importance across window.

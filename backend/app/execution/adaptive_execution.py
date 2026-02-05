@@ -66,8 +66,21 @@ class TimeOfDayProfiles:
 
         Returns:
             MarketProfile for that hour (or default if outside market hours)
+
+        Raises:
+            ValueError: If hour outside 0-23
         """
-        return cls.PROFILES.get(hour, MarketProfile(hour, 0.5, 2.0, 2.0, "AVOID"))
+        # Input validation
+        if not isinstance(hour, int):
+            logger.error(f"Invalid hour type: {type(hour)}, expected int")
+            raise ValueError(f"Hour must be int, got {type(hour)}")
+        if not 0 <= hour <= 23:
+            logger.error(f"Hour {hour} outside valid range 0-23")
+            raise ValueError(f"Hour must be 0-23, got {hour}")
+
+        profile = cls.PROFILES.get(hour, MarketProfile(hour, 0.5, 2.0, 2.0, "AVOID"))
+        logger.debug(f"Retrieved profile for hour {hour}: {profile.recommendation}")
+        return profile
 
 
 class AdaptiveExecutionProfiles:
@@ -92,7 +105,7 @@ class AdaptiveExecutionProfiles:
 
         Args:
             hour: Hour (9-17)
-            iv: Current implied volatility
+            iv: Current implied volatility (0-1)
             iv_percentile: IV percentile (0-100)
             symbol: Stock symbol
             current_date: Current date
@@ -100,7 +113,31 @@ class AdaptiveExecutionProfiles:
 
         Returns:
             AdaptiveProfile with adjustments
+
+        Raises:
+            ValueError: If inputs invalid
         """
+        # Input validation
+        if not isinstance(hour, int) or not 9 <= hour <= 17:
+            logger.error(f"Invalid hour {hour}, must be 9-17")
+            raise ValueError(f"Hour must be 9-17, got {hour}")
+        if not isinstance(iv, (int, float)) or iv < 0:
+            logger.error(f"Invalid IV {iv}, must be non-negative")
+            raise ValueError(f"IV must be non-negative, got {iv}")
+        if not isinstance(iv_percentile, (int, float)) or not 0 <= iv_percentile <= 100:
+            logger.error(f"Invalid IV percentile {iv_percentile}, must be 0-100")
+            raise ValueError(f"IV percentile must be 0-100, got {iv_percentile}")
+        if not isinstance(symbol, str) or len(symbol) == 0:
+            logger.error(f"Invalid symbol {symbol}, must be non-empty string")
+            raise ValueError(f"Symbol must be non-empty string, got {symbol}")
+        if current_date is None:
+            current_date = datetime.now()
+        if not isinstance(is_fed_day, bool):
+            logger.error(f"Invalid is_fed_day type: {type(is_fed_day)}")
+            raise ValueError(f"is_fed_day must be bool, got {type(is_fed_day)}")
+
+        logger.debug(f"Computing adaptive profile for {symbol} at {hour}:00, IV={iv:.2%}, IV%={iv_percentile:.1f}")
+
         # Get base time-of-day profile
         base = TimeOfDayProfiles.get_profile(hour)
 
@@ -172,15 +209,37 @@ class RealisticCostModel:
         """Estimate total execution cost.
 
         Args:
-            order_size: Order size (dollars)
-            daily_volume: Daily trading volume (dollars)
-            volatility: Realized volatility
-            vix: VIX level
-            spread_bps: Bid-ask spread in basis points
+            order_size: Order size (dollars), must be > 0
+            daily_volume: Daily trading volume (dollars), must be > 0
+            volatility: Realized volatility (0-1), must be >= 0
+            vix: VIX level (typically 10-80)
+            spread_bps: Bid-ask spread in basis points (0-100)
 
         Returns:
             Cost breakdown {total, spread, participation, adverse, vix_premium}
+
+        Raises:
+            ValueError: If inputs are invalid
         """
+        # Input validation
+        if not isinstance(order_size, (int, float)) or order_size <= 0:
+            logger.error(f"Invalid order_size {order_size}, must be > 0")
+            raise ValueError(f"order_size must be > 0, got {order_size}")
+        if not isinstance(daily_volume, (int, float)) or daily_volume <= 0:
+            logger.error(f"Invalid daily_volume {daily_volume}, must be > 0")
+            raise ValueError(f"daily_volume must be > 0, got {daily_volume}")
+        if not isinstance(volatility, (int, float)) or volatility < 0:
+            logger.error(f"Invalid volatility {volatility}, must be >= 0")
+            raise ValueError(f"volatility must be >= 0, got {volatility}")
+        if not isinstance(vix, (int, float)) or vix < 0:
+            logger.error(f"Invalid vix {vix}, must be >= 0")
+            raise ValueError(f"vix must be >= 0, got {vix}")
+        if not isinstance(spread_bps, (int, float)) or spread_bps < 0:
+            logger.error(f"Invalid spread_bps {spread_bps}, must be >= 0")
+            raise ValueError(f"spread_bps must be >= 0, got {spread_bps}")
+
+        logger.debug(f"Estimating cost: order={order_size:,.0f}, volume={daily_volume:,.0f}, vol={volatility:.2%}, vix={vix:.1f}, spread={spread_bps:.1f}bps")
+
         # 1. Spread cost (half the bid-ask)
         spread_cost = spread_bps / 2.0
 
@@ -217,7 +276,7 @@ class RealisticCostModel:
             + vix_premium
         )
 
-        return {
+        result = {
             'total_cost_bps': float(total_cost),
             'spread_cost_bps': float(spread_cost),
             'participation_cost_bps': float(participation_cost),
@@ -225,6 +284,10 @@ class RealisticCostModel:
             'vix_premium_bps': float(vix_premium),
             'vol_adjustment': float(vol_adjustment),
         }
+
+        logger.debug(f"Cost breakdown: total={total_cost:.1f}bps, spread={spread_cost:.1f}, participation={participation_cost:.1f}, adverse={adverse_selection:.1f}, vix_premium={vix_premium:.1f}")
+
+        return result
 
     def record_execution(
         self,
@@ -236,16 +299,33 @@ class RealisticCostModel:
 
         Args:
             order_id: Order ID
-            expected_cost_bps: Expected cost
-            actual_cost_bps: Actual cost
+            expected_cost_bps: Expected cost in bps
+            actual_cost_bps: Actual cost in bps
+
+        Raises:
+            ValueError: If inputs invalid
         """
+        # Input validation
+        if not isinstance(order_id, str) or len(order_id) == 0:
+            logger.error(f"Invalid order_id {order_id}, must be non-empty string")
+            raise ValueError(f"order_id must be non-empty string, got {order_id}")
+        if not isinstance(expected_cost_bps, (int, float)):
+            logger.error(f"Invalid expected_cost_bps type: {type(expected_cost_bps)}")
+            raise ValueError(f"expected_cost_bps must be numeric, got {type(expected_cost_bps)}")
+        if not isinstance(actual_cost_bps, (int, float)):
+            logger.error(f"Invalid actual_cost_bps type: {type(actual_cost_bps)}")
+            raise ValueError(f"actual_cost_bps must be numeric, got {type(actual_cost_bps)}")
+
+        slippage = actual_cost_bps - expected_cost_bps
         self.execution_history.append({
             'timestamp': datetime.now(),
             'order_id': order_id,
             'expected_cost': expected_cost_bps,
             'actual_cost': actual_cost_bps,
-            'slippage': actual_cost_bps - expected_cost_bps,
+            'slippage': slippage,
         })
+
+        logger.debug(f"Recorded execution {order_id}: expected={expected_cost_bps:.1f}bps, actual={actual_cost_bps:.1f}bps, slippage={slippage:+.1f}bps")
 
         # Keep last 1000
         self.execution_history = self.execution_history[-1000:]
@@ -285,11 +365,19 @@ class VolatilityAdaptiveRebalancing:
         """Check if rebalancing is needed.
 
         Args:
-            current_vol: Current realized volatility
+            current_vol: Current realized volatility (0-1)
 
         Returns:
             True if rebalancing should occur
+
+        Raises:
+            ValueError: If volatility invalid
         """
+        # Input validation
+        if not isinstance(current_vol, (int, float)) or current_vol < 0:
+            logger.error(f"Invalid current_vol {current_vol}, must be >= 0")
+            raise ValueError(f"current_vol must be >= 0, got {current_vol}")
+
         # Determine rebalance frequency from vol
         if current_vol < 0.10:
             freq_days = 10  # Low vol: less frequent
@@ -302,11 +390,15 @@ class VolatilityAdaptiveRebalancing:
         else:
             freq_days = 1  # High vol: daily rebalancing
 
+        logger.debug(f"Volatility {current_vol:.2%}: rebalance every {freq_days} days")
+
         # Check if enough time has passed
         time_since_rebalance = (datetime.now() - self.last_rebalance).days
 
-        if time_since_rebalance >= freq_days:
+        should_rebal = time_since_rebalance >= freq_days
+        if should_rebal:
             self.last_rebalance = datetime.now()
+            logger.info(f"Rebalancing triggered after {time_since_rebalance} days (threshold: {freq_days} days, vol={current_vol:.2%})")
             return True
 
         return False
@@ -315,21 +407,32 @@ class VolatilityAdaptiveRebalancing:
         """Get recommended rebalance frequency in days.
 
         Args:
-            current_vol: Current realized volatility
+            current_vol: Current realized volatility (0-1)
 
         Returns:
-            Rebalance frequency in days
+            Rebalance frequency in days (1-10)
+
+        Raises:
+            ValueError: If volatility invalid
         """
+        # Input validation
+        if not isinstance(current_vol, (int, float)) or current_vol < 0:
+            logger.error(f"Invalid current_vol {current_vol}, must be >= 0")
+            raise ValueError(f"current_vol must be >= 0, got {current_vol}")
+
         if current_vol < 0.10:
-            return 10
+            freq = 10
         elif current_vol < 0.15:
-            return 7
+            freq = 7
         elif current_vol < 0.20:
-            return 5
+            freq = 5
         elif current_vol < 0.30:
-            return 2
+            freq = 2
         else:
-            return 1
+            freq = 1
+
+        logger.debug(f"Rebalance frequency for vol {current_vol:.2%}: {freq} days")
+        return freq
 
 
 class OptimizedAdaptiveExecutor:
@@ -358,20 +461,57 @@ class OptimizedAdaptiveExecutor:
         """Get comprehensive execution plan.
 
         Args:
-            symbol: Stock symbol
-            order_size: Order size
-            daily_volume: Daily volume
+            symbol: Stock symbol (non-empty string)
+            order_size: Order size (> 0)
+            daily_volume: Daily volume (> 0)
             hour: Hour (9-17)
-            iv: Current implied vol
-            iv_20d: 20-day average IV
-            volatility: Realized volatility
-            vix: VIX level
-            spread_bps: Current spread
+            iv: Current implied vol (>= 0)
+            iv_20d: 20-day average IV (>= 0)
+            volatility: Realized volatility (>= 0)
+            vix: VIX level (>= 0)
+            spread_bps: Current spread (>= 0)
             is_fed_day: True if Fed announcement
 
         Returns:
             Execution plan with all recommendations
+
+        Raises:
+            ValueError: If inputs invalid
         """
+        # Comprehensive input validation
+        if not isinstance(symbol, str) or len(symbol) == 0:
+            logger.error(f"Invalid symbol {symbol}, must be non-empty string")
+            raise ValueError(f"symbol must be non-empty string, got {symbol}")
+        if not isinstance(order_size, (int, float)) or order_size <= 0:
+            logger.error(f"Invalid order_size {order_size}, must be > 0")
+            raise ValueError(f"order_size must be > 0, got {order_size}")
+        if not isinstance(daily_volume, (int, float)) or daily_volume <= 0:
+            logger.error(f"Invalid daily_volume {daily_volume}, must be > 0")
+            raise ValueError(f"daily_volume must be > 0, got {daily_volume}")
+        if not isinstance(hour, int) or not 9 <= hour <= 17:
+            logger.error(f"Invalid hour {hour}, must be 9-17")
+            raise ValueError(f"hour must be 9-17, got {hour}")
+        if not isinstance(iv, (int, float)) or iv < 0:
+            logger.error(f"Invalid iv {iv}, must be >= 0")
+            raise ValueError(f"iv must be >= 0, got {iv}")
+        if not isinstance(iv_20d, (int, float)) or iv_20d < 0:
+            logger.error(f"Invalid iv_20d {iv_20d}, must be >= 0")
+            raise ValueError(f"iv_20d must be >= 0, got {iv_20d}")
+        if not isinstance(volatility, (int, float)) or volatility < 0:
+            logger.error(f"Invalid volatility {volatility}, must be >= 0")
+            raise ValueError(f"volatility must be >= 0, got {volatility}")
+        if not isinstance(vix, (int, float)) or vix < 0:
+            logger.error(f"Invalid vix {vix}, must be >= 0")
+            raise ValueError(f"vix must be >= 0, got {vix}")
+        if not isinstance(spread_bps, (int, float)) or spread_bps < 0:
+            logger.error(f"Invalid spread_bps {spread_bps}, must be >= 0")
+            raise ValueError(f"spread_bps must be >= 0, got {spread_bps}")
+        if not isinstance(is_fed_day, bool):
+            logger.error(f"Invalid is_fed_day type: {type(is_fed_day)}")
+            raise ValueError(f"is_fed_day must be bool, got {type(is_fed_day)}")
+
+        logger.info(f"Computing execution plan for {symbol}: order={order_size:,.0f}, hour={hour}:00, iv={iv:.2%}, vix={vix:.1f}, fed_day={is_fed_day}")
+
         # Get adaptive profile
         iv_percentile = np.percentile([iv], 50) if self.iv_history else 50
         self.iv_history.append(iv)
