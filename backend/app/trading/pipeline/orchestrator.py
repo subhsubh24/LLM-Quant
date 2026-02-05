@@ -394,7 +394,11 @@ class PipelineOrchestrator:
             )
 
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
-        """Execute a single opportunity (delegates to engine + broker)."""
+        """Execute a single opportunity (delegates to engine + broker).
+
+        Paper trade is executed FIRST; live broker order only if paper
+        trade succeeds.  This prevents orphaned broker positions.
+        """
         try:
             # Market-hours check for equity options
             if opp.asset_class in (
@@ -407,17 +411,7 @@ class PipelineOrchestrator:
                 except Exception:
                     pass
 
-            # Live order submission (in parallel with engine paper trade)
-            if self.live_trading_enabled and self.broker_manager is not None:
-                base_sym = opp.symbol.split("-")[0].split("/")[0]
-                side = "buy" if "Long" in opp.strategy or "Buy" in opp.strategy else "sell"
-                is_futures = opp.asset_class == AssetClass.CRYPTO_PERPETUAL
-                await self._submit_live_order(
-                    base_sym, side,
-                    self._vol_size(opp.symbol, 0.02, 2000),
-                    asset_type="crypto" if "CRYPTO" in opp.asset_class.value else "stock",
-                    is_futures=is_futures,
-                )
+            paper_ok = False
 
             if opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
                 side = "long" if "Long" in opp.strategy else "short"
@@ -430,7 +424,7 @@ class PipelineOrchestrator:
                     tid = self._record_trade(opp, "crypto_perpetual", pos.entry_price, pos.size)
                     pos.trade_id = tid
                     pos.opened_at = datetime.now()
-                return pos is not None
+                paper_ok = pos is not None
 
             elif opp.asset_class == AssetClass.CRYPTO_SPOT:
                 side = "buy" if "Long" in opp.strategy else "sell"
@@ -442,7 +436,7 @@ class PipelineOrchestrator:
                     tid = self._record_trade(opp, "crypto_spot", pos.entry_price, pos.size)
                     pos.trade_id = tid
                     pos.opened_at = datetime.now()
-                return pos is not None
+                paper_ok = pos is not None
 
             elif opp.asset_class == AssetClass.CRYPTO_OPTIONS:
                 base = opp.symbol.split("-")[0]
@@ -460,7 +454,7 @@ class PipelineOrchestrator:
                     tid = self._record_trade(opp, "crypto_option", pos.entry_price, pos.size)
                     pos.trade_id = tid
                     pos.opened_at = datetime.now()
-                return pos is not None
+                paper_ok = pos is not None
 
             elif opp.asset_class in (
                 AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS,
@@ -472,7 +466,21 @@ class PipelineOrchestrator:
                 if signal:
                     await self.engine._execute_signal(opp.symbol, signal, iv_analysis)
                     self._record_trade(opp, "options")
-                    return True
+                    paper_ok = True
+
+            # Submit live broker order ONLY after paper trade succeeds
+            if paper_ok and self.live_trading_enabled and self.broker_manager is not None:
+                base_sym = opp.symbol.split("-")[0].split("/")[0]
+                side = "buy" if "Long" in opp.strategy or "Buy" in opp.strategy else "sell"
+                is_futures = opp.asset_class == AssetClass.CRYPTO_PERPETUAL
+                await self._submit_live_order(
+                    base_sym, side,
+                    self._vol_size(opp.symbol, 0.02, 2000),
+                    asset_type="crypto" if "CRYPTO" in opp.asset_class.value else "stock",
+                    is_futures=is_futures,
+                )
+
+            return paper_ok
 
         except Exception as e:
             logger.error(f"Execution failed {opp.symbol}: {e}")
@@ -863,7 +871,12 @@ class PipelineOrchestrator:
         if self.broker_manager is None:
             return False, "No broker manager — call initialize_broker() first"
         status = self.broker_manager.get_status()
-        if not any(v.get("connected") for v in status.get("brokers", {}).values()):
+        # get_status() returns flat dict: {"alpaca": {...}, "binance": {...}, "is_live_trading": bool}
+        broker_connected = any(
+            isinstance(v, dict) and v.get("connected")
+            for v in status.values()
+        )
+        if not broker_connected:
             return False, "No brokers connected"
 
         meets, reason = self.model_pretrainer.meets_training_requirements()

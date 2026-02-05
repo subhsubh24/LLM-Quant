@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -55,10 +56,22 @@ class TradePersistence:
             return []
 
     def save_trades(self, trades: List[Dict]):
-        """Persist trade history to disk."""
+        """Persist trade history to disk (atomic write via temp + rename)."""
         try:
-            with open(self._trades_path, "w") as f:
-                json.dump(trades, f, indent=2, default=str)
+            fd, tmp = tempfile.mkstemp(
+                dir=self.data_dir, suffix=".tmp", prefix="trades_",
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(trades, f, indent=2, default=str)
+                os.replace(tmp, self._trades_path)
+            except BaseException:
+                # Clean up temp file on any failure
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.error(f"Failed to save trades: {e}")
 
@@ -80,11 +93,22 @@ class TradePersistence:
     # ── Portfolio state ───────────────────────────────────────
 
     def save_portfolio_state(self, state: Dict):
-        """Snapshot portfolio state for crash recovery."""
+        """Snapshot portfolio state for crash recovery (atomic write)."""
         state["_saved_at"] = datetime.now().isoformat()
         try:
-            with open(self._portfolio_path, "w") as f:
-                json.dump(state, f, indent=2, default=str)
+            fd, tmp = tempfile.mkstemp(
+                dir=self.data_dir, suffix=".tmp", prefix="portfolio_",
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(state, f, indent=2, default=str)
+                os.replace(tmp, self._portfolio_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.error(f"Failed to save portfolio state: {e}")
 
