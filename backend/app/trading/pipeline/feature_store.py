@@ -312,7 +312,7 @@ class FeatureStore:
 
         if returns is not None and len(returns) >= 60:
             state[10] = np.std(returns[-5:]) * np.sqrt(252)
-            state[11] = np.std(returns[-20:]) * np.sqrt(252)
+            state[11] = np.std(returns[-10:]) * np.sqrt(252)  # 10-day vol (distinct from state[3] = 20-day)
             state[12] = np.std(returns[-60:]) * np.sqrt(252)
             state[13] = state[10] / (state[12] + 1e-8)
             if self.garch_fitted:
@@ -450,16 +450,13 @@ class FeatureStore:
             except Exception:
                 pass
 
-        # ── [63] Data quality indicator ─────────────────────────
-        state[63] = float(np.count_nonzero(state[:63])) / 63.0
-
         if returns is not None and len(returns) >= 30:
-            r30 = returns[-30:]
+            r_slice = returns[-32:] if len(returns) >= 32 else returns[-30:]
             try:
                 r_input = (
-                    r30.reshape(1, -1)[:, :32]
-                    if len(r30) >= 32
-                    else np.pad(r30, (0, 32 - len(r30))).reshape(1, -1)
+                    r_slice.reshape(1, -1)[:, :32]
+                    if len(r_slice) >= 32
+                    else np.pad(r_slice, (0, 32 - len(r_slice))).reshape(1, -1)
                 )
                 _, mu, _, regime_probs_full = self.regime_vae.forward(r_input)
                 regime_probs = regime_probs_full[0]
@@ -468,6 +465,9 @@ class FeatureStore:
                 state[59:63] = latent[:4] if len(latent) >= 4 else latent
             except Exception:
                 pass
+
+        # ── [63] Data quality indicator (AFTER all slots filled) ──
+        state[63] = float(np.count_nonzero(state[:63])) / 63.0
 
         # Final sanitisation
         state = np.nan_to_num(state, nan=0.0, posinf=0.0, neginf=0.0)
@@ -540,7 +540,7 @@ class FeatureStore:
                     len(sym_rets), market_returns=mkt_rets,
                 )
                 fe = self.factor_model.fit(sym_rets, factor_returns=factor_rets)
-                factors = fe.betas
+                factors = dict(fe.betas)  # Copy to avoid mutating FactorModel internal state
                 factors["alpha"] = fe.alpha
             except Exception:
                 pass
@@ -742,29 +742,33 @@ class FeatureStore:
         class 1 = positive return.
         """
         # ── Collect training sequences ──────────────────────
-        X_seqs, y_labels = [], []
+        X_seqs, y_labels, y_raw_returns = [], [], []
         for sym, rets in self.return_history.items():
             if len(rets) < 80:
                 continue
             # Sliding windows: 60 timesteps → predict sign of next return
             for start in range(0, len(rets) - 61, 5):  # stride 5
                 window = rets[start:start + 60]
-                target = 1 if rets[start + 60] > 0 else 0
+                raw_ret = rets[start + 60]
+                target = 1 if raw_ret > 0 else 0
                 seq = _build_seq_features(window)  # (60, 16) rich features
                 X_seqs.append(seq)
                 y_labels.append(target)
+                y_raw_returns.append(raw_ret)
 
         if len(X_seqs) < 64:
             logger.info("Not enough data for supervised training")
             return
 
         X_all = np.array(X_seqs)       # (N, 60, 16)
-        y_all = np.array(y_labels)     # (N,) ints
+        y_all = np.array(y_labels)     # (N,) ints — binary {0, 1}
+        y_raw = np.array(y_raw_returns)  # (N,) floats — raw returns
 
         # Walk-forward split: 80% train, 20% validation
         split = int(len(X_all) * 0.8)
         X_train, y_train = X_all[:split], y_all[:split]
         X_val, y_val = X_all[split:], y_all[split:]
+        y_raw_train, y_raw_val = y_raw[:split], y_raw[split:]
 
         # ── Train LSTMClassifier (BPTT + Adam) ──────────────
         lstm_train_losses, lstm_val_losses = [], []
@@ -803,10 +807,17 @@ class FeatureStore:
             )
 
         # ── Train Transformer (full backprop through attention + FFN) ──
-        # TrainableTransformer uses output_dim=3 → remap binary labels:
-        #   label 0 (down) → class 0,  label 1 (up) → class 2
-        y_train_3 = np.where(y_train == 1, 2, 0).astype(int)
-        y_val_3 = np.where(y_val == 1, 2, 0).astype(int)
+        # TrainableTransformer uses output_dim=3: 0=sell, 1=hold, 2=buy
+        # Use raw return magnitude with threshold to create proper 3-class labels
+        hold_threshold = 0.002  # returns within ±0.2% → hold
+        y_train_3 = np.where(
+            y_raw_train > hold_threshold, 2,
+            np.where(y_raw_train < -hold_threshold, 0, 1),
+        ).astype(int)
+        y_val_3 = np.where(
+            y_raw_val > hold_threshold, 2,
+            np.where(y_raw_val < -hold_threshold, 0, 1),
+        ).astype(int)
 
         trans_train_losses = []
         for epoch in range(n_epochs):
@@ -824,13 +835,12 @@ class FeatureStore:
             if n > 0:
                 trans_train_losses.append(epoch_loss / n)
 
-        # Transformer validation
+        # Transformer validation (3-class accuracy)
         t_correct = 0
         for idx in range(len(X_val)):
             try:
                 tp = self.transformer.predict(X_val[idx])
-                # Map back: class 0 = down → 0, class 2 = up → 1
-                if (tp == 2 and y_val[idx] == 1) or (tp == 0 and y_val[idx] == 0):
+                if tp == y_val_3[idx]:
                     t_correct += 1
             except Exception:
                 continue
@@ -1017,14 +1027,14 @@ class FeatureStore:
 
         zscore = float((spread[-1] - mu) / sigma)
 
-        if zscore < -1.0:
+        if abs(zscore) > 4.0:
+            signal = "stop"
+        elif zscore < -1.0:
             signal = "buy_spread"
         elif zscore > 1.0:
             signal = "sell_spread"
         elif abs(zscore) < 0.5:
             signal = "exit"
-        elif abs(zscore) > 4.0:
-            signal = "stop"
         else:
             signal = "hold"
 

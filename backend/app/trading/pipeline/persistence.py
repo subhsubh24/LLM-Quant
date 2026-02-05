@@ -94,7 +94,7 @@ class TradePersistence:
 
     def save_portfolio_state(self, state: Dict):
         """Snapshot portfolio state for crash recovery (atomic write)."""
-        state["_saved_at"] = datetime.now().isoformat()
+        state = {**state, "_saved_at": datetime.now().isoformat()}
         try:
             fd, tmp = tempfile.mkstemp(
                 dir=self.data_dir, suffix=".tmp", prefix="portfolio_",
@@ -199,6 +199,7 @@ class ModelCheckpointer:
         if os.path.exists(path):
             try:
                 feature_store.dqn.load(path)
+                feature_store.dqn._hard_update()  # Sync target network with loaded weights
                 loaded += 1
             except Exception as e:
                 logger.warning(f"DQN load failed: {e}")

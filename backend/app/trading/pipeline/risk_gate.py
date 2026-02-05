@@ -181,6 +181,7 @@ class RiskGate:
         held_symbols: Set[str],
         existing_positions: Dict[str, str],
         max_new: int = 3,
+        peak_value: float = 0,
     ) -> List[Opportunity]:
         """
         Return the opportunities that pass all risk checks.
@@ -193,9 +194,14 @@ class RiskGate:
         held_symbols :         symbols we already hold
         existing_positions :   {symbol: side} for sector-concentration check
         max_new :              maximum new positions per cycle
+        peak_value :           peak portfolio value for drawdown calc
         """
-        # ── Drawdown circuit breaker ──────────────────────────
-        drawdown = -total_pnl / self.initial_capital if self.initial_capital > 0 else 0
+        # ── Drawdown circuit breaker (peak-to-trough) ─────────
+        current_value = self.initial_capital + total_pnl
+        if peak_value > 0 and peak_value > current_value:
+            drawdown = (peak_value - current_value) / peak_value
+        else:
+            drawdown = 0.0
 
         if drawdown >= self.drawdown_hard:
             logger.warning(

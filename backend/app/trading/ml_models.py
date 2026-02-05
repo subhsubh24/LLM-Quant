@@ -438,8 +438,11 @@ class LSTMClassifier:
         x = self.cache['x']
         batch_size, seq_len, _ = x.shape
 
-        # Forward to get predictions
-        probs, _ = self.forward(x)
+        # Compute probs from cached final hidden state (don't re-run forward
+        # which would overwrite the gate caches needed for BPTT)
+        h_last = self.cache['h'][-1]
+        logits = h_last @ self.Wy + self.by
+        probs = self._softmax(logits)
 
         # Cross-entropy loss
         y_onehot = np.zeros_like(probs)
@@ -881,6 +884,11 @@ class DQN:
         # Create gradient for full Q-values tensor
         full_grad = np.zeros_like(current_q)
         full_grad[np.arange(batch_size), actions] = grad
+
+        # Re-forward with states to restore correct layer caches.
+        # The next_states forward (line above) overwrote each Dense
+        # layer's self.x/self.z, so backward() would use wrong activations.
+        self._forward(states, self._q_network)
 
         # Backward pass through layers
         for layer in reversed(self._q_network):
@@ -1626,8 +1634,8 @@ class TrainableTransformer:
         K = h @ self.W_k
         V = h @ self.W_v
 
-        # Scaled dot-product attention
-        scale = np.sqrt(self.hidden_dim)
+        # Scaled dot-product attention (scale by head_dim, not hidden_dim)
+        scale = np.sqrt(self.head_dim)
         attn_scores = Q @ K.transpose(0, 2, 1) / scale
         attn_weights = self._softmax(attn_scores, axis=-1)
         attn_values = attn_weights @ V  # Before W_o projection
@@ -1773,7 +1781,7 @@ class TrainableTransformer:
         # Gradient for Q and K through: scores = Q @ K.T / scale
         Q = self.cache['Q']
         K = self.cache['K']
-        scale = np.sqrt(self.hidden_dim)
+        scale = np.sqrt(self.head_dim)
 
         # dQ = d_scores @ K / scale
         dQ = np.zeros_like(Q)
@@ -1821,8 +1829,6 @@ class TrainableTransformer:
         beta1, beta2, eps = 0.9, 0.999, 1e-8
 
         for name, grad in grads.items():
-            if np.sum(np.abs(grad)) == 0:
-                continue
             param = getattr(self, name)
             self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
             self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
@@ -2006,9 +2012,9 @@ class TrainableVAE:
             dW_cls = np.zeros_like(self.W_cls)
             db_cls = np.zeros_like(self.b_cls)
 
-        # KL gradient
+        # KL gradient (use logvar_clipped to match forward pass clamp)
         dmu = beta * mu / batch_size
-        dlogvar = beta * 0.5 * (np.exp(logvar) - 1) / batch_size
+        dlogvar = beta * 0.5 * (np.exp(logvar_clipped) - 1) / batch_size
 
         # Reparameterization backward
         dmu += dz

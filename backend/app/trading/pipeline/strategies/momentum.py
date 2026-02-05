@@ -84,7 +84,7 @@ class MomentumStrategy(BaseStrategy):
 
         max_profit = 100 * 0.10
         max_loss = 100 * 0.05
-        expected_return = ml_pred.lstm_pred * 100 if ml_pred.lstm_pred else 5
+        expected_return = ml_pred.lstm_pred * 100 if ml_pred.lstm_pred is not None else 5
 
         return Opportunity(
             symbol=symbol,

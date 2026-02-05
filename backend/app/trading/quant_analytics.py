@@ -91,7 +91,7 @@ class BayesianEstimator:
 
         # Posterior for mean (conditional on variance)
         precision_prior = 1 / prior_sigma_mu ** 2
-        precision_data = n / sample_var
+        precision_data = n / max(sample_var, 1e-10)
         precision_post = precision_prior + precision_data
         mu_post = (precision_prior * prior_mu + precision_data * sample_mean) / precision_post
 
@@ -249,14 +249,14 @@ class GaussianHMM:
         # Initialize
         for j in range(self.n_states):
             alpha[0, j] = self.start_probs[j] * self._emission_prob(observations[0], j)
-        scaling[0] = np.sum(alpha[0])
+        scaling[0] = max(np.sum(alpha[0]), 1e-300)
         alpha[0] /= scaling[0]
 
         # Recursion
         for t in range(1, n):
             for j in range(self.n_states):
                 alpha[t, j] = np.sum(alpha[t - 1] * self.transition_matrix[:, j]) * self._emission_prob(observations[t], j)
-            scaling[t] = np.sum(alpha[t])
+            scaling[t] = max(np.sum(alpha[t]), 1e-300)
             alpha[t] /= scaling[t]
 
         return alpha, scaling
@@ -312,14 +312,23 @@ class GaussianHMM:
 
         # Update transition matrix
         for i in range(self.n_states):
+            denom = np.sum(gamma[:-1, i])
+            if denom < 1e-300:
+                continue  # Skip update for states with zero posterior mass
             for j in range(self.n_states):
-                self.transition_matrix[i, j] = np.sum(xi[:, i, j]) / np.sum(gamma[:-1, i])
+                self.transition_matrix[i, j] = np.sum(xi[:, i, j]) / denom
 
         # Update emission parameters
         for j in range(self.n_states):
             weight = gamma[:, j]
-            self.means[j] = np.sum(weight * observations) / np.sum(weight)
-            self.variances[j] = np.sum(weight * (observations - self.means[j]) ** 2) / np.sum(weight)
+            weight_sum = np.sum(weight)
+            if weight_sum < 1e-300:
+                continue  # Skip update for states with zero posterior mass
+            self.means[j] = np.sum(weight * observations) / weight_sum
+            self.variances[j] = max(
+                np.sum(weight * (observations - self.means[j]) ** 2) / weight_sum,
+                1e-10,  # Floor to prevent zero-variance state collapse
+            )
 
     def predict(self, observations: np.ndarray) -> np.ndarray:
         """Predict most likely state sequence using Viterbi algorithm."""
@@ -522,12 +531,15 @@ class GARCH:
                                   self.alpha[0] * returns[t - 1] ** 2 +
                                   self.beta[0] * var_history[t - 1])
             else:
-                std_resid = returns[t - 1] / np.sqrt(var_history[t - 1])
+                prev_var = max(var_history[t - 1], 1e-10)
+                std_resid = returns[t - 1] / np.sqrt(prev_var)
                 log_var = (self.omega +
                            self.alpha[0] * (np.abs(std_resid) - np.sqrt(2 / np.pi)) +
                            self.gamma[0] * std_resid +
-                           self.beta[0] * np.log(var_history[t - 1]))
+                           self.beta[0] * np.log(prev_var))
+                log_var = np.clip(log_var, -20, 20)  # Prevent exp overflow
                 var_history[t] = np.exp(log_var)
+            var_history[t] = max(var_history[t], 1e-10)
 
         # Forecast
         forecast_var = np.zeros(horizon)
@@ -1006,8 +1018,12 @@ class FactorModel:
         r_squared = 1 - ss_res / ss_tot
 
         # Standard errors and t-stats
-        sigma_sq = ss_res / (n - len(beta_hat))
-        var_beta = sigma_sq * np.linalg.inv(X.T @ X).diagonal()
+        sigma_sq = ss_res / max(n - len(beta_hat), 1)
+        try:
+            var_beta = sigma_sq * np.linalg.inv(X.T @ X).diagonal()
+        except np.linalg.LinAlgError:
+            var_beta = sigma_sq * np.linalg.pinv(X.T @ X).diagonal()
+        var_beta = np.maximum(var_beta, 1e-10)  # Floor for numerical stability
         se = np.sqrt(var_beta)
         t_stats = beta_hat / se
 

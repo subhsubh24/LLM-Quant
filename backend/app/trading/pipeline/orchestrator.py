@@ -126,6 +126,9 @@ class PipelineOrchestrator:
         self.last_action: Optional[int] = None
         self.episode_reward: float = 0.0
 
+        # ── Peak tracking for drawdown ─────────────────────
+        self.peak_value: float = initial_capital
+
         # ── Live trading ──────────────────────────────────────
         self.live_trading_enabled = False
         self.broker_manager = None
@@ -204,19 +207,19 @@ class PipelineOrchestrator:
             try:
                 now = datetime.now()
 
-                if (now - last_scan).seconds >= scan_interval:
+                if (now - last_scan).total_seconds() >= scan_interval:
                     await self._cycle()
                     last_scan = now
 
-                if (now - last_pos_check).seconds >= position_check_interval:
+                if (now - last_pos_check).total_seconds() >= position_check_interval:
                     await self._manage_positions()
                     last_pos_check = now
 
-                if (now - last_rl).seconds >= rl_train_interval:
+                if (now - last_rl).total_seconds() >= rl_train_interval:
                     self._train_rl()
                     last_rl = now
 
-                if (now - last_price).seconds >= price_update_interval:
+                if (now - last_price).total_seconds() >= price_update_interval:
                     await self._update_live_prices()
                     last_price = now
 
@@ -267,6 +270,11 @@ class PipelineOrchestrator:
         held = self._held_symbols()
         existing_pos = self._existing_positions_map()
 
+        # Update peak portfolio value for drawdown calculation
+        current_value = self.initial_capital + self.engine.total_pnl
+        if current_value > self.peak_value:
+            self.peak_value = current_value
+
         passed = self.risk_gate.filter(
             all_opps,
             total_pnl=self.engine.total_pnl,
@@ -274,6 +282,7 @@ class PipelineOrchestrator:
             current_allocations=self.current_allocations,
             held_symbols=held,
             existing_positions=existing_pos,
+            peak_value=self.peak_value,
         )
 
         self.opportunities = all_opps  # keep full list for UI
@@ -365,7 +374,19 @@ class PipelineOrchestrator:
             action = ml_pred["action"]
             confidence = ml_pred["confidence"]
 
-            ml_agrees = action != 1
+            # Directional agreement: ML must confirm opportunity direction
+            is_long = "Long" in opp.strategy or "Buy" in opp.strategy
+            is_short = "Short" in opp.strategy or "Sell" in opp.strategy
+            # Pairs/arb strategies are market-neutral — any non-hold signal suffices
+            is_neutral = is_long and is_short
+            if is_neutral:
+                ml_agrees = action != 1
+            elif is_long:
+                ml_agrees = action == 2  # buy signal for long
+            elif is_short:
+                ml_agrees = action == 0  # sell signal for short
+            else:
+                ml_agrees = action != 1
             conf_ok = confidence >= self.risk_gate.confidence_threshold(self.market_regime)
 
             if not (ml_agrees and conf_ok):
@@ -413,7 +434,55 @@ class PipelineOrchestrator:
 
             paper_ok = False
 
-            if opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
+            # ── Multi-leg: Funding Rate Arb (symbol = "BTC-FUNDING") ──
+            if opp.asset_class == AssetClass.CRYPTO_PERPETUAL and opp.symbol.endswith("-FUNDING"):
+                base = opp.symbol.replace("-FUNDING", "")
+                perp_sym = f"{base}-PERP"
+                half_size = self._vol_size(base, 0.03, 3000)
+                if "Short" in opp.strategy and "Long" in opp.strategy:
+                    # Short perp + Long spot  (or vice versa based on strategy)
+                    perp_side = "short" if opp.strategy.startswith("Funding Arb: Short") else "long"
+                    spot_side = "buy" if perp_side == "short" else "sell"
+                    pos_perp = await self.engine.open_crypto_perpetual(
+                        symbol=perp_sym, side=perp_side,
+                        size_usd=half_size, leverage=1.0,
+                    )
+                    pos_spot = await self.engine.open_crypto_spot(
+                        symbol=base, side=spot_side, size_usd=half_size,
+                    )
+                    if pos_perp and pos_spot:
+                        tid = self._record_trade(opp, "funding_arb", pos_perp.entry_price, half_size * 2)
+                        pos_perp.trade_id = tid
+                        pos_perp.opened_at = datetime.now()
+                        pos_spot.trade_id = tid
+                        pos_spot.opened_at = datetime.now()
+                        paper_ok = True
+
+            # ── Multi-leg: Pairs Trading (symbol = "SOL/BTC") ──
+            elif opp.asset_class == AssetClass.CRYPTO_SPOT and "/" in opp.symbol:
+                sym_a, sym_b = opp.symbol.split("/")
+                half_size = self._vol_size(sym_a, 0.02, 2000)
+                if "Long" in opp.strategy and "Short" in opp.strategy:
+                    # Determine which leg is long and which is short
+                    a_is_long = f"Long {sym_a}" in opp.strategy
+                    side_a = "buy" if a_is_long else "sell"
+                    side_b = "sell" if a_is_long else "buy"
+                    pos_a = await self.engine.open_crypto_spot(
+                        symbol=sym_a, side=side_a, size_usd=half_size,
+                    )
+                    pos_b = await self.engine.open_crypto_spot(
+                        symbol=sym_b, side=side_b, size_usd=half_size,
+                    )
+                    if pos_a and pos_b:
+                        tid = self._record_trade(opp, "pairs_trade", pos_a.entry_price, half_size * 2)
+                        pos_a.trade_id = tid
+                        pos_a.opened_at = datetime.now()
+                        pos_b.trade_id = tid
+                        pos_b.opened_at = datetime.now()
+                        paper_ok = True
+
+            # ── Single-leg: Crypto Perpetual ──
+            elif opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
                 side = "long" if "Long" in opp.strategy else "short"
                 pos = await self.engine.open_crypto_perpetual(
                     symbol=opp.symbol, side=side,
@@ -426,6 +495,7 @@ class PipelineOrchestrator:
                     pos.opened_at = datetime.now()
                 paper_ok = pos is not None
 
+            # ── Single-leg: Crypto Spot ──
             elif opp.asset_class == AssetClass.CRYPTO_SPOT:
                 side = "buy" if "Long" in opp.strategy else "sell"
                 pos = await self.engine.open_crypto_spot(
@@ -537,11 +607,12 @@ class PipelineOrchestrator:
 
         # Small Sharpe-ratio bonus for consistent recent returns
         sharpe_bonus = 0.0
-        if len(self.daily_pnl) >= 20:
-            recent = [p[1] for p in self.daily_pnl[-20:]]
-            std = np.std(recent)
+        if len(self.daily_pnl) >= 21:
+            recent_levels = [p[1] for p in self.daily_pnl[-21:]]
+            recent_returns = np.diff(recent_levels)  # 20 returns from 21 levels
+            std = np.std(recent_returns)
             if std > 0:
-                sharpe_bonus = np.clip(np.mean(recent) / std * 0.01, -0.1, 0.1)
+                sharpe_bonus = np.clip(np.mean(recent_returns) / std * 0.01, -0.1, 0.1)
 
         reward = np.clip(raw_reward + sharpe_bonus, -1.0, 1.0)
 
@@ -551,6 +622,8 @@ class PipelineOrchestrator:
             self.episode_reward += reward
 
         self.daily_pnl.append((datetime.now(), pnl))
+        if len(self.daily_pnl) > 500:
+            self.daily_pnl = self.daily_pnl[-300:]
 
     # ──────────────────────────────────────────────────────────
     # Data loading
@@ -729,10 +802,10 @@ class PipelineOrchestrator:
                 t["exit_timestamp"] = datetime.now().isoformat()
                 t["close_reason"] = close_reason
                 t["realized_pnl"] = round(realized_pnl, 2)
-                entry = t.get("entry_price", 0)
+                position_size = t.get("size", 0)
                 t["realized_pnl_pct"] = (
-                    round(realized_pnl / entry * 100, 2)
-                    if entry and entry > 0 else 0
+                    round(realized_pnl / position_size * 100, 2)
+                    if position_size and position_size > 0 else 0
                 )
                 entry_ts = t.get("timestamp")
                 if entry_ts:
@@ -883,7 +956,8 @@ class PipelineOrchestrator:
         if not meets:
             return False, f"Models not ready: {reason}"
 
-        drawdown = -self.engine.total_pnl / self.initial_capital
+        current_value = self.initial_capital + self.engine.total_pnl
+        drawdown = (self.peak_value - current_value) / self.peak_value if self.peak_value > 0 else 0
         if drawdown >= self.risk_gate.drawdown_hard:
             return False, f"Circuit breaker active: drawdown {drawdown:.1%}"
 
