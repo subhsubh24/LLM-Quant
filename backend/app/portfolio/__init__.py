@@ -37,7 +37,7 @@ from .predictive_risk import (
     WarningSignal,
     RiskAdjustments,
     PredictiveCircuitBreaker,
-    KellyCriterion,
+    KellyCriterionSizing,
     SmoothModeTransitions,
 )
 
@@ -76,6 +76,6 @@ __all__ = [
     "WarningSignal",
     "RiskAdjustments",
     "PredictiveCircuitBreaker",
-    "KellyCriterion",
+    "KellyCriterionSizing",
     "SmoothModeTransitions",
 ]
