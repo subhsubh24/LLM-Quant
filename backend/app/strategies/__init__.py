@@ -32,6 +32,11 @@ from .sentiment_strategy import (
     SentimentAnalysisStrategy as SentimentTradingStrategy,
     MultiSourceSentimentStrategy,
 )
+from .advanced_strategies import (
+    RegimeAwareStrategy,
+    SkewStrategy,
+    EarningsEventStrategy,
+)
 
 __all__ = [
     # Framework
@@ -61,4 +66,8 @@ __all__ = [
     # Sentiment Trading (2)
     "SentimentTradingStrategy",
     "MultiSourceSentimentStrategy",
+    # Advanced Strategies (3) - Phase 11
+    "RegimeAwareStrategy",
+    "SkewStrategy",
+    "EarningsEventStrategy",
 ]
