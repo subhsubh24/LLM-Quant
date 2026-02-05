@@ -18,6 +18,8 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import json
 
+from .activity_logger import get_activity_logger, EventSubtype
+
 logger = logging.getLogger(__name__)
 
 
@@ -296,38 +298,53 @@ class BinanceBroker:
 
     Supports:
     - Spot trading (BTC, ETH, etc.)
-    - USDT-M Perpetual Futures
+    - USDT-M Perpetual Futures (Binance Global only, limited on Binance.US)
     - Real-time WebSocket data
 
-    Documentation: https://binance-docs.github.io/apidocs/
+    Documentation:
+    - Binance Global: https://binance-docs.github.io/apidocs/
+    - Binance.US: https://docs.binance.us/
     """
 
+    # Binance Global URLs
     SPOT_BASE_URL = "https://api.binance.com"
     FUTURES_BASE_URL = "https://fapi.binance.com"
     TESTNET_SPOT_URL = "https://testnet.binance.vision"
     TESTNET_FUTURES_URL = "https://testnet.binancefuture.com"
+
+    # Binance.US URLs (no futures, spot only)
+    US_SPOT_URL = "https://api.binance.us"
 
     def __init__(
         self,
         api_key: str,
         api_secret: str,
         testnet: bool = True,
+        us_mode: bool = False,
     ):
         self.api_key = api_key
         self.api_secret = api_secret
         self.testnet = testnet
+        self.us_mode = us_mode
 
-        if testnet:
+        if us_mode:
+            # Binance.US - spot only, no futures
+            self.spot_url = self.US_SPOT_URL
+            self.futures_url = None  # Binance.US doesn't have futures
+            mode_str = "US"
+        elif testnet:
             self.spot_url = self.TESTNET_SPOT_URL
             self.futures_url = self.TESTNET_FUTURES_URL
+            mode_str = "TESTNET"
         else:
             self.spot_url = self.SPOT_BASE_URL
             self.futures_url = self.FUTURES_BASE_URL
+            mode_str = "LIVE"
 
         self._session = None
         self._connected = False
 
-        logger.info(f"BinanceBroker initialized: {'TESTNET' if testnet else 'LIVE'} mode")
+        logger.info(f"BinanceBroker initialized: {mode_str} mode")
 
     def _sign(self, params: Dict) -> str:
         """Sign request parameters."""
@@ -662,6 +679,7 @@ class BrokerManager:
         api_key: str,
         api_secret: str,
         is_paper: bool = True,
+        additional_config: Optional[Dict[str, Any]] = None,
     ):
         """Set credentials for a broker."""
         self.credentials[broker] = BrokerCredentials(
@@ -669,6 +687,7 @@ class BrokerManager:
             api_key=api_key,
             api_secret=api_secret,
             is_paper=is_paper,
+            additional_config=additional_config or {},
         )
         logger.info(f"Credentials set for {broker.value}: {'PAPER' if is_paper else 'LIVE'}")
 
@@ -687,10 +706,12 @@ class BrokerManager:
 
         if BrokerType.BINANCE in self.credentials:
             creds = self.credentials[BrokerType.BINANCE]
+            us_mode = creds.additional_config.get("us_mode", False)
             self.binance = BinanceBroker(
                 api_key=creds.api_key,
                 api_secret=creds.api_secret,
                 testnet=creds.is_paper,
+                us_mode=us_mode,
             )
             results["binance"] = await self.binance.connect()
 
@@ -729,8 +750,9 @@ class BrokerManager:
             binance_symbol = f"{symbol}USDT" if not symbol.endswith("USDT") else symbol
             return await self.binance.get_price(binance_symbol)
         elif asset_type == "crypto_futures" and self.binance and self.binance._connected:
+            # Binance.US doesn't have futures - use spot price as proxy for perpetuals
             binance_symbol = f"{symbol.replace('-PERP', '')}USDT"
-            return await self.binance.get_futures_price(binance_symbol)
+            return await self.binance.get_price(binance_symbol)  # Use spot price
         return 0
 
     async def submit_stock_order(
@@ -820,6 +842,7 @@ async def auto_initialize_brokers() -> Dict[str, Any]:
 
     settings = get_settings()
     manager = get_broker_manager()
+    activity_logger = get_activity_logger()
     results = {"alpaca": None, "binance": None, "errors": []}
 
     # Setup Alpaca if keys are configured
@@ -840,13 +863,16 @@ async def auto_initialize_brokers() -> Dict[str, Any]:
     # Setup Binance if keys are configured
     if settings.has_binance_keys:
         try:
+            us_mode = getattr(settings, 'binance_us_mode', True)  # Default to US mode
             manager.set_credentials(
                 broker=BrokerType.BINANCE,
                 api_key=settings.binance_api_key,
                 api_secret=settings.binance_api_secret,
                 is_paper=settings.binance_testnet_mode,
+                additional_config={"us_mode": us_mode},
             )
-            logger.info(f"Binance credentials configured (testnet={settings.binance_testnet_mode})")
+            mode_str = "US" if us_mode else ("testnet" if settings.binance_testnet_mode else "global")
+            logger.info(f"Binance credentials configured ({mode_str})")
             results["binance"] = "configured"
         except Exception as e:
             logger.error(f"Failed to configure Binance: {e}")
@@ -858,8 +884,30 @@ async def auto_initialize_brokers() -> Dict[str, Any]:
             connect_results = await manager.connect_all()
             results["connection"] = connect_results
             logger.info(f"Broker auto-connect results: {connect_results}")
+
+            # Log broker connection results to activity logger
+            for broker_name, success in connect_results.items():
+                await activity_logger.log_broker(
+                    subtype=EventSubtype.CONNECT if success else EventSubtype.AUTH_FAILURE,
+                    broker=broker_name,
+                    message=f"{broker_name.capitalize()} connection {'successful' if success else 'failed'}",
+                    success=success,
+                    details={
+                        "mode": "paper" if broker_name == "alpaca" and settings.alpaca_paper_mode else
+                               "testnet" if broker_name == "binance" and settings.binance_testnet_mode else "live",
+                        "us_mode": True if broker_name == "binance" and getattr(settings, 'binance_us_mode', True) else None,
+                    }
+                )
+
         except Exception as e:
             logger.error(f"Broker auto-connect failed: {e}")
             results["errors"].append(f"Auto-connect error: {e}")
+
+            # Log connection error
+            await activity_logger.log_error(
+                subtype=EventSubtype.EXCEPTION,
+                message=f"Broker auto-connect failed: {str(e)[:200]}",
+                details={"error": str(e)}
+            )
 
     return results
