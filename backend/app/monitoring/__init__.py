@@ -1,21 +1,33 @@
-"""Monitoring and alerting subsystem."""
+"""Monitoring and health system subsystem."""
 
-from .monitoring import (
-    Alert,
+from .health_system import (
+    HealthStatus,
     AlertLevel,
-    AlertType,
-    DailyMetrics,
-    AlertManager,
-    PerformanceTracker,
-    DashboardData,
+    HealthAlert,
+    ComponentHealth,
+    StrategyHealthMonitor,
+    ModelDegradationMonitor,
+    CorrelationMonitor,
+    ExecutionQualityMonitor,
+    LatencyMonitor,
+    DataFeedHealthMonitor,
+    SystemHealthDashboard,
 )
 
 __all__ = [
-    "Alert",
+    # Enums
+    "HealthStatus",
     "AlertLevel",
-    "AlertType",
-    "DailyMetrics",
-    "AlertManager",
-    "PerformanceTracker",
-    "DashboardData",
+    # Data structures
+    "HealthAlert",
+    "ComponentHealth",
+    # Monitors
+    "StrategyHealthMonitor",
+    "ModelDegradationMonitor",
+    "CorrelationMonitor",
+    "ExecutionQualityMonitor",
+    "LatencyMonitor",
+    "DataFeedHealthMonitor",
+    # Master dashboard
+    "SystemHealthDashboard",
 ]
