@@ -501,14 +501,20 @@ class PipelineOrchestrator:
 
     def _train_rl(self):
         pnl = self.engine.total_pnl
-        reward = (pnl - getattr(self, "_last_pnl", 0)) / self.initial_capital * 100
+        # Reward as fraction of capital (not * 100) so it stays in [-1, 1]
+        # range that DQN's reward clipping expects.
+        raw_reward = (pnl - getattr(self, "_last_pnl", 0)) / self.initial_capital
         self._last_pnl = pnl
 
+        # Small Sharpe-ratio bonus for consistent recent returns
+        sharpe_bonus = 0.0
         if len(self.daily_pnl) >= 20:
             recent = [p[1] for p in self.daily_pnl[-20:]]
             std = np.std(recent)
             if std > 0:
-                reward += np.mean(recent) / std * 0.1
+                sharpe_bonus = np.clip(np.mean(recent) / std * 0.01, -0.1, 0.1)
+
+        reward = np.clip(raw_reward + sharpe_bonus, -1.0, 1.0)
 
         if self.last_state is not None and self.last_action is not None:
             cur = self.store.get_state_vector("SPY", {"vix": self.vix_level})

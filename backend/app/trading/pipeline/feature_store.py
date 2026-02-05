@@ -29,10 +29,12 @@ from ..ml_models import (
     DQN,
     PPOAgent,
     LSTM,
+    LSTMClassifier,
     TransformerPredictor,
     MarketRegimeVAE,
     EnsemblePredictor,
     Experience,
+    Adam,
     create_dqn_agent,
     create_ppo_agent,
 )
@@ -75,6 +77,71 @@ def _momentum(prices: np.ndarray, lookback: int = 20) -> float:
     return float(prices[-1] / ref - 1)
 
 
+def _build_seq_features(returns: np.ndarray, n_features: int = 16) -> np.ndarray:
+    """Build a rich (seq_len, n_features) matrix from a 1-D return series.
+
+    Instead of zero-padding a single column, compute 16 meaningful per-
+    timestep features so the LSTM / Transformer can learn from rich input.
+
+    Features per timestep t:
+      0  raw return
+      1  |return|  (realised vol proxy)
+      2  return²   (quadratic variation)
+      3  sign(r) * log(1+|r|)  (log-scaled signed return)
+      4  rolling mean  (past 5)
+      5  rolling std   (past 5, annualised)
+      6  z-score relative to rolling 20
+      7  cumulative return from window start
+      8  rolling min   (past 5)
+      9  rolling max   (past 5)
+     10  return acceleration  (Δreturn)
+     11  sign of return  (+1 / -1)
+     12  rolling positive-return ratio (past 14)
+     13  time fraction  (t / seq_len)
+     14  distance from running mean
+     15  percentile rank within past 20
+    """
+    T = len(returns)
+    out = np.zeros((T, n_features), dtype=np.float64)
+
+    cum = np.cumsum(returns)
+
+    for t in range(T):
+        r = returns[t]
+        out[t, 0] = r
+        out[t, 1] = abs(r)
+        out[t, 2] = r * r
+        out[t, 3] = np.sign(r) * np.log1p(abs(r))
+
+        # Rolling windows (handle early timesteps gracefully)
+        s5 = max(t - 4, 0)
+        s14 = max(t - 13, 0)
+        s20 = max(t - 19, 0)
+        win5 = returns[s5:t + 1]
+        win20 = returns[s20:t + 1]
+        win14 = returns[s14:t + 1]
+
+        out[t, 4] = np.mean(win5)
+        out[t, 5] = np.std(win5) * np.sqrt(252) if len(win5) > 1 else 0.0
+        mu20 = np.mean(win20)
+        std20 = np.std(win20) + 1e-8
+        out[t, 6] = (r - mu20) / std20
+        out[t, 7] = cum[t]
+        out[t, 8] = np.min(win5)
+        out[t, 9] = np.max(win5)
+        out[t, 10] = r - returns[t - 1] if t > 0 else 0.0
+        out[t, 11] = 1.0 if r >= 0 else -1.0
+        out[t, 12] = float(np.mean(win14 > 0))
+        out[t, 13] = t / max(T - 1, 1)
+        out[t, 14] = r - mu20
+        # Percentile rank within past 20
+        out[t, 15] = float(np.mean(win20 <= r))
+
+    # Clip extreme values for numerical stability
+    np.clip(out, -10, 10, out=out)
+    return out
+
+
 # ────────────────────────────────────────────────────────────────
 # FeatureStore
 # ────────────────────────────────────────────────────────────────
@@ -115,8 +182,16 @@ class FeatureStore:
             hidden_dims=[256, 256],
         )
         self.lstm = LSTM(input_dim=16, hidden_dim=128)
+        # LSTMClassifier has BPTT + Adam — used for supervised training
+        self.lstm_classifier = LSTMClassifier(
+            input_dim=16, hidden_dim=128, output_dim=2, lr=0.001,
+        )
         self.transformer = TransformerPredictor(
             input_dim=16, d_model=64, n_heads=4, n_layers=3,
+        )
+        # Transformer output projection optimizer (for supervised gradient descent)
+        self._transformer_opt = Adam(
+            self.transformer.output_projection.parameters(), lr=0.001,
         )
         self.regime_vae = MarketRegimeVAE(input_dim=32, latent_dim=8)
         self.ensemble = EnsemblePredictor(
@@ -240,6 +315,34 @@ class FeatureStore:
                 except Exception:
                     pass
 
+        # ── [16-19] Higher-order return statistics ──────────────
+        if returns is not None and len(returns) >= 20:
+            r20 = returns[-20:]
+            mu, sigma = np.mean(r20), np.std(r20) + 1e-8
+            # Skewness
+            state[16] = float(np.mean(((r20 - mu) / sigma) ** 3))
+            # Excess kurtosis
+            state[17] = float(np.mean(((r20 - mu) / sigma) ** 4) - 3)
+            # Lag-1 autocorrelation (mean-reversion indicator)
+            if len(r20) > 1:
+                r_lag = r20[:-1] - np.mean(r20[:-1])
+                r_cur = r20[1:] - np.mean(r20[1:])
+                denom = np.sqrt(np.sum(r_lag ** 2) * np.sum(r_cur ** 2) + 1e-16)
+                state[18] = float(np.sum(r_lag * r_cur) / denom)
+            # Hurst exponent estimate (R/S method, simplified)
+            if len(returns) >= 40:
+                hl = 20
+                rs_vals = []
+                for start_rs in range(0, len(returns) - hl, hl):
+                    blk = returns[start_rs:start_rs + hl]
+                    bmu = np.mean(blk)
+                    cum_dev = np.cumsum(blk - bmu)
+                    R = np.max(cum_dev) - np.min(cum_dev)
+                    S = np.std(blk) + 1e-10
+                    rs_vals.append(R / S)
+                if rs_vals:
+                    state[19] = float(np.log(np.mean(rs_vals) + 1e-8) / np.log(hl))
+
         if prices is not None and len(prices) >= 20:
             state[20] = _rsi(self.return_history.get(symbol, np.zeros(14)))
             state[21] = _bollinger_position(prices)
@@ -247,6 +350,43 @@ class FeatureStore:
             state[23] = prices[-1] / max(prices[-20], 1e-8) - 1
             if len(prices) >= 60:
                 state[24] = prices[-1] / max(prices[-60], 1e-8) - 1
+
+        # ── [25-34] Extended technical features ─────────────────
+        if returns is not None and len(returns) >= 20:
+            r20 = returns[-20:]
+            r5 = returns[-5:]
+            # MACD-like: short momentum minus long
+            state[25] = float(np.mean(r5) - np.mean(r20))
+            # Rate of change of volatility
+            if len(returns) >= 40:
+                vol_recent = np.std(returns[-10:])
+                vol_prior = np.std(returns[-20:-10])
+                state[26] = float((vol_recent - vol_prior) / (vol_prior + 1e-8))
+            # Average absolute return (ATR proxy)
+            state[27] = float(np.mean(np.abs(r20)))
+            # SMA crossover: sign(mean_5 - mean_20)
+            state[28] = float(np.sign(np.mean(r5) - np.mean(r20)))
+            # Return dispersion (IQR of last 20)
+            state[29] = float(np.percentile(r20, 75) - np.percentile(r20, 25))
+            # Median return (robust location)
+            state[30] = float(np.median(r20))
+            # Win rate (fraction of positive returns)
+            state[31] = float(np.mean(r20 > 0))
+            # Max consecutive losses in last 20
+            neg = (r20 < 0).astype(int)
+            max_consec = 0
+            cur_consec = 0
+            for n_val in neg:
+                cur_consec = cur_consec + 1 if n_val else 0
+                max_consec = max(max_consec, cur_consec)
+            state[32] = float(max_consec / 20.0)
+
+        if prices is not None and len(prices) >= 20:
+            p20 = prices[-20:]
+            # Distance from 20d high (0 = at high)
+            state[33] = float((prices[-1] - np.max(p20)) / (np.max(p20) + 1e-8))
+            # Distance from 20d low (0 = at low)
+            state[34] = float((prices[-1] - np.min(p20)) / (np.min(p20) + 1e-8))
 
         if additional_features:
             state[35] = additional_features.get("position_size", 0)
@@ -258,6 +398,52 @@ class FeatureStore:
             state[45] = additional_features.get("vix", 18) / 100
             state[46] = additional_features.get("market_return", 0)
             state[47] = additional_features.get("sector_return", 0)
+
+        # ── [41-44] Time-of-day / day-of-week cyclical encoding ─
+        now = datetime.now()
+        hour_frac = (now.hour + now.minute / 60.0) / 24.0
+        dow_frac = now.weekday() / 7.0
+        state[41] = float(np.sin(2 * np.pi * hour_frac))
+        state[42] = float(np.cos(2 * np.pi * hour_frac))
+        state[43] = float(np.sin(2 * np.pi * dow_frac))
+        state[44] = float(np.cos(2 * np.pi * dow_frac))
+
+        # ── [48-54] Statistical model outputs ───────────────────
+        if returns is not None and len(returns) >= 60:
+            try:
+                bayes_mean, bayes_std, _ = self.bayesian.estimate_sharpe_ratio(returns[-60:])
+                state[48] = float(bayes_mean)
+                state[49] = float(bayes_std)
+            except Exception:
+                pass
+            if self.hmm_fitted:
+                try:
+                    hmm_state, hmm_probs = self.detect_regime_hmm(returns)
+                    state[50] = float(hmm_state / 2.0)  # normalise to [0, 1]
+                    state[51] = float(np.max(hmm_probs))
+                except Exception:
+                    pass
+            if self.garch_fitted:
+                try:
+                    gf = self.garch.forecast(returns[-60:], horizon=5)
+                    state[52] = float(gf.current_vol)
+                    # Vol term structure slope
+                    if len(gf.forecast_vol) >= 2:
+                        state[53] = float(gf.forecast_vol[-1] - gf.forecast_vol[0])
+                except Exception:
+                    pass
+            try:
+                losses = -returns
+                evt_a = self.evt.analyze(
+                    losses[losses > 0] if np.any(losses > 0) else np.abs(losses)
+                )
+                if hasattr(evt_a, "tail_index"):
+                    state[54] = float(evt_a.tail_index) / 10.0  # normalise
+            except Exception:
+                pass
+
+        # ── [63] Data quality indicator ─────────────────────────
+        state[63] = float(np.count_nonzero(state[:63])) / 63.0
 
         if returns is not None and len(returns) >= 30:
             r30 = returns[-30:]
@@ -299,15 +485,15 @@ class FeatureStore:
         ppo_action, ppo_log_prob, ppo_value = self.ppo.select_action(state)
         ppo_probs = self.ppo._forward_actor(state.reshape(1, -1)).flatten()
 
-        # LSTM
+        # LSTM (use trained LSTMClassifier — output is [P(down), P(up)])
         lstm_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
             try:
-                self.lstm.reset_state()
                 r60 = np.array(self.return_history[symbol][-60:]).flatten()
-                lstm_input = np.pad(r60.reshape(-1, 1), ((0, 0), (0, 15)), mode="constant")
-                lstm_out = self.lstm.forward(lstm_input)
-                lstm_pred = float(lstm_out[0, -1, 0])
+                lstm_input = _build_seq_features(r60)  # (60, 16) rich features
+                probs, _ = self.lstm_classifier.forward(lstm_input)
+                # Convert P(up) to a signed prediction: >0.5 = bullish, <0.5 = bearish
+                lstm_pred = float(probs[0, 1] - 0.5)
             except Exception:
                 pass
 
@@ -316,7 +502,7 @@ class FeatureStore:
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
             try:
                 r60 = np.array(self.return_history[symbol][-60:]).flatten()
-                t_input = np.pad(r60.reshape(-1, 1), ((0, 0), (0, 15)), mode="constant")
+                t_input = _build_seq_features(r60)  # (60, 16) rich features
                 transformer_pred = self.transformer.predict(t_input)
             except Exception:
                 pass
@@ -537,14 +723,13 @@ class FeatureStore:
         self.training_step += 1
 
     def train_supervised_models(self, n_epochs: int = 5):
-        """Train LSTM and Transformer on historical return prediction.
+        """Train LSTMClassifier and Transformer on return-direction prediction.
 
-        Uses all symbols with sufficient data.  Target: next-step return
-        direction (positive / negative).  This should be called during the
-        initial data-loading phase or periodically to keep supervised
-        models calibrated.
+        Uses walk-forward: last 20% of data held out for validation to
+        avoid in-sample overfit.  Target: class 0 = negative return,
+        class 1 = positive return.
         """
-        # Collect sequences from all symbols with >=80 observations
+        # ── Collect training sequences ──────────────────────
         X_seqs, y_labels = [], []
         for sym, rets in self.return_history.items():
             if len(rets) < 80:
@@ -552,75 +737,92 @@ class FeatureStore:
             # Sliding windows: 60 timesteps → predict sign of next return
             for start in range(0, len(rets) - 61, 5):  # stride 5
                 window = rets[start:start + 60]
-                target = 1.0 if rets[start + 60] > 0 else 0.0
-                # Pad to 16 features (first col = returns, rest zero)
-                seq = np.pad(window.reshape(-1, 1), ((0, 0), (0, 15)),
-                             mode="constant")
+                target = 1 if rets[start + 60] > 0 else 0
+                seq = _build_seq_features(window)  # (60, 16) rich features
                 X_seqs.append(seq)
                 y_labels.append(target)
 
-        if len(X_seqs) < 32:
+        if len(X_seqs) < 64:
             logger.info("Not enough data for supervised training")
             return
 
-        X_all = np.array(X_seqs)     # (N, 60, 16)
-        y_all = np.array(y_labels)   # (N,)
+        X_all = np.array(X_seqs)       # (N, 60, 16)
+        y_all = np.array(y_labels)     # (N,) ints
 
-        # Shuffle
-        indices = np.random.permutation(len(X_all))
-        X_all, y_all = X_all[indices], y_all[indices]
+        # Walk-forward split: 80% train, 20% validation
+        split = int(len(X_all) * 0.8)
+        X_train, y_train = X_all[:split], y_all[:split]
+        X_val, y_val = X_all[split:], y_all[split:]
 
-        # ── Train LSTM ──────────────────────────────────────
-        lstm_losses = []
+        # ── Train LSTMClassifier (BPTT + Adam) ──────────────
+        lstm_train_losses, lstm_val_losses = [], []
         for epoch in range(n_epochs):
-            epoch_loss = 0.0
-            n_batches = 0
-            for i in range(0, len(X_all), 32):
-                batch_x = X_all[i:i + 32]
-                batch_y = y_all[i:i + 32]
-                for x, y in zip(batch_x, batch_y):
-                    try:
-                        self.lstm.reset_state()
-                        out = self.lstm.forward(x)             # (1, 60, hidden)
-                        pred = float(out[0, -1, 0])
-                        # Simple MSE gradient push through last output
-                        error = pred - y
-                        epoch_loss += error ** 2
-                        n_batches += 1
-                    except Exception:
-                        continue
-            if n_batches > 0:
-                lstm_losses.append(epoch_loss / n_batches)
+            # Shuffle training data each epoch
+            perm = np.random.permutation(len(X_train))
+            epoch_loss, n = 0.0, 0
+            for idx in perm:
+                try:
+                    loss = self.lstm_classifier.train_step(
+                        X_train[idx], np.array([y_train[idx]]),
+                    )
+                    epoch_loss += loss
+                    n += 1
+                except Exception:
+                    continue
+            if n > 0:
+                lstm_train_losses.append(epoch_loss / n)
+            # Validation accuracy
+            correct = 0
+            for idx in range(len(X_val)):
+                try:
+                    pred_cls = self.lstm_classifier.predict(X_val[idx])
+                    if pred_cls == y_val[idx]:
+                        correct += 1
+                except Exception:
+                    continue
+            val_acc = correct / max(len(X_val), 1)
+            lstm_val_losses.append(val_acc)
 
-        if lstm_losses:
+        if lstm_train_losses:
             logger.info(
                 f"LSTM trained: {n_epochs} epochs, "
-                f"loss {lstm_losses[0]:.4f} → {lstm_losses[-1]:.4f}"
+                f"loss {lstm_train_losses[0]:.4f} → {lstm_train_losses[-1]:.4f}, "
+                f"val acc {lstm_val_losses[-1]:.1%}"
             )
 
-        # ── Train Transformer ───────────────────────────────
-        trans_losses = []
+        # ── Train Transformer (gradient descent on output projection) ──
+        trans_train_losses = []
         for epoch in range(n_epochs):
-            epoch_loss = 0.0
-            n_batches = 0
-            for i in range(0, len(X_all), 32):
-                batch_x = X_all[i:i + 32]
-                batch_y = y_all[i:i + 32]
-                for x, y in zip(batch_x, batch_y):
-                    try:
-                        pred = self.transformer.predict(x)
-                        error = pred - y
-                        epoch_loss += error ** 2
-                        n_batches += 1
-                    except Exception:
-                        continue
-            if n_batches > 0:
-                trans_losses.append(epoch_loss / n_batches)
+            perm = np.random.permutation(len(X_train))
+            epoch_loss, n = 0.0, 0
+            for idx in perm:
+                try:
+                    x = X_train[idx]
+                    y_target = float(y_train[idx])  # 0 or 1
+                    pred = self.transformer.predict(x)
+                    error = pred - y_target
+                    epoch_loss += error ** 2
+                    n += 1
 
-        if trans_losses:
+                    # Backprop through output projection (Dense layer)
+                    # Gradient of MSE: d_loss/d_pred = 2 * error / 1
+                    grad_out = np.array([[2 * error]])
+                    self.transformer.output_projection.backward(grad_out)
+                    grads = self.transformer.output_projection.gradients()
+                    # Clip gradients
+                    grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in grads) + 1e-8)
+                    if grad_norm > 1.0:
+                        grads = [g * 1.0 / grad_norm for g in grads]
+                    self._transformer_opt.step(grads)
+                except Exception:
+                    continue
+            if n > 0:
+                trans_train_losses.append(epoch_loss / n)
+
+        if trans_train_losses:
             logger.info(
                 f"Transformer trained: {n_epochs} epochs, "
-                f"loss {trans_losses[0]:.4f} → {trans_losses[-1]:.4f}"
+                f"loss {trans_train_losses[0]:.4f} → {trans_train_losses[-1]:.4f}"
             )
 
     # ──────────────────────────────────────────────────────────
