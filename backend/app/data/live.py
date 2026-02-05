@@ -383,9 +383,7 @@ class LiveMarketService:
             news = []
             for item in raw_news[:20]:
                 try:
-                    # Use current time if publish time is missing/invalid to avoid 1969 dates
-                    publish_ts = item.get("providerPublishTime")
-                    published = datetime.fromtimestamp(publish_ts) if publish_ts else datetime.now()
+                    published = datetime.fromtimestamp(item.get("providerPublishTime", 0))
                     news.append(NewsItem(
                         id=str(item.get("uuid", "")),
                         headline=item.get("title", ""),
@@ -444,9 +442,6 @@ class LiveMarketService:
             news = []
             for item in data[:50]:
                 try:
-                    # Use current time if datetime is missing/invalid to avoid 1969 dates
-                    dt_ts = item.get("datetime")
-                    published = datetime.fromtimestamp(dt_ts) if dt_ts else datetime.now()
                     news.append(NewsItem(
                         id=str(item.get("id", "")),
                         headline=item.get("headline", ""),
@@ -454,7 +449,7 @@ class LiveMarketService:
                         source=item.get("source", ""),
                         url=item.get("url", ""),
                         image=item.get("image"),
-                        published=published,
+                        published=datetime.fromtimestamp(item.get("datetime", 0)),
                         related_symbols=item.get("related", "").split(",") if item.get("related") else [],
                     ))
                 except Exception:
@@ -479,9 +474,6 @@ class LiveMarketService:
             news = []
             for item in data[:20]:
                 try:
-                    # Use current time if datetime is missing/invalid to avoid 1969 dates
-                    dt_ts = item.get("datetime")
-                    published = datetime.fromtimestamp(dt_ts) if dt_ts else datetime.now()
                     news.append(NewsItem(
                         id=str(item.get("id", "")),
                         headline=item.get("headline", ""),
@@ -489,7 +481,7 @@ class LiveMarketService:
                         source=item.get("source", ""),
                         url=item.get("url", ""),
                         image=item.get("image"),
-                        published=published,
+                        published=datetime.fromtimestamp(item.get("datetime", 0)),
                         related_symbols=[symbol],
                     ))
                 except Exception:

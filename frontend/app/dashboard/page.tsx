@@ -122,15 +122,11 @@ export default function DashboardPage() {
     date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
   const formatNewsTime = (isoString: string) => {
-    if (!isoString) return "Recent";
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return "Recent";
-    const diffMs = Date.now() - date.getTime();
+    const diffMs = Date.now() - new Date(isoString).getTime();
     const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 0) return "Just now";
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
-    return date.toLocaleDateString();
+    return new Date(isoString).toLocaleDateString();
   };
 
   return (
@@ -314,7 +310,7 @@ export default function DashboardPage() {
                 className="block p-4 hover:bg-gray-50 group"
               >
                 <p className="text-sm font-medium text-gray-900 line-clamp-2 group-hover:text-blue-600">
-                  {item.headline || item.summary || "News article"}
+                  {item.headline}
                 </p>
                 <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
                   <span>{item.source}</span>

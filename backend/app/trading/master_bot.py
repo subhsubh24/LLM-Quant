@@ -65,7 +65,6 @@ from .options_bot import (
     IVAnalysis,
     create_options_bot,
 )
-from .quant_bot import is_market_open, get_market_status
 from .ml_models import (
     DQN,
     PPOAgent,
@@ -89,21 +88,6 @@ from .quant_analytics import (
     WalkForwardOptimizer,
     create_analytics_suite,
 )
-from .activity_logger import (
-    get_activity_logger,
-    EventType,
-    EventSubtype,
-    Severity,
-)
-from .backtester import (
-    get_model_pretrainer,
-    get_alpha_manager,
-    get_data_downloader,
-    get_backtester,
-    ModelPreTrainer,
-    AlphaSourceManager,
-    CHECKPOINT_DIR,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +99,6 @@ class AssetClass(Enum):
     COMMODITY_OPTIONS = "commodity_options"
     CRYPTO_PERPETUAL = "crypto_perpetual"
     CRYPTO_OPTIONS = "crypto_options"
-    CRYPTO_SPOT = "crypto_spot"  # Direct crypto spot trading
 
 
 class MarketRegime(Enum):
@@ -287,29 +270,13 @@ class QuantAnalyticsEngine:
         self.cumulative_reward = 0.0
         self.episode_rewards: List[float] = []
 
-        # ============================================================
-        # STATISTICAL ARBITRAGE ENGINE
-        # ============================================================
-        # Cointegrated pairs: {(sym_a, sym_b): {hedge_ratio, half_life, last_test}}
-        self.cointegrated_pairs: Dict[Tuple[str, str], Dict] = {}
-        # Spread z-scores for active pairs
-        self.spread_history: Dict[Tuple[str, str], List[float]] = {}
-        # Last full cointegration scan timestamp
-        self._last_coint_scan: Optional[datetime] = None
-        self._coint_scan_interval = timedelta(hours=4)  # Rescan every 4h
-
         logger.info("QuantAnalyticsEngine initialized with full ML/stats suite")
 
     def update_price_history(self, symbol: str, prices: np.ndarray):
         """Update price history for a symbol."""
         self.price_history[symbol] = prices
         if len(prices) > 1:
-            denom = prices[:-1]
-            # Guard against zero/negative prices from data glitches
-            safe_denom = np.where(denom > 0, denom, 1.0)
-            returns = np.diff(prices) / safe_denom
-            # Sanitize any NaN/Inf that slipped through
-            self.return_history[symbol] = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
+            self.return_history[symbol] = np.diff(prices) / prices[:-1]
 
     def _construct_state(self, symbol: str, additional_features: Optional[Dict] = None) -> np.ndarray:
         """
@@ -373,12 +340,12 @@ class QuantAnalyticsEngine:
                 std20 = np.std(prices[-20:])
                 state[21] = (prices[-1] - ma20) / (2 * std20 + 1e-8)  # BB position
 
-                # Momentum (guard against zero historical prices from data glitches)
-                state[22] = prices[-1] / max(prices[-5], 1e-8) - 1  # 5-day momentum
-                state[23] = prices[-1] / max(prices[-20], 1e-8) - 1  # 20-day momentum
+                # Momentum
+                state[22] = prices[-1] / prices[-5] - 1  # 5-day momentum
+                state[23] = prices[-1] / prices[-20] - 1  # 20-day momentum
 
                 if len(prices) >= 60:
-                    state[24] = prices[-1] / max(prices[-60], 1e-8) - 1  # 60-day momentum
+                    state[24] = prices[-1] / prices[-60] - 1  # 60-day momentum
 
         # Add additional features if provided
         if additional_features:
@@ -407,350 +374,7 @@ class QuantAnalyticsEngine:
             except Exception:
                 pass
 
-        # Final sanitization: ensure no NaN/Inf reaches the models
-        state = np.nan_to_num(state, nan=0.0, posinf=0.0, neginf=0.0)
-        # Clip extreme values (>10 std from 0 is almost certainly a data glitch)
-        state = np.clip(state, -10, 10)
-
         return state
-
-    # ============================================================
-    # STATISTICAL ARBITRAGE METHODS
-    # ============================================================
-
-    def adf_test(self, series: np.ndarray) -> Tuple[float, bool]:
-        """
-        Augmented Dickey-Fuller test for stationarity (numpy-only).
-
-        Regresses ΔY_t = α + β·Y_{t-1} + Σ(γ_i·ΔY_{t-i}) + ε_t
-        Tests H0: β=0 (unit root / non-stationary).
-
-        Returns:
-            (t_statistic, is_stationary_at_5pct)
-        """
-        series = np.asarray(series, dtype=float)
-        if len(series) < 20:
-            return (0.0, False)
-
-        # Include 1 lag of differences for augmentation
-        dy = np.diff(series)
-        n = len(dy)
-        y_lag = series[:-1]  # Y_{t-1}
-
-        # Build regression matrix: [constant, Y_{t-1}, ΔY_{t-1}]
-        # Use at least 1 lag to control for serial correlation
-        y_dep = dy[1:]       # ΔY_t (from t=1 onward)
-        X = np.column_stack([
-            np.ones(n - 1),   # constant
-            y_lag[1:],        # Y_{t-1}
-            dy[:-1],          # ΔY_{t-1} (first lag of differences)
-        ])
-
-        # OLS: β = (X'X)^{-1} X'y
-        try:
-            XtX = X.T @ X
-            Xty = X.T @ y_dep
-            beta = np.linalg.solve(XtX, Xty)
-        except np.linalg.LinAlgError:
-            return (0.0, False)
-
-        # Residuals and standard error
-        residuals = y_dep - X @ beta
-        s2 = np.sum(residuals ** 2) / (len(y_dep) - X.shape[1])
-        try:
-            var_beta = s2 * np.linalg.inv(XtX)
-        except np.linalg.LinAlgError:
-            return (0.0, False)
-
-        # t-statistic for the Y_{t-1} coefficient (index 1)
-        se_beta1 = np.sqrt(max(var_beta[1, 1], 1e-16))
-        t_stat = beta[1] / se_beta1
-
-        # MacKinnon critical values (with constant, no trend)
-        # 5% ≈ -2.86 for large samples
-        is_stationary = t_stat < -2.86
-
-        return (float(t_stat), is_stationary)
-
-    def test_cointegration(
-        self, sym_a: str, sym_b: str, min_obs: int = 60
-    ) -> Optional[Dict]:
-        """
-        Engle-Granger two-step cointegration test.
-
-        Step 1: Regress Y = α + β·X + ε (OLS)
-        Step 2: Test residuals ε for stationarity (ADF)
-
-        If residuals are stationary, the pair is cointegrated and the
-        spread S_t = Y_t - β·X_t is mean-reverting.
-
-        Returns:
-            Dict with hedge_ratio, half_life, t_stat, is_cointegrated
-            or None if insufficient data.
-        """
-        prices_a = self.price_history.get(sym_a)
-        prices_b = self.price_history.get(sym_b)
-
-        if prices_a is None or prices_b is None:
-            return None
-
-        # Align lengths
-        min_len = min(len(prices_a), len(prices_b))
-        if min_len < min_obs:
-            return None
-
-        pa = prices_a[-min_len:].astype(float)
-        pb = prices_b[-min_len:].astype(float)
-
-        # Step 1: OLS regression Y=a+b*X
-        X = np.column_stack([np.ones(min_len), pb])
-        try:
-            beta = np.linalg.lstsq(X, pa, rcond=None)[0]
-        except np.linalg.LinAlgError:
-            return None
-
-        intercept, hedge_ratio = beta[0], beta[1]
-
-        # Step 2: Get residuals (spread)
-        spread = pa - intercept - hedge_ratio * pb
-
-        # Step 3: ADF test on spread
-        t_stat, is_cointegrated = self.adf_test(spread)
-
-        # Step 4: Estimate half-life of mean reversion
-        half_life = self.estimate_half_life(spread)
-
-        return {
-            "hedge_ratio": float(hedge_ratio),
-            "intercept": float(intercept),
-            "half_life": half_life,
-            "t_stat": float(t_stat),
-            "is_cointegrated": is_cointegrated,
-            "spread_mean": float(np.mean(spread)),
-            "spread_std": float(np.std(spread)),
-        }
-
-    def estimate_half_life(self, spread: np.ndarray) -> float:
-        """
-        Estimate half-life of mean reversion via Ornstein-Uhlenbeck model.
-
-        Fits: ΔS_t = θ·(μ - S_{t-1}) + ε  →  ΔS = a + b·S_{t-1}
-        Half-life = -ln(2) / b   (b must be negative for mean reversion)
-
-        Returns:
-            half_life in periods (positive float). Returns 999 if not mean-reverting.
-        """
-        spread = np.asarray(spread, dtype=float)
-        if len(spread) < 10:
-            return 999.0
-
-        ds = np.diff(spread)
-        s_lag = spread[:-1]
-
-        # OLS: ΔS = a + b·S_{t-1}
-        X = np.column_stack([np.ones(len(s_lag)), s_lag])
-        try:
-            beta = np.linalg.lstsq(X, ds, rcond=None)[0]
-        except np.linalg.LinAlgError:
-            return 999.0
-
-        b = beta[1]
-
-        if b >= 0:
-            return 999.0  # Not mean-reverting
-
-        half_life = -np.log(2) / b
-        return max(float(half_life), 1.0)  # Floor at 1 period
-
-    def find_cointegrated_pairs(self, min_obs: int = 100) -> List[Dict]:
-        """
-        Scan all tracked assets for cointegrated pairs.
-
-        Tests all possible pairs (O(n²)) and returns those passing
-        the ADF test at 5% significance with a reasonable half-life
-        (between 1 and 60 periods).
-        """
-        now = datetime.now()
-        # Throttle: don't rescan more often than every 4 hours
-        if (self._last_coint_scan and
-                now - self._last_coint_scan < self._coint_scan_interval):
-            return list(self.cointegrated_pairs.values())
-
-        self._last_coint_scan = now
-
-        symbols = [s for s, p in self.price_history.items() if len(p) >= min_obs]
-        new_pairs = {}
-        results = []
-
-        for i in range(len(symbols)):
-            for j in range(i + 1, len(symbols)):
-                sym_a, sym_b = symbols[i], symbols[j]
-                result = self.test_cointegration(sym_a, sym_b, min_obs)
-
-                if result and result["is_cointegrated"]:
-                    hl = result["half_life"]
-                    # Only keep pairs with reasonable half-life (1-60 periods)
-                    if 1 < hl < 60:
-                        pair_key = (sym_a, sym_b)
-                        pair_info = {
-                            "sym_a": sym_a,
-                            "sym_b": sym_b,
-                            "last_test": now,
-                            **result,
-                        }
-                        new_pairs[pair_key] = pair_info
-                        results.append(pair_info)
-
-        self.cointegrated_pairs = new_pairs
-        if results:
-            logger.info(
-                f"📊 Cointegration scan: found {len(results)} pairs "
-                f"from {len(symbols)} assets"
-            )
-        return results
-
-    def get_spread_zscore(
-        self, sym_a: str, sym_b: str
-    ) -> Optional[Dict]:
-        """
-        Compute current spread z-score for a cointegrated pair.
-
-        Uses the pair's half-life to set an adaptive lookback window
-        (2× half-life), then computes z-score of the current spread
-        relative to that window.
-
-        Returns:
-            Dict with zscore, spread, half_life, signal, entry_size
-            or None if pair not tracked.
-        """
-        pair_key = (sym_a, sym_b)
-        pair_info = self.cointegrated_pairs.get(pair_key)
-        if not pair_info:
-            return None
-
-        prices_a = self.price_history.get(sym_a)
-        prices_b = self.price_history.get(sym_b)
-        if prices_a is None or prices_b is None:
-            return None
-
-        hedge_ratio = pair_info["hedge_ratio"]
-        intercept = pair_info["intercept"]
-        half_life = pair_info["half_life"]
-
-        # Adaptive lookback: 2× half-life (minimum 10, maximum 120)
-        lookback = int(np.clip(half_life * 2, 10, 120))
-
-        # Compute spread over lookback window
-        min_len = min(len(prices_a), len(prices_b), lookback)
-        pa = prices_a[-min_len:].astype(float)
-        pb = prices_b[-min_len:].astype(float)
-        spread = pa - intercept - hedge_ratio * pb
-
-        current_spread = spread[-1]
-        spread_mean = np.mean(spread)
-        spread_std = np.std(spread)
-
-        if spread_std < 1e-10:
-            return None
-
-        zscore = (current_spread - spread_mean) / spread_std
-
-        # Generate trading signal
-        #   z < -2.0: BUY spread  (long A, short B) — strong entry
-        #   z < -1.0: BUY spread  (long A, short B) — mild entry
-        #   z >  2.0: SELL spread (short A, long B) — strong entry
-        #   z >  1.0: SELL spread (short A, long B) — mild entry
-        #   |z| < 0.5: EXIT (spread has reverted to mean)
-        #   |z| > 4.0: STOP (spread blown out, cut losses)
-        signal = "hold"
-        confidence = 0.0
-        if zscore < -2.0:
-            signal = "buy_spread"
-            confidence = min(abs(zscore) / 3.0, 1.0)
-        elif zscore < -1.0:
-            signal = "buy_spread"
-            confidence = abs(zscore) / 4.0
-        elif zscore > 2.0:
-            signal = "sell_spread"
-            confidence = min(abs(zscore) / 3.0, 1.0)
-        elif zscore > 1.0:
-            signal = "sell_spread"
-            confidence = abs(zscore) / 4.0
-        elif abs(zscore) < 0.5:
-            signal = "exit"
-            confidence = 1.0 - abs(zscore)
-        if abs(zscore) > 4.0:
-            signal = "stop"
-            confidence = 1.0
-
-        # Track spread history
-        if pair_key not in self.spread_history:
-            self.spread_history[pair_key] = []
-        self.spread_history[pair_key].append(float(current_spread))
-        # Keep last 500 spread values
-        if len(self.spread_history[pair_key]) > 500:
-            self.spread_history[pair_key] = self.spread_history[pair_key][-500:]
-
-        return {
-            "zscore": float(zscore),
-            "spread": float(current_spread),
-            "spread_mean": float(spread_mean),
-            "spread_std": float(spread_std),
-            "half_life": float(half_life),
-            "hedge_ratio": float(hedge_ratio),
-            "signal": signal,
-            "confidence": float(confidence),
-            "lookback": lookback,
-        }
-
-    def get_funding_rate_arb_signal(
-        self, symbol: str, funding_rate: float, spot_price: float, perp_price: float
-    ) -> Dict:
-        """
-        Generate funding rate arbitrage signal.
-
-        Funding rate arb: when funding is abnormally high/low, the
-        cost of holding a perp position creates a carry opportunity.
-
-        Strategy:
-        - High positive funding (>0.05%): Short perp earns funding
-        - High negative funding (<-0.01%): Long perp earns funding
-        - Combine with spot hedge for market-neutral carry
-
-        Returns:
-            Dict with signal, annualized_carry, confidence
-        """
-        # Basis: (perp - spot) / spot
-        basis = 0.0
-        if spot_price > 0:
-            basis = (perp_price - spot_price) / spot_price
-
-        # Annualize funding rate (8h periods → yearly)
-        annual_funding = funding_rate * 3 * 365  # 3 periods/day × 365 days
-
-        signal = "neutral"
-        confidence = 0.0
-        annualized_carry = 0.0
-
-        # High positive funding: short perp (earn funding) + long spot (hedge)
-        if funding_rate > 0.0005:  # >0.05% per 8h ≈ 54% annualized
-            signal = "short_perp_long_spot"
-            annualized_carry = abs(annual_funding)
-            confidence = min(abs(funding_rate) / 0.002, 1.0)
-
-        # High negative funding: long perp (earn funding) + short spot (hedge)
-        elif funding_rate < -0.0001:  # <-0.01% per 8h
-            signal = "long_perp_short_spot"
-            annualized_carry = abs(annual_funding)
-            confidence = min(abs(funding_rate) / 0.001, 1.0)
-
-        return {
-            "signal": signal,
-            "funding_rate": float(funding_rate),
-            "basis": float(basis),
-            "annualized_carry": float(annualized_carry),
-            "confidence": float(confidence),
-        }
 
     def get_ml_prediction(
         self,
@@ -782,27 +406,21 @@ class QuantAnalyticsEngine:
         # LSTM prediction (if we have history)
         lstm_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
-            try:
-                self.lstm.reset_state()
-                returns = np.array(self.return_history[symbol][-60:]).flatten()
-                # Reshape for LSTM: (seq_len, features)
-                lstm_input = returns.reshape(-1, 1)
-                lstm_input = np.pad(lstm_input, ((0, 0), (0, 15)), mode='constant')
-                lstm_out = self.lstm.forward(lstm_input)
-                lstm_pred = float(lstm_out[0, -1, 0])
-            except Exception as e:
-                logger.debug(f"LSTM prediction failed for {symbol}: {e}")
+            self.lstm.reset_state()
+            returns = self.return_history[symbol][-60:]
+            # Reshape for LSTM: (seq_len, features)
+            lstm_input = returns.reshape(-1, 1)
+            lstm_input = np.pad(lstm_input, ((0, 0), (0, 15)), mode='constant')
+            lstm_out = self.lstm.forward(lstm_input)
+            lstm_pred = float(lstm_out[0, -1, 0])
 
         # Transformer prediction
         transformer_pred = 0.0
         if symbol in self.return_history and len(self.return_history[symbol]) >= 60:
-            try:
-                returns = np.array(self.return_history[symbol][-60:]).flatten()
-                transformer_input = returns.reshape(-1, 1)
-                transformer_input = np.pad(transformer_input, ((0, 0), (0, 15)), mode='constant')
-                transformer_pred = self.transformer.predict(transformer_input)
-            except Exception as e:
-                logger.debug(f"Transformer prediction failed for {symbol}: {e}")
+            returns = self.return_history[symbol][-60:]
+            transformer_input = returns.reshape(-1, 1)
+            transformer_input = np.pad(transformer_input, ((0, 0), (0, 15)), mode='constant')
+            transformer_pred = self.transformer.predict(transformer_input)
 
         # Regime detection
         regime = "Unknown"
@@ -1027,44 +645,11 @@ class MasterQuantBot:
         "GLD", "SLV", "GDX", "USO", "UNG", "WEAT", "CORN",
     ]
 
-    # Binance Futures USDT-M Perpetuals (verified available on Binance)
-    # Symbol format: "XXX-PERP" -> converted to "XXXUSDT" for Binance API
     CRYPTO_PERPETUALS = [
-        # Tier 1 - Blue Chips (highest liquidity)
-        "BTC-PERP", "ETH-PERP", "BNB-PERP", "SOL-PERP", "XRP-PERP",
-        # Tier 2 - Major Alts (all verified on Binance Futures)
-        "DOGE-PERP", "ADA-PERP", "AVAX-PERP", "LINK-PERP", "DOT-PERP",
-        "MATIC-PERP", "LTC-PERP", "ATOM-PERP", "UNI-PERP", "ETC-PERP",
-        "FIL-PERP", "NEAR-PERP", "APT-PERP", "ARB-PERP", "OP-PERP",
-        # Tier 3 - DeFi & L2s (verified on Binance Futures)
-        "INJ-PERP", "SUI-PERP", "SEI-PERP", "TIA-PERP", "FTM-PERP",
-        "AAVE-PERP", "MKR-PERP", "LDO-PERP", "CRV-PERP", "SNX-PERP",
-        "COMP-PERP", "DYDX-PERP", "GMX-PERP", "GRT-PERP", "IMX-PERP",
-        # Tier 4 - AI & Storage (verified on Binance Futures)
-        "FET-PERP", "RNDR-PERP", "AR-PERP", "THETA-PERP", "STX-PERP",
-        # Tier 5 - Memes (verified, use smaller sizes due to volatility)
-        "PEPE-PERP", "SHIB-PERP", "FLOKI-PERP", "BONK-PERP", "WIF-PERP",
-        "MEME-PERP", "ORDI-PERP",
-        # Tier 6 - Recent Listings (verified on Binance Futures)
-        "JTO-PERP", "PYTH-PERP", "JUP-PERP", "STRK-PERP", "W-PERP",
-        "ENA-PERP", "ONDO-PERP", "PENDLE-PERP", "NOT-PERP", "WLD-PERP",
+        "BTC-PERP", "ETH-PERP", "SOL-PERP", "AVAX-PERP", "LINK-PERP",
     ]
 
-    # Crypto options - for paper trading all work; live trading limited to BTC/ETH
-    CRYPTO_OPTIONS = [
-        "BTC", "ETH", "SOL", "BNB", "XRP", "AVAX", "LINK", "DOGE",
-        "ADA", "DOT", "MATIC", "LTC",
-    ]
-
-    # Crypto spot trading - direct buy/sell (works on Binance.US)
-    CRYPTO_SPOT = [
-        # Blue chips - always liquid
-        "BTC", "ETH", "SOL", "BNB", "XRP",
-        # Major alts
-        "AVAX", "LINK", "DOGE", "ADA", "DOT", "MATIC", "LTC", "ATOM",
-        # DeFi & emerging
-        "UNI", "AAVE", "MKR", "CRV", "FET", "RNDR", "INJ", "SUI",
-    ]
+    CRYPTO_OPTIONS = ["BTC", "ETH"]
 
     def __init__(
         self,
@@ -1092,14 +677,12 @@ class MasterQuantBot:
         self.last_full_scan: Optional[datetime] = None
 
         # Dynamic allocation (optimized via portfolio optimization)
-        # Total allocation can exceed 100% since positions use leverage/margin
         self.allocation_limits = {
-            AssetClass.STOCK_OPTIONS: 0.25,
-            AssetClass.ETF_OPTIONS: 0.25,
-            AssetClass.COMMODITY_OPTIONS: 0.10,
+            AssetClass.STOCK_OPTIONS: 0.30,
+            AssetClass.ETF_OPTIONS: 0.35,
+            AssetClass.COMMODITY_OPTIONS: 0.15,
             AssetClass.CRYPTO_PERPETUAL: 0.15,
             AssetClass.CRYPTO_OPTIONS: 0.10,
-            AssetClass.CRYPTO_SPOT: 0.15,  # Direct crypto spot buys
         }
 
         self.current_allocations: Dict[AssetClass, float] = {
@@ -1122,32 +705,6 @@ class MasterQuantBot:
         self.live_trading_enabled = False
         self.broker_manager = None  # Set via enable_live_trading endpoint
 
-        # Activity logger for comprehensive event tracking
-        self.activity_logger = get_activity_logger()
-
-        # Funding rate cache: {symbol: (rate, timestamp)}
-        self._funding_rate_cache: Dict[str, Tuple[float, datetime]] = {}
-        self._funding_rate_cache_ttl = timedelta(minutes=30)
-
-        # Pre-training integration - CRITICAL for intelligent trading
-        self.model_pretrainer = get_model_pretrainer()
-        self.alpha_manager = get_alpha_manager()
-        self.models_trained = False
-        self.training_required = True  # Require training before live trading
-
-        # Try to load pre-trained models
-        if self.model_pretrainer.load_checkpoints():
-            meets_req, reason = self.model_pretrainer.meets_training_requirements()
-            self.models_trained = meets_req
-            if meets_req:
-                logger.info("✅ Pre-trained models loaded successfully!")
-                # Sync DQN epsilon from loaded checkpoint
-                self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon
-            else:
-                logger.warning(f"⚠️ Models loaded but: {reason}")
-        else:
-            logger.warning("⚠️ No pre-trained models found - training required before trading")
-
         # Initialize with some synthetic price history for models
         self._initialize_price_history()
 
@@ -1160,167 +717,28 @@ class MasterQuantBot:
         )
 
     def _initialize_price_history(self):
-        """Initialize price history tracking - NO synthetic data, requires REAL data."""
-        # Flag to track if real data has been loaded
-        self._real_data_loaded = False
+        """Initialize synthetic price history for models."""
+        np.random.seed(42)
 
-        # NO SYNTHETIC DATA - ML models will wait for real data
-        logger.info("Price history initialized - waiting for REAL market data (no synthetic fallback)")
+        all_symbols = (self.STOCK_OPTIONS + self.ETF_OPTIONS +
+                       self.COMMODITY_OPTIONS + self.CRYPTO_PERPETUALS)
 
-    async def _load_real_market_data(self):
-        """Load real historical data from Binance (crypto) and Alpaca (stocks)."""
-        if self._real_data_loaded:
-            return
-
-        total_loaded = 0
-
-        # ============ CRYPTO DATA FROM BINANCE ============
-        try:
-            from ..data.binance_data import get_binance_fetcher
-
-            fetcher = get_binance_fetcher()
-
-            # Crypto symbols to fetch real data for (verified on Binance.US)
-            crypto_symbols = [
-                "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX",
-                "LINK", "DOT", "MATIC", "LTC", "ATOM", "UNI", "FET",
-                "AAVE", "MKR", "CRV", "NEAR", "APT", "ARB", "OP", "SUI",
-            ]
-
-            self._add_commentary(
-                "📊 Fetching REAL crypto data from Binance.US...",
-                "system"
-            )
-
-            data = await fetcher.get_multi_symbol_data(crypto_symbols, days=252, interval="1d")
-
-            crypto_loaded = 0
-            for symbol, (prices, returns) in data.items():
-                if len(prices) >= 60:
-                    # Update both the base symbol and perpetual version
-                    self.analytics.update_price_history(symbol, prices)
-                    self.analytics.update_price_history(f"{symbol}-PERP", prices)
-                    crypto_loaded += 1
-
-            if crypto_loaded > 0:
-                self._add_commentary(
-                    f"✅ Loaded {crypto_loaded} crypto symbols from Binance.US",
-                    "system"
-                )
-                logger.info(f"Loaded real Binance data for {crypto_loaded} crypto symbols")
-                total_loaded += crypto_loaded
-
-        except Exception as e:
-            logger.warning(f"Failed to load Binance crypto data: {e}")
-            self._add_commentary(
-                f"⚠️ Binance fetch failed: {str(e)[:40]}",
-                "system"
-            )
-
-        # ============ STOCK DATA FROM ALPACA ============
-        try:
-            from ..data.alpaca_data import get_alpaca_fetcher
-
-            alpaca = get_alpaca_fetcher()
-
-            if alpaca.has_keys:
-                # Stock/ETF symbols to fetch
-                stock_symbols = [
-                    # ETFs (most important for regime detection)
-                    "SPY", "QQQ", "IWM", "DIA",
-                    # Major stocks
-                    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
-                    # Commodities ETFs
-                    "GLD", "SLV", "USO",
-                    # Financials
-                    "JPM", "BAC", "GS",
-                    # High vol
-                    "AMD", "COIN",
-                ]
-
-                self._add_commentary(
-                    "📈 Fetching REAL stock data from Alpaca...",
-                    "system"
-                )
-
-                stock_data = await alpaca.get_multi_symbol_data(stock_symbols, days=252)
-
-                stock_loaded = 0
-                for symbol, (prices, returns) in stock_data.items():
-                    if len(prices) >= 60:
-                        self.analytics.update_price_history(symbol, prices)
-                        stock_loaded += 1
-
-                if stock_loaded > 0:
-                    self._add_commentary(
-                        f"✅ Loaded {stock_loaded} stock symbols from Alpaca",
-                        "system"
-                    )
-                    logger.info(f"Loaded real Alpaca data for {stock_loaded} stock symbols")
-                    total_loaded += stock_loaded
+        for symbol in all_symbols:
+            # Generate 252 days of synthetic returns
+            if "BTC" in symbol or "ETH" in symbol:
+                vol = 0.04  # Higher crypto vol
+                drift = 0.0003
+            elif symbol in ["SPY", "QQQ", "IWM"]:
+                vol = 0.012
+                drift = 0.0004
             else:
-                self._add_commentary(
-                    "❌ Alpaca API keys not configured - stock data UNAVAILABLE",
-                    "system"
-                )
+                vol = 0.02
+                drift = 0.0003
 
-        except Exception as e:
-            logger.warning(f"Failed to load Alpaca stock data: {e}")
-            self._add_commentary(
-                f"❌ Alpaca fetch failed: {str(e)[:40]}",
-                "system"
-            )
+            returns = np.random.normal(drift, vol, 252)
+            prices = 100 * np.cumprod(1 + returns)
 
-        # ============ SUMMARY ============
-        if total_loaded > 0:
-            self._real_data_loaded = True
-            self._add_commentary(
-                f"🎯 ML Training Data: {total_loaded} symbols with REAL market data",
-                "system"
-            )
-        else:
-            self._add_commentary(
-                "❌ NO REAL DATA LOADED - ML predictions may be unreliable! Check broker connections.",
-                "system"
-            )
-            logger.error("No real market data loaded - synthetic fallback DISABLED")
-
-    async def _update_live_prices(self):
-        """Update price history with latest live data from Binance."""
-        try:
-            from ..data.binance_data import get_binance_fetcher
-
-            fetcher = get_binance_fetcher()
-
-            # Update prices for actively traded symbols
-            active_symbols = list(set(
-                [pos.symbol.replace("-PERP", "").split("-")[0]
-                 for pos in self.engine.crypto_positions.values()]
-            ))
-
-            # Also update top crypto symbols
-            top_cryptos = ["BTC", "ETH", "SOL", "BNB", "XRP"]
-            symbols_to_update = list(set(active_symbols + top_cryptos))
-
-            for symbol in symbols_to_update[:10]:  # Limit to 10 to avoid rate limits
-                try:
-                    price = await fetcher.get_price(symbol)
-                    if price:
-                        # Append to existing price history
-                        key = symbol if symbol in self.analytics.price_history else f"{symbol}-PERP"
-                        if key in self.analytics.price_history:
-                            prices = self.analytics.price_history[key]
-                            # Append new price
-                            new_prices = np.append(prices, price)
-                            # Keep last 500 prices
-                            if len(new_prices) > 500:
-                                new_prices = new_prices[-500:]
-                            self.analytics.update_price_history(key, new_prices)
-                except Exception:
-                    pass  # Silently skip failed updates
-
-        except Exception as e:
-            logger.debug(f"Live price update failed: {e}")
+            self.analytics.update_price_history(symbol, prices)
 
     # ===================
     # MARKET ANALYSIS (ML-Enhanced)
@@ -1336,23 +754,20 @@ class MasterQuantBot:
             hmm_state, hmm_probs = self.analytics.detect_regime_hmm(spy_returns)
 
             # VAE regime detection
-            vae_regime, vae_probs = 1, np.array([0.25, 0.25, 0.25, 0.25])  # Default
             if len(spy_returns) >= 32:
-                try:
-                    vae_regime, vae_probs, _ = self.analytics.regime_vae.detect_regime(
-                        spy_returns[-32:].reshape(1, -1)
-                    )
-                except Exception as e:
-                    logger.debug(f"VAE regime detection failed: {e}")
+                vae_regime, vae_probs, _ = self.analytics.regime_vae.detect_regime(
+                    spy_returns[-32:].reshape(1, -1)
+                )
+            else:
+                vae_regime, vae_probs = 1, np.array([0.25, 0.25, 0.25, 0.25])
 
             # Combine HMM and VAE
             combined_confidence = (np.max(hmm_probs) + np.max(vae_probs)) / 2
 
-            # Calculate VIX from actual SPY volatility (annualized)
-            # HMM state provides regime context: 0=low vol, 1=medium, 2=high vol
-            actual_vol = float(np.std(spy_returns[-20:]) * np.sqrt(252) * 100) if len(spy_returns) >= 20 else 18
-            # VIX typically ranges 10-40, with SPY vol * 100 being a good proxy
-            self.vix_level = max(10, min(50, actual_vol + hmm_state * 2))
+            # Map to regime
+            # HMM: 0=low vol, 1=medium, 2=high vol
+            # VAE: 0=bull, 1=bear, 2=high vol, 3=low vol
+            self.vix_level = 15 + hmm_state * 5 + np.random.uniform(-2, 5)
 
             if self.vix_level > 25:
                 self.market_regime = MarketRegime.HIGH_VOLATILITY
@@ -1380,17 +795,7 @@ class MasterQuantBot:
                 "analysis"
             )
         else:
-            # No SPY data - try to use BTC volatility as market proxy
-            if "BTC" in self.analytics.return_history:
-                btc_returns = self.analytics.return_history["BTC"]
-                if len(btc_returns) >= 20:
-                    btc_vol = float(np.std(btc_returns[-20:]) * np.sqrt(365) * 100)
-                    # BTC vol is typically 2-3x stock vol, so scale down
-                    self.vix_level = max(10, min(50, btc_vol / 3))
-                else:
-                    self.vix_level = 18  # Default if no data
-            else:
-                self.vix_level = 18  # Default
+            self.vix_level = 18 + np.random.uniform(-3, 5)
             self.market_regime = MarketRegime.RANGE_BOUND
 
     # ===================
@@ -1398,37 +803,26 @@ class MasterQuantBot:
     # ===================
 
     async def _scan_all_markets(self) -> List[Opportunity]:
-        """Scan markets with ML-enhanced scoring, respecting market hours."""
+        """Scan ALL markets with ML-enhanced scoring."""
         opportunities = []
 
-        # Check if US stock market is open
-        market_open = is_market_open()
-        market_status = get_market_status()
+        self._add_commentary(
+            "🔍 Initiating full market scan with ML analytics...",
+            "scan"
+        )
 
-        if market_open:
-            self._add_commentary(
-                "🔍 Market OPEN - Scanning ALL markets with ML analytics...",
-                "scan"
-            )
+        # 1. Scan Stock Options with ML
+        stock_opps = await self._scan_stock_options()
+        opportunities.extend(stock_opps)
 
-            # 1. Scan Stock Options with ML
-            stock_opps = await self._scan_stock_options()
-            opportunities.extend(stock_opps)
+        # 2. Scan ETF Options
+        etf_opps = await self._scan_etf_options()
+        opportunities.extend(etf_opps)
 
-            # 2. Scan ETF Options
-            etf_opps = await self._scan_etf_options()
-            opportunities.extend(etf_opps)
+        # 3. Scan Commodity Options
+        commodity_opps = await self._scan_commodity_options()
+        opportunities.extend(commodity_opps)
 
-            # 3. Scan Commodity Options
-            commodity_opps = await self._scan_commodity_options()
-            opportunities.extend(commodity_opps)
-        else:
-            self._add_commentary(
-                f"🌙 Market CLOSED ({market_status['message']}) - CRYPTO ONLY mode active",
-                "scan"
-            )
-
-        # Crypto markets are 24/7 - always scan
         # 4. Scan Crypto Perpetuals
         crypto_perp_opps = await self._scan_crypto_perpetuals()
         opportunities.extend(crypto_perp_opps)
@@ -1436,14 +830,6 @@ class MasterQuantBot:
         # 5. Scan Crypto Options
         crypto_opt_opps = await self._scan_crypto_options()
         opportunities.extend(crypto_opt_opps)
-
-        # 6. Scan Crypto Spot (direct buy/sell)
-        crypto_spot_opps = await self._scan_crypto_spot()
-        opportunities.extend(crypto_spot_opps)
-
-        # 7. Statistical Arbitrage (pairs trading + funding rate arb)
-        stat_arb_opps = await self._scan_stat_arb()
-        opportunities.extend(stat_arb_opps)
 
         # Re-rank using ML composite score
         for opp in opportunities:
@@ -1461,27 +847,6 @@ class MasterQuantBot:
 
         self.opportunities = opportunities
         self.last_full_scan = datetime.now()
-
-        # Log scan completion to activity logger
-        await self.activity_logger.log_scan(
-            subtype=EventSubtype.SCAN_COMPLETE,
-            message=f"Market scan complete: {len(opportunities)} opportunities found",
-            details={
-                "market_open": market_open,
-                "total_opportunities": len(opportunities),
-                "by_asset_class": {
-                    "stock_options": len([o for o in opportunities if o.asset_class == AssetClass.STOCK_OPTIONS]),
-                    "etf_options": len([o for o in opportunities if o.asset_class == AssetClass.ETF_OPTIONS]),
-                    "commodity_options": len([o for o in opportunities if o.asset_class == AssetClass.COMMODITY_OPTIONS]),
-                    "crypto_perpetual": len([o for o in opportunities if o.asset_class == AssetClass.CRYPTO_PERPETUAL]),
-                    "crypto_options": len([o for o in opportunities if o.asset_class == AssetClass.CRYPTO_OPTIONS]),
-                    "crypto_spot": len([o for o in opportunities if o.asset_class == AssetClass.CRYPTO_SPOT]),
-                },
-                "top_opportunity": opportunities[0].symbol if opportunities else None,
-                "market_regime": self.market_regime.value,
-                "vix_level": self.vix_level,
-            }
-        )
 
         return opportunities
 
@@ -1528,17 +893,6 @@ class MasterQuantBot:
     def _compute_regime_alignment(self, opp: Opportunity) -> float:
         """Compute how well opportunity aligns with current regime."""
         alignment = 0.5  # Neutral
-
-        # Statistical arbitrage strategies are market-neutral → good in all regimes
-        if "Pairs" in opp.strategy or "Funding Arb" in opp.strategy:
-            # Pairs trading works best in range-bound / high-vol (more reversion)
-            if self.market_regime == MarketRegime.RANGE_BOUND:
-                alignment = 0.95
-            elif self.market_regime == MarketRegime.HIGH_VOLATILITY:
-                alignment = 0.85  # Wider spreads = bigger opportunity but riskier
-            else:
-                alignment = 0.75  # Still works, just fewer signals
-            return alignment
 
         if self.market_regime == MarketRegime.HIGH_VOLATILITY:
             # Prefer premium selling
@@ -1615,8 +969,7 @@ class MasterQuantBot:
 
         for symbol in self.CRYPTO_PERPETUALS:
             opp = await self._score_crypto_perpetual(symbol)
-            # Lower threshold (30) to capture more opportunities in range-bound markets
-            if opp and opp.score > 30:
+            if opp and opp.score > 35:
                 opportunities.append(opp)
 
         return opportunities
@@ -1627,240 +980,14 @@ class MasterQuantBot:
 
         for base_asset in self.CRYPTO_OPTIONS:
             call_opp = await self._score_crypto_option(base_asset, "call")
-            # Lower threshold (35) for more opportunity capture
-            if call_opp and call_opp.score > 35:
+            if call_opp and call_opp.score > 40:
                 opportunities.append(call_opp)
 
             put_opp = await self._score_crypto_option(base_asset, "put")
-            if put_opp and put_opp.score > 35:
+            if put_opp and put_opp.score > 40:
                 opportunities.append(put_opp)
 
         return opportunities
-
-    async def _scan_crypto_spot(self) -> List[Opportunity]:
-        """Scan crypto spot market for buy/sell opportunities."""
-        opportunities = []
-
-        for symbol in self.CRYPTO_SPOT:
-            opp = await self._score_crypto_spot(symbol)
-            # Lower threshold (30) for spot - we want more activity
-            if opp and opp.score > 30:
-                opportunities.append(opp)
-
-        return opportunities
-
-    async def _scan_stat_arb(self) -> List[Opportunity]:
-        """
-        Scan for statistical arbitrage opportunities.
-
-        Two strategies:
-        1. Pairs Trading — find cointegrated pairs, generate spread z-score
-           signals, create Opportunity for entry/exit.
-        2. Funding Rate Arbitrage — detect abnormally high/low funding rates
-           on perpetuals and create carry-trade Opportunities.
-        """
-        opportunities = []
-
-        # ── Pairs Trading ─────────────────────────────────
-        try:
-            coint_pairs = self.analytics.find_cointegrated_pairs(min_obs=60)
-
-            for pair_info in coint_pairs:
-                sym_a = pair_info["sym_a"]
-                sym_b = pair_info["sym_b"]
-                zscore_data = self.analytics.get_spread_zscore(sym_a, sym_b)
-                if zscore_data is None:
-                    continue
-
-                signal = zscore_data["signal"]
-                if signal in ("hold", "exit"):
-                    continue  # No actionable entry
-
-                zscore = zscore_data["zscore"]
-                confidence = zscore_data["confidence"]
-                half_life = zscore_data["half_life"]
-                hedge_ratio = zscore_data["hedge_ratio"]
-
-                # Determine strategy name and rationale
-                if signal == "buy_spread":
-                    strategy = f"Pairs Long {sym_a} / Short {sym_b}"
-                    rationale = (
-                        f"Cointegrated pair: z={zscore:+.2f} (entry <-1.0) | "
-                        f"Half-life: {half_life:.1f} periods | "
-                        f"Hedge ratio: {hedge_ratio:.3f}"
-                    )
-                elif signal == "sell_spread":
-                    strategy = f"Pairs Short {sym_a} / Long {sym_b}"
-                    rationale = (
-                        f"Cointegrated pair: z={zscore:+.2f} (entry >+1.0) | "
-                        f"Half-life: {half_life:.1f} periods | "
-                        f"Hedge ratio: {hedge_ratio:.3f}"
-                    )
-                elif signal == "stop":
-                    strategy = f"Pairs STOP {sym_a}/{sym_b}"
-                    rationale = (
-                        f"Spread blown out: z={zscore:+.2f} (>4σ) | "
-                        f"Close position immediately"
-                    )
-                else:
-                    continue
-
-                # Estimate P&L: spread mean reversion over half-life
-                spread_std = zscore_data["spread_std"]
-                position_size = self.initial_capital * 0.02  # 2% per leg
-                # Expected profit: spread reverts ~1 std ≈ hedge-ratio-adjusted move
-                expected_return = min(abs(zscore) * 5, 30.0)  # Cap at 30%
-                max_profit = position_size * 0.08  # 8% upside from reversion
-                max_loss = position_size * 0.04    # 4% stop (spread keeps diverging)
-
-                # Use CRYPTO_SPOT for pairs (market-neutral, not directional)
-                opp = Opportunity(
-                    symbol=f"{sym_a}/{sym_b}",
-                    asset_class=AssetClass.CRYPTO_SPOT,
-                    strategy=strategy,
-                    expected_return=expected_return,
-                    max_profit=max_profit,
-                    max_loss=max_loss,
-                    probability_of_profit=0.55 + confidence * 0.20,
-                    risk_reward_ratio=max_profit / max_loss if max_loss > 0 else 2.0,
-                    iv_rank=50.0,  # Neutral (not IV-driven)
-                    score=35.0 + confidence * 30 + min(abs(zscore), 3) * 5,
-                    rationale=rationale,
-                )
-                opportunities.append(opp)
-
-            if coint_pairs:
-                logger.info(
-                    f"Stat arb scan: {len(coint_pairs)} cointegrated pairs, "
-                    f"{len(opportunities)} actionable signals"
-                )
-        except Exception as e:
-            logger.debug(f"Pairs scan error: {e}")
-
-        # ── Funding Rate Arbitrage ────────────────────────
-        try:
-            funding_opps = 0
-            for symbol in self.CRYPTO_PERPETUALS[:20]:  # Top-20 liquid perps
-                base = symbol.split("-")[0]
-                funding_rate = await self._fetch_funding_rate(symbol)
-
-                spot_price = await self.engine._get_crypto_price(base)
-                perp_price = await self.engine._get_crypto_price(symbol)
-                if spot_price <= 0 or perp_price <= 0:
-                    continue
-
-                arb_signal = self.analytics.get_funding_rate_arb_signal(
-                    symbol, funding_rate, spot_price, perp_price
-                )
-
-                if arb_signal["signal"] == "neutral":
-                    continue
-                if arb_signal["confidence"] < 0.3:
-                    continue
-
-                annual_carry = arb_signal["annualized_carry"]
-                position_size = self.initial_capital * 0.02
-
-                if arb_signal["signal"] == "short_perp_long_spot":
-                    strategy = f"Funding Arb: Short {symbol} + Long {base}"
-                    rationale = (
-                        f"High funding rate: {funding_rate*100:.4f}% per 8h "
-                        f"({annual_carry:.1f}% annualized carry) | "
-                        f"Basis: {arb_signal['basis']*100:.3f}%"
-                    )
-                else:  # long_perp_short_spot
-                    strategy = f"Funding Arb: Long {symbol} + Short {base}"
-                    rationale = (
-                        f"Negative funding: {funding_rate*100:.4f}% per 8h "
-                        f"({annual_carry:.1f}% annualized carry) | "
-                        f"Basis: {arb_signal['basis']*100:.3f}%"
-                    )
-
-                # Carry trade: expected return is the annualized carry (pro-rated)
-                expected_return = min(annual_carry / 12, 10.0)  # Monthly, capped
-                max_profit = position_size * expected_return / 100
-                max_loss = position_size * 0.02  # 2% stop if basis blows out
-
-                opp = Opportunity(
-                    symbol=f"{base}-FUNDING",
-                    asset_class=AssetClass.CRYPTO_PERPETUAL,
-                    strategy=strategy,
-                    expected_return=expected_return,
-                    max_profit=max_profit,
-                    max_loss=max_loss,
-                    probability_of_profit=0.70 + arb_signal["confidence"] * 0.15,
-                    risk_reward_ratio=max_profit / max_loss if max_loss > 0 else 3.0,
-                    iv_rank=40.0,
-                    score=40.0 + arb_signal["confidence"] * 25 + min(annual_carry, 100) * 0.2,
-                    rationale=rationale,
-                )
-                opportunities.append(opp)
-                funding_opps += 1
-
-            if funding_opps > 0:
-                logger.info(f"Funding rate arb: {funding_opps} opportunities")
-        except Exception as e:
-            logger.debug(f"Funding arb scan error: {e}")
-
-        return opportunities
-
-    async def _score_crypto_spot(self, symbol: str) -> Optional[Opportunity]:
-        """Score crypto spot opportunity using ML signals."""
-        try:
-            # Get ML prediction
-            ml_pred = self.analytics.get_ml_prediction(symbol)
-
-            # Determine direction based on ML
-            if ml_pred.action == 2:  # Buy signal
-                strategy = "Spot Long"
-                direction = "bullish"
-            elif ml_pred.action == 0:  # Sell signal
-                strategy = "Spot Short"  # Or just don't buy
-                direction = "bearish"
-            else:
-                # Hold signal - still create opportunity but lower score
-                strategy = "Spot Long"
-                direction = "neutral"
-
-            # Get risk metrics
-            risk = self.analytics.compute_risk_metrics(symbol)
-
-            # Score based on ML confidence and risk metrics
-            base_score = ml_pred.confidence * 100
-
-            # Adjust for regime
-            if self.market_regime == MarketRegime.BULL_MARKET and direction == "bullish":
-                base_score *= 1.2
-            elif self.market_regime == MarketRegime.BEAR_MARKET and direction == "bearish":
-                base_score *= 1.1
-
-            # Penalize high volatility for spot (we prefer stable entries)
-            if risk.volatility_forecast > 0.5:
-                base_score *= 0.8
-
-            # Estimate P&L
-            position_size = self.initial_capital * 0.02  # 2% position
-            expected_return = ml_pred.lstm_pred * 100 if ml_pred.lstm_pred else 5
-            max_profit = position_size * 0.10  # 10% upside
-            max_loss = position_size * 0.05   # 5% stop loss
-
-            return Opportunity(
-                symbol=symbol,
-                asset_class=AssetClass.CRYPTO_SPOT,
-                strategy=strategy,
-                score=base_score,
-                expected_return=expected_return,
-                probability_of_profit=ml_pred.confidence,
-                risk_reward_ratio=max_profit / max_loss if max_loss > 0 else 2.0,
-                iv_rank=50,  # N/A for spot, use neutral value
-                max_profit=max_profit,
-                max_loss=max_loss,
-                rationale=f"ML Signal: {ml_pred.action_name} (conf: {ml_pred.confidence:.1%}) | "
-                         f"Regime: {ml_pred.regime}",
-            )
-        except Exception as e:
-            logger.debug(f"Error scoring {symbol} spot: {e}")
-            return None
 
     # ===================
     # OPPORTUNITY SCORING
@@ -1921,57 +1048,15 @@ class MasterQuantBot:
             rationale=rationale,
         )
 
-    async def _fetch_funding_rate(self, symbol: str) -> float:
-        """
-        Fetch real funding rate from Binance Futures API.
-
-        Falls back to a neutral estimate on failure. Caches results
-        for 30 minutes to avoid excessive API calls.
-        """
-        base = symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
-        cache_key = base
-
-        # Check cache
-        if cache_key in self._funding_rate_cache:
-            rate, ts = self._funding_rate_cache[cache_key]
-            if datetime.now() - ts < self._funding_rate_cache_ttl:
-                return rate
-
-        try:
-            import httpx
-            binance_symbol = f"{base}USDT"
-            url = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={binance_symbol}&limit=1"
-
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data and len(data) > 0:
-                        rate = float(data[0]["fundingRate"])
-                        self._funding_rate_cache[cache_key] = (rate, datetime.now())
-                        return rate
-        except Exception as e:
-            logger.debug(f"Funding rate API failed for {symbol}: {e}")
-
-        # Fallback: neutral funding rate (typical average ~0.01% per 8h)
-        fallback = 0.0001
-        self._funding_rate_cache[cache_key] = (fallback, datetime.now())
-        return fallback
-
     async def _score_crypto_perpetual(self, symbol: str) -> Optional[Opportunity]:
         """Score crypto perpetual with ML enhancement."""
         base = symbol.split("-")[0]
         price = await self.engine._get_crypto_price(symbol)
 
-        # Skip if no valid price (no synthetic fallback)
-        if price <= 0:
-            logger.debug(f"Skipping {symbol} - no live price available")
-            return None
-
         # Get ML prediction for crypto
         ml_pred = self.analytics.get_ml_prediction(symbol)
 
-        funding_rate = await self._fetch_funding_rate(symbol)
+        funding_rate = np.random.uniform(-0.001, 0.003)
 
         if ml_pred.action == 0:  # Sell signal
             strategy = "Short Perpetual"
@@ -1992,7 +1077,7 @@ class MasterQuantBot:
 
         max_profit = price * 0.10
         max_loss = price * 0.05
-        risk_reward = max_profit / max_loss if max_loss > 0 else 2.0
+        risk_reward = max_profit / max_loss
 
         score = (
             expected_return * 0.30 +
@@ -2019,11 +1104,6 @@ class MasterQuantBot:
         """Score crypto option opportunity."""
         symbol = f"{base_asset}-OPT"
         price = await self.engine._get_crypto_price(symbol)
-
-        # Skip if no valid price (no synthetic fallback)
-        if price <= 0:
-            logger.debug(f"Skipping {symbol} - no live price available")
-            return None
 
         iv = 0.65 + np.random.uniform(-0.1, 0.2)
 
@@ -2071,57 +1151,12 @@ class MasterQuantBot:
     # ===================
 
     async def _execute_best_opportunities(self):
-        """Execute opportunities using RL-informed decisions.
-
-        IMPORTANT: This now requires trained models before executing trades.
-        No more "exploration bypass" - we don't trade with random weights.
-        """
+        """Execute opportunities using RL-informed decisions."""
         if not self.opportunities:
             return
 
-        # CRITICAL: Check if models are trained before allowing trades
-        if self.training_required and not self.models_trained:
-            meets_req, reason = self.model_pretrainer.meets_training_requirements()
-            if not meets_req:
-                self._add_commentary(
-                    f"⏸️ Trading paused - models not trained: {reason}. "
-                    f"Run training pipeline first!",
-                    "system"
-                )
-                return
-            else:
-                self.models_trained = True
-                self._add_commentary(
-                    "✅ Models trained - enabling intelligent trading",
-                    "system"
-                )
-
-        # ============================================================
-        # DRAWDOWN CIRCUIT BREAKER
-        # ============================================================
-        # Halt new positions when portfolio drawdown exceeds thresholds.
-        # - Soft limit (10%): reduce max new positions from 3 to 1
-        # - Hard limit (20%): halt ALL new position opening
-        # This prevents compounding losses during adverse regimes.
-        portfolio_drawdown = -self.engine.total_pnl / self.initial_capital
-        max_new_positions = 3
-
-        if portfolio_drawdown >= 0.20:
-            self._add_commentary(
-                f"🛑 CIRCUIT BREAKER: Portfolio drawdown {portfolio_drawdown:.1%} "
-                f"exceeds 20% hard limit — halting new trades until recovery",
-                "risk"
-            )
-            return
-        elif portfolio_drawdown >= 0.10:
-            max_new_positions = 1
-            self._add_commentary(
-                f"⚠️ DRAWDOWN WARNING: {portfolio_drawdown:.1%} — "
-                f"reducing max new positions to {max_new_positions}",
-                "risk"
-            )
-
         executed = 0
+        max_new_positions = 3
 
         for opp in self.opportunities[:10]:
             if executed >= max_new_positions:
@@ -2137,59 +1172,17 @@ class MasterQuantBot:
             if self._has_position(opp.symbol):
                 continue
 
-            # Construct state for ML prediction
+            # RL decision - should we take this trade?
             state = self.analytics._construct_state(opp.symbol, {
                 "position_size": 0,
                 "vix": self.vix_level,
             })
 
-            # Get ensemble prediction from PRE-TRAINED models
-            ml_prediction = self.model_pretrainer.predict(state)
-            action = ml_prediction["action"]
-            confidence = ml_prediction["confidence"]
+            # Get RL action
+            action = self.analytics.dqn.select_action(state, training=self.is_running)
 
-            # Get alpha signals (sentiment, on-chain, fear/greed)
-            try:
-                alpha_signal = await self.alpha_manager.get_combined_alpha(opp.symbol)
-                alpha_boost = alpha_signal.get("combined_signal", 0) * 10  # -10 to +10
-            except Exception:
-                alpha_boost = 0
-
-            # INTELLIGENT TRADING DECISION (no more random exploration bypass!)
-            # Criteria for execution:
-            # 1. ML prediction is BUY (action=2) or SELL (action=0), not HOLD (action=1)
-            # 2. ML confidence > 60%
-            # 3. Opportunity score >= 35 (from traditional analysis)
-            # 4. Optional: alpha sources support the trade
-
-            ml_agrees = action != 1  # Not hold
-            score_threshold = self._get_dynamic_score_threshold()
-            conf_threshold = self._get_dynamic_confidence_threshold()
-            ml_confident = confidence >= conf_threshold
-            score_sufficient = opp.score >= score_threshold
-            alpha_supports = (
-                (action == 2 and alpha_boost > 0) or  # Buy + bullish alpha
-                (action == 0 and alpha_boost < 0) or  # Sell + bearish alpha
-                abs(alpha_boost) < 3  # Neutral alpha doesn't block
-            )
-
-            # Adjusted score with alpha
-            adjusted_score = opp.score + alpha_boost
-
-            # Correlation concentration check: max 3 same-sector same-direction
-            trade_side = "long" if action == 2 else "short"
-            corr_ok = self._check_correlation_limit(opp.symbol, trade_side)
-
-            # Execute only with proper ML support (NO RANDOM TRADING!)
-            should_execute = (
-                ml_agrees and
-                ml_confident and
-                score_sufficient and
-                alpha_supports and
-                corr_ok
-            )
-
-            if should_execute:
+            # Only execute if RL agrees (action 2, 3, 4 = buy)
+            if opp.ml_prediction and opp.ml_prediction.action != 1:  # Not hold
                 success = await self._execute_opportunity(opp)
 
                 if success:
@@ -2197,142 +1190,21 @@ class MasterQuantBot:
                     position_size = opp.max_loss / self.initial_capital
                     self.current_allocations[opp.asset_class] = current_alloc + position_size
 
-                    # Store state for continued RL training (online learning)
+                    # Store state for RL training
                     self.last_state = state
                     self.last_action = action
 
-                    # Log the intelligent decision
-                    self._add_commentary(
-                        f"🎯 ML-INFORMED TRADE: {opp.symbol} | "
-                        f"Action: {'BUY' if action == 2 else 'SELL'} | "
-                        f"Confidence: {confidence:.1%} | "
-                        f"Score: {adjusted_score:.1f} (alpha: {alpha_boost:+.1f})",
-                        "execution"
-                    )
-            else:
-                # Log rejection reason for transparency
-                if not ml_agrees:
-                    rejection = "ML says HOLD"
-                elif not ml_confident:
-                    rejection = f"Low confidence ({confidence:.1%} < {conf_threshold:.0%})"
-                elif not score_sufficient:
-                    rejection = f"Score too low ({opp.score:.1f} < {score_threshold:.0f})"
-                elif not corr_ok:
-                    rejection = "Sector concentration limit reached"
-                else:
-                    rejection = "Alpha signal conflicts"
-
-                logger.debug(f"Rejected {opp.symbol}: {rejection}")
-
         if executed > 0:
             self._add_commentary(
-                f"📈 Executed {executed} intelligent trades | "
-                f"DQN Epsilon: {self.analytics.dqn.epsilon:.3f} | "
-                f"Models: {'TRAINED ✅' if self.models_trained else 'UNTRAINED ❌'}",
+                f"📈 Executed {executed} positions | "
+                f"RL Training Step: {self.analytics.training_step} | "
+                f"DQN Epsilon: {self.analytics.dqn.epsilon:.3f}",
                 "execution"
             )
-        else:
-            # Log why no trades executed (for debugging)
-            top_opps = self.opportunities[:3] if self.opportunities else []
-            if top_opps:
-                rejection_reasons = []
-                for opp in top_opps:
-                    reason = f"{opp.symbol}: Score {opp.score:.1f}"
-                    if opp.ml_prediction and opp.ml_prediction.action == 1:
-                        reason += " (ML: HOLD)"
-                    rejection_reasons.append(reason)
-                self._add_commentary(
-                    f"⏸️ No trades executed. Top opportunities: {', '.join(rejection_reasons)}",
-                    "scan"
-                )
-
-    def _get_dynamic_score_threshold(self) -> float:
-        """
-        Regime-adjusted score threshold for trade execution.
-
-        Instead of a fixed score >= 35, adapts to market conditions:
-        - High volatility: very selective (50) — only high-conviction trades
-        - Bear market: cautious (45) — tighter filter
-        - Range-bound: default (35) — normal selectivity
-        - Bull market: more aggressive (30) — capture momentum
-        - Low volatility: slightly aggressive (28) — more opportunities
-        """
-        thresholds = {
-            MarketRegime.HIGH_VOLATILITY: 50,
-            MarketRegime.BEAR_MARKET: 45,
-            MarketRegime.RANGE_BOUND: 35,
-            MarketRegime.BULL_MARKET: 30,
-            MarketRegime.LOW_VOLATILITY: 28,
-        }
-        return thresholds.get(self.market_regime, 35)
-
-    def _get_dynamic_confidence_threshold(self) -> float:
-        """
-        Regime-adjusted ML confidence threshold.
-
-        Higher bar in dangerous regimes, lower in favorable ones.
-        """
-        thresholds = {
-            MarketRegime.HIGH_VOLATILITY: 0.75,
-            MarketRegime.BEAR_MARKET: 0.70,
-            MarketRegime.RANGE_BOUND: 0.60,
-            MarketRegime.BULL_MARKET: 0.55,
-            MarketRegime.LOW_VOLATILITY: 0.50,
-        }
-        return thresholds.get(self.market_regime, 0.60)
-
-    def _vol_adjusted_size(self, symbol: str, base_pct: float, max_usd: float,
-                              leverage: float = 1.0) -> float:
-        """
-        Compute volatility-adjusted position size.
-
-        Instead of fixed % of cash, targets a fixed dollar-risk per position
-        by scaling inversely with the asset's volatility.
-
-        Higher vol → smaller position, Lower vol → larger position.
-        This normalizes the risk contribution of each trade.
-
-        Args:
-            symbol: Asset symbol
-            base_pct: Base position size as fraction of cash (e.g. 0.05)
-            max_usd: Hard dollar cap
-            leverage: Position leverage multiplier
-        """
-        base_size = self.engine.cash * base_pct
-
-        # Get asset volatility from return history
-        base_symbol = symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
-        vol_annual = 0.40  # Default: 40% annualized
-
-        for sym, returns in self.analytics.return_history.items():
-            if base_symbol in sym and len(returns) >= 20:
-                vol_annual = float(np.std(returns[-60:]) * np.sqrt(252))
-                break
-
-        # Target volatility: 20% annualized (moderate risk)
-        # Scale: position shrinks when asset vol > target, grows when below
-        target_vol = 0.20
-        vol_scalar = target_vol / max(vol_annual, 0.05)  # Floor at 5% vol
-        vol_scalar = np.clip(vol_scalar, 0.25, 2.0)  # Don't go below 25% or above 200% of base
-
-        # Account for leverage (higher leverage → smaller base position)
-        leverage_adj = 1.0 / max(leverage, 1.0)
-
-        adjusted_size = base_size * vol_scalar * leverage_adj
-        return min(adjusted_size, max_usd)
 
     async def _execute_opportunity(self, opp: Opportunity) -> bool:
         """Execute a single opportunity."""
         try:
-            # CRITICAL: Check market hours for stock/ETF/commodity options
-            if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
-                if not is_market_open():
-                    self._add_commentary(
-                        f"⛔ BLOCKED: Cannot execute {opp.symbol} - market is CLOSED",
-                        "execution"
-                    )
-                    return False
-
             # If live trading is enabled, execute on real exchanges
             if self.live_trading_enabled and self.broker_manager:
                 live_success = await self._execute_live_trade(opp)
@@ -2355,17 +1227,14 @@ class MasterQuantBot:
 
             elif opp.asset_class == AssetClass.CRYPTO_PERPETUAL:
                 side = "long" if "Long" in opp.strategy else "short"
-                perp_size = self._vol_adjusted_size(opp.symbol, base_pct=0.05, max_usd=5000, leverage=2.0)
                 position = await self.engine.open_crypto_perpetual(
                     symbol=opp.symbol,
                     side=side,
-                    size_usd=perp_size,
+                    size_usd=min(5000, self.engine.cash * 0.05),
                     leverage=2.0,
                 )
                 if position:
-                    trade_id = self._record_trade(opp, "crypto_perpetual", position.entry_price, position.size)
-                    position.trade_id = trade_id
-                    position.opened_at = datetime.now()
+                    self._record_trade(opp, "crypto_perpetual")
                 return position is not None
 
             elif opp.asset_class == AssetClass.CRYPTO_OPTIONS:
@@ -2376,35 +1245,16 @@ class MasterQuantBot:
                 price = await self.engine._get_crypto_price(f"{base}-OPT")
                 strike = round(price * (1.05 if opt_type == "call" else 0.95), -2)
 
-                opt_size = self._vol_adjusted_size(opp.symbol, base_pct=0.03, max_usd=3000)
                 position = await self.engine.open_crypto_option(
                     base_asset=base,
                     option_type=opt_type,
                     strike=strike,
                     expiry_days=30,
-                    size_usd=opt_size,
+                    size_usd=min(3000, self.engine.cash * 0.03),
                     is_buy=is_buy,
                 )
                 if position:
-                    trade_id = self._record_trade(opp, "crypto_option", position.entry_price, position.size)
-                    position.trade_id = trade_id
-                    position.opened_at = datetime.now()
-                return position is not None
-
-            elif opp.asset_class == AssetClass.CRYPTO_SPOT:
-                # Crypto spot buy/sell
-                side = "buy" if "Long" in opp.strategy else "sell"
-                size_usd = self._vol_adjusted_size(opp.symbol, base_pct=0.02, max_usd=2000)
-
-                position = await self.engine.open_crypto_spot(
-                    symbol=opp.symbol,
-                    side=side,
-                    size_usd=size_usd,
-                )
-                if position:
-                    trade_id = self._record_trade(opp, "crypto_spot", position.entry_price, position.size)
-                    position.trade_id = trade_id
-                    position.opened_at = datetime.now()
+                    self._record_trade(opp, "crypto_option")
                 return position is not None
 
         except Exception as e:
@@ -2413,149 +1263,18 @@ class MasterQuantBot:
 
         return False
 
-    def _record_trade(self, opp: Opportunity, trade_type: str, price: float = 0, size: float = 0) -> str:
-        """Record trade for RL training and analysis with LLM summary. Returns trade_id."""
-        from ..llm.analyst import get_quant_analyst
-
-        trade_id = str(uuid.uuid4())[:8]
-        side = "long" if "Long" in opp.strategy or "Buy" in opp.strategy or "Call" in opp.strategy else "short"
-
-        # Use explicit checks for price/size to avoid falsy 0 issues
-        if price > 0:
-            trade_price = price
-        elif opp.max_profit and opp.max_profit > 0:
-            trade_price = opp.max_profit / 100
-        else:
-            trade_price = 0
-
-        trade_size = size if size > 0 else min(5000, self.initial_capital * 0.05)
-
-        # Build comprehensive trade record with full details
-        trade_record = {
-            "id": trade_id,
+    def _record_trade(self, opp: Opportunity, trade_type: str):
+        """Record trade for RL training and analysis."""
+        self.trade_history.append({
             "timestamp": datetime.now().isoformat(),
             "symbol": opp.symbol,
-            "asset_class": opp.asset_class.value,
             "type": trade_type,
             "strategy": opp.strategy,
-            "side": side,
-            # Entry details (keep both 'price' and 'entry_price' for frontend compatibility)
-            "price": trade_price,  # Legacy field for frontend
-            "entry_price": trade_price,
-            "size": trade_size,
-            # Exit details (populated when position closes)
-            "status": "open",  # open, closed, stopped, target_hit
-            "exit_price": None,
-            "exit_timestamp": None,
-            "close_reason": None,
-            # P&L tracking
-            "realized_pnl": None,
-            "realized_pnl_pct": None,
-            "duration_minutes": None,
-            # ML/Analysis context
-            "score": round(opp.score, 1),
+            "score": opp.score,
             "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
-            "iv_rank": opp.iv_rank,
             "regime": self.market_regime.value,
-            "rationale": opp.rationale,
             "live_executed": self.live_trading_enabled,
-            "llm_summary": "",  # Will be populated async
-        }
-
-        # Generate LLM summary asynchronously (non-blocking)
-        async def generate_summary():
-            try:
-                analyst = get_quant_analyst()
-                summary = await analyst.generate_trade_summary(trade_record)
-                trade_record["llm_summary"] = summary
-            except Exception as e:
-                logger.debug(f"LLM summary generation failed: {e}")
-                trade_record["llm_summary"] = f"{opp.strategy} - {opp.rationale[:80] if opp.rationale else 'ML signal'}"
-
-        # Schedule async summary generation
-        asyncio.create_task(generate_summary())
-
-        self.trade_history.append(trade_record)
-
-        # Log trade to activity logger (async, non-blocking)
-        async def log_trade_activity():
-            await self.activity_logger.log_trade(
-                subtype=EventSubtype.SUBMIT,
-                symbol=opp.symbol,
-                asset_class=opp.asset_class.value,
-                message=f"Trade executed: {side.upper()} {opp.symbol} via {trade_type}",
-                broker="live" if self.live_trading_enabled else "paper",
-                value=trade_size,
-                details={
-                    "trade_id": trade_id,
-                    "strategy": opp.strategy,
-                    "entry_price": trade_price,
-                    "size": trade_size,
-                    "score": opp.score,
-                    "ml_confidence": opp.ml_prediction.confidence if opp.ml_prediction else 0,
-                    "iv_rank": opp.iv_rank,
-                    "regime": self.market_regime.value,
-                    "rationale": opp.rationale[:200] if opp.rationale else None,
-                }
-            )
-
-        asyncio.create_task(log_trade_activity())
-
-        return trade_id
-
-    def _update_trade_closed(
-        self,
-        trade_id: str,
-        exit_price: float,
-        realized_pnl: float,
-        close_reason: str,
-    ):
-        """Update a trade record when position is closed."""
-        for trade in self.trade_history:
-            if trade.get("id") == trade_id:
-                now = datetime.now()
-                entry_time = datetime.fromisoformat(trade["timestamp"])
-                duration_minutes = (now - entry_time).total_seconds() / 60
-
-                trade["status"] = "closed"
-                trade["exit_price"] = round(exit_price, 4)
-                trade["exit_timestamp"] = now.isoformat()
-                trade["close_reason"] = close_reason
-                trade["realized_pnl"] = round(realized_pnl, 2)
-                trade["realized_pnl_pct"] = round(realized_pnl / trade["size"] * 100, 2) if trade["size"] else 0
-                trade["duration_minutes"] = round(duration_minutes, 1)
-
-                # Log trade close to activity logger
-                async def log_close():
-                    emoji = "profit" if realized_pnl >= 0 else "loss"
-                    await self.activity_logger.log_trade(
-                        subtype=EventSubtype.FILL,
-                        symbol=trade["symbol"],
-                        asset_class=trade["asset_class"],
-                        message=f"Trade closed: {trade['symbol']} {close_reason} | P&L: ${realized_pnl:+,.2f}",
-                        broker="live" if trade["live_executed"] else "paper",
-                        value=realized_pnl,
-                        details={
-                            "trade_id": trade_id,
-                            "entry_price": trade["entry_price"],
-                            "exit_price": exit_price,
-                            "realized_pnl": realized_pnl,
-                            "realized_pnl_pct": trade["realized_pnl_pct"],
-                            "duration_minutes": duration_minutes,
-                            "close_reason": close_reason,
-                        }
-                    )
-
-                asyncio.create_task(log_close())
-                break
-
-    def get_trade_log(self, limit: int = 50) -> List[Dict]:
-        """Get formatted trade log for display."""
-        return sorted(
-            self.trade_history[-limit:],
-            key=lambda x: x.get("timestamp", ""),
-            reverse=True
-        )
+        })
 
     async def _execute_live_trade(self, opp: Opportunity) -> bool:
         """Execute a trade on live exchanges via broker manager."""
@@ -2568,13 +1287,6 @@ class MasterQuantBot:
             position_size = min(5000, self.initial_capital * 0.05)  # 5% max per position
 
             if opp.asset_class in [AssetClass.STOCK_OPTIONS, AssetClass.ETF_OPTIONS, AssetClass.COMMODITY_OPTIONS]:
-                # CRITICAL: Double-check market hours for stock-based assets
-                if not is_market_open():
-                    self._add_commentary(
-                        f"⛔ LIVE BLOCKED: {opp.symbol} - stock market CLOSED",
-                        "execution"
-                    )
-                    return False
                 # For options, we trade the underlying for now
                 # TODO: Integrate with options broker when available
                 underlying = symbol.replace("-CALL", "").replace("-PUT", "").split("-")[0]
@@ -2656,56 +1368,6 @@ class MasterQuantBot:
 
         return False
 
-    def _check_correlation_limit(self, symbol: str, side: str, max_correlated: int = 3) -> bool:
-        """
-        Check if opening a new position would exceed correlation concentration limits.
-
-        Prevents stacking multiple highly-correlated bets (e.g., 3 long crypto
-        positions are effectively 3x the same directional trade).
-
-        Uses sector classification as a proxy for correlation. Assets in the same
-        sector (crypto, tech, etc.) are assumed to be correlated at ~0.7+.
-
-        Args:
-            symbol: The asset to trade
-            side: "long" or "short" (or "buy"/"sell")
-            max_correlated: Max same-sector same-direction positions allowed
-
-        Returns:
-            True if the trade is allowed, False if it would exceed limits.
-        """
-        from ..signals.engine import MultiFactorSignalEngine
-
-        base = symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
-        new_sector = MultiFactorSignalEngine.SYMBOL_SECTOR.get(base)
-
-        # If no sector mapping, allow the trade (unknown correlation)
-        if new_sector is None:
-            return True
-
-        is_long = side in ("long", "buy")
-
-        # Count existing positions in the same sector + same direction
-        same_sector_count = 0
-
-        for pos in self.engine.crypto_positions.values():
-            pos_base = pos.symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
-            pos_sector = MultiFactorSignalEngine.SYMBOL_SECTOR.get(pos_base)
-
-            if pos_sector == new_sector:
-                pos_is_long = getattr(pos, 'side', 'long') == 'long'
-                if pos_is_long == is_long:
-                    same_sector_count += 1
-
-        for pos in self.engine.positions.values():
-            pos_base = pos.symbol.split("-")[0].replace("USDT", "").replace("/USD", "")
-            pos_sector = MultiFactorSignalEngine.SYMBOL_SECTOR.get(pos_base)
-
-            if pos_sector == new_sector:
-                same_sector_count += 1  # Options are directional by nature
-
-        return same_sector_count < max_correlated
-
     # ===================
     # BOT LIFECYCLE
     # ===================
@@ -2723,18 +1385,6 @@ class MasterQuantBot:
             "ML Models Active: DQN, PPO, LSTM, Transformer, HMM, VAE, GARCH | "
             "Scanning all markets...",
             "system"
-        )
-
-        # Log startup to activity logger
-        await self.activity_logger.log_lifecycle(
-            subtype=EventSubtype.START,
-            message=f"Master Quant Bot started with ${self.initial_capital:,.0f} capital, mode={self.mode.value}",
-            details={
-                "capital": self.initial_capital,
-                "mode": self.mode.value,
-                "ml_models": ["DQN", "PPO", "LSTM", "Transformer", "HMM", "VAE", "GARCH"],
-                "asset_classes": [ac.value for ac in AssetClass],
-            }
         )
 
         self._task = asyncio.create_task(self._run_loop())
@@ -2759,32 +1409,15 @@ class MasterQuantBot:
             "system"
         )
 
-        # Log shutdown to activity logger
-        await self.activity_logger.log_lifecycle(
-            subtype=EventSubtype.STOP,
-            message=f"Master Quant Bot stopped after {self.analytics.training_step} RL training steps",
-            details={
-                "rl_training_steps": self.analytics.training_step,
-                "episodes_completed": len(self.analytics.episode_rewards),
-                "final_pnl": self.engine.total_pnl,
-                "trades_executed": len(self.trade_history),
-            }
-        )
-
     async def _run_loop(self):
         """Main trading loop with RL training."""
         scan_interval = 60
         position_check_interval = 30
         rl_train_interval = 10
-        live_price_update_interval = 300  # Update live prices every 5 minutes
 
         last_scan = datetime.min
         last_position_check = datetime.min
         last_rl_train = datetime.min
-        last_price_update = datetime.min
-
-        # Load real market data on first run
-        await self._load_real_market_data()
 
         while self.is_running:
             try:
@@ -2807,26 +1440,12 @@ class MasterQuantBot:
                     await self._train_rl_models()
                     last_rl_train = now
 
-                # Update live prices from Binance
-                if (now - last_price_update).seconds >= live_price_update_interval:
-                    await self._update_live_prices()
-                    last_price_update = now
-
                 await asyncio.sleep(5)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in master bot loop: {e}")
-                # Log error to activity logger
-                await self.activity_logger.log_error(
-                    subtype=EventSubtype.EXCEPTION,
-                    message=f"Error in bot main loop: {str(e)[:200]}",
-                    details={
-                        "error_type": type(e).__name__,
-                        "error_message": str(e),
-                    }
-                )
                 await asyncio.sleep(10)
 
     async def _manage_positions(self):
@@ -2837,48 +1456,17 @@ class MasterQuantBot:
         for pos_id, pos in list(self.engine.crypto_positions.items()):
             pos.current_price = await self.engine._get_crypto_price(pos.symbol)
 
-            # Skip if no valid price
-            if pos.current_price <= 0:
-                continue
-
-            # Minimum hold time before allowing stop/take-profit (prevent instant closes)
-            MIN_HOLD_MINUTES = 2
-            opened_at = getattr(pos, 'opened_at', None)
-            if opened_at:
-                hold_time = (datetime.now() - opened_at).total_seconds() / 60
-                if hold_time < MIN_HOLD_MINUTES:
-                    continue  # Don't check stops yet, position too new
-
             # Check stop loss / take profit
-            close_reason = None
             if pos.side == "long":
                 if pos.current_price <= pos.stop_loss:
-                    close_reason = "Stop loss hit"
+                    await self.engine.close_crypto_perpetual(pos_id, "Stop loss hit")
                 elif pos.current_price >= pos.take_profit:
-                    close_reason = "Take profit hit"
+                    await self.engine.close_crypto_perpetual(pos_id, "Take profit hit")
             else:
                 if pos.current_price >= pos.stop_loss:
-                    close_reason = "Stop loss hit"
+                    await self.engine.close_crypto_perpetual(pos_id, "Stop loss hit")
                 elif pos.current_price <= pos.take_profit:
-                    close_reason = "Take profit hit"
-
-            if close_reason:
-                # Calculate P&L before closing
-                realized_pnl = pos.calculate_pnl()
-                exit_price = pos.current_price
-                trade_id = getattr(pos, 'trade_id', None)
-
-                # Close the position
-                await self.engine.close_crypto_perpetual(pos_id, close_reason)
-
-                # Update trade record with exit details
-                if trade_id:
-                    self._update_trade_closed(
-                        trade_id=trade_id,
-                        exit_price=exit_price,
-                        realized_pnl=realized_pnl,
-                        close_reason=close_reason,
-                    )
+                    await self.engine.close_crypto_perpetual(pos_id, "Take profit hit")
 
     async def _train_rl_models(self):
         """Train RL models with current market feedback."""
@@ -2941,10 +1529,6 @@ class MasterQuantBot:
         """Get comprehensive bot status with ML metrics."""
         engine_status = self.engine.get_status()
 
-        # Get training status
-        meets_req, training_reason = self.model_pretrainer.meets_training_requirements()
-        training_metrics = self.model_pretrainer.training_metrics
-
         return {
             "is_running": self.is_running,
             "mode": self.mode.value,
@@ -2972,17 +1556,6 @@ class MasterQuantBot:
                 "total_episodes": len(self.analytics.episode_rewards),
                 "hmm_fitted": self.analytics.hmm_fitted,
                 "garch_fitted": self.analytics.garch_fitted,
-                "real_data_loaded": getattr(self, '_real_data_loaded', False),
-                "data_source": "Binance.US" if getattr(self, '_real_data_loaded', False) else "Synthetic",
-            },
-            # NEW: Training status
-            "training_status": {
-                "models_trained": self.models_trained,
-                "meets_requirements": meets_req,
-                "status_message": training_reason,
-                "epochs_completed": training_metrics.epochs_completed,
-                "total_samples": training_metrics.total_samples,
-                "checkpoint_exists": (CHECKPOINT_DIR / "model_checkpoint.pkl").exists(),
             },
             "last_scan": self.last_full_scan.isoformat() if self.last_full_scan else None,
             "opportunities_count": len(self.opportunities),
@@ -3085,81 +1658,3 @@ def create_master_bot(
     global _master_bot
     _master_bot = MasterQuantBot(initial_capital=capital, mode=mode)
     return _master_bot
-
-
-async def run_training_pipeline(
-    days_of_data: int = 180,
-    training_epochs: int = 40  # Optimized for ~1 hour training
-) -> Dict:
-    """
-    Run the full ML training pipeline.
-
-    This should be run BEFORE starting live/paper trading to ensure
-    models are properly trained on historical data.
-
-    Args:
-        days_of_data: Number of days of historical data to download
-        training_epochs: Number of training epochs
-
-    Returns:
-        Training results including backtest performance
-    """
-    from .backtester import run_full_training_pipeline
-
-    logger.info("="*60)
-    logger.info("STARTING ML TRAINING PIPELINE")
-    logger.info("="*60)
-
-    result = await run_full_training_pipeline(
-        days_of_data=days_of_data,
-        training_epochs=training_epochs
-    )
-
-    # Update the master bot's training status
-    global _master_bot
-    if _master_bot is not None:
-        _master_bot.model_pretrainer.load_checkpoints()
-        meets_req, reason = _master_bot.model_pretrainer.meets_training_requirements()
-        _master_bot.models_trained = meets_req
-
-        if meets_req:
-            _master_bot._add_commentary(
-                "✅ Training complete! Models are ready for intelligent trading.",
-                "system"
-            )
-        else:
-            _master_bot._add_commentary(
-                f"⚠️ Training incomplete: {reason}",
-                "system"
-            )
-
-    return result
-
-
-async def run_quick_backtest(
-    days: int = 90
-) -> Dict:
-    """
-    Run a quick backtest with current model state.
-
-    Returns backtest results without full retraining.
-    """
-    from .backtester import (
-        get_data_downloader,
-        get_model_pretrainer,
-        get_backtester,
-    )
-
-    downloader = get_data_downloader()
-    pretrainer = get_model_pretrainer()
-    backtester = get_backtester()
-
-    # Load data
-    historical_data = downloader.load_all_from_disk()
-    if not historical_data:
-        return {"error": "No historical data available. Run training pipeline first."}
-
-    # Run backtest
-    result = backtester.run_backtest(historical_data, pretrainer)
-
-    return result.to_dict()

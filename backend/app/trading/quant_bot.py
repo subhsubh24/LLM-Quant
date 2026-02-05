@@ -362,12 +362,8 @@ class QuantMath:
         min_len = min(len(prices1), len(prices2))
         p1, p2 = prices1[-min_len:], prices2[-min_len:]
 
-        denom1 = np.array(p1[:-1], dtype=float)
-        denom2 = np.array(p2[:-1], dtype=float)
-        safe1 = np.where(np.abs(denom1) > 1e-12, denom1, 1.0)
-        safe2 = np.where(np.abs(denom2) > 1e-12, denom2, 1.0)
-        r1 = np.diff(p1) / safe1
-        r2 = np.diff(p2) / safe2
+        r1 = np.diff(p1) / np.array(p1[:-1])
+        r2 = np.diff(p2) / np.array(p2[:-1])
 
         if len(r1) < 5:
             return 0.0
