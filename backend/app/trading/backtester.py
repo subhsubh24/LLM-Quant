@@ -1380,6 +1380,12 @@ class ModelPreTrainer:
         wf_fold = 0
         wf_fold_accuracies = []
 
+        # Early stopping setup - check for resume state (must be before wf_fold calculation)
+        start_epoch = getattr(self, '_last_epoch', 0)
+        best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
+        patience = 8  # Stop if no improvement for 8 epochs (more thorough)
+        patience_counter = getattr(self, '_patience_counter', 0)
+
         n = len(features)
         wf_boundaries = []
         for f in range(n_wf_folds):
@@ -1417,12 +1423,6 @@ class ModelPreTrainer:
         total_batches = len(X_train) // batch_size
         logger.info(f"Walk-forward training: {n_wf_folds} folds, {epochs_per_fold} epochs/fold")
         logger.info(f"Fold 1/{n_wf_folds}: train={len(X_train):,}, val={len(X_val):,}")
-
-        # Early stopping setup - check for resume state
-        start_epoch = getattr(self, '_last_epoch', 0)
-        best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
-        patience = 8  # Stop if no improvement for 8 epochs (more thorough)
-        patience_counter = getattr(self, '_patience_counter', 0)
 
         if start_epoch > 0:
             logger.info(f"📥 Resuming training from epoch {start_epoch + 1}, best_acc={best_val_accuracy:.2%}")
