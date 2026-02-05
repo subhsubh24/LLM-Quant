@@ -228,7 +228,7 @@ class MultiHeadAttention(Layer):
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:
         exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
-        return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+        return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
 
     def parameters(self) -> List[np.ndarray]:
         return [self.W_q, self.W_k, self.W_v, self.W_o]
@@ -438,8 +438,11 @@ class LSTMClassifier:
         x = self.cache['x']
         batch_size, seq_len, _ = x.shape
 
-        # Forward to get predictions
-        probs, _ = self.forward(x)
+        # Compute probs from cached final hidden state (don't re-run forward
+        # which would overwrite the gate caches needed for BPTT)
+        h_last = self.cache['h'][-1]
+        logits = h_last @ self.Wy + self.by
+        probs = self._softmax(logits)
 
         # Cross-entropy loss
         y_onehot = np.zeros_like(probs)
@@ -882,6 +885,11 @@ class DQN:
         full_grad = np.zeros_like(current_q)
         full_grad[np.arange(batch_size), actions] = grad
 
+        # Re-forward with states to restore correct layer caches.
+        # The next_states forward (line above) overwrote each Dense
+        # layer's self.x/self.z, so backward() would use wrong activations.
+        self._forward(states, self._q_network)
+
         # Backward pass through layers
         for layer in reversed(self._q_network):
             full_grad = layer.backward(full_grad)
@@ -937,13 +945,11 @@ class DQN:
     def load(self, path: str):
         """Load model parameters."""
         data = np.load(path)
-        idx = 0
-        for layer in self._q_network:
-            for param in layer.parameters():
-                key = f"layer_{idx}_param_{0}"
+        for i, layer in enumerate(self._q_network):
+            for j, param in enumerate(layer.parameters()):
+                key = f"layer_{i}_param_{j}"
                 if key in data:
                     param[:] = data[key]
-                idx += 1
 
 
 # =============================================================================
@@ -1165,21 +1171,27 @@ class PPOAgent:
                 entropy = -np.mean(np.sum(probs * np.log(probs + 1e-10), axis=1))
 
                 # ============ ACTOR BACKWARD PASS ============
-                # Gradient of policy loss w.r.t. log_probs
-                # d(policy_loss)/d(log_prob) = -advantage * d(clipped_ratio)/d(log_prob)
-                # For clipped surrogate: use ratio where not clipped
+                # Gradient of clipped surrogate: take gradient of whichever
+                # branch min() selected.  surr1 = ratio * adv,
+                # surr2 = clip(ratio, 1-eps, 1+eps) * adv.
+                use_surr1 = surr1 <= surr2          # min selects surr1
+                # d(surr1)/d(log_prob) = ratio * adv  (since d_ratio/d_log_prob = ratio)
+                # d(surr2)/d(log_prob) = 0 where clipped, else ratio * adv
                 clipped = (ratio < 1 - self.clip_epsilon) | (ratio > 1 + self.clip_epsilon)
-                d_ratio = np.where(clipped, 0, batch_advantages)
-                d_log_probs = -ratio * d_ratio / len(batch_actions)
+                d_surr2 = np.where(clipped, 0.0, batch_advantages)
+                d_selected = np.where(use_surr1, batch_advantages, d_surr2)
+                d_log_probs = -ratio * d_selected / len(batch_actions)
 
                 # Gradient through log(prob) -> prob: d(log(p))/d(p) = 1/p
-                # So d(loss)/d(prob) = d(loss)/d(log_prob) * 1/prob
                 d_probs = np.zeros_like(probs)
-                d_probs[np.arange(len(batch_actions)), batch_actions] = d_log_probs / (probs[np.arange(len(batch_actions)), batch_actions] + 1e-10)
+                act_probs = probs[np.arange(len(batch_actions)), batch_actions]
+                d_probs[np.arange(len(batch_actions)), batch_actions] = d_log_probs / (act_probs + 1e-10)
 
-                # Add entropy gradient (entropy bonus encourages exploration)
-                d_entropy = -self.entropy_coef * (np.log(probs + 1e-10) + 1) / len(batch_actions)
-                d_probs += d_entropy
+                # Entropy bonus gradient: H = -Σ p log p, maximize H ⇒ subtract dH/dp
+                # dH/dp_i = -(log(p_i) + 1), we want to MAXIMIZE entropy so we
+                # SUBTRACT its gradient (since we minimise total loss).
+                d_entropy = self.entropy_coef * (np.log(probs + 1e-10) + 1) / len(batch_actions)
+                d_probs -= d_entropy
 
                 # Softmax backward: d_logits = probs * (d_probs - sum(probs * d_probs))
                 sum_dp = np.sum(probs * d_probs, axis=1, keepdims=True)
@@ -1622,8 +1634,8 @@ class TrainableTransformer:
         K = h @ self.W_k
         V = h @ self.W_v
 
-        # Scaled dot-product attention
-        scale = np.sqrt(self.hidden_dim)
+        # Scaled dot-product attention (scale by head_dim, not hidden_dim)
+        scale = np.sqrt(self.head_dim)
         attn_scores = Q @ K.transpose(0, 2, 1) / scale
         attn_weights = self._softmax(attn_scores, axis=-1)
         attn_values = attn_weights @ V  # Before W_o projection
@@ -1687,7 +1699,8 @@ class TrainableTransformer:
 
         # Loss
         y_onehot = np.zeros_like(probs)
-        y_onehot[np.arange(batch_size), y.astype(int)] = 1
+        y_safe = np.clip(y.astype(int), 0, self.output_dim - 1)
+        y_onehot[np.arange(batch_size), y_safe] = 1
         loss = -np.mean(np.sum(y_onehot * np.log(probs + 1e-8), axis=1))
 
         # Backward
@@ -1768,7 +1781,7 @@ class TrainableTransformer:
         # Gradient for Q and K through: scores = Q @ K.T / scale
         Q = self.cache['Q']
         K = self.cache['K']
-        scale = np.sqrt(self.hidden_dim)
+        scale = np.sqrt(self.head_dim)
 
         # dQ = d_scores @ K / scale
         dQ = np.zeros_like(Q)
@@ -1816,8 +1829,6 @@ class TrainableTransformer:
         beta1, beta2, eps = 0.9, 0.999, 1e-8
 
         for name, grad in grads.items():
-            if np.sum(np.abs(grad)) == 0:
-                continue
             param = getattr(self, name)
             self.m[name] = beta1 * self.m[name] + (1 - beta1) * grad
             self.v[name] = beta2 * self.v[name] + (1 - beta2) * (grad ** 2)
@@ -2001,9 +2012,9 @@ class TrainableVAE:
             dW_cls = np.zeros_like(self.W_cls)
             db_cls = np.zeros_like(self.b_cls)
 
-        # KL gradient
+        # KL gradient (use logvar_clipped to match forward pass clamp)
         dmu = beta * mu / batch_size
-        dlogvar = beta * 0.5 * (np.exp(logvar) - 1) / batch_size
+        dlogvar = beta * 0.5 * (np.exp(logvar_clipped) - 1) / batch_size
 
         # Reparameterization backward
         dmu += dz
