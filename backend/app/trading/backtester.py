@@ -947,11 +947,26 @@ class WalkForwardBacktester:
             logger.error("No data for backtest")
             return self._empty_result()
 
+        # Log data summary
+        symbols = list(data.keys())
+        total_candles = sum(len(candles) for candles in data.values())
+        date_range = f"{all_candles[0][0].date()} to {all_candles[-1][0].date()}"
+        logger.info(f"Backtest Configuration:")
+        logger.info(f"  Symbols: {len(symbols)} ({', '.join(symbols[:10])}{'...' if len(symbols) > 10 else ''})")
+        logger.info(f"  Total Candles: {total_candles:,}")
+        logger.info(f"  Date Range: {date_range}")
+        logger.info(f"  Strategy: {strategy}")
+        logger.info(f"  Initial Capital: ${self.initial_capital:,.2f}")
+
         # Initialize tracking
         capital = self.initial_capital
         positions: Dict[str, Dict] = {}  # symbol -> position info
         equity_curve = [(all_candles[0][0], capital)]
         trades = []
+
+        # Progress tracking
+        last_log_time = time.time()
+        last_log_index = 0
 
         # Slippage and commission modeling
         # Realistic costs: ~5 bps slippage + ~5 bps commission per side = ~20 bps round trip
@@ -961,8 +976,28 @@ class WalkForwardBacktester:
 
         # Walk through time
         window_data: Dict[str, List[OHLCV]] = {sym: [] for sym in data.keys()}
+        candles_processed = 0
+        signals_generated = 0
+        positions_opened = 0
 
         for timestamp, symbol, candle in all_candles:
+            candles_processed += 1
+
+            # Periodic progress logging (every 10 seconds or 5000 candles)
+            current_time = time.time()
+            if current_time - last_log_time > 10 or candles_processed - last_log_index >= 5000:
+                progress_pct = (candles_processed / len(all_candles)) * 100
+                rate = (candles_processed - last_log_index) / (current_time - last_log_time)
+                est_remaining = (len(all_candles) - candles_processed) / rate if rate > 0 else 0
+                logger.info(
+                    f"Progress: {candles_processed:,}/{len(all_candles):,} candles ({progress_pct:.1f}%) | "
+                    f"Positions: {len(positions)} | Trades: {len(trades)} | "
+                    f"Capital: ${capital:,.2f} | "
+                    f"Rate: {rate:.0f} candles/sec | ETA: {est_remaining:.0f}s"
+                )
+                last_log_time = current_time
+                last_log_index = candles_processed
+
             window_data[symbol].append(candle)
 
             # Keep only recent data (memory efficiency)
@@ -1008,7 +1043,7 @@ class WalkForwardBacktester:
                     realized_pnl = pos["size"] * pnl_pct - exit_cost
                     capital += pos["size"] + realized_pnl
 
-                    trades.append({
+                    trade = {
                         "symbol": symbol,
                         "side": side,
                         "entry_price": entry_price,
@@ -1019,7 +1054,17 @@ class WalkForwardBacktester:
                         "pnl_pct": pnl_pct * 100,
                         "exit_reason": exit_reason,
                         "trade_costs": pos.get("entry_cost", 0) + exit_cost,
-                    })
+                    }
+                    trades.append(trade)
+
+                    # Log trade closure
+                    trade_direction = "LONG" if side == "long" else "SHORT"
+                    logger.debug(
+                        f"Trade Closed: {symbol} {trade_direction} | "
+                        f"Entry: ${entry_price:.4f} → Exit: ${current_price:.4f} | "
+                        f"P&L: ${realized_pnl:.2f} ({pnl_pct*100:.2f}%) | "
+                        f"Reason: {exit_reason}"
+                    )
 
                     del positions[symbol]
 
@@ -1031,6 +1076,7 @@ class WalkForwardBacktester:
                     # Get ML prediction
                     state = features[-1]
                     prediction = model_trainer.predict(state)
+                    signals_generated += 1
 
                     # Only trade on strong signals
                     if prediction["action"] != 1 and prediction["confidence"] > 0.6:
@@ -1040,6 +1086,7 @@ class WalkForwardBacktester:
 
                             if position_size > 100:  # Minimum position
                                 side = "long" if prediction["action"] == 2 else "short"
+                                positions_opened += 1
 
                                 # Apply entry-side slippage + commission
                                 entry_cost = position_size * COST_PER_SIDE
@@ -1052,6 +1099,14 @@ class WalkForwardBacktester:
                                     "size": effective_size,
                                     "entry_cost": entry_cost,
                                 }
+
+                                # Log position opening
+                                trade_direction = "LONG" if side == "long" else "SHORT"
+                                logger.debug(
+                                    f"Position Opened: {symbol} {trade_direction} | "
+                                    f"Price: ${candle.close:.4f} | Size: ${effective_size:.2f} | "
+                                    f"Confidence: {prediction['confidence']:.2f}"
+                                )
 
                                 capital -= position_size
 
@@ -1098,6 +1153,15 @@ class WalkForwardBacktester:
                     "trade_costs": pos.get("entry_cost", 0) + exit_cost,
                 })
 
+        # Log completion
+        logger.info(f"Walk-forward backtest processing complete!")
+        logger.info(f"  Total Candles Processed: {candles_processed:,}")
+        logger.info(f"  Signals Generated: {signals_generated:,}")
+        logger.info(f"  Positions Opened: {positions_opened}")
+        logger.info(f"  Total Trades: {len(trades)}")
+        logger.info(f"  Final Capital: ${capital:,.2f}")
+        logger.info("Calculating final metrics...")
+
         # Calculate final metrics
         return self._calculate_metrics(equity_curve, trades)
 
@@ -1110,6 +1174,7 @@ class WalkForwardBacktester:
         if not equity_curve:
             return self._empty_result()
 
+        logger.info("Calculating returns and Sharpe/Sortino ratios...")
         initial = self.initial_capital
         final = equity_curve[-1][1]
 
@@ -1134,6 +1199,7 @@ class WalkForwardBacktester:
         else:
             sortino = sharpe
 
+        logger.info("Calculating drawdown...")
         # Max Drawdown
         peak = equity_values[0]
         max_dd = 0
@@ -1144,6 +1210,7 @@ class WalkForwardBacktester:
             if dd > max_dd:
                 max_dd = dd
 
+        logger.info("Analyzing trade statistics...")
         # Trade statistics
         winning_trades = [t for t in trades if t["pnl"] > 0]
         losing_trades = [t for t in trades if t["pnl"] <= 0]
@@ -1165,7 +1232,7 @@ class WalkForwardBacktester:
             holding_periods.append((exit_time - entry).total_seconds() / 3600)
         avg_holding = np.mean(holding_periods) if holding_periods else 0
 
-        return BacktestResult(
+        result = BacktestResult(
             start_date=equity_curve[0][0],
             end_date=equity_curve[-1][0],
             initial_capital=initial,
@@ -1187,6 +1254,26 @@ class WalkForwardBacktester:
             equity_curve=equity_curve,
             trades=trades,
         )
+
+        # Log final results
+        logger.info("=" * 80)
+        logger.info("📈 BACKTEST RESULTS")
+        logger.info("=" * 80)
+        logger.info(f"Period: {result.start_date.date()} to {result.end_date.date()}")
+        logger.info(f"Initial Capital: ${result.initial_capital:,.2f}")
+        logger.info(f"Final Capital: ${result.final_capital:,.2f}")
+        logger.info(f"Total Return: ${result.total_return:,.2f} ({result.total_return_pct:.2f}%)")
+        logger.info(f"Sharpe Ratio: {result.sharpe_ratio:.2f}")
+        logger.info(f"Sortino Ratio: {result.sortino_ratio:.2f}")
+        logger.info(f"Max Drawdown: ${result.max_drawdown:,.2f} ({result.max_drawdown_pct:.2f}%)")
+        logger.info(f"Win Rate: {result.win_rate*100:.2f}% ({result.winning_trades}/{result.total_trades} trades)")
+        logger.info(f"Profit Factor: {result.profit_factor:.2f}")
+        logger.info(f"Avg Win: ${result.avg_win:,.2f}")
+        logger.info(f"Avg Loss: ${result.avg_loss:,.2f}")
+        logger.info(f"Avg Holding Period: {result.avg_holding_period:.2f} hours")
+        logger.info("=" * 80)
+
+        return result
 
     def _empty_result(self) -> BacktestResult:
         """Return empty backtest result."""
