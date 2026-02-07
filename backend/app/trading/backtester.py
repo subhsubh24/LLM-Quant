@@ -846,6 +846,29 @@ class WalkForwardBacktester:
             atr = np.mean(tr[-14:])
             trend_strength = atr / (closes[i] + 1e-8)
 
+            # PHASE E: Enhanced Features
+            # Mean reversion signal (distance from 50-period MA)
+            sma_50 = np.mean(window_close[-50:]) if len(window_close) >= 50 else np.mean(window_close)
+            mean_reversion = (closes[i] - sma_50) / (sma_50 + 1e-8)
+
+            # Volume weighted momentum
+            vol_weighted_close = np.sum(window_close[-20:] * window_vol[-20:]) / (np.sum(window_vol[-20:]) + 1e-8)
+            vol_momentum = (closes[i] - vol_weighted_close) / (vol_weighted_close + 1e-8)
+
+            # Volatility regime (recent vs historical)
+            recent_vol = np.std(log_returns[-10:]) if len(log_returns) >= 10 else realized_vol
+            historical_vol = np.std(log_returns[:-10]) if len(log_returns) > 10 else realized_vol
+            vol_regime = (recent_vol - historical_vol) / (historical_vol + 1e-8)
+
+            # Price acceleration (second derivative)
+            if len(window_close) >= 3:
+                accel = (closes[i] - 2*closes[i-1] + closes[i-2]) / (closes[i-1] + 1e-8)
+            else:
+                accel = 0
+
+            # Return volatility (how volatile are returns?)
+            return_vol = np.std(log_returns) if len(log_returns) > 1 else 0
+
             feature_vector = [
                 returns_1, returns_5, returns_10, returns_20,
                 realized_vol, parkinson_vol,
@@ -859,6 +882,12 @@ class WalkForwardBacktester:
                 (closes[i] - np.min(window_close)) / (np.max(window_close) - np.min(window_close) + 1e-8),
                 # High-low range
                 (window_high[-1] - window_low[-1]) / (closes[i] + 1e-8),
+                # PHASE E: Enhanced features
+                mean_reversion,
+                vol_momentum,
+                vol_regime,
+                accel,
+                return_vol,
             ]
 
             features.append(feature_vector)
