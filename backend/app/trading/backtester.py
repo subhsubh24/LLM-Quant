@@ -1018,6 +1018,11 @@ class WalkForwardBacktester:
         model_names = ["DQN", "PPO", "LSTM", "Transformer"]
         model_predictions = {m: {"correct": 0, "incorrect": 0} for m in model_names}
 
+        # Rolling win-rate monitoring (for degradation detection)
+        recent_trades_window = []  # Keep last 20 trades for rolling win-rate
+        max_recent_trades = 20
+        degradation_threshold = 0.35  # Alert if win rate drops below 35%
+
         for timestamp, symbol, candle in all_candles:
             candles_processed += 1
 
@@ -1106,6 +1111,19 @@ class WalkForwardBacktester:
                     }
                     trades.append(trade)
 
+                    # Track rolling win-rate for degradation detection
+                    recent_trades_window.append(1 if realized_pnl > 0 else 0)
+                    if len(recent_trades_window) > max_recent_trades:
+                        recent_trades_window.pop(0)
+
+                    rolling_win_rate = np.mean(recent_trades_window) if recent_trades_window else 0
+                    if len(recent_trades_window) >= 10 and rolling_win_rate < degradation_threshold:
+                        logger.warning(
+                            f"⚠️ Model degradation detected! Rolling win rate: {rolling_win_rate*100:.1f}% "
+                            f"(below {degradation_threshold*100:.0f}% threshold). "
+                            f"Consider retraining models."
+                        )
+
                     # Track individual model accuracy
                     trade_was_profitable = realized_pnl > 0
                     if "individual_predictions" in pos and "final_action" in pos:
@@ -1143,6 +1161,12 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict(state)
                     signals_generated += 1
 
+                    # Check liquidity (require minimum volume)
+                    recent_volumes = np.array([c.volume for c in window_data[symbol][-20:]])
+                    avg_volume = np.mean(recent_volumes)
+                    min_volume_threshold = 1000  # Minimum acceptable volume
+                    is_liquid = avg_volume >= min_volume_threshold
+
                     # Detect market regime
                     regime = self.detect_market_regime(window_data[symbol][-100:])
 
@@ -1153,7 +1177,7 @@ class WalkForwardBacktester:
                     is_long = prediction["action"] == 2
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
-                    if prediction["action"] != 1 and prediction["confidence"] > 0.80 and not conflicting_trade:
+                    if prediction["action"] != 1 and prediction["confidence"] > 0.80 and not conflicting_trade and is_liquid:
                         # Kelly Criterion position sizing (adaptive based on model confidence)
                         # Higher confidence = larger position (up to 2%)
                         # Lower confidence = smaller position (down to 0.1%)
