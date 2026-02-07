@@ -895,6 +895,40 @@ class WalkForwardBacktester:
             ema = (price - ema) * multiplier + ema
         return ema
 
+    def detect_market_regime(self, candles: List[OHLCV], window: int = 50) -> str:
+        """
+        Detect current market regime (bull, bear, or sideways).
+
+        Args:
+            candles: Recent candles to analyze
+            window: Look-back window
+
+        Returns:
+            'bull', 'bear', or 'sideways'
+        """
+        if len(candles) < window:
+            return 'sideways'
+
+        recent = candles[-window:]
+        closes = np.array([c.close for c in recent])
+
+        # Calculate trend
+        sma_short = np.mean(closes[-20:])
+        sma_long = np.mean(closes)
+        trend = (sma_short - sma_long) / sma_long
+
+        # Calculate volatility
+        returns = np.diff(closes) / closes[:-1]
+        volatility = np.std(returns)
+
+        # Regime logic
+        if trend > 0.02 and volatility > 0.01:
+            return 'bull'
+        elif trend < -0.02 and volatility > 0.01:
+            return 'bear'
+        else:
+            return 'sideways'
+
     def generate_labels(self, candles: List[OHLCV], lookahead: int = 5, threshold: float = 0.02) -> np.ndarray:
         """
         Generate trading labels based on future returns.
@@ -1089,9 +1123,17 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict(state)
                     signals_generated += 1
 
+                    # Detect market regime
+                    regime = self.detect_market_regime(window_data[symbol][-100:])
+
                     # Only trade on ULTRA-STRONG signals (increased from 0.6 to improve quality)
                     # Higher threshold = fewer but higher-quality trades
-                    if prediction["action"] != 1 and prediction["confidence"] > 0.80:
+                    # Also apply regime filter: skip conflicting trades
+                    is_short = prediction["action"] == 0
+                    is_long = prediction["action"] == 2
+                    conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
+
+                    if prediction["action"] != 1 and prediction["confidence"] > 0.80 and not conflicting_trade:
                         # Kelly Criterion position sizing (adaptive based on model confidence)
                         # Higher confidence = larger position (up to 2%)
                         # Lower confidence = smaller position (down to 0.1%)
