@@ -1024,6 +1024,14 @@ class WalkForwardBacktester:
         # PHASE C: Track P&L contribution by model (profit if model voted for winning trade)
         model_pnl = {m: {"pnl": 0, "trades": 0, "wins": 0, "losses": 0} for m in model_names}
 
+        # PHASE D: Track signal filtering by reason
+        filtered_signals = {
+            "low_confidence": 0,
+            "conflicting_regime": 0,
+            "low_liquidity": 0,
+            "low_model_agreement": 0,
+        }
+
         # Rolling win-rate monitoring (for degradation detection)
         recent_trades_window = []  # Keep last 20 trades for rolling win-rate
         max_recent_trades = 20
@@ -1216,14 +1224,24 @@ class WalkForwardBacktester:
                     # Detect market regime
                     regime = self.detect_market_regime(window_data[symbol][-100:])
 
-                    # Only trade on ULTRA-STRONG signals (increased from 0.6 to improve quality)
-                    # Higher threshold = fewer but higher-quality trades
-                    # Also apply regime filter: skip conflicting trades
+                    # PHASE D: Aggressive Signal Filtering
+                    # Only trade on ULTRA-STRONG signals
                     is_short = prediction["action"] == 0
                     is_long = prediction["action"] == 2
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
-                    if prediction["action"] != 1 and prediction["confidence"] > 0.80 and not conflicting_trade and is_liquid:
+                    # PHASE D: Require model agreement (3+ out of 4 models agree)
+                    individual_preds = prediction.get("predictions", [])
+                    final_action = prediction["action"]
+                    model_agreement = sum(1 for p in individual_preds if p == final_action)
+                    min_agreement = 3  # Require at least 3 out of 4 models to agree
+                    strong_consensus = model_agreement >= min_agreement
+
+                    if (prediction["action"] != 1 and
+                        prediction["confidence"] > 0.80 and
+                        not conflicting_trade and
+                        is_liquid and
+                        strong_consensus):
                         # Kelly Criterion position sizing (adaptive based on model confidence)
                         # Higher confidence = larger position (up to 2%)
                         # Lower confidence = smaller position (down to 0.1%)
@@ -1251,15 +1269,28 @@ class WalkForwardBacktester:
                                 "final_action": prediction["action"],
                             }
 
-                            # Log position opening
+                            # Log position opening (PHASE D: include model agreement)
                             trade_direction = "LONG" if side == "long" else "SHORT"
                             logger.debug(
                                 f"Position Opened: {symbol} {trade_direction} | "
                                 f"Price: ${candle.close:.4f} | Size: ${effective_size:.2f} | "
-                                f"Confidence: {prediction['confidence']:.2f}"
+                                f"Confidence: {prediction['confidence']:.2f} | "
+                                f"Models: {model_agreement}/{len(individual_preds)}"
                             )
 
                             capital -= position_size
+                    else:
+                        # PHASE D: Track why signal was rejected
+                        if prediction["action"] == 1:  # Hold signal
+                            pass  # Don't count hold signals
+                        elif prediction["confidence"] <= 0.80:
+                            filtered_signals["low_confidence"] += 1
+                        elif conflicting_trade:
+                            filtered_signals["conflicting_regime"] += 1
+                        elif not is_liquid:
+                            filtered_signals["low_liquidity"] += 1
+                        elif not strong_consensus:
+                            filtered_signals["low_model_agreement"] += 1
 
             # Update equity curve periodically
             if len(equity_curve) == 0 or (timestamp - equity_curve[-1][0]).total_seconds() > 3600:
@@ -1311,6 +1342,19 @@ class WalkForwardBacktester:
         logger.info(f"  Positions Opened: {positions_opened}")
         logger.info(f"  Total Trades: {len(trades)}")
         logger.info(f"  Final Capital: ${capital:,.2f}")
+
+        # PHASE D: Log signal filtering statistics
+        logger.info("\n🔎 PHASE D - SIGNAL FILTERING ANALYSIS:")
+        total_filtered = sum(filtered_signals.values())
+        logger.info(f"  Total Actionable Signals: {signals_generated:,}")
+        logger.info(f"  Total Filtered Out: {total_filtered:,}")
+        logger.info(f"  Positions Actually Opened: {positions_opened}")
+        logger.info(f"  Filtering Rate: {total_filtered/signals_generated*100:.1f}% filtered")
+        logger.info(f"  Breakdown:")
+        logger.info(f"    - Low Confidence (< 0.80): {filtered_signals['low_confidence']:,}")
+        logger.info(f"    - Conflicting Regime: {filtered_signals['conflicting_regime']:,}")
+        logger.info(f"    - Low Liquidity: {filtered_signals['low_liquidity']:,}")
+        logger.info(f"    - Low Model Agreement (< 3/4): {filtered_signals['low_model_agreement']:,}")
 
         # Log individual model performance
         logger.info("\n📊 INDIVIDUAL MODEL ACCURACY:")
