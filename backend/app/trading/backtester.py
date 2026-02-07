@@ -760,8 +760,8 @@ class WalkForwardBacktester:
 
     def __init__(
         self,
-        train_window_days: int = 60,
-        test_window_days: int = 20,
+        train_window_days: int = 730,  # 2 years: Patterns across 1600h cycles need repetition
+        test_window_days: int = 60,    # 2.5 months for robust validation
         step_days: int = 10,
         initial_capital: float = 10000.0
     ):
@@ -774,7 +774,7 @@ class WalkForwardBacktester:
         self.equity_curve: List[Tuple[datetime, float]] = []
         self.all_trades: List[Dict] = []
 
-    def prepare_features(self, candles: List[OHLCV], lookback: int = 20) -> np.ndarray:
+    def prepare_features(self, candles: List[OHLCV], lookback: int = 400) -> np.ndarray:
         """
         Prepare feature matrix from OHLCV data.
 
@@ -784,6 +784,7 @@ class WalkForwardBacktester:
         - RSI, MACD, Bollinger Bands
         - Volume profile
         - Price momentum
+        - EXTENDED LOOKBACK: 400 hours = 16+ days of context for 1600h predictions
         """
         if len(candles) < lookback + 20:
             return np.array([])
@@ -1190,9 +1191,34 @@ class WalkForwardBacktester:
                 else:
                     volatility = 0.02  # Default 2% volatility
 
-                # Adaptive stops based on volatility (higher vol = wider stops)
-                stop_loss_pct = max(0.03, min(0.10, volatility * 2))  # 3-10% based on volatility
-                take_profit_pct = max(0.08, min(0.25, volatility * 4))  # 8-25% based on volatility
+                # HORIZON-AWARE STOPS: Widen stops as position ages (longer-term trends need room)
+                hours_held = (timestamp - pos["entry_time"]).total_seconds() / 3600
+
+                # Determine effective horizon based on holding period
+                if hours_held < 48:
+                    horizon_mult = 1.0  # 24h-48h trades: tight stops
+                    base_stop = 0.02
+                    base_target = 0.05
+                elif hours_held < 200:
+                    horizon_mult = 1.5  # 100h trades: medium stops
+                    base_stop = 0.05
+                    base_target = 0.12
+                elif hours_held < 500:
+                    horizon_mult = 2.0  # 200h-400h trades: wider stops
+                    base_stop = 0.12
+                    base_target = 0.30
+                else:  # 800h+ trades
+                    horizon_mult = 3.0  # Macro trends: very wide stops
+                    base_stop = 0.20
+                    base_target = 0.50
+
+                # Apply volatility adjustment on top of horizon-based stops
+                stop_loss_pct = base_stop + (volatility * horizon_mult)
+                take_profit_pct = base_target + (volatility * horizon_mult * 2)
+
+                # Reasonable bounds
+                stop_loss_pct = max(0.02, min(0.30, stop_loss_pct))      # 2% min, 30% max
+                take_profit_pct = max(0.05, min(0.60, take_profit_pct))  # 5% min, 60% max
 
                 # Check exit conditions
                 should_exit = False
@@ -1206,8 +1232,8 @@ class WalkForwardBacktester:
                 elif pnl_pct <= -stop_loss_pct:
                     should_exit = True
                     exit_reason = "stop_loss"
-                # Time-based exit (hold max 48 hours)
-                elif (timestamp - pos["entry_time"]).total_seconds() > 48 * 3600:
+                # Time-based exit (hold max 1600 hours = 66+ days for full 1600h horizon)
+                elif (timestamp - pos["entry_time"]).total_seconds() > 1600 * 3600:
                     should_exit = True
                     exit_reason = "time_exit"
 
@@ -1319,18 +1345,46 @@ class WalkForwardBacktester:
                     min_agreement = 3  # Require at least 3 out of 4 models to agree
                     strong_consensus = model_agreement >= min_agreement
 
+                    # HORIZON-AWARE CONFIDENCE: Longer-term signals need lower confidence
+                    # Higher agreement (4/4) = likely short-term = need 0.80+
+                    # Lower agreement (3/4) = likely longer-term = accept 0.65+
+                    if model_agreement == 4:
+                        min_confidence = 0.80  # 4/4 models agree: require very high confidence
+                    elif model_agreement == 3:
+                        min_confidence = 0.70  # 3/4 models agree: accept lower (longer-term)
+                    else:
+                        min_confidence = 0.60  # Fallback (unlikely)
+
+                    meets_confidence = prediction["confidence"] >= min_confidence
+
                     if (prediction["action"] != 1 and
-                        prediction["confidence"] > 0.80 and
+                        meets_confidence and
                         not conflicting_trade and
                         is_liquid and
                         strong_consensus):
-                        # Kelly Criterion position sizing (adaptive based on model confidence)
-                        # Higher confidence = larger position (up to 2%)
-                        # Lower confidence = smaller position (down to 0.1%)
-                        # This is conservative Kelly (1/2 * Kelly fraction)
+                        # HORIZON-AWARE KELLY CRITERION SIZING
+                        # Longer-term positions need smaller sizes (more time = more risk)
+                        # Shorter-term positions can be larger (less time = less risk)
                         confidence = prediction["confidence"]
+
+                        # Base Kelly fraction
                         # Scale: 0.6 confidence -> 0.3% size, 1.0 confidence -> 1.5% size
-                        kelly_fraction = 0.003 + (confidence - 0.6) * 0.015 / 0.4 if confidence >= 0.6 else 0.001
+                        base_kelly = 0.003 + (confidence - 0.6) * 0.015 / 0.4 if confidence >= 0.6 else 0.001
+
+                        # Adjust for position duration (proxy for horizon)
+                        # Lower confidence = likely longer-term = apply multiplier
+                        if confidence > 0.80:
+                            horizon_mult = 1.0     # 24h-48h: full Kelly
+                        elif confidence > 0.75:
+                            horizon_mult = 0.90    # 100h: 90% Kelly
+                        elif confidence > 0.70:
+                            horizon_mult = 0.75    # 200h-400h: 75% Kelly
+                        elif confidence > 0.65:
+                            horizon_mult = 0.50    # 800h: 50% Kelly
+                        else:
+                            horizon_mult = 0.30    # 1600h: 30% Kelly (3x more conservative)
+
+                        kelly_fraction = base_kelly * horizon_mult
                         position_size = capital * min(kelly_fraction, 0.02)  # Cap at 2%
 
                         if position_size > 100:  # Minimum position
@@ -1712,8 +1766,8 @@ class ModelPreTrainer:
         all_rewards = []
 
         for symbol, candles in historical_data.items():
-            if len(candles) < 2000:  # Need more history for 1600h horizon (66+ days)
-                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=2000 for 1600h horizon)")
+            if len(candles) < 10000:  # 416+ days minimum for 1600h pattern learning
+                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=10000 for 1600h, ~0.3 cycles)")
                 continue
 
             features = backtester.prepare_features(candles)
@@ -2939,8 +2993,8 @@ def get_alpha_manager() -> AlphaSourceManager:
 
 
 async def run_full_training_pipeline(
-    days_of_data: int = 180,
-    training_epochs: int = 40  # Balanced for ~1 hour training with early stopping
+    days_of_data: int = 730,  # 2 years: Required for 1600h pattern learning
+    training_epochs: int = 40  # Balanced for ~2 hours training with early stopping
 ) -> Dict:
     """
     Run the complete pre-training pipeline:
