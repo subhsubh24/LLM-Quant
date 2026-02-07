@@ -1014,6 +1014,10 @@ class WalkForwardBacktester:
         signals_generated = 0
         positions_opened = 0
 
+        # Model performance tracking
+        model_names = ["DQN", "PPO", "LSTM", "Transformer"]
+        model_predictions = {m: {"correct": 0, "incorrect": 0} for m in model_names}
+
         for timestamp, symbol, candle in all_candles:
             candles_processed += 1
 
@@ -1102,6 +1106,22 @@ class WalkForwardBacktester:
                     }
                     trades.append(trade)
 
+                    # Track individual model accuracy
+                    trade_was_profitable = realized_pnl > 0
+                    if "individual_predictions" in pos and "final_action" in pos:
+                        individual_preds = pos["individual_predictions"]
+                        final_action = pos["final_action"]
+
+                        # Check which models predicted the same as final action
+                        for idx, pred in enumerate(individual_preds):
+                            if idx < len(model_names):
+                                model_name = model_names[idx]
+                                model_was_correct = (pred == final_action) == trade_was_profitable
+                                if model_was_correct:
+                                    model_predictions[model_name]["correct"] += 1
+                                else:
+                                    model_predictions[model_name]["incorrect"] += 1
+
                     # Log trade closure
                     trade_direction = "LONG" if side == "long" else "SHORT"
                     logger.debug(
@@ -1157,6 +1177,8 @@ class WalkForwardBacktester:
                                 "entry_time": timestamp,
                                 "size": effective_size,
                                 "entry_cost": entry_cost,
+                                "individual_predictions": prediction.get("predictions", []),
+                                "final_action": prediction["action"],
                             }
 
                             # Log position opening
@@ -1219,6 +1241,16 @@ class WalkForwardBacktester:
         logger.info(f"  Positions Opened: {positions_opened}")
         logger.info(f"  Total Trades: {len(trades)}")
         logger.info(f"  Final Capital: ${capital:,.2f}")
+
+        # Log individual model performance
+        logger.info("\n📊 INDIVIDUAL MODEL ACCURACY:")
+        for model_name in model_names:
+            correct = model_predictions[model_name]["correct"]
+            incorrect = model_predictions[model_name]["incorrect"]
+            total = correct + incorrect
+            accuracy = (correct / total * 100) if total > 0 else 0
+            logger.info(f"  {model_name}: {accuracy:.1f}% ({correct}/{total})")
+
         logger.info("Calculating final metrics...")
 
         # Calculate final metrics
