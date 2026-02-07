@@ -111,11 +111,20 @@ class TradingSystem1600h:
             "credit_spreads": macro_regime.get("credit_spreads", 150),
             "seasonal_factor": macro_regime.get("seasonal_factor", 1.0),
             "entry_time": datetime.now(),
+            # Track data sources for transparency
+            "vix_source": macro_regime.get("vix_source", "unknown"),
+            "credit_spread_source": macro_regime.get("credit_spread_source", "unknown"),
+            "data_is_real": macro_regime.get("data_is_real", False),
         }
 
         # Store position ID for later reference
         if symbol not in self.positions:
             self.positions[symbol] = []
+
+        # Alert if using fallback data sources
+        data_source_warning = ""
+        if not macro_regime.get("data_is_real", False):
+            data_source_warning = " ⚠️ [FALLBACK DATA SOURCES - REAL APIS MAY BE DOWN]"
 
         logger.info(
             f"✅ Trade approved: {symbol} | "
@@ -123,8 +132,9 @@ class TradingSystem1600h:
             f"Size: {position_size:.2f} | "
             f"Confidence: {adjusted_confidence:.2f} | "
             f"Regime: {macro_regime['overall_regime']} | "
-            f"VIX: {macro_regime.get('vix_level', 20):.1f} | "
-            f"Spreads: {macro_regime.get('credit_spreads', 150):.0f}bps"
+            f"VIX: {macro_regime.get('vix_level', 20):.1f} ({macro_regime.get('vix_source', 'unknown')}) | "
+            f"Spreads: {macro_regime.get('credit_spreads', 150):.0f}bps ({macro_regime.get('credit_spread_source', 'unknown')})"
+            f"{data_source_warning}"
         )
 
         return True, "All checks passed", position_size
