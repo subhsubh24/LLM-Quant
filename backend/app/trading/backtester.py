@@ -1026,7 +1026,7 @@ class WalkForwardBacktester:
         max_recent_trades = 20
         degradation_threshold = 0.35  # Alert if win rate drops below 35%
 
-        # PHASE B: Initialize continuous learning
+        # PHASE B: Initialize continuous learning (real data only)
         continuous_learner = ContinuousLearner(
             retrain_interval=100,  # Retrain every 100 candles
             window_size=5000,  # Keep last 5000 samples
@@ -1034,15 +1034,13 @@ class WalkForwardBacktester:
         )
         adaptive_weighter = AdaptiveEnsembleWeighter(model_names=model_names, lookback=50)
 
-        # PHASE A: Microstructure extractors for each symbol
-        microstructure_extractors: Dict[str, MicrostructureExtractor] = {
-            sym: MicrostructureExtractor(lookback=20) for sym in data.keys()
-        }
+        # PHASE A: Microstructure (waiting for real order book data APIs)
+        # Microstructure extractors removed from backtest until we have real data
+        # TODO: Integrate when Binance/Coinbase order book APIs are available
 
-        logger.info(f"📊 PHASE A+B: Continuous Learning & Microstructure initialized")
+        logger.info(f"📊 PHASE B: Continuous Learning initialized")
         logger.info(f"  Continuous Learner: Retrain every 100 candles")
         logger.info(f"  Adaptive Ensemble: Reweight models by recent performance")
-        logger.info(f"  Microstructure: Extracting {len(data)} symbol features")
 
         for timestamp, symbol, candle in all_candles:
             candles_processed += 1
@@ -1307,14 +1305,6 @@ class WalkForwardBacktester:
             total = correct + incorrect
             accuracy = (correct / total * 100) if total > 0 else 0
             logger.info(f"  {model_name}: {accuracy:.1f}% ({correct}/{total})")
-
-        # Log microstructure statistics (PHASE A)
-        logger.info("\n🔬 PHASE A - MICROSTRUCTURE DATA:")
-        logger.info(f"  Symbols with Microstructure: {len(microstructure_extractors)}")
-        ob_samples = sum(
-            len(extractor.order_book_history) for extractor in microstructure_extractors.values()
-        )
-        logger.info(f"  Order Book Snapshots Processed: {ob_samples:,}")
 
         # Log adaptive ensemble weights (PHASE B)
         logger.info("\n⚖️  PHASE B - ADAPTIVE ENSEMBLE WEIGHTS:")
