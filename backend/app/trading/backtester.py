@@ -995,23 +995,24 @@ class WalkForwardBacktester:
         Generate trading labels for multiple lookahead horizons.
 
         Multi-horizon training allows the ensemble to learn patterns at different timescales:
-        - 24h: Short-term tactical moves
-        - 48h: Medium-term directional bias
-        - 100h: Intermediate trend
-        - 200h: Longer trend
-        - 400h: Long-term direction
-        - 800h: Ultra-long direction (multiple weeks)
+        - 24h: Short-term tactical moves (1 day)
+        - 48h: Medium-term directional bias (2 days)
+        - 100h: Intermediate trend (4+ days)
+        - 200h: Longer trend (8+ days)
+        - 400h: Long-term direction (16+ days)
+        - 800h: Ultra-long direction (33+ days)
+        - 1600h: Extended direction (66+ days - macro trends, earnings cycles, seasonality)
 
         Args:
             candles: OHLCV candles
-            horizons: List of lookahead periods in candles. Default: [24, 48, 100, 200, 400, 800]
+            horizons: List of lookahead periods in candles. Default: [24, 48, 100, 200, 400, 800, 1600]
             threshold: Return threshold for buy/sell signals
 
         Returns:
             Dictionary mapping horizon -> labels array
         """
         if horizons is None:
-            horizons = [24, 48, 100, 200, 400, 800]
+            horizons = [24, 48, 100, 200, 400, 800, 1600]
 
         closes = np.array([c.close for c in candles])
         multi_labels = {}
@@ -1707,12 +1708,12 @@ class ModelPreTrainer:
         - Fixes the critical mismatch: training predicted 5h but held 48h+
         """
         all_features = []
-        all_multi_labels = {h: [] for h in [24, 48, 100, 200, 400, 800]}
+        all_multi_labels = {h: [] for h in [24, 48, 100, 200, 400, 800, 1600]}
         all_rewards = []
 
         for symbol, candles in historical_data.items():
-            if len(candles) < 1000:  # Need more history for long horizons
-                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=1000 for multi-horizon)")
+            if len(candles) < 2000:  # Need more history for 1600h horizon (66+ days)
+                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=2000 for 1600h horizon)")
                 continue
 
             features = backtester.prepare_features(candles)
@@ -1739,13 +1740,13 @@ class ModelPreTrainer:
             for horizon, labels in multi_labels.items():
                 all_multi_labels[horizon].append(labels[:min_label_len])
 
-            # Calculate rewards based on 48h horizon (median of our horizons)
+            # Calculate rewards based on 200h horizon (mid-range of our horizons)
             # This balances between short-term tactical and long-term strategic
             closes = np.array([c.close for c in candles])
             rewards = []
             for i in range(len(features)):
-                if i + 48 < len(closes):
-                    future_return = (closes[i + 48] - closes[i]) / closes[i]
+                if i + 200 < len(closes):
+                    future_return = (closes[i + 200] - closes[i]) / closes[i]
                     # Get majority vote across horizons
                     horizon_votes = []
                     for horizon, labels in multi_labels.items():
@@ -1778,7 +1779,7 @@ class ModelPreTrainer:
 
         # Concatenate labels for each horizon
         y_multi = {}
-        for horizon in [24, 48, 100, 200, 400, 800]:
+        for horizon in [24, 48, 100, 200, 400, 800, 1600]:
             if all_multi_labels[horizon]:
                 y_multi[horizon] = np.concatenate(all_multi_labels[horizon])
             else:
@@ -1796,7 +1797,7 @@ class ModelPreTrainer:
 
         logger.info(f"✅ Prepared multi-horizon training data:")
         logger.info(f"   Features: {X.shape}")
-        for h in [24, 48, 100, 200, 400, 800]:
+        for h in [24, 48, 100, 200, 400, 800, 1600]:
             logger.info(f"   Horizon {h}h labels: {y_multi[h].shape}")
         logger.info(f"   Rewards: {r.shape}")
 
@@ -1830,8 +1831,9 @@ class ModelPreTrainer:
         if is_multi_horizon:
             logger.info("🎯 MULTI-HORIZON TRAINING MODE")
             logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
-            # Use 48h (median) as primary for compatibility with existing code
-            primary_labels = labels.get(48, list(labels.values())[0])
+            logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
+            # Use 200h (mid-range) as primary for compatibility with existing code
+            primary_labels = labels.get(200, list(labels.values())[0])
         else:
             logger.info("Single-horizon training mode")
             primary_labels = labels
@@ -1905,8 +1907,8 @@ class ModelPreTrainer:
 
         # For multi-horizon, also slice the horizon-specific labels
         if is_multi_horizon:
-            y_train_multi = {h: labels[h][:train_end] for h in labels.keys()}
-            y_val_multi = {h: labels[h][train_end:val_end] for h in labels.keys()}
+            y_train_multi = {h: labels[h][:train_end] for h in sorted(labels.keys())}
+            y_val_multi = {h: labels[h][train_end:val_end] for h in sorted(labels.keys())}
         else:
             y_train_multi = None
             y_val_multi = None
@@ -1948,8 +1950,8 @@ class ModelPreTrainer:
 
                 # Update multi-horizon labels for new fold
                 if is_multi_horizon:
-                    y_train_multi = {h: labels[h][:train_end] for h in labels.keys()}
-                    y_val_multi = {h: labels[h][train_end:val_end] for h in labels.keys()}
+                    y_train_multi = {h: labels[h][:train_end] for h in sorted(labels.keys())}
+                    y_val_multi = {h: labels[h][train_end:val_end] for h in sorted(labels.keys())}
 
                 total_batches = len(X_train) // batch_size
                 fixed_train_indices, fixed_val_indices = _compute_sample_indices(X_train, X_val)
@@ -1983,11 +1985,17 @@ class ModelPreTrainer:
             if is_multi_horizon and epoch % 5 == 0:
                 # Calculate horizon agreement rates
                 horizon_agreement = {}
-                for h1_idx, h1 in enumerate(sorted(y_train_multi.keys())):
-                    for h2 in sorted(y_train_multi.keys())[h1_idx+1:]:
-                        agreement = np.mean(y_train_multi[h1] == y_train_multi[h2])
-                        horizon_agreement[f"{h1}h-{h2}h"] = agreement
-                logger.info(f"  Epoch {epoch+1}: Horizon agreement: {', '.join(f'{k}={v:.2%}' for k, v in horizon_agreement.items())}")
+                horizons_list = sorted(y_train_multi.keys())
+                # Show agreement between key horizons
+                if len(horizons_list) >= 2:
+                    for i in [0, len(horizons_list)//2, -1]:  # Short, mid, long
+                        if i < len(horizons_list) - 1:
+                            h1 = horizons_list[i]
+                            h2 = horizons_list[i+1]
+                            agreement = np.mean(y_train_multi[h1] == y_train_multi[h2])
+                            horizon_agreement[f"{h1}h-{h2}h"] = agreement
+                if horizon_agreement:
+                    logger.info(f"  Epoch {epoch+1}: Horizon agreement: {', '.join(f'{k}={v:.2%}' for k, v in horizon_agreement.items())}")
 
             # Mini-batch training
             for i in range(0, len(X_train), batch_size):
@@ -2184,15 +2192,19 @@ class ModelPreTrainer:
 
         # Multi-horizon training summary
         if is_multi_horizon:
-            logger.info("=" * 70)
-            logger.info("🎯 MULTI-HORIZON TRAINING COMPLETE")
+            logger.info("=" * 80)
+            logger.info("🎯 MULTI-HORIZON TRAINING COMPLETE (7 TIMEFRAMES)")
             logger.info(f"   Training horizons: {sorted(labels.keys())} hours")
-            logger.info(f"   Primary horizon (48h) accuracy: {best_val_accuracy:.2%}")
-            logger.info(f"   This fixes the critical mismatch:")
-            logger.info(f"   - Previous: 5h predictions but 48h+ holding periods")
-            logger.info(f"   - Now: Ensemble learns patterns across all timeframes")
-            logger.info(f"   - Result: Better directional predictions at relevant horizons")
-            logger.info("=" * 70)
+            logger.info(f"   Coverage: 1 day to 66+ days (micro-trends → macro-trends)")
+            logger.info(f"   Primary horizon (200h / 8+ days) accuracy: {best_val_accuracy:.2%}")
+            logger.info(f"")
+            logger.info(f"   ✅ What this achieves:")
+            logger.info(f"   • Captures short-term reversions (24h-100h)")
+            logger.info(f"   • Learns medium-term trends (200h-400h)")
+            logger.info(f"   • Models seasonal/macro patterns (800h-1600h)")
+            logger.info(f"   • Ensemble consensus across all timeframes")
+            logger.info(f"   • No prediction horizon blindness")
+            logger.info("=" * 80)
 
         logger.info(f"Training complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
