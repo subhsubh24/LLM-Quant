@@ -1017,9 +1017,12 @@ class WalkForwardBacktester:
         signals_generated = 0
         positions_opened = 0
 
-        # Model performance tracking
+        # PHASE C: Model Ensemble Optimization - Track per-model P&L
         model_names = ["DQN", "PPO", "LSTM", "Transformer"]
         model_predictions = {m: {"correct": 0, "incorrect": 0} for m in model_names}
+
+        # PHASE C: Track P&L contribution by model (profit if model voted for winning trade)
+        model_pnl = {m: {"pnl": 0, "trades": 0, "wins": 0, "losses": 0} for m in model_names}
 
         # Rolling win-rate monitoring (for degradation detection)
         recent_trades_window = []  # Keep last 20 trades for rolling win-rate
@@ -1151,7 +1154,7 @@ class WalkForwardBacktester:
                             f"Consider retraining models."
                         )
 
-                    # Track individual model accuracy
+                    # Track individual model accuracy and P&L (PHASE C)
                     trade_was_profitable = realized_pnl > 0
                     if "individual_predictions" in pos and "final_action" in pos:
                         individual_preds = pos["individual_predictions"]
@@ -1162,6 +1165,7 @@ class WalkForwardBacktester:
                             if idx < len(model_names):
                                 model_name = model_names[idx]
                                 model_was_correct = (pred == final_action) == trade_was_profitable
+
                                 if model_was_correct:
                                     model_predictions[model_name]["correct"] += 1
                                     # PHASE B: Track for adaptive weighting
@@ -1170,6 +1174,17 @@ class WalkForwardBacktester:
                                     model_predictions[model_name]["incorrect"] += 1
                                     # PHASE B: Track for adaptive weighting
                                     adaptive_weighter.record_prediction(model_name, was_correct=False)
+
+                                # PHASE C: Track P&L contribution
+                                # Credit model if it voted for the winning action
+                                if pred == final_action:  # Model agrees with ensemble
+                                    model_pnl[model_name]["trades"] += 1
+                                    if trade_was_profitable:
+                                        model_pnl[model_name]["pnl"] += realized_pnl
+                                        model_pnl[model_name]["wins"] += 1
+                                    else:
+                                        model_pnl[model_name]["pnl"] += realized_pnl
+                                        model_pnl[model_name]["losses"] += 1
 
                     # Log trade closure
                     trade_direction = "LONG" if side == "long" else "SHORT"
@@ -1305,6 +1320,44 @@ class WalkForwardBacktester:
             total = correct + incorrect
             accuracy = (correct / total * 100) if total > 0 else 0
             logger.info(f"  {model_name}: {accuracy:.1f}% ({correct}/{total})")
+
+        # PHASE C: Log model P&L contribution (profit factor by model)
+        logger.info("\n💰 PHASE C - MODEL P&L CONTRIBUTION:")
+        logger.info("  (When model voted for winning action)")
+        model_ranking = []
+        for model_name in model_names:
+            trades_count = model_pnl[model_name]["trades"]
+            total_pnl = model_pnl[model_name]["pnl"]
+            wins = model_pnl[model_name]["wins"]
+            losses = model_pnl[model_name]["losses"]
+
+            if trades_count > 0:
+                avg_pnl = total_pnl / trades_count
+                win_rate = wins / trades_count * 100
+                model_ranking.append((model_name, total_pnl, avg_pnl, win_rate, trades_count))
+            else:
+                model_ranking.append((model_name, 0, 0, 0, 0))
+
+        # Sort by total P&L (best first)
+        model_ranking.sort(key=lambda x: x[1], reverse=True)
+
+        for model_name, total_pnl, avg_pnl, win_rate, trades_count in model_ranking:
+            status = "✅ GOOD" if total_pnl > 0 else "❌ BAD"
+            logger.info(
+                f"  {status} {model_name}: ${total_pnl:+.2f} total | "
+                f"${avg_pnl:+.2f} avg | {win_rate:.1f}% win rate | {trades_count} trades"
+            )
+
+        # Recommendation for ensemble optimization
+        profitable_models = [name for name, pnl, *_ in model_ranking if pnl > 0]
+        unprofitable_models = [name for name, pnl, *_ in model_ranking if pnl <= 0]
+
+        if unprofitable_models:
+            logger.info(f"\n💡 PHASE C RECOMMENDATION:")
+            logger.info(f"  Remove unprofitable models: {', '.join(unprofitable_models)}")
+            logger.info(f"  Keep and focus on: {', '.join(profitable_models) if profitable_models else 'NONE (all bad!)'}")
+            if not profitable_models:
+                logger.error(f"  ⚠️  WARNING: ALL MODELS ARE UNPROFITABLE. Ensemble is fundamentally broken.")
 
         # Log adaptive ensemble weights (PHASE B)
         logger.info("\n⚖️  PHASE B - ADAPTIVE ENSEMBLE WEIGHTS:")
