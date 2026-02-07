@@ -1020,16 +1020,27 @@ class WalkForwardBacktester:
 
                 unrealized_pnl = pos["size"] * pnl_pct
 
+                # Calculate volatility for adaptive stops (last 20 candles)
+                recent_closes = [c.close for c in window_data[symbol][-20:]] if len(window_data[symbol]) >= 20 else [entry_price]
+                if len(recent_closes) > 1:
+                    volatility = np.std(np.diff(recent_closes) / np.array(recent_closes[:-1]))
+                else:
+                    volatility = 0.02  # Default 2% volatility
+
+                # Adaptive stops based on volatility (higher vol = wider stops)
+                stop_loss_pct = max(0.03, min(0.10, volatility * 2))  # 3-10% based on volatility
+                take_profit_pct = max(0.08, min(0.25, volatility * 4))  # 8-25% based on volatility
+
                 # Check exit conditions
                 should_exit = False
                 exit_reason = ""
 
-                # Take profit (10%)
-                if pnl_pct >= 0.10:
+                # Take profit (adaptive based on volatility)
+                if pnl_pct >= take_profit_pct:
                     should_exit = True
                     exit_reason = "take_profit"
-                # Stop loss (5%)
-                elif pnl_pct <= -0.05:
+                # Stop loss (adaptive based on volatility)
+                elif pnl_pct <= -stop_loss_pct:
                     should_exit = True
                     exit_reason = "stop_loss"
                 # Time-based exit (hold max 48 hours)
@@ -1078,11 +1089,17 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict(state)
                     signals_generated += 1
 
-                    # Only trade on strong signals
-                    if prediction["action"] != 1 and prediction["confidence"] > 0.6:
-                        # Position sizing: 0.5% per trade allows up to 200 positions
-                        # Max risk = 0.5% * num_positions. With 50 positions = 25% max risk (reasonable)
-                        position_size = capital * 0.005
+                    # Only trade on ULTRA-STRONG signals (increased from 0.6 to improve quality)
+                    # Higher threshold = fewer but higher-quality trades
+                    if prediction["action"] != 1 and prediction["confidence"] > 0.80:
+                        # Kelly Criterion position sizing (adaptive based on model confidence)
+                        # Higher confidence = larger position (up to 2%)
+                        # Lower confidence = smaller position (down to 0.1%)
+                        # This is conservative Kelly (1/2 * Kelly fraction)
+                        confidence = prediction["confidence"]
+                        # Scale: 0.6 confidence -> 0.3% size, 1.0 confidence -> 1.5% size
+                        kelly_fraction = 0.003 + (confidence - 0.6) * 0.015 / 0.4 if confidence >= 0.6 else 0.001
+                        position_size = capital * min(kelly_fraction, 0.02)  # Cap at 2%
 
                         if position_size > 100:  # Minimum position
                             side = "long" if prediction["action"] == 2 else "short"
