@@ -75,7 +75,7 @@ class MacroStrategy:
         }
         return seasonal_patterns.get(month, 0.0)
 
-    def get_macro_regime(self, vix_level: float = 20, credit_spread: float = 150) -> Dict:
+    def get_macro_regime(self, vix_level: float = 20, credit_spread: float = 150, timestamp: Optional[datetime] = None) -> Dict:
         """
         Determine macro regime based on VIX and credit spreads.
 
@@ -84,6 +84,9 @@ class MacroStrategy:
         - BALANCED: Moderate VIX (15-25), spreads (100-200)
         - RISK_OFF: High VIX (>25), wide spreads (>200), risk aversion
         """
+        if timestamp is None:
+            timestamp = datetime.now()
+
         vix_regime = "low" if vix_level < 15 else ("high" if vix_level > 25 else "moderate")
         spread_regime = "tight" if credit_spread < 100 else ("wide" if credit_spread > 200 else "moderate")
 
@@ -98,13 +101,20 @@ class MacroStrategy:
             overall_regime = "BALANCED"
             risk_score = 0.7  # Moderate risk appetite
 
+        # Get seasonal factor
+        seasonal_score = self._get_seasonal_score(timestamp.month)
+        seasonal_factor = 1.0 + seasonal_score  # Convert to multiplier (0.95 to 1.05)
+
         return {
             "vix_regime": vix_regime,
             "spread_regime": spread_regime,
             "overall_regime": overall_regime,
             "risk_score": risk_score,
             "vix_level": vix_level,
-            "credit_spread": credit_spread,
+            "credit_spreads": credit_spread,
+            "credit_spread": credit_spread,  # Both names for compatibility
+            "seasonal_factor": seasonal_factor,
+            "timestamp": timestamp,
         }
 
     def get_position_size_multiplier(self, macro_regime: Dict, prediction_confidence: float) -> float:
@@ -252,6 +262,106 @@ class MacroStrategy:
             level: (price - entry_price) * multiplier + entry_price
             for level, price in base_levels.items()
         }
+
+    def get_upcoming_events(self, timestamp: datetime, days_ahead: int = 7) -> List[Dict]:
+        """
+        Get list of upcoming macro events that could impact trading.
+
+        Returns list of events with:
+        - type: 'fed_meeting', 'earnings', 'cpi', 'nonfarm_payrolls', 'gdp'
+        - severity: 'LOW', 'MEDIUM', 'HIGH'
+        - timestamp: when the event occurs
+        - description: event description
+        """
+        events = []
+        current_date = timestamp.date() if hasattr(timestamp, 'date') else timestamp
+        check_until = current_date + timedelta(days=days_ahead)
+
+        month = timestamp.month
+        day = timestamp.day
+
+        # ========== FED MEETINGS (High severity) ==========
+        if month in self.fed_meeting_months:
+            # Approximate: assume 8 meetings per year, roughly every 6 weeks
+            # Real dates would be: Jan, Mar, May, Jun, Jul, Sep, Nov, Dec
+            fed_meeting_days = {
+                1: 31,  # January FOMC
+                3: 20,  # March FOMC
+                5: 1,   # May FOMC
+                6: 19,  # June FOMC
+                7: 31,  # July FOMC
+                9: 18,  # September FOMC
+                11: 7,  # November FOMC
+                12: 18, # December FOMC
+            }
+            fed_date = fed_meeting_days.get(month)
+            if fed_date and current_date <= datetime(timestamp.year, month, min(fed_date, 28)).date() <= check_until:
+                events.append({
+                    "type": "fed_meeting",
+                    "severity": "HIGH",
+                    "timestamp": datetime(timestamp.year, month, min(fed_date, 28)),
+                    "description": f"Fed FOMC Meeting - {month}/{min(fed_date, 28)}",
+                    "hours_away": (datetime(timestamp.year, month, min(fed_date, 28)) - timestamp).total_seconds() / 3600,
+                })
+
+        # ========== NONFARM PAYROLLS (High severity) ==========
+        # First Friday of month
+        first_day = datetime(timestamp.year, month, 1)
+        first_friday = first_day + timedelta(days=(4 - first_day.weekday()) % 7)
+        if current_date <= first_friday.date() <= check_until:
+            events.append({
+                "type": "nonfarm_payrolls",
+                "severity": "HIGH",
+                "timestamp": first_friday,
+                "description": f"Nonfarm Payrolls - {first_friday.strftime('%m/%d')}",
+                "hours_away": (first_friday - timestamp).total_seconds() / 3600,
+            })
+
+        # ========== CPI (High severity) ==========
+        # Mid-month, typically second week
+        cpi_date = datetime(timestamp.year, month, 12)
+        if current_date <= cpi_date.date() <= check_until:
+            events.append({
+                "type": "cpi",
+                "severity": "HIGH",
+                "timestamp": cpi_date,
+                "description": f"CPI Release - {cpi_date.strftime('%m/%d')}",
+                "hours_away": (cpi_date - timestamp).total_seconds() / 3600,
+            })
+
+        # ========== GDP (Medium severity) ==========
+        # Usually end of month
+        gdp_date = datetime(timestamp.year, month, 28)
+        if current_date <= gdp_date.date() <= check_until:
+            events.append({
+                "type": "gdp",
+                "severity": "MEDIUM",
+                "timestamp": gdp_date,
+                "description": f"GDP Release - {gdp_date.strftime('%m/%d')}",
+                "hours_away": (gdp_date - timestamp).total_seconds() / 3600,
+            })
+
+        # ========== EARNINGS SEASON (Medium severity) ==========
+        if month in self.earnings_season_months:
+            earnings_dates = [
+                datetime(timestamp.year, month, 15),
+                datetime(timestamp.year, month, 20),
+                datetime(timestamp.year, month, 25),
+            ]
+            for earnings_date in earnings_dates:
+                if current_date <= earnings_date.date() <= check_until:
+                    events.append({
+                        "type": "earnings",
+                        "severity": "MEDIUM",
+                        "timestamp": earnings_date,
+                        "description": f"Earnings Season - {earnings_date.strftime('%m/%d')}",
+                        "hours_away": (earnings_date - timestamp).total_seconds() / 3600,
+                    })
+
+        # Sort by how soon they occur
+        events.sort(key=lambda e: e.get("hours_away", float('inf')))
+
+        return events
 
 
 # Global macro strategy instance
