@@ -1080,35 +1080,35 @@ class WalkForwardBacktester:
 
                     # Only trade on strong signals
                     if prediction["action"] != 1 and prediction["confidence"] > 0.6:
-                        # Position sizing (2% of capital per trade, max 10 positions)
-                        if len(positions) < 10:
-                            position_size = min(capital * 0.02, capital * 0.1)
+                        # Position sizing: 0.5% per trade allows up to 200 positions
+                        # Max risk = 0.5% * num_positions. With 50 positions = 25% max risk (reasonable)
+                        position_size = capital * 0.005
 
-                            if position_size > 100:  # Minimum position
-                                side = "long" if prediction["action"] == 2 else "short"
-                                positions_opened += 1
+                        if position_size > 100:  # Minimum position
+                            side = "long" if prediction["action"] == 2 else "short"
+                            positions_opened += 1
 
-                                # Apply entry-side slippage + commission
-                                entry_cost = position_size * COST_PER_SIDE
-                                effective_size = position_size - entry_cost
+                            # Apply entry-side slippage + commission
+                            entry_cost = position_size * COST_PER_SIDE
+                            effective_size = position_size - entry_cost
 
-                                positions[symbol] = {
-                                    "side": side,
-                                    "entry_price": candle.close,
-                                    "entry_time": timestamp,
-                                    "size": effective_size,
-                                    "entry_cost": entry_cost,
-                                }
+                            positions[symbol] = {
+                                "side": side,
+                                "entry_price": candle.close,
+                                "entry_time": timestamp,
+                                "size": effective_size,
+                                "entry_cost": entry_cost,
+                            }
 
-                                # Log position opening
-                                trade_direction = "LONG" if side == "long" else "SHORT"
-                                logger.debug(
-                                    f"Position Opened: {symbol} {trade_direction} | "
-                                    f"Price: ${candle.close:.4f} | Size: ${effective_size:.2f} | "
-                                    f"Confidence: {prediction['confidence']:.2f}"
-                                )
+                            # Log position opening
+                            trade_direction = "LONG" if side == "long" else "SHORT"
+                            logger.debug(
+                                f"Position Opened: {symbol} {trade_direction} | "
+                                f"Price: ${candle.close:.4f} | Size: ${effective_size:.2f} | "
+                                f"Confidence: {prediction['confidence']:.2f}"
+                            )
 
-                                capital -= position_size
+                            capital -= position_size
 
             # Update equity curve periodically
             if len(equity_curve) == 0 or (timestamp - equity_curve[-1][0]).total_seconds() > 3600:
