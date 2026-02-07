@@ -1483,6 +1483,8 @@ class MarketRegimeVAE:
 
         mu = self.fc_mu.forward(h)
         logvar = self.fc_logvar.forward(h)
+        # Clip logvar to prevent overflow in exp: np.exp(logvar) must be finite
+        logvar = np.clip(logvar, -10.0, 10.0)  # exp(-10)≈0, exp(10)≈22k - safe bounds
         return mu, logvar
 
     def reparameterize(self, mu: np.ndarray, logvar: np.ndarray) -> np.ndarray:
@@ -2001,9 +2003,13 @@ class TrainableVAE:
             dW_cls = np.zeros_like(self.W_cls)
             db_cls = np.zeros_like(self.b_cls)
 
-        # KL gradient
+        # KL gradient (with numerical stability)
         dmu = beta * mu / batch_size
-        dlogvar = beta * 0.5 * (np.exp(logvar) - 1) / batch_size
+        # Clip to prevent overflow: exp(logvar) must be finite
+        logvar_safe = np.clip(logvar, -10.0, 10.0)
+        dlogvar = beta * 0.5 * (np.exp(logvar_safe) - 1) / batch_size
+        # Detect NaN and clamp to safe values
+        dlogvar = np.nan_to_num(dlogvar, nan=0.0, posinf=1.0, neginf=-1.0)
 
         # Reparameterization backward
         dmu += dz
@@ -2036,6 +2042,9 @@ class TrainableVAE:
         beta1, beta2, eps = 0.9, 0.999, 1e-8
 
         for name, grad in grads.items():
+            # Handle NaN gracefully
+            grad = np.nan_to_num(grad, nan=0.0, posinf=0.1, neginf=-0.1)
+
             norm = np.linalg.norm(grad)
             if norm > max_grad:
                 grad = grad * max_grad / norm
@@ -2047,7 +2056,12 @@ class TrainableVAE:
             m_hat = self.m[name] / (1 - beta1 ** self.t)
             v_hat = self.v[name] / (1 - beta2 ** self.t)
 
-            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+            # Ensure no NaN in update step
+            v_hat_safe = np.clip(v_hat, 1e-10, None)  # Prevent division by zero
+            update = self.lr * m_hat / (np.sqrt(v_hat_safe) + eps)
+            update = np.nan_to_num(update, nan=0.0)
+
+            param -= update
             setattr(self, name, param)
 
         return total_loss
