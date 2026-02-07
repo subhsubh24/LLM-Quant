@@ -1180,8 +1180,12 @@ class WalkForwardBacktester:
                                 model_was_correct = (pred == final_action) == trade_was_profitable
                                 if model_was_correct:
                                     model_predictions[model_name]["correct"] += 1
+                                    # PHASE B: Track for adaptive weighting
+                                    adaptive_weighter.record_prediction(model_name, was_correct=True)
                                 else:
                                     model_predictions[model_name]["incorrect"] += 1
+                                    # PHASE B: Track for adaptive weighting
+                                    adaptive_weighter.record_prediction(model_name, was_correct=False)
 
                     # Log trade closure
                     trade_direction = "LONG" if side == "long" else "SHORT"
@@ -1317,6 +1321,29 @@ class WalkForwardBacktester:
             total = correct + incorrect
             accuracy = (correct / total * 100) if total > 0 else 0
             logger.info(f"  {model_name}: {accuracy:.1f}% ({correct}/{total})")
+
+        # Log microstructure statistics (PHASE A)
+        logger.info("\n🔬 PHASE A - MICROSTRUCTURE DATA:")
+        logger.info(f"  Symbols with Microstructure: {len(microstructure_extractors)}")
+        ob_samples = sum(
+            len(extractor.order_book_history) for extractor in microstructure_extractors.values()
+        )
+        logger.info(f"  Order Book Snapshots Processed: {ob_samples:,}")
+
+        # Log adaptive ensemble weights (PHASE B)
+        logger.info("\n⚖️  PHASE B - ADAPTIVE ENSEMBLE WEIGHTS:")
+        adaptive_weights = adaptive_weighter.get_model_weights()
+        for model_name in model_names:
+            weight = adaptive_weights.get(model_name, 0)
+            logger.info(f"  {model_name}: {weight:.2%}")
+
+        # Log continuous learning stats (PHASE B)
+        logger.info("\n🔄 PHASE B - CONTINUOUS LEARNING STATS:")
+        learner_stats = continuous_learner.get_training_stats()
+        logger.info(f"  Total Candles Processed: {learner_stats['total_candles_processed']:,}")
+        logger.info(f"  Buffer Size: {learner_stats['buffer_size']:,} samples")
+        logger.info(f"  Retraining Count: {learner_stats['retraining_count']}")
+        logger.info(f"  Recent Win Rate: {learner_stats['performance']['win_rate']:.1%}")
 
         logger.info("Calculating final metrics...")
 
