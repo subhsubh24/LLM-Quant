@@ -27,7 +27,7 @@ from .microstructure import MicrostructureExtractor, OrderBook
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
 from .macro_strategy import MacroStrategy, get_macro_strategy
 from .portfolio_risk import PortfolioRiskManager, get_portfolio_risk_manager
-from .1600h_trading_system import TradingSystem1600h, get_trading_system
+from .trading_system_1600h import TradingSystem1600h, get_trading_system
 
 logger = logging.getLogger(__name__)
 
