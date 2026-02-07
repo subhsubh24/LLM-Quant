@@ -1769,8 +1769,11 @@ class ModelPreTrainer:
         all_rewards = []
 
         for symbol, candles in historical_data.items():
-            if len(candles) < 10000:  # 416+ days minimum for 1600h pattern learning
-                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=10000 for 1600h, ~0.3 cycles)")
+            # Need 2+ complete 1600h cycles to learn patterns: 1600h * 2 = 3200h = 133+ days
+            # Realistic minimum: 4000 candles = 166 days = 2.5 complete cycles
+            # Most crypto APIs only have ~8760 hourly candles (365 days), which is sufficient
+            if len(candles) < 4000:
+                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=4000 for 1600h, ~{len(candles)/1600:.1f} cycles)")
                 continue
 
             features = backtester.prepare_features(candles)
