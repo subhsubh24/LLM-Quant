@@ -1069,27 +1069,13 @@ class WalkForwardBacktester:
             if len(window_data[symbol]) > max_window * 24:  # hourly data
                 window_data[symbol] = window_data[symbol][-max_window * 24:]
 
-            # PHASE A: Generate synthetic order book and extract microstructure
-            if len(window_data[symbol]) >= 5:
-                recent_candles = window_data[symbol][-5:]
-                # Simulate order book from candle data
-                mid_price = candle.close
-                spread_pct = 0.001 * (candle.high - candle.low) / candle.close  # Spread based on volatility
-                bid_price = mid_price * (1 - spread_pct / 2)
-                ask_price = mid_price * (1 + spread_pct / 2)
-
-                # Simulate order book with volume clustered at levels
-                synthetic_bids = [
-                    (bid_price * (1 - 0.001 * i), candle.volume / 20 / (1 + i * 0.5))
-                    for i in range(10)
-                ]
-                synthetic_asks = [
-                    (ask_price * (1 + 0.001 * i), candle.volume / 20 / (1 + i * 0.5))
-                    for i in range(10)
-                ]
-
-                ob = OrderBook(bids=synthetic_bids, asks=synthetic_asks, timestamp=timestamp.timestamp())
-                microstructure_extractors[symbol].add_order_book(ob)
+            # PHASE A: Microstructure data
+            # NOTE: Real order book data must come from live APIs (Binance, Coinbase, Kraken)
+            # or from properly recorded historical order book snapshots
+            # NO synthetic/made-up data allowed
+            # TODO: Implement live order book fetching during backtest simulation
+            # For now, microstructure extractors are initialized but will be empty in backtest
+            # This ensures we only use REAL market data
 
             # Update existing positions
             if symbol in positions:
