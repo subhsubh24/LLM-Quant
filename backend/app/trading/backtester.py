@@ -23,6 +23,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import numpy as np
 
+from .microstructure import MicrostructureExtractor, OrderBook
+from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
+
 logger = logging.getLogger(__name__)
 
 # Model checkpoint directory
@@ -1023,6 +1026,24 @@ class WalkForwardBacktester:
         max_recent_trades = 20
         degradation_threshold = 0.35  # Alert if win rate drops below 35%
 
+        # PHASE B: Initialize continuous learning
+        continuous_learner = ContinuousLearner(
+            retrain_interval=100,  # Retrain every 100 candles
+            window_size=5000,  # Keep last 5000 samples
+            performance_threshold=0.45,  # Alert if win rate < 45%
+        )
+        adaptive_weighter = AdaptiveEnsembleWeighter(model_names=model_names, lookback=50)
+
+        # PHASE A: Microstructure extractors for each symbol
+        microstructure_extractors: Dict[str, MicrostructureExtractor] = {
+            sym: MicrostructureExtractor(lookback=20) for sym in data.keys()
+        }
+
+        logger.info(f"📊 PHASE A+B: Continuous Learning & Microstructure initialized")
+        logger.info(f"  Continuous Learner: Retrain every 100 candles")
+        logger.info(f"  Adaptive Ensemble: Reweight models by recent performance")
+        logger.info(f"  Microstructure: Extracting {len(data)} symbol features")
+
         for timestamp, symbol, candle in all_candles:
             candles_processed += 1
 
@@ -1047,6 +1068,28 @@ class WalkForwardBacktester:
             max_window = self.train_window + self.test_window + 50
             if len(window_data[symbol]) > max_window * 24:  # hourly data
                 window_data[symbol] = window_data[symbol][-max_window * 24:]
+
+            # PHASE A: Generate synthetic order book and extract microstructure
+            if len(window_data[symbol]) >= 5:
+                recent_candles = window_data[symbol][-5:]
+                # Simulate order book from candle data
+                mid_price = candle.close
+                spread_pct = 0.001 * (candle.high - candle.low) / candle.close  # Spread based on volatility
+                bid_price = mid_price * (1 - spread_pct / 2)
+                ask_price = mid_price * (1 + spread_pct / 2)
+
+                # Simulate order book with volume clustered at levels
+                synthetic_bids = [
+                    (bid_price * (1 - 0.001 * i), candle.volume / 20 / (1 + i * 0.5))
+                    for i in range(10)
+                ]
+                synthetic_asks = [
+                    (ask_price * (1 + 0.001 * i), candle.volume / 20 / (1 + i * 0.5))
+                    for i in range(10)
+                ]
+
+                ob = OrderBook(bids=synthetic_bids, asks=synthetic_asks, timestamp=timestamp.timestamp())
+                microstructure_extractors[symbol].add_order_book(ob)
 
             # Update existing positions
             if symbol in positions:
