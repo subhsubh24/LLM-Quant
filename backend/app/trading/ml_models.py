@@ -323,11 +323,12 @@ class LSTMClassifier:
     Includes proper backpropagation through time (BPTT).
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, lr: float = 0.001):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, lr: float = 0.001, l2_reg: float = 0.0001):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.lr = lr
+        self.l2_reg = l2_reg  # L2 regularization to prevent overfitting
 
         # LSTM weights (Xavier initialization)
         scale = np.sqrt(1.0 / (input_dim + hidden_dim))
@@ -536,7 +537,12 @@ class LSTMClassifier:
             m_hat = self.m[name] / (1 - beta1 ** self.t)
             v_hat = self.v[name] / (1 - beta2 ** self.t)
 
+            # Adam update
             param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+
+            # L2 weight decay (regularization) - shrink weights to prevent overfitting
+            param *= (1 - self.l2_reg * self.lr)
+
             setattr(self, name, param)
 
         return loss
@@ -1543,13 +1549,14 @@ class TrainableTransformer:
     """
 
     def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3,
-                 n_heads: int = 4, lr: float = 0.001):
+                 n_heads: int = 4, lr: float = 0.001, l2_reg: float = 0.0001):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.n_heads = n_heads
         self.head_dim = hidden_dim // n_heads
         self.lr = lr
+        self.l2_reg = l2_reg  # L2 regularization to prevent overfitting
 
         # Input projection
         self.W_in = np.random.randn(input_dim, hidden_dim) * np.sqrt(2.0 / input_dim)
@@ -1827,7 +1834,12 @@ class TrainableTransformer:
             m_hat = self.m[name] / (1 - beta1 ** self.t)
             v_hat = self.v[name] / (1 - beta2 ** self.t)
 
+            # Adam update
             param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+
+            # L2 weight decay (regularization) - shrink weights to prevent overfitting
+            param *= (1 - self.l2_reg * self.lr)
+
             setattr(self, name, param)
 
         # Normalize loss for stable reporting

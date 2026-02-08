@@ -1913,19 +1913,21 @@ class ModelPreTrainer:
         logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
         # ============================================================
-        # WALK-FORWARD VALIDATION (expanding window)
+        # WALK-FORWARD VALIDATION (rolling window - FIXED for non-stationary markets)
         # ============================================================
-        # Instead of a single 80/20 split, progressively expand the training
-        # window and validate on the next temporal segment. This:
-        # 1. Prevents look-ahead bias (always validates on future data)
-        # 2. Gives robust out-of-sample performance across multiple periods
-        # 3. Detects concept drift if later folds degrade
-        # 4. Model adapts to evolving market regimes via warm-start
+        # CHANGE FROM EXPANDING to ROLLING WINDOW:
+        # Expanding window assumes past patterns repeat (❌ FALSE for markets)
+        # Rolling window trains on RECENT data only (✅ Realistic for trading)
         #
-        # Fold structure (3 folds, expanding window):
-        # Fold 0: Train [0:50%], Val [50:60%]
-        # Fold 1: Train [0:60%], Val [60:70%]
-        # Fold 2: Train [0:70%], Val [70:80%]
+        # Why this matters:
+        # - Market regime changes every 30-60 days
+        # - Training on 120+ days old data won't predict new regime
+        # - Rolling window keeps RECENT patterns in training set
+        #
+        # Fold structure (3 folds, rolling window):
+        # Fold 0: Train [0:50%], Val [50:60%]    (early period)
+        # Fold 1: Train [20:70%], Val [70:80%]   (shifted, not expanded)
+        # Fold 2: Train [40:90%], Val [90:100%]  (recent data focus)
         n_wf_folds = 3
         epochs_per_fold = max(epochs // n_wf_folds, 4)
         wf_fold = 0
@@ -1934,34 +1936,37 @@ class ModelPreTrainer:
         # Early stopping setup - check for resume state (must be before wf_fold calculation)
         start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
-        patience = 8  # Stop if no improvement for 8 epochs (more thorough)
+        patience = 2  # REDUCED: Stop if no improvement for 2 epochs (prevent overfitting)
         patience_counter = getattr(self, '_patience_counter', 0)
 
         n = len(features)
         wf_boundaries = []
         for f in range(n_wf_folds):
-            train_frac = 0.50 + f * 0.10
-            val_end_frac = min(train_frac + 0.10, 1.0)
+            # ROLLING WINDOW: Shift training window, don't expand it
+            train_start = int(n * (f * 0.20))  # Shift by 20% each fold
+            train_end = int(n * (0.50 + f * 0.20))
+            val_end = int(n * (0.60 + f * 0.20))
             wf_boundaries.append((
-                int(n * train_frac),       # train_end
-                int(n * val_end_frac),      # val_end
+                train_start,           # NEW: train_start instead of 0
+                train_end,             # Shifted training end
+                val_end,               # Shifted validation end
             ))
 
         # If resuming, advance to correct fold
         wf_fold = min(start_epoch // epochs_per_fold, n_wf_folds - 1)
 
-        # Initialize current fold
-        train_end, val_end = wf_boundaries[wf_fold]
-        X_train = features[:train_end]
-        y_train = primary_labels[:train_end]
-        r_train = rewards[:train_end]
+        # Initialize current fold (now with rolling window support)
+        train_start, train_end, val_end = wf_boundaries[wf_fold]
+        X_train = features[train_start:train_end]
+        y_train = primary_labels[train_start:train_end]
+        r_train = rewards[train_start:train_end]
         X_val = features[train_end:val_end]
         y_val = primary_labels[train_end:val_end]
         r_val = rewards[train_end:val_end]
 
-        # For multi-horizon, also slice the horizon-specific labels
+        # For multi-horizon, also slice the horizon-specific labels (with rolling window)
         if is_multi_horizon:
-            y_train_multi = {h: labels[h][:train_end] for h in sorted(labels.keys())}
+            y_train_multi = {h: labels[h][train_start:train_end] for h in sorted(labels.keys())}
             y_val_multi = {h: labels[h][train_end:val_end] for h in sorted(labels.keys())}
         else:
             y_train_multi = None
