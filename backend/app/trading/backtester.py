@@ -2989,7 +2989,7 @@ def get_alpha_manager() -> AlphaSourceManager:
 
 async def run_full_training_pipeline(
     days_of_data: int = 730,  # 2 years: Required for 1600h pattern learning
-    training_epochs: int = 40  # Balanced for ~2 hours training with early stopping
+    training_epochs: int = 20  # Reduced: early stopping prevents overfitting (patience=2)
 ) -> Dict:
     """
     Run the complete pre-training pipeline:
