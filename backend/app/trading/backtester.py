@@ -1720,7 +1720,7 @@ class ModelPreTrainer:
         # Initialize models with PROPER TRAINABLE versions
         from .ml_models import (
             create_dqn_agent, create_ppo_agent,
-            LSTMClassifier, TrainableTransformer, TrainableVAE
+            LSTMClassifier, TrainableTransformer
         )
 
         # DQN and PPO already have proper training
@@ -1733,9 +1733,6 @@ class ModelPreTrainer:
         )
         self.transformer = TrainableTransformer(
             input_dim=state_dim, hidden_dim=64, output_dim=action_dim, lr=0.001
-        )
-        self.vae = TrainableVAE(
-            input_dim=state_dim, hidden_dim=64, latent_dim=8, output_dim=4, lr=0.001
         )
 
         # State buffer for sequential prediction (LSTM/Transformer)
@@ -1867,7 +1864,7 @@ class ModelPreTrainer:
         features: np.ndarray,
         labels: np.ndarray,
         rewards: np.ndarray,
-        epochs: int = 40,
+        epochs: int = 20,
         batch_size: int = 256,
         validation_split: float = 0.2
     ) -> TrainingMetrics:
@@ -1925,13 +1922,11 @@ class ModelPreTrainer:
         # 3. Detects concept drift if later folds degrade
         # 4. Model adapts to evolving market regimes via warm-start
         #
-        # Fold structure (5 folds, expanding window):
+        # Fold structure (3 folds, expanding window):
         # Fold 0: Train [0:50%], Val [50:60%]
         # Fold 1: Train [0:60%], Val [60:70%]
         # Fold 2: Train [0:70%], Val [70:80%]
-        # Fold 3: Train [0:80%], Val [80:90%]
-        # Fold 4: Train [0:90%], Val [90:100%]
-        n_wf_folds = 5
+        n_wf_folds = 3
         epochs_per_fold = max(epochs // n_wf_folds, 4)
         wf_fold = 0
         wf_fold_accuracies = []
@@ -2037,7 +2032,7 @@ class ModelPreTrainer:
 
             epoch_losses = []
             # Per-model loss tracking for debugging
-            dqn_losses, lstm_losses, trans_losses, vae_losses = [], [], [], []
+            dqn_losses, lstm_losses, trans_losses = [], [], []
             batch_count = 0
 
             # Multi-horizon logging
@@ -2143,13 +2138,6 @@ class ModelPreTrainer:
                             epoch_losses.append(trans_loss)
                             trans_losses.append(trans_loss)
 
-                # =====================
-                # TRAIN VAE (Reconstruction + KL Loss)
-                # =====================
-                # VAE trains on individual states with optional regime labels
-                vae_loss = self.vae.train_step(batch_X, batch_y % 4)  # 4 regimes
-                epoch_losses.append(vae_loss)
-                vae_losses.append(vae_loss)
 
             # Training accuracy (sample subset for speed)
             # Reset buffer and iterate so LSTM/Transformer get sequential context
@@ -2196,8 +2184,7 @@ class ModelPreTrainer:
             logger.info(
                 f"  📊 Loss breakdown: DQN={np.mean(dqn_losses):.2f}, "
                 f"LSTM={np.mean(lstm_losses):.2f}, "
-                f"Trans={np.mean(trans_losses):.2f}, "
-                f"VAE={np.mean(vae_losses):.2f}"
+                f"Trans={np.mean(trans_losses):.2f}"
             )
 
             # Update resume state
@@ -2398,7 +2385,6 @@ class ModelPreTrainer:
             # Use get_weights() methods from trainable models
             "lstm_weights": self.lstm.get_weights(),
             "transformer_weights": self.transformer.get_weights(),
-            "vae_weights": self.vae.get_weights(),
             "training_metrics": self.training_metrics.to_dict(),
             "is_trained": self.is_trained,
             "timestamp": datetime.now().isoformat(),
@@ -2438,7 +2424,6 @@ class ModelPreTrainer:
             # Restore trainable models using set_weights() methods
             self.lstm.set_weights(checkpoint["lstm_weights"])
             self.transformer.set_weights(checkpoint["transformer_weights"])
-            self.vae.set_weights(checkpoint["vae_weights"])
 
             self.is_trained = checkpoint.get("is_trained", True)
 
