@@ -1791,6 +1791,10 @@ class WalkForwardBacktester:
                         kelly_fraction = base_kelly * horizon_mult
                         position_size = capital * min(kelly_fraction, 0.02)  # Cap at 2%
 
+                        # TIER 2 FIX: Calculate optimal stop distance for this new position
+                        optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
+                        effective_stop_distance = optimal_stop  # Track which stop will be used
+
                         # TIER 1 FIX: Apply recovery scaling (reduce sizing after losses)
                         position_size *= recovery_scale
                         if recovery_mode:
