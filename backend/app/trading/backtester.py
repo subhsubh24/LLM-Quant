@@ -965,6 +965,39 @@ class WalkForwardBacktester:
         else:
             return 'sideways'
 
+    def calculate_correlation(self, candles1: List[OHLCV], candles2: List[OHLCV], lookback: int = 50) -> float:
+        """
+        Calculate correlation between two symbols' returns.
+
+        Args:
+            candles1: First symbol's candles
+            candles2: Second symbol's candles
+            lookback: Number of periods to look back
+
+        Returns:
+            Correlation coefficient (-1 to 1)
+        """
+        try:
+            if len(candles1) < lookback or len(candles2) < lookback:
+                return 0.0  # Not enough data, assume uncorrelated
+
+            # Get recent close prices
+            closes1 = np.array([c.close for c in candles1[-lookback:]])
+            closes2 = np.array([c.close for c in candles2[-lookback:]])
+
+            # Calculate returns
+            returns1 = np.diff(closes1) / closes1[:-1]
+            returns2 = np.diff(closes2) / closes2[:-1]
+
+            # Calculate Pearson correlation
+            if len(returns1) == 0 or np.std(returns1) == 0 or np.std(returns2) == 0:
+                return 0.0
+
+            correlation = np.corrcoef(returns1, returns2)[0, 1]
+            return correlation if not np.isnan(correlation) else 0.0
+        except:
+            return 0.0  # If any error, assume uncorrelated
+
     def generate_labels(self, candles: List[OHLCV], lookahead: int = 5, threshold: float = 0.02) -> np.ndarray:
         """
         Generate trading labels based on future returns.
@@ -1389,6 +1422,25 @@ class WalkForwardBacktester:
 
                         kelly_fraction = base_kelly * horizon_mult
                         position_size = capital * min(kelly_fraction, 0.02)  # Cap at 2%
+
+                        # CORRELATION-AWARE SIZING: Reduce position if correlated with existing positions
+                        if positions:
+                            max_correlation = 0.0
+                            for existing_symbol in positions.keys():
+                                if symbol in window_data and existing_symbol in window_data:
+                                    if len(window_data[symbol]) >= 50 and len(window_data[existing_symbol]) >= 50:
+                                        corr = self.calculate_correlation(
+                                            window_data[symbol][-100:],
+                                            window_data[existing_symbol][-100:],
+                                            lookback=50
+                                        )
+                                        max_correlation = max(max_correlation, abs(corr))
+
+                            # Scale down position if highly correlated (>0.7)
+                            if max_correlation > 0.70:
+                                correlation_discount = 1.0 - (max_correlation - 0.70) / 0.30  # Linear decay from 0.7 to 1.0
+                                position_size *= correlation_discount
+                                logger.debug(f"Correlation discount for {symbol}: {correlation_discount:.2f}x (corr={max_correlation:.2f})")
 
                         if position_size > 100:  # Minimum position
                             side = "long" if prediction["action"] == 2 else "short"
