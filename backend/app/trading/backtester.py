@@ -1120,6 +1120,13 @@ class WalkForwardBacktester:
         equity_curve = [(all_candles[0][0], capital)]
         trades = []
 
+        # PORTFOLIO-LEVEL RISK MANAGEMENT
+        rolling_max_equity = self.initial_capital  # Track peak equity for DD calculation
+        max_portfolio_dd = 0.15  # 15% max drawdown tolerance
+        portfolio_trading_paused = False  # Pause trading if DD exceeds limit
+        recent_returns = []  # Track recent returns for volatility
+        min_lookback_returns = 20  # Need 20 days of returns for vol calculation
+
         # Progress tracking
         last_log_time = time.time()
         last_log_index = 0
@@ -1142,6 +1149,9 @@ class WalkForwardBacktester:
 
         # PHASE C: Track P&L contribution by model (profit if model voted for winning trade)
         model_pnl = {m: {"pnl": 0, "trades": 0, "wins": 0, "losses": 0} for m in model_names}
+
+        # TIER 1 FIX: Track per-model win-rate for filtering
+        model_recent_trades = {m: [] for m in model_names}  # Rolling 20-trade window
 
         # PHASE D: Track signal filtering by reason
         filtered_signals = {
@@ -1259,25 +1269,43 @@ class WalkForwardBacktester:
                 # Check exit conditions
                 should_exit = False
                 exit_reason = ""
+                partial_exit_pct = 0.0  # Fraction of position to exit
 
-                # Take profit (adaptive based on volatility)
-                if pnl_pct >= take_profit_pct:
+                # TIER 1 FIX: PROFIT PYRAMIDING
+                # Take profits gradually instead of holding to full target
+                # This locks in profits and reduces drawdown
+                if pnl_pct >= take_profit_pct * 0.5:  # 50% of target
+                    partial_exit_pct = 0.30  # Exit 30% of position at halfway point
+                    exit_reason = "profit_pyramid_1"
+                    should_exit = True
+
+                if pnl_pct >= take_profit_pct:  # Full target
+                    partial_exit_pct = 1.0  # Exit remaining position
                     should_exit = True
                     exit_reason = "take_profit"
-                # Stop loss (adaptive based on volatility)
+                # Stop loss (aggressive: tighter on long positions, wider on short)
                 elif pnl_pct <= -stop_loss_pct:
                     should_exit = True
                     exit_reason = "stop_loss"
+                    partial_exit_pct = 1.0
                 # Time-based exit (hold max 1600 hours = 66+ days for full 1600h horizon)
                 elif (timestamp - pos["entry_time"]).total_seconds() > 1600 * 3600:
                     should_exit = True
                     exit_reason = "time_exit"
+                    partial_exit_pct = 1.0
 
                 if should_exit:
-                    # Apply exit-side slippage + commission
-                    exit_cost = pos["size"] * COST_PER_SIDE
-                    realized_pnl = pos["size"] * pnl_pct - exit_cost
-                    capital += pos["size"] + realized_pnl
+                    # Handle partial exits (profit pyramiding)
+                    exit_size = pos["size"] * partial_exit_pct
+                    exit_cost = exit_size * COST_PER_SIDE
+                    realized_pnl = exit_size * pnl_pct - exit_cost
+                    capital += exit_size + realized_pnl
+
+                    # If full exit, remove position; otherwise reduce position size
+                    if partial_exit_pct >= 1.0:
+                        del positions[symbol]
+                    else:
+                        pos["size"] *= (1.0 - partial_exit_pct)
 
                     trade = {
                         "symbol": symbol,
@@ -1288,6 +1316,7 @@ class WalkForwardBacktester:
                         "exit_time": timestamp.isoformat(),
                         "pnl": realized_pnl,
                         "pnl_pct": pnl_pct * 100,
+                        "exit_size_pct": partial_exit_pct * 100,  # Track what % was exited
                         "exit_reason": exit_reason,
                         "trade_costs": pos.get("entry_cost", 0) + exit_cost,
                     }
@@ -1309,8 +1338,8 @@ class WalkForwardBacktester:
                     # Track individual model accuracy and P&L (PHASE C)
                     trade_was_profitable = realized_pnl > 0
                     if "individual_predictions" in pos and "final_action" in pos:
-                        individual_preds = pos["individual_predictions"]
-                        final_action = pos["final_action"]
+                        individual_preds = pos.get("individual_predictions", [])
+                        final_action = pos.get("final_action", 1)
 
                         # Check which models predicted the same as final action
                         for idx, pred in enumerate(individual_preds):
@@ -1347,10 +1376,24 @@ class WalkForwardBacktester:
                         f"Reason: {exit_reason}"
                     )
 
-                    del positions[symbol]
+            # TIER 1 FIX: Portfolio-level drawdown check - stop trading if DD > 15%
+            current_equity = capital + sum(
+                pos["size"] * window_data[sym][-1].close / pos["entry_price"]
+                for sym, pos in positions.items()
+                if sym in window_data and len(window_data[sym]) > 0
+            )
+            rolling_max_equity = max(rolling_max_equity, current_equity)
+            current_dd = (rolling_max_equity - current_equity) / rolling_max_equity if rolling_max_equity > 0 else 0
 
-            # Generate trading signal (only if we have enough data)
-            if len(window_data[symbol]) >= 100 and symbol not in positions:
+            if current_dd > max_portfolio_dd:
+                portfolio_trading_paused = True
+                if not any(t.get("reason") == "DD_LIMIT_PAUSED" for t in trades[-10:]):  # Log once
+                    logger.warning(f"⚠️ PORTFOLIO DD LIMIT HIT: {current_dd*100:.1f}% > {max_portfolio_dd*100:.0f}% | Pausing new trades")
+            elif current_dd < max_portfolio_dd * 0.7:  # Resume at 70% of limit
+                portfolio_trading_paused = False
+
+            # Generate trading signal (only if we have enough data AND portfolio not paused)
+            if len(window_data[symbol]) >= 100 and symbol not in positions and not portfolio_trading_paused:
                 features = self.prepare_features(window_data[symbol][-100:])
 
                 if len(features) > 0:
@@ -1441,6 +1484,21 @@ class WalkForwardBacktester:
                                 correlation_discount = 1.0 - (max_correlation - 0.70) / 0.30  # Linear decay from 0.7 to 1.0
                                 position_size *= correlation_discount
                                 logger.debug(f"Correlation discount for {symbol}: {correlation_discount:.2f}x (corr={max_correlation:.2f})")
+
+                        # TIER 1 FIX: VOLATILITY-BASED POSITION SIZING
+                        # Trade smaller when volatility is high (improves Sharpe ratio)
+                        if len(window_data[symbol]) >= 30:
+                            closes = np.array([c.close for c in window_data[symbol][-30:]])
+                            returns = np.diff(closes) / closes[:-1]
+                            realized_vol = np.std(returns)
+
+                            # Scale position inversely to volatility
+                            # Base volatility = 1% daily
+                            base_vol = 0.01
+                            if realized_vol > 0:
+                                vol_multiplier = min(base_vol / realized_vol, 1.5)  # Don't scale up too much in low vol
+                                position_size *= vol_multiplier
+                                logger.debug(f"Volatility scaling for {symbol}: {vol_multiplier:.2f}x (vol={realized_vol*100:.2f}%)")
 
                         if position_size > 100:  # Minimum position
                             side = "long" if prediction["action"] == 2 else "short"
