@@ -1224,6 +1224,18 @@ class WalkForwardBacktester:
             logger.error("No data for backtest")
             return self._empty_result()
 
+        # CRITICAL: Verify models are trained
+        models_ready = all([
+            hasattr(self, 'dqn') and self.dqn is not None,
+            hasattr(self, 'ppo') and self.ppo is not None,
+            hasattr(self, 'lstm') and self.lstm is not None,
+            hasattr(self, 'transformer') and self.transformer is not None,
+        ])
+        if not models_ready:
+            logger.error("❌ MODELS NOT TRAINED: Cannot backtest without trained models. Run training first.")
+            return self._empty_result()
+        logger.info("✅ All models loaded and ready for predictions")
+
         # Log data summary
         symbols = list(data.keys())
         total_candles = sum(len(candles) for candles in data.values())
@@ -1322,6 +1334,39 @@ class WalkForwardBacktester:
         min_cooldown_candles = 5  # Wait at least 5 candles before re-entering same symbol
         trade_churn = {}  # symbol -> count of direction flips (long->short or short->long)
         trade_directions = {}  # symbol -> last direction (for detecting flips)
+
+        # ============================================================
+        # PRE-TRADING SANITY CHECKS (ensure we'll actually trade)
+        # ============================================================
+        logger.info("\n🔍 PRE-TRADING SANITY CHECKS:")
+        logger.info(f"  Models loaded: DQN={hasattr(self, 'dqn')}, PPO={hasattr(self, 'ppo')}, LSTM={hasattr(self, 'lstm')}, Transformer={hasattr(self, 'transformer')}")
+        logger.info(f"  Initial capital: ${capital:,.2f}")
+        logger.info(f"  Minimum position size: $100")
+        logger.info(f"  Symbols to trade: {len(data)} symbols")
+        logger.info(f"  Training window: {self.train_window} candles (~{self.train_window/24:.0f} days)")
+        logger.info(f"  Data available: {len(all_candles):,} candles")
+        logger.info(f"  Features required: {features.shape[1] if len(features) > 0 else 0} features")
+        logger.info(f"  Filter thresholds (LOOSENED for diagnostics):")
+        logger.info(f"    - Min confidence: 0.50-0.70 (by model agreement)")
+        logger.info(f"    - Min model agreement: 2/4 models (weighted >50%)")
+        logger.info(f"    - Per-symbol cooldown: {min_cooldown_candles} candles")
+        logger.info(f"    - Max position size: 2% of capital (Kelly-based)")
+        logger.info(f"  Expected: Should generate trades within first 100-500 candles")
+
+        # DIAGNOSTIC: Track filter stages
+        filter_stage_counters = {
+            "total_predictions": 0,
+            "not_hold": 0,           # action != 1
+            "meets_confidence": 0,    # confidence check passed
+            "not_conflicting": 0,     # regime conflict passed
+            "is_liquid": 0,           # liquidity check passed
+            "strong_consensus": 0,    # model agreement passed
+            "stat_significant": 0,    # statistical significance passed
+            "not_in_cooldown": 0,     # cooldown check passed
+            "no_conflict": 0,         # position conflict passed
+            "not_already_open": 0,    # position not already open
+            "positions_opened": 0,    # actually opened
+        }
 
         # PHASE B: Initialize continuous learning (real data only)
         continuous_learner = ContinuousLearner(
@@ -1712,11 +1757,11 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 
-                    # DIAGNOSTIC: Log raw model predictions (sample to avoid spam)
-                    if signals_generated % 1000 == 0:  # Log every 1000 signals
+                    # DIAGNOSTIC: Log raw model predictions (especially first 50 for detailed debugging)
+                    filter_stage_counters["total_predictions"] += 1
+                    if signals_generated <= 50 or signals_generated % 1000 == 0:  # Log first 50, then every 1000
                         action_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], f'UNK_{prediction["action"]}')
-                        individual_preds_str = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], "?")
-                        logger.debug(f"📊 Raw prediction #{signals_generated}: {symbol} → {action_name}, conf={prediction['confidence']:.3f}, regime={regime}")
+                        logger.debug(f"[{signals_generated}] Raw prediction: {symbol} → {action_name}, conf={prediction['confidence']:.3f}, regime={regime}")
 
                     # Check liquidity (require minimum volume)
                     recent_volumes = np.array([c.volume for c in window_data[symbol][-20:]])
@@ -1728,7 +1773,12 @@ class WalkForwardBacktester:
                     # Only trade on ULTRA-STRONG signals
                     is_short = prediction["action"] == 0
                     is_long = prediction["action"] == 2
+                    is_hold = prediction["action"] == 1
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
+
+                    # DIAGNOSTIC: Track filter stages
+                    if not is_hold:
+                        filter_stage_counters["not_hold"] += 1
 
                     # TIER 1 FIX: Model weighting by recent performance
                     # Instead of equal voting, weight models by recent win rate
@@ -1780,6 +1830,14 @@ class WalkForwardBacktester:
                     # sideways: no change, use default
 
                     meets_confidence = prediction["confidence"] >= min_confidence
+                    if meets_confidence:
+                        filter_stage_counters["meets_confidence"] += 1
+                    if not conflicting_trade:
+                        filter_stage_counters["not_conflicting"] += 1
+                    if is_liquid:
+                        filter_stage_counters["is_liquid"] += 1
+                    if strong_consensus:
+                        filter_stage_counters["strong_consensus"] += 1
 
                     # TIER 1 FIX: SIGNAL STATISTICAL SIGNIFICANCE TESTING
                     # Only trade if historical win rate for this symbol-action is statistically > 50%
@@ -1787,10 +1845,12 @@ class WalkForwardBacktester:
                     is_statistically_significant = self.is_signal_statistically_significant(
                         symbol, prediction["action"], signal_history
                     )
+                    if is_statistically_significant:
+                        filter_stage_counters["stat_significant"] += 1
 
                     # DIAGNOSTIC LOGGING: Understand why 0 signals
                     action_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], f'UNK_{prediction["action"]}')
-                    is_hold = prediction["action"] == 1
+                    # (is_hold already defined above)
 
                     if is_hold or not meets_confidence or conflicting_trade or not is_liquid or not strong_consensus:
                         # Log why signal was rejected (sampling to avoid spam)
@@ -1816,8 +1876,10 @@ class WalkForwardBacktester:
                         candles_since_exit = candles_processed - last_exit_time[symbol]
                         if candles_since_exit < min_cooldown_candles:
                             in_cooldown = True
-                            if np.random.random() < 0.001:  # Log 0.1% for diagnostics
+                            if signals_generated <= 100 or np.random.random() < 0.001:  # Log first 100 + 0.1% sample
                                 logger.debug(f"⏳ {symbol} in cooldown ({candles_since_exit}/{min_cooldown_candles} candles since exit)")
+                    else:
+                        filter_stage_counters["not_in_cooldown"] += 1
 
                     # SAFEGUARD: Check for position direction conflicts
                     position_conflict = False
@@ -1826,8 +1888,14 @@ class WalkForwardBacktester:
                         new_action_side = "long" if prediction["action"] == 2 else "short"
                         if current_pos_side != new_action_side:
                             position_conflict = True
-                            if np.random.random() < 0.01:  # Log 1% for diagnostics
+                            if signals_generated <= 100 or np.random.random() < 0.01:  # Log first 100 + 1% sample
                                 logger.debug(f"🔄 {symbol}: Already {current_pos_side}, signal wants {new_action_side} (conflict)")
+                    else:
+                        filter_stage_counters["no_conflict"] += 1
+
+                    # Check if already have position on this symbol
+                    if symbol not in positions:
+                        filter_stage_counters["not_already_open"] += 1
 
                     if (prediction["action"] != 1 and
                         meets_confidence and
@@ -1839,7 +1907,8 @@ class WalkForwardBacktester:
                         not position_conflict and
                         symbol not in positions):  # Don't open if already have position
                         # ✅ SIGNAL ACCEPTED: Log for diagnostics
-                        logger.info(f"✅ SIGNAL ACCEPTED: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
+                        filter_stage_counters["positions_opened"] += 1
+                        logger.info(f"✅ TRADE #{filter_stage_counters['positions_opened']}: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
 
                         # HORIZON-AWARE KELLY CRITERION SIZING
                         # Longer-term positions need smaller sizes (more time = more risk)
@@ -2072,6 +2141,21 @@ class WalkForwardBacktester:
         logger.info(f"  Positions Opened: {positions_opened}")
         logger.info(f"  Total Trades: {len(trades)}")
         logger.info(f"  Final Capital: ${capital:,.2f}")
+
+        # DIAGNOSTIC: Show filter stage breakdown
+        logger.info("\n📊 SIGNAL FILTER PIPELINE ANALYSIS:")
+        logger.info(f"  Stage 1 - Total predictions: {filter_stage_counters['total_predictions']:,}")
+        logger.info(f"  Stage 2 - Not HOLD (action in [0,2]): {filter_stage_counters['not_hold']:,} ({100*filter_stage_counters['not_hold']/max(1,filter_stage_counters['total_predictions']):.1f}%)")
+        logger.info(f"  Stage 3 - Meets confidence: {filter_stage_counters['meets_confidence']:,} ({100*filter_stage_counters['meets_confidence']/max(1,filter_stage_counters['not_hold']):.1f}% of not_hold)")
+        logger.info(f"  Stage 4 - Not conflicting regime: {filter_stage_counters['not_conflicting']:,}")
+        logger.info(f"  Stage 5 - Is liquid: {filter_stage_counters['is_liquid']:,}")
+        logger.info(f"  Stage 6 - Strong consensus: {filter_stage_counters['strong_consensus']:,}")
+        logger.info(f"  Stage 7 - Statistically significant: {filter_stage_counters['stat_significant']:,}")
+        logger.info(f"  Stage 8 - Not in cooldown: {filter_stage_counters['not_in_cooldown']:,}")
+        logger.info(f"  Stage 9 - No position conflict: {filter_stage_counters['no_conflict']:,}")
+        logger.info(f"  Stage 10 - Not already open: {filter_stage_counters['not_already_open']:,}")
+        logger.info(f"  ✅ POSITIONS ACTUALLY OPENED: {filter_stage_counters['positions_opened']:,}")
+        logger.info(f"\n  Filter funnel: {filter_stage_counters['total_predictions']:,} → {filter_stage_counters['positions_opened']:,} trades ({100*filter_stage_counters['positions_opened']/max(1,filter_stage_counters['total_predictions']):.2f}% conversion)")
 
         # SAFEGUARD: Log trading quality metrics
         logger.info("\n🛡️ SAFEGUARDS - TRADING QUALITY METRICS:")
