@@ -1913,21 +1913,17 @@ class ModelPreTrainer:
         logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
         # ============================================================
-        # WALK-FORWARD VALIDATION (rolling window - FIXED for non-stationary markets)
+        # WALK-FORWARD VALIDATION (expanding window)
         # ============================================================
-        # CHANGE FROM EXPANDING to ROLLING WINDOW:
-        # Expanding window assumes past patterns repeat (❌ FALSE for markets)
-        # Rolling window trains on RECENT data only (✅ Realistic for trading)
+        # REVERT TO EXPANDING WINDOW with patience=3:
+        # - Expanding allows models to learn patterns across full historical range
+        # - Early stopping (patience=3) catches overfitting without underfitting
+        # - Better than rolling window which was too restrictive (0 trades generated)
         #
-        # Why this matters:
-        # - Market regime changes every 30-60 days
-        # - Training on 120+ days old data won't predict new regime
-        # - Rolling window keeps RECENT patterns in training set
-        #
-        # Fold structure (3 folds, rolling window):
+        # Fold structure (3 folds, expanding window):
         # Fold 0: Train [0:50%], Val [50:60%]    (early period)
-        # Fold 1: Train [20:70%], Val [70:80%]   (shifted, not expanded)
-        # Fold 2: Train [40:90%], Val [90:100%]  (recent data focus)
+        # Fold 1: Train [0:70%], Val [70:80%]    (expanded - includes fold 0 data)
+        # Fold 2: Train [0:90%], Val [90:100%]   (most expanded - full historical data)
         n_wf_folds = 3
         epochs_per_fold = max(epochs // n_wf_folds, 4)
         wf_fold = 0
@@ -1936,26 +1932,26 @@ class ModelPreTrainer:
         # Early stopping setup - check for resume state (must be before wf_fold calculation)
         start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
-        patience = 2  # REDUCED: Stop if no improvement for 2 epochs (prevent overfitting)
+        patience = 3  # Stop if no improvement for 3 epochs (balanced: learn more, catch overfitting)
         patience_counter = getattr(self, '_patience_counter', 0)
 
         n = len(features)
         wf_boundaries = []
         for f in range(n_wf_folds):
-            # ROLLING WINDOW: Shift training window, don't expand it
-            train_start = int(n * (f * 0.20))  # Shift by 20% each fold
-            train_end = int(n * (0.50 + f * 0.20))
-            val_end = int(n * (0.60 + f * 0.20))
+            # EXPANDING WINDOW: Train on more data each fold
+            train_start = 0  # Always start from beginning
+            train_end = int(n * (0.50 + f * 0.20))  # Expand training end
+            val_end = int(n * (0.60 + f * 0.20))    # Shift validation end
             wf_boundaries.append((
-                train_start,           # NEW: train_start instead of 0
-                train_end,             # Shifted training end
-                val_end,               # Shifted validation end
+                train_start,           # Always 0 for expanding window
+                train_end,             # Growing training set
+                val_end,               # Shifted validation set
             ))
 
         # If resuming, advance to correct fold
         wf_fold = min(start_epoch // epochs_per_fold, n_wf_folds - 1)
 
-        # Initialize current fold (now with rolling window support)
+        # Initialize current fold (expanding window)
         train_start, train_end, val_end = wf_boundaries[wf_fold]
         X_train = features[train_start:train_end]
         y_train = primary_labels[train_start:train_end]
@@ -1964,7 +1960,7 @@ class ModelPreTrainer:
         y_val = primary_labels[train_end:val_end]
         r_val = rewards[train_end:val_end]
 
-        # For multi-horizon, also slice the horizon-specific labels (with rolling window)
+        # For multi-horizon, also slice the horizon-specific labels (expanding window)
         if is_multi_horizon:
             y_train_multi = {h: labels[h][train_start:train_end] for h in sorted(labels.keys())}
             y_val_multi = {h: labels[h][train_end:val_end] for h in sorted(labels.keys())}
