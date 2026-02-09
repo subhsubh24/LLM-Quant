@@ -2532,7 +2532,7 @@ class ModelPreTrainer:
 
         self.is_trained = False
         self.training_metrics = TrainingMetrics(epochs_completed=0, total_samples=0)
-        self.min_training_epochs = 10  # Reduced - early stopping ensures quality
+        self.min_training_epochs = 1  # No minimum - early stopping is the control, not epoch count
         self.min_training_samples = 10000
         self.regime_train_counts = {'bull': 0, 'bear': 0, 'neutral': 0}  # Track samples per regime
 
@@ -3071,15 +3071,18 @@ class ModelPreTrainer:
 
             if len(X_test) > 0:
                 # Evaluate ensemble on test set
+                self.reset_state_buffer()  # CRITICAL: Reset buffer before test evaluation
                 test_preds = []
                 test_correct = 0
+                test_sample_count = 0
                 for i, state in enumerate(X_test[:min(1000, len(X_test))]):  # Sample for speed
                     pred = self.predict(state)
                     predicted_action = pred.get("action", 1)
                     actual_action = y_test_primary[i] if i < len(y_test_primary) else 1
                     test_correct += (predicted_action == actual_action)
+                    test_sample_count += 1
 
-                test_accuracy = test_correct / min(1000, len(X_test)) if len(X_test) > 0 else 0
+                test_accuracy = test_correct / test_sample_count if test_sample_count > 0 else 0
                 val_test_gap = best_val_accuracy - test_accuracy
 
                 logger.info(f"Validation Accuracy: {best_val_accuracy:.2%}")
@@ -3398,8 +3401,8 @@ class ModelPreTrainer:
         if not self.is_trained:
             return False, "Models have not been trained"
 
-        if self.training_metrics.epochs_completed < self.min_training_epochs:
-            return False, f"Only {self.training_metrics.epochs_completed}/{self.min_training_epochs} epochs completed"
+        # NOTE: No minimum epoch requirement - early stopping controls training length naturally
+        # Even 1 epoch of improving is better than 100 epochs of overfitting
 
         if self.training_metrics.total_samples < self.min_training_samples:
             return False, f"Only {self.training_metrics.total_samples}/{self.min_training_samples} samples trained"

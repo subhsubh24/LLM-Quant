@@ -3118,7 +3118,8 @@ async def run_training_pipeline(
     # Update the master bot's training status
     global _master_bot
     if _master_bot is not None:
-        _master_bot.model_pretrainer.load_checkpoints()
+        # NOTE: DO NOT load_checkpoints() here - that would overwrite fresh training!
+        # The training pipeline just completed, use those models, don't load old ones
         meets_req, reason = _master_bot.model_pretrainer.meets_training_requirements()
         _master_bot.models_trained = meets_req
 
