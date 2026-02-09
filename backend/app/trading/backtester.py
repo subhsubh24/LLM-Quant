@@ -2830,7 +2830,7 @@ class ModelPreTrainer:
                 for i, state in enumerate(X_test[:min(1000, len(X_test))]):  # Sample for speed
                     pred = self.predict(state)
                     predicted_action = pred.get("action", 1)
-                    actual_action = y_test_primary[test_start + i] if test_start + i < len(primary_labels) else 1
+                    actual_action = y_test_primary[i] if i < len(y_test_primary) else 1
                     test_correct += (predicted_action == actual_action)
 
                 test_accuracy = test_correct / min(1000, len(X_test)) if len(X_test) > 0 else 0
