@@ -1317,6 +1317,12 @@ class WalkForwardBacktester:
         max_recent_trades = 20
         degradation_threshold = 0.35  # Alert if win rate drops below 35%
 
+        # SAFEGUARD: Per-symbol trading cooldown (prevent thrashing)
+        last_exit_time = {}  # symbol -> timestamp of last exit
+        min_cooldown_candles = 5  # Wait at least 5 candles before re-entering same symbol
+        trade_churn = {}  # symbol -> count of direction flips (long->short or short->long)
+        trade_directions = {}  # symbol -> last direction (for detecting flips)
+
         # PHASE B: Initialize continuous learning (real data only)
         continuous_learner = ContinuousLearner(
             retrain_interval=100,  # Retrain every 100 candles
@@ -1505,6 +1511,20 @@ class WalkForwardBacktester:
 
                     # If full exit, remove position; otherwise reduce position size
                     if partial_exit_pct >= 1.0:
+                        # SAFEGUARD: Track last exit time and direction for cooldown and churn detection
+                        last_exit_time[symbol] = candles_processed
+                        current_direction = pos["side"]
+
+                        # Detect direction flips (long->short or short->long)
+                        if symbol in trade_directions:
+                            if trade_directions[symbol] != current_direction:
+                                if symbol not in trade_churn:
+                                    trade_churn[symbol] = 0
+                                trade_churn[symbol] += 1
+                                if trade_churn[symbol] > 3:  # Alert if too many flips
+                                    logger.warning(f"⚠️ HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips (long↔short). Possible thrashing.")
+
+                        trade_directions[symbol] = current_direction
                         del positions[symbol]
                     else:
                         pos["size"] *= (1.0 - partial_exit_pct)
@@ -1790,12 +1810,34 @@ class WalkForwardBacktester:
                                 reasons.append("not_sig_significant")
                             logger.debug(f"❌ Signal rejected {action_name} {symbol}: {', '.join(reasons)}")
 
+                    # SAFEGUARD: Check for per-symbol trading cooldown (prevent thrashing)
+                    in_cooldown = False
+                    if symbol in last_exit_time:
+                        candles_since_exit = candles_processed - last_exit_time[symbol]
+                        if candles_since_exit < min_cooldown_candles:
+                            in_cooldown = True
+                            if np.random.random() < 0.001:  # Log 0.1% for diagnostics
+                                logger.debug(f"⏳ {symbol} in cooldown ({candles_since_exit}/{min_cooldown_candles} candles since exit)")
+
+                    # SAFEGUARD: Check for position direction conflicts
+                    position_conflict = False
+                    if symbol in positions:
+                        current_pos_side = positions[symbol]["side"]
+                        new_action_side = "long" if prediction["action"] == 2 else "short"
+                        if current_pos_side != new_action_side:
+                            position_conflict = True
+                            if np.random.random() < 0.01:  # Log 1% for diagnostics
+                                logger.debug(f"🔄 {symbol}: Already {current_pos_side}, signal wants {new_action_side} (conflict)")
+
                     if (prediction["action"] != 1 and
                         meets_confidence and
                         not conflicting_trade and
                         is_liquid and
                         strong_consensus and
-                        is_statistically_significant):
+                        is_statistically_significant and
+                        not in_cooldown and
+                        not position_conflict and
+                        symbol not in positions):  # Don't open if already have position
                         # ✅ SIGNAL ACCEPTED: Log for diagnostics
                         logger.info(f"✅ SIGNAL ACCEPTED: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
 
@@ -2030,6 +2072,16 @@ class WalkForwardBacktester:
         logger.info(f"  Positions Opened: {positions_opened}")
         logger.info(f"  Total Trades: {len(trades)}")
         logger.info(f"  Final Capital: ${capital:,.2f}")
+
+        # SAFEGUARD: Log trading quality metrics
+        logger.info("\n🛡️ SAFEGUARDS - TRADING QUALITY METRICS:")
+        logger.info(f"  Per-Symbol Cooldown: {min_cooldown_candles} candles minimum")
+        logger.info(f"  Direction Flips Detected: {sum(trade_churn.values())} total")
+        if trade_churn:
+            most_churned = max(trade_churn.items(), key=lambda x: x[1])
+            logger.info(f"    - Most churned: {most_churned[0]} with {most_churned[1]} flips")
+        logger.info(f"  Symbols in cooldown history: {len(last_exit_time)}")
+        logger.info(f"  Position conflicts avoided: (logged during trading)")
 
         # PHASE D: Log signal filtering statistics
         logger.info("\n🔎 PHASE D - SIGNAL FILTERING ANALYSIS:")
