@@ -2522,8 +2522,9 @@ class ModelPreTrainer:
         # Early stopping setup - check for resume state (must be before wf_fold calculation)
         start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
+        global_best_accuracy = best_val_accuracy  # Track GLOBAL best across all folds
         patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting)
-        patience_counter = getattr(self, '_patience_counter', 0)
+        patience_counter = getattr(self, '_patience_counter', 0)  # Persists across folds
 
         n = len(features)
         wf_boundaries = []
@@ -2600,9 +2601,11 @@ class ModelPreTrainer:
 
                 total_batches = len(X_train) // batch_size
                 fixed_train_indices, fixed_val_indices = _compute_sample_indices(X_train, X_val)
-                # Reset patience for new validation window (keep model weights)
-                patience_counter = 0
-                best_val_accuracy = 0
+                # NOTE: DO NOT reset patience_counter or global_best_accuracy on fold switch
+                # This allows early stopping to detect when model quality degrades across folds
+                # Reset per-fold tracking but keep global context
+                best_val_accuracy = 0  # Reset fold-specific best (for checkpoint saving)
+                # patience_counter continues from previous fold (detects multi-fold degradation)
                 # Reset loss EMA so normalized loss isn't distorted by
                 # the previous fold's loss scale
                 self.dqn.loss_ema = 1.0
@@ -2783,19 +2786,24 @@ class ModelPreTrainer:
             self._best_val_accuracy = best_val_accuracy
             self._patience_counter = patience_counter
 
-            # Early stopping check
+            # Early stopping check - compare against GLOBAL best to detect degradation across folds
             if val_accuracy > best_val_accuracy:
                 best_val_accuracy = val_accuracy
-                self._best_val_accuracy = best_val_accuracy
+
+            # Update global best if this is a new global maximum
+            if val_accuracy > global_best_accuracy:
+                global_best_accuracy = val_accuracy
+                self._best_val_accuracy = global_best_accuracy
                 patience_counter = 0
                 self._patience_counter = 0
                 self.save_checkpoints()  # Save best model
-                logger.info(f"🏆 New best val accuracy: {val_accuracy:.2%}")
+                logger.info(f"🏆 New GLOBAL best val accuracy: {val_accuracy:.2%}")
             else:
+                # No improvement vs global best - increment patience counter
                 patience_counter += 1
                 self._patience_counter = patience_counter
                 if patience_counter >= patience and epoch >= 5:  # Min 5 epochs, then check patience
-                    logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs (best was {best_val_accuracy:.2%})")
+                    logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs (global best: {global_best_accuracy:.2%})")
                     break
 
         self.training_metrics.epochs_completed = epoch + 1  # Actual epochs completed
@@ -2804,11 +2812,11 @@ class ModelPreTrainer:
 
         # Save resume state (but don't overwrite best checkpoint if early stopping occurred)
         self._last_epoch = epoch + 1
-        if val_accuracy >= best_val_accuracy:
-            # Only save final checkpoint if it's at least as good as the best
+        if val_accuracy >= global_best_accuracy:
+            # Only save final checkpoint if it's at least as good as the global best
             self.save_checkpoints()
         else:
-            logger.info(f"Keeping best checkpoint (acc={best_val_accuracy:.2%}) over final (acc={val_accuracy:.2%})")
+            logger.info(f"Keeping best checkpoint (acc={global_best_accuracy:.2%}, global best) over final (acc={val_accuracy:.2%})")
 
         # Walk-forward summary
         wf_fold_accuracies.append(best_val_accuracy)
