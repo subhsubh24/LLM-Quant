@@ -278,7 +278,7 @@ class OrderBookFetcher:
         Initialize order book fetcher.
 
         Args:
-            exchange: 'binance', 'coinbase', or 'kraken'
+            exchange: 'binance', 'binance_us', 'coinbase', or 'kraken'
         """
         self.exchange = exchange.lower()
         self.session = None
@@ -297,8 +297,8 @@ class OrderBookFetcher:
             OrderBook object or None if fetch fails
         """
         try:
-            if self.exchange == "binance":
-                return await self._fetch_binance(symbol, depth)
+            if self.exchange in ("binance", "binance_us"):
+                return await self._fetch_binance(symbol, depth, is_us=self.exchange == "binance_us")
             elif self.exchange == "coinbase":
                 return await self._fetch_coinbase(symbol, depth)
             elif self.exchange == "kraken":
@@ -310,8 +310,8 @@ class OrderBookFetcher:
             logger.warning(f"Failed to fetch order book for {symbol}: {e}")
             return None
 
-    async def _fetch_binance(self, symbol: str, depth: int) -> Optional[OrderBook]:
-        """Fetch from Binance."""
+    async def _fetch_binance(self, symbol: str, depth: int, is_us: bool = False) -> Optional[OrderBook]:
+        """Fetch from Binance or Binance US."""
         try:
             import aiohttp
             from datetime import datetime
@@ -321,7 +321,9 @@ class OrderBookFetcher:
             if not symbol.endswith(("USDT", "BUSD", "USDC")):
                 symbol += "USDT"
 
-            url = f"https://api.binance.com/api/v3/depth?symbol={symbol}&limit={depth}"
+            # Use Binance US endpoint if requested, otherwise use global Binance
+            api_domain = "api.binance.us" if is_us else "api.binance.com"
+            url = f"https://{api_domain}/api/v3/depth?symbol={symbol}&limit={depth}"
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=5) as resp:
