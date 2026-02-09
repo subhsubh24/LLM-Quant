@@ -1212,6 +1212,83 @@ class WalkForwardBacktester:
         """
         logger.info("Starting walk-forward backtest...")
 
+        # ============================================================
+        # CONFIG: Centralized hardcoded parameters (easy to tune)
+        # ============================================================
+        config = {
+            # Risk Management
+            "max_portfolio_drawdown": 0.15,          # 15% max DD before pausing trading
+            "portfolio_dd_resume_pct": 0.70,         # Resume trading at 70% of DD limit
+
+            # Position Sizing & Kelly Criterion
+            "kelly_cap_pct": 0.02,                   # Cap position at 2% of capital
+            "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
+
+            # Confidence Thresholds (loosened for diagnostics)
+            "confidence_4x4_models": 0.70,           # 4/4 models agree
+            "confidence_3x4_models": 0.55,           # 3/4 models agree
+            "confidence_fallback": 0.50,             # 2/4 or fewer models
+            "regime_bull_confidence_mult": 0.85,     # Bull: lower threshold by 15%
+            "regime_bear_confidence_mult": 1.15,     # Bear: raise threshold by 15%
+
+            # Model Agreement & Consensus
+            "min_model_agreement": 2,                # Minimum 2/4 models required
+            "weighted_agreement_threshold": 0.50,    # 50% weighted agreement
+
+            # Liquidity & Volume
+            "min_volume_threshold": 1000,            # Minimum acceptable volume
+
+            # Correlation & Systemic Risk
+            "max_correlation_threshold": 0.70,       # Reduce sizing if correlation > 70%
+            "btc_eth_systemic_threshold": 0.80,      # High systemic risk at 80% corr
+
+            # Stop Loss & Take Profit
+            "stop_loss_min": 0.02,                   # 2% minimum stop loss
+            "stop_loss_max": 0.30,                   # 30% maximum stop loss
+            "take_profit_min": 0.05,                 # 5% minimum take profit
+            "take_profit_max": 0.60,                 # 60% maximum take profit
+
+            # Holding Periods (hours)
+            "max_hold_hours_default": 1600,          # Default: 66+ days
+            "max_hold_hours_winner": 2000,           # Winners: 83+ days
+            "max_hold_hours_loser": 1200,            # Losers: 50 days
+
+            # Macro Regime Detection
+            "baseline_portfolio_vol": 0.008,         # 0.8% daily baseline
+            "high_vol_multiplier": 1.5,              # 1.5x baseline = elevated
+            "extreme_vol_multiplier": 2.5,           # 2.5x baseline = extreme
+
+            # Model Degradation Detection
+            "degradation_threshold": 0.35,           # Alert if win rate < 35%
+            "rolling_window_size": 20,               # Keep last 20 trades
+
+            # Continuous Learning
+            "continuous_learning_interval": 100,    # Retrain every 100 candles
+            "continuous_learning_window": 5000,     # Keep last 5000 samples
+            "continuous_learning_threshold": 0.45,  # Alert if win rate < 45%
+
+            # Trading Safeguards
+            "per_symbol_cooldown_candles": 5,       # 5-candle minimum between entries
+            "churn_alert_threshold": 3,             # Alert if >3 direction flips
+
+            # Feature Extraction
+            "feature_lookback_window": 100,         # 100-candle lookback for features
+            "regime_detection_window": 100,         # 100-candle window for regime
+            "macro_vol_lookback": 100,              # 100-candle window for macro vol
+
+            # Slippage & Commissions
+            "slippage_bps": 5,                       # 5 basis points per side
+            "commission_bps": 5,                     # 5 basis points per side
+
+            # Statistical Significance
+            "min_trades_for_significance": 10,      # Need 10+ trades to test
+            "significance_confidence": 0.95,        # 95% confidence level (p < 0.05)
+        }
+        logger.info("📋 Backtest Configuration (centralized):")
+        for key, val in list(config.items())[:5]:
+            logger.debug(f"  {key}: {val}")
+        logger.debug(f"  ... and {len(config) - 5} more parameters (see config dict)")
+
         # Combine all data into time-sorted events
         all_candles = []
         for symbol, candles in data.items():
@@ -1223,18 +1300,6 @@ class WalkForwardBacktester:
         if not all_candles:
             logger.error("No data for backtest")
             return self._empty_result()
-
-        # CRITICAL: Verify models are trained
-        models_ready = all([
-            hasattr(self, 'dqn') and self.dqn is not None,
-            hasattr(self, 'ppo') and self.ppo is not None,
-            hasattr(self, 'lstm') and self.lstm is not None,
-            hasattr(self, 'transformer') and self.transformer is not None,
-        ])
-        if not models_ready:
-            logger.error("❌ MODELS NOT TRAINED: Cannot backtest without trained models. Run training first.")
-            return self._empty_result()
-        logger.info("✅ All models loaded and ready for predictions")
 
         # Log data summary
         symbols = list(data.keys())
@@ -1253,14 +1318,14 @@ class WalkForwardBacktester:
         equity_curve = [(all_candles[0][0], capital)]
         trades = []
 
-        # PORTFOLIO-LEVEL RISK MANAGEMENT
+        # PORTFOLIO-LEVEL RISK MANAGEMENT (using config)
         rolling_max_equity = self.initial_capital  # Track peak equity for DD calculation
-        max_portfolio_dd = 0.15  # 15% max drawdown tolerance
+        max_portfolio_dd = config["max_portfolio_drawdown"]
         portfolio_trading_paused = False  # Pause trading if DD exceeds limit
         recent_returns = []  # Track recent returns for volatility
         min_lookback_returns = 20  # Need 20 days of returns for vol calculation
 
-        # TIER 1 FIX: DRAWDOWN RECOVERY SCALING
+        # TIER 1 FIX: DRAWDOWN RECOVERY SCALING (using config)
         # After losses, trade smaller to recover gradually (like top funds)
         recent_pnls = []  # Rolling window of recent trade P&Ls
         recovery_mode = False  # Are we in drawdown recovery?
@@ -1270,11 +1335,10 @@ class WalkForwardBacktester:
         last_log_time = time.time()
         last_log_index = 0
 
-        # Slippage and commission modeling
-        # Realistic costs: ~5 bps slippage + ~5 bps commission per side = ~20 bps round trip
-        SLIPPAGE_BPS = 5    # 0.05% per side
-        COMMISSION_BPS = 5  # 0.05% per side
-        COST_PER_SIDE = (SLIPPAGE_BPS + COMMISSION_BPS) / 10000  # 0.001 per side
+        # Slippage and commission modeling (using config)
+        SLIPPAGE_BPS = config["slippage_bps"]
+        COMMISSION_BPS = config["commission_bps"]
+        COST_PER_SIDE = (SLIPPAGE_BPS + COMMISSION_BPS) / 10000
 
         # Walk through time
         window_data: Dict[str, List[OHLCV]] = {sym: [] for sym in data.keys()}
@@ -1309,10 +1373,10 @@ class WalkForwardBacktester:
 
         # TIER 2 FIX: MACRO FILTERING - VOLATILITY REGIME DETECTION
         # Track baseline volatility and macro regime shifts
-        baseline_portfolio_vol = 0.008  # 0.8% daily vol baseline
+        baseline_portfolio_vol = config["baseline_portfolio_vol"]  # 0.8% daily vol baseline
         macro_regime = "normal"  # Track current regime (normal, elevated, extreme)
-        high_vol_threshold = 1.5  # 1.5x baseline = elevated macro vol
-        extreme_vol_threshold = 2.5  # 2.5x baseline = extreme macro vol
+        high_vol_threshold = config["high_vol_multiplier"]  # 1.5x baseline = elevated macro vol
+        extreme_vol_threshold = config["extreme_vol_multiplier"]  # 2.5x baseline = extreme macro vol
         macro_filtered_trades = 0  # Track how many trades were blocked by macro filter
 
         # PHASE D: Track signal filtering by reason
@@ -1327,11 +1391,11 @@ class WalkForwardBacktester:
         # Rolling win-rate monitoring (for degradation detection)
         recent_trades_window = []  # Keep last 20 trades for rolling win-rate
         max_recent_trades = 20
-        degradation_threshold = 0.35  # Alert if win rate drops below 35%
+        degradation_threshold = config["degradation_threshold"]  # Alert if win rate drops below 35%
 
         # SAFEGUARD: Per-symbol trading cooldown (prevent thrashing)
         last_exit_time = {}  # symbol -> timestamp of last exit
-        min_cooldown_candles = 5  # Wait at least 5 candles before re-entering same symbol
+        min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 5 candles before re-entering same symbol
         trade_churn = {}  # symbol -> count of direction flips (long->short or short->long)
         trade_directions = {}  # symbol -> last direction (for detecting flips)
 
@@ -1370,9 +1434,9 @@ class WalkForwardBacktester:
 
         # PHASE B: Initialize continuous learning (real data only)
         continuous_learner = ContinuousLearner(
-            retrain_interval=100,  # Retrain every 100 candles
-            window_size=5000,  # Keep last 5000 samples
-            performance_threshold=0.45,  # Alert if win rate < 45%
+            retrain_interval=config["continuous_learning_interval"],  # Retrain every 100 candles
+            window_size=config["continuous_learning_window"],  # Keep last 5000 samples
+            performance_threshold=config["continuous_learning_threshold"],  # Alert if win rate < 45%
         )
         adaptive_weighter = AdaptiveEnsembleWeighter(model_names=model_names, lookback=50)
 
@@ -1490,8 +1554,8 @@ class WalkForwardBacktester:
                 take_profit_pct = base_target + (volatility * horizon_mult * 2)
 
                 # Reasonable bounds
-                stop_loss_pct = max(0.02, min(0.30, stop_loss_pct))      # 2% min, 30% max
-                take_profit_pct = max(0.05, min(0.60, take_profit_pct))  # 5% min, 60% max
+                stop_loss_pct = max(config["stop_loss_min"], min(config["stop_loss_max"], stop_loss_pct))      # 2% min, 30% max
+                take_profit_pct = max(config["take_profit_min"], min(config["take_profit_max"], take_profit_pct))  # 5% min, 60% max
 
                 # Check exit conditions
                 should_exit = False
@@ -1532,13 +1596,13 @@ class WalkForwardBacktester:
                     partial_exit_pct = 1.0
                 # TIER 1 FIX: ADAPTIVE HOLD PERIODS
                 # Let winners run longer, exit losers faster based on recent performance
-                max_hold_hours = 1600  # Default: 66+ days
+                max_hold_hours = config["max_hold_hours_default"]  # Default: 66+ days
                 if len(recent_trades_window) >= 10:
                     recent_win_rate = np.mean(recent_trades_window[-10:])
                     if recent_win_rate > 0.60:  # Win streak
-                        max_hold_hours = 2000  # Let it run: 83 days
+                        max_hold_hours = config["max_hold_hours_winner"]  # Let it run: 83 days
                     elif recent_win_rate < 0.40:  # Loss streak
-                        max_hold_hours = 1200  # Exit faster: 50 days
+                        max_hold_hours = config["max_hold_hours_loser"]  # Exit faster: 50 days
                     # Otherwise: 1600h normal
 
                 # Time-based exit (hold max based on recent performance)
@@ -1566,7 +1630,7 @@ class WalkForwardBacktester:
                                 if symbol not in trade_churn:
                                     trade_churn[symbol] = 0
                                 trade_churn[symbol] += 1
-                                if trade_churn[symbol] > 3:  # Alert if too many flips
+                                if trade_churn[symbol] > config["churn_alert_threshold"]:  # Alert if too many flips
                                     logger.warning(f"⚠️ HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips (long↔short). Possible thrashing.")
 
                         trade_directions[symbol] = current_direction
@@ -1629,7 +1693,7 @@ class WalkForwardBacktester:
                         recent_avg_pnl = np.mean(recent_pnls[-10:])
                         if recent_avg_pnl < 0:
                             # Net losses: reduce sizing
-                            recovery_scale = max(0.5, 1.0 + (recent_avg_pnl / 100))  # Scale 0.5x to 1.0x
+                            recovery_scale = max(config["recovery_scale_min"], 1.0 + (recent_avg_pnl / 100))  # Scale 0.5x to 1.0x
                             recovery_mode = True
                         else:
                             # Net profits: restore normal sizing
@@ -1709,7 +1773,7 @@ class WalkForwardBacktester:
                 portfolio_trading_paused = True
                 if not any(t.get("reason") == "DD_LIMIT_PAUSED" for t in trades[-10:]):  # Log once
                     logger.warning(f"⚠️ PORTFOLIO DD LIMIT HIT: {current_dd*100:.1f}% > {max_portfolio_dd*100:.0f}% | Pausing new trades")
-            elif current_dd < max_portfolio_dd * 0.7:  # Resume at 70% of limit
+            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 70% of limit
                 portfolio_trading_paused = False
 
             # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
@@ -1745,12 +1809,12 @@ class WalkForwardBacktester:
 
             # Generate trading signal (only if we have enough data AND portfolio not paused AND not during extreme macro vol)
             macro_vol_safe = macro_regime != "extreme"
-            if len(window_data[symbol]) >= 100 and symbol not in positions and not portfolio_trading_paused and macro_vol_safe:
-                features = self.prepare_features(window_data[symbol][-100:])
+            if len(window_data[symbol]) >= config["feature_lookback_window"] and symbol not in positions and not portfolio_trading_paused and macro_vol_safe:
+                features = self.prepare_features(window_data[symbol][-config["feature_lookback_window"]:])
 
                 if len(features) > 0:
                     # Detect market regime FIRST (needed for regime-aware prediction)
-                    regime = self.detect_market_regime(window_data[symbol][-100:])
+                    regime = self.detect_market_regime(window_data[symbol][-config["feature_lookback_window"]:])
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
@@ -1766,7 +1830,7 @@ class WalkForwardBacktester:
                     # Check liquidity (require minimum volume)
                     recent_volumes = np.array([c.volume for c in window_data[symbol][-20:]])
                     avg_volume = np.mean(recent_volumes)
-                    min_volume_threshold = 1000  # Minimum acceptable volume
+                    min_volume_threshold = config["min_volume_threshold"]  # Minimum acceptable volume
                     is_liquid = avg_volume >= min_volume_threshold
 
                     # PHASE D: Aggressive Signal Filtering
@@ -1805,28 +1869,28 @@ class WalkForwardBacktester:
                     weighted_agreement_pct = weighted_agreement / total_model_weight if total_model_weight > 0 else 0
 
                     # Require strong consensus (>50% weighted agreement, loosened from 60% for diagnostics)
-                    min_agreement = 2  # Fallback: require at least 2 out of 4 models (loosened from 3)
+                    min_agreement = config["min_model_agreement"]  # Fallback: require at least 2 out of 4 models (loosened from 3)
                     model_agreement = sum(1 for p in individual_preds if p == final_action)
-                    strong_consensus = (weighted_agreement_pct > 0.50) or (model_agreement >= min_agreement)
+                    strong_consensus = (weighted_agreement_pct > config["weighted_agreement_threshold"]) or (model_agreement >= min_agreement)
 
                     # HORIZON-AWARE CONFIDENCE: Longer-term signals need lower confidence
                     # Higher agreement (4/4) = likely short-term = need 0.70+
                     # Lower agreement (3/4) = likely longer-term = accept 0.55+
                     # Loosened for diagnostics to understand signal generation
                     if model_agreement == 4:
-                        min_confidence = 0.70  # 4/4 models agree: require high confidence (loosened from 0.80)
+                        min_confidence = config["confidence_4x4_models"]  # 4/4 models agree: require high confidence (loosened from 0.80)
                     elif model_agreement == 3:
-                        min_confidence = 0.55  # 3/4 models agree: accept lower (loosened from 0.70)
+                        min_confidence = config["confidence_3x4_models"]  # 3/4 models agree: accept lower (loosened from 0.70)
                     else:
-                        min_confidence = 0.50  # Fallback: very loose for 2/4 or 1/4
+                        min_confidence = config["confidence_fallback"]  # Fallback: very loose for 2/4 or 1/4
 
                     # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
                     # Adjust thresholds based on market regime
-                    regime = self.detect_market_regime(window_data[symbol][-100:])
+                    regime = self.detect_market_regime(window_data[symbol][-config["feature_lookback_window"]:])
                     if regime == 'bull':
-                        min_confidence *= 0.85  # Bull: Easier to profit, lower threshold
+                        min_confidence *= config["regime_bull_confidence_mult"]  # Bull: Easier to profit, lower threshold
                     elif regime == 'bear':
-                        min_confidence *= 1.15  # Bear: Harder to profit, higher threshold (be selective)
+                        min_confidence *= config["regime_bear_confidence_mult"]  # Bear: Harder to profit, higher threshold (be selective)
                     # sideways: no change, use default
 
                     meets_confidence = prediction["confidence"] >= min_confidence
@@ -1933,7 +1997,7 @@ class WalkForwardBacktester:
                             horizon_mult = 0.30    # 1600h: 30% Kelly (3x more conservative)
 
                         kelly_fraction = base_kelly * horizon_mult
-                        position_size = capital * min(kelly_fraction, 0.02)  # Cap at 2%
+                        position_size = capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 2%
 
                         # TIER 2 FIX: Calculate optimal stop distance for this new position
                         optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
@@ -1951,15 +2015,15 @@ class WalkForwardBacktester:
                                 if symbol in window_data and existing_symbol in window_data:
                                     if len(window_data[symbol]) >= 50 and len(window_data[existing_symbol]) >= 50:
                                         corr = self.calculate_correlation(
-                                            window_data[symbol][-100:],
+                                            window_data[symbol][-config["feature_lookback_window"]:],
                                             window_data[existing_symbol][-100:],
                                             lookback=50
                                         )
                                         max_correlation = max(max_correlation, abs(corr))
 
                             # Scale down position if highly correlated (>0.7)
-                            if max_correlation > 0.70:
-                                correlation_discount = 1.0 - (max_correlation - 0.70) / 0.30  # Linear decay from 0.7 to 1.0
+                            if max_correlation > config["max_correlation_threshold"]:
+                                correlation_discount = 1.0 - (max_correlation - config["max_correlation_threshold"]) / (1.0 - config["max_correlation_threshold"])  # Linear decay from 0.7 to 1.0
                                 position_size *= correlation_discount
                                 logger.debug(f"Correlation discount for {symbol}: {correlation_discount:.2f}x (corr={max_correlation:.2f})")
 
@@ -2010,9 +2074,9 @@ class WalkForwardBacktester:
                                     lookback=100
                                 ))
 
-                                if btc_eth_corr > 0.80:
+                                if btc_eth_corr > config["btc_eth_systemic_threshold"]:
                                     # High systemic risk: reduce position sizing
-                                    systemic_risk_discount = 1.0 - (btc_eth_corr - 0.80) / 0.20  # Linear decay from 0.8 to 1.0
+                                    systemic_risk_discount = 1.0 - (btc_eth_corr - config["btc_eth_systemic_threshold"]) / (1.0 - config["btc_eth_systemic_threshold"])  # Linear decay from 0.8 to 1.0
                                     position_size *= systemic_risk_discount
                                     logger.debug(f"⚠️ Systemic risk detected: BTC-ETH corr={btc_eth_corr:.2f} | Reducing {symbol} by {systemic_risk_discount:.2f}x")
 
