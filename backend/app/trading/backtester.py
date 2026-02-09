@@ -2552,7 +2552,7 @@ class ModelPreTrainer:
             if target_fold > wf_fold:
                 wf_fold_accuracies.append(best_val_accuracy)
                 wf_fold = target_fold
-                train_end, val_end = wf_boundaries[wf_fold]
+                train_start, train_end, val_end = wf_boundaries[wf_fold]
                 X_train = features[:train_end]
                 y_train = primary_labels[:train_end]
                 r_train = rewards[:train_end]
