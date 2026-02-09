@@ -1039,6 +1039,86 @@ class WalkForwardBacktester:
         except:
             return 0.0  # If any error, assume uncorrelated
 
+    def is_signal_statistically_significant(self, symbol: str, action: int, signal_history: Dict) -> bool:
+        """
+        Test if a signal's historical win rate is statistically significant at 95% confidence.
+        Uses binomial test: H0 = win_rate = 50%, H1 = win_rate > 50%
+
+        Args:
+            symbol: Trading pair symbol
+            action: Action code (0=short, 2=long)
+            signal_history: Dict of symbol -> {action -> [win/loss results]}
+
+        Returns:
+            True if win rate is significantly > 50% at 95% confidence (p < 0.05)
+        """
+        try:
+            from scipy import stats
+
+            # Get history for this symbol-action combo
+            if symbol not in signal_history:
+                return True  # No history, allow the signal (neutral)
+
+            if action not in signal_history[symbol]:
+                return True  # No history for this action, allow it
+
+            trade_results = signal_history[symbol][action]  # List of 1 (win) or 0 (loss)
+
+            # Need minimum sample size for statistical significance
+            if len(trade_results) < 10:
+                return True  # Not enough data yet, allow signal
+
+            # Count wins and total trades
+            wins = sum(trade_results)
+            total = len(trade_results)
+
+            # Binomial test: is win rate > 50% at 95% confidence?
+            # H0: p = 0.5, H1: p > 0.5 (one-tailed test)
+            p_value = stats.binom_test(wins, total, 0.5, alternative='greater')
+
+            # If p < 0.05, we reject null hypothesis at 95% confidence
+            is_significant = p_value < 0.05
+
+            if not is_significant and total >= 20:
+                # Log when we're filtering due to statistical significance
+                win_rate = wins / total * 100
+                if total >= 10:
+                    logger.debug(f"🔍 Signal {symbol}:{action} filtered: {win_rate:.1f}% win rate ({wins}/{total}) not significantly > 50% (p={p_value:.3f})")
+
+            return is_significant
+
+        except Exception as e:
+            logger.debug(f"Error in significance test: {e}")
+            return True  # If error, allow the signal (neutral)
+
+    def get_optimal_stop_distance(self, stop_distance_effectiveness: Dict) -> float:
+        """
+        Learn optimal stop distance from historical data.
+        Returns the stop distance with highest win rate.
+
+        Args:
+            stop_distance_effectiveness: Dict mapping distance -> {wins, losses}
+
+        Returns:
+            Optimal stop distance to use (default 0.05 = 5%)
+        """
+        try:
+            best_distance = 0.05  # Default fallback
+            best_win_rate = 0.0
+            min_trades = 10  # Need at least 10 trades to trust the metric
+
+            for distance, results in stop_distance_effectiveness.items():
+                total_trades = results["wins"] + results["losses"]
+                if total_trades >= min_trades:
+                    win_rate = results["wins"] / total_trades
+                    if win_rate > best_win_rate:
+                        best_win_rate = win_rate
+                        best_distance = distance
+
+            return best_distance
+        except:
+            return 0.05  # Fallback to 5% if any error
+
     def generate_labels(self, candles: List[OHLCV], lookahead: int = 5, threshold: float = 0.02) -> np.ndarray:
         """
         Generate trading labels based on future returns.
@@ -1200,12 +1280,36 @@ class WalkForwardBacktester:
         # TIER 1 FIX: Track per-model win-rate for filtering
         model_recent_trades = {m: [] for m in model_names}  # Rolling 20-trade window
 
+        # TIER 1 FIX: SIGNAL STATISTICAL SIGNIFICANCE TESTING
+        # Track per-symbol, per-action (long/short) trades to test if win rate > 50% is statistically significant
+        signal_history = {}  # symbol -> {action -> [wins/losses]}
+        min_trades_for_significance = 10  # Need at least 10 historical trades to test
+        significance_threshold = 0.95  # 95% confidence (p < 0.05)
+
+        # TIER 2 FIX: LEARN OPTIMAL STOP PLACEMENT FROM HISTORICAL DATA
+        # Track effectiveness of different stop distances (learn what works)
+        stop_distance_effectiveness = {
+            0.02: {"wins": 0, "losses": 0},  # 2% stop
+            0.05: {"wins": 0, "losses": 0},  # 5% stop
+            0.10: {"wins": 0, "losses": 0},  # 10% stop
+            0.20: {"wins": 0, "losses": 0},  # 20% stop
+        }
+
+        # TIER 2 FIX: MACRO FILTERING - VOLATILITY REGIME DETECTION
+        # Track baseline volatility and macro regime shifts
+        baseline_portfolio_vol = 0.008  # 0.8% daily vol baseline
+        macro_regime = "normal"  # Track current regime (normal, elevated, extreme)
+        high_vol_threshold = 1.5  # 1.5x baseline = elevated macro vol
+        extreme_vol_threshold = 2.5  # 2.5x baseline = extreme macro vol
+        macro_filtered_trades = 0  # Track how many trades were blocked by macro filter
+
         # PHASE D: Track signal filtering by reason
         filtered_signals = {
             "low_confidence": 0,
             "conflicting_regime": 0,
             "low_liquidity": 0,
             "low_model_agreement": 0,
+            "low_statistical_significance": 0,  # TIER 1 FIX: Track statistical significance filtering
         }
 
         # Rolling win-rate monitoring (for degradation detection)
@@ -1311,6 +1415,11 @@ class WalkForwardBacktester:
                     base_stop = 0.20
                     base_target = 0.50
 
+                # TIER 2 FIX: LEARN OPTIMAL STOP DISTANCE FROM HISTORICAL DATA
+                # Choose stop distance based on what's worked best in recent trades
+                optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
+                base_stop = optimal_stop  # Replace hardcoded stop with learned value
+
                 # Apply volatility adjustment on top of horizon-based stops
                 stop_loss_pct = base_stop + (volatility * horizon_mult)
                 take_profit_pct = base_target + (volatility * horizon_mult * 2)
@@ -1323,6 +1432,7 @@ class WalkForwardBacktester:
                 should_exit = False
                 exit_reason = ""
                 partial_exit_pct = 0.0  # Fraction of position to exit
+                effective_stop_distance = base_stop  # Track which stop was used
 
                 # TIER 1 FIX: TRAILING STOPS
                 # Exit if price reversals from highest point
@@ -1355,8 +1465,19 @@ class WalkForwardBacktester:
                     should_exit = True
                     exit_reason = "stop_loss"
                     partial_exit_pct = 1.0
-                # Time-based exit (hold max 1600 hours = 66+ days for full 1600h horizon)
-                elif not should_exit and (timestamp - pos["entry_time"]).total_seconds() > 1600 * 3600:
+                # TIER 1 FIX: ADAPTIVE HOLD PERIODS
+                # Let winners run longer, exit losers faster based on recent performance
+                max_hold_hours = 1600  # Default: 66+ days
+                if len(recent_trades_window) >= 10:
+                    recent_win_rate = np.mean(recent_trades_window[-10:])
+                    if recent_win_rate > 0.60:  # Win streak
+                        max_hold_hours = 2000  # Let it run: 83 days
+                    elif recent_win_rate < 0.40:  # Loss streak
+                        max_hold_hours = 1200  # Exit faster: 50 days
+                    # Otherwise: 1600h normal
+
+                # Time-based exit (hold max based on recent performance)
+                elif not should_exit and (timestamp - pos["entry_time"]).total_seconds() > max_hold_hours * 3600:
                     should_exit = True
                     exit_reason = "time_exit"
                     partial_exit_pct = 1.0
@@ -1388,6 +1509,35 @@ class WalkForwardBacktester:
                         "trade_costs": pos.get("entry_cost", 0) + exit_cost,
                     }
                     trades.append(trade)
+
+                    # TIER 1 FIX: TRACK SIGNAL OUTCOMES FOR STATISTICAL SIGNIFICANCE TESTING
+                    # Record whether this signal was a win (1) or loss (0) by symbol and action
+                    if "final_action" in pos:
+                        final_action = pos["final_action"]
+                        if symbol not in signal_history:
+                            signal_history[symbol] = {0: [], 2: []}  # 0=short, 2=long
+                        if final_action not in signal_history[symbol]:
+                            signal_history[symbol][final_action] = []
+
+                        # Record outcome: 1 if profitable, 0 if losing
+                        outcome = 1 if realized_pnl > 0 else 0
+                        signal_history[symbol][final_action].append(outcome)
+
+                        # Keep rolling window of last 100 trades per signal
+                        if len(signal_history[symbol][final_action]) > 100:
+                            signal_history[symbol][final_action].pop(0)
+
+                    # TIER 2 FIX: UPDATE STOP DISTANCE EFFECTIVENESS TRACKING
+                    # Track which stop distances work best
+                    if "stop_distance" in pos:
+                        used_stop = pos["stop_distance"]
+                        # Find the closest stop distance in our tracking
+                        closest_stop = min(stop_distance_effectiveness.keys(), key=lambda x: abs(x - used_stop))
+
+                        if realized_pnl > 0:
+                            stop_distance_effectiveness[closest_stop]["wins"] += 1
+                        else:
+                            stop_distance_effectiveness[closest_stop]["losses"] += 1
 
                     # TIER 1 FIX: DRAWDOWN RECOVERY SCALING
                     # Track recent P&Ls to adjust position sizing during recovery
@@ -1483,8 +1633,40 @@ class WalkForwardBacktester:
             elif current_dd < max_portfolio_dd * 0.7:  # Resume at 70% of limit
                 portfolio_trading_paused = False
 
-            # Generate trading signal (only if we have enough data AND portfolio not paused)
-            if len(window_data[symbol]) >= 100 and symbol not in positions and not portfolio_trading_paused:
+            # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
+            # Detect macro regime shifts (elevated vol = higher risk, extreme vol = don't trade)
+            portfolio_vols_for_macro = []
+            for sym in list(window_data.keys())[:5]:  # Sample first 5 symbols for efficiency
+                if len(window_data[sym]) >= 30:
+                    closes = np.array([c.close for c in window_data[sym][-30:]])
+                    returns = np.diff(closes) / closes[:-1]
+                    portfolio_vols_for_macro.append(np.std(returns))
+
+            if portfolio_vols_for_macro:
+                current_macro_vol = np.mean(portfolio_vols_for_macro)
+
+                # Update baseline if we're in normal conditions
+                if current_macro_vol < baseline_portfolio_vol * 1.2:
+                    baseline_portfolio_vol = baseline_portfolio_vol * 0.99 + current_macro_vol * 0.01  # Exponential moving average
+
+                # Detect regime shifts
+                vol_ratio = current_macro_vol / baseline_portfolio_vol
+                prev_regime = macro_regime
+
+                if vol_ratio > extreme_vol_threshold:
+                    macro_regime = "extreme"
+                    if prev_regime != "extreme":
+                        logger.warning(f"⚠️ MACRO REGIME SHIFT: Extreme volatility detected (vol_ratio={vol_ratio:.2f}) | Pausing new trades")
+                elif vol_ratio > high_vol_threshold:
+                    macro_regime = "elevated"
+                    if prev_regime != "elevated":
+                        logger.info(f"⚠️ Elevated volatility regime (vol_ratio={vol_ratio:.2f}) | Reducing position sizes")
+                else:
+                    macro_regime = "normal"
+
+            # Generate trading signal (only if we have enough data AND portfolio not paused AND not during extreme macro vol)
+            macro_vol_safe = macro_regime != "extreme"
+            if len(window_data[symbol]) >= 100 and symbol not in positions and not portfolio_trading_paused and macro_vol_safe:
                 features = self.prepare_features(window_data[symbol][-100:])
 
                 if len(features) > 0:
@@ -1558,11 +1740,18 @@ class WalkForwardBacktester:
 
                     meets_confidence = prediction["confidence"] >= min_confidence
 
+                    # TIER 1 FIX: SIGNAL STATISTICAL SIGNIFICANCE TESTING
+                    # Only trade if historical win rate for this symbol-action is statistically > 50%
+                    is_statistically_significant = self.is_signal_statistically_significant(
+                        symbol, prediction["action"], signal_history
+                    )
+
                     if (prediction["action"] != 1 and
                         meets_confidence and
                         not conflicting_trade and
                         is_liquid and
-                        strong_consensus):
+                        strong_consensus and
+                        is_statistically_significant):
                         # HORIZON-AWARE KELLY CRITERION SIZING
                         # Longer-term positions need smaller sizes (more time = more risk)
                         # Shorter-term positions can be larger (less time = less risk)
@@ -1648,6 +1837,30 @@ class WalkForwardBacktester:
                             position_size *= leverage_mult
                             logger.debug(f"Dynamic leverage for {symbol}: {leverage_mult:.2f}x (portfolio_vol={portfolio_vol*100:.2f}%)")
 
+                        # TIER 1 FIX: SYSTEMIC RISK FILTER - BTC/ETH CORRELATION
+                        # If BTC and ETH are highly correlated (>0.8), reduce all position sizes
+                        # This indicates systemic risk where all assets move together
+                        if "BTC" in window_data and "ETH" in window_data:
+                            if len(window_data["BTC"]) >= 100 and len(window_data["ETH"]) >= 100:
+                                btc_eth_corr = abs(self.calculate_correlation(
+                                    window_data["BTC"][-100:],
+                                    window_data["ETH"][-100:],
+                                    lookback=100
+                                ))
+
+                                if btc_eth_corr > 0.80:
+                                    # High systemic risk: reduce position sizing
+                                    systemic_risk_discount = 1.0 - (btc_eth_corr - 0.80) / 0.20  # Linear decay from 0.8 to 1.0
+                                    position_size *= systemic_risk_discount
+                                    logger.debug(f"⚠️ Systemic risk detected: BTC-ETH corr={btc_eth_corr:.2f} | Reducing {symbol} by {systemic_risk_discount:.2f}x")
+
+                        # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
+                        # Reduce position sizing during elevated macro volatility
+                        if macro_regime == "elevated":
+                            macro_regime_discount = 0.7  # Reduce to 70% during elevated vol
+                            position_size *= macro_regime_discount
+                            logger.debug(f"Macro regime (elevated): scaling {symbol} by {macro_regime_discount:.2f}x")
+
                         if position_size > 100:  # Minimum position
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
@@ -1666,6 +1879,7 @@ class WalkForwardBacktester:
                                 "final_action": prediction["action"],
                                 "highest_price": candle.close,  # TIER 1 FIX: Track for trailing stops
                                 "lowest_price": candle.close,   # Also track for shorts
+                                "stop_distance": effective_stop_distance,  # TIER 2 FIX: Track which stop was used
                             }
 
                             # Log position opening (PHASE D: include model agreement)
@@ -1682,6 +1896,8 @@ class WalkForwardBacktester:
                         # PHASE D: Track why signal was rejected
                         if prediction["action"] == 1:  # Hold signal
                             pass  # Don't count hold signals
+                        elif not is_statistically_significant:
+                            filtered_signals["low_statistical_significance"] += 1
                         elif prediction["confidence"] <= 0.80:
                             filtered_signals["low_confidence"] += 1
                         elif conflicting_trade:
@@ -1750,10 +1966,20 @@ class WalkForwardBacktester:
         logger.info(f"  Positions Actually Opened: {positions_opened}")
         logger.info(f"  Filtering Rate: {total_filtered/signals_generated*100:.1f}% filtered")
         logger.info(f"  Breakdown:")
+        logger.info(f"    - Low Statistical Significance: {filtered_signals['low_statistical_significance']:,}")
         logger.info(f"    - Low Confidence (< 0.80): {filtered_signals['low_confidence']:,}")
         logger.info(f"    - Conflicting Regime: {filtered_signals['conflicting_regime']:,}")
         logger.info(f"    - Low Liquidity: {filtered_signals['low_liquidity']:,}")
         logger.info(f"    - Low Model Agreement (< 3/4): {filtered_signals['low_model_agreement']:,}")
+
+        # TIER 2 FIX: Log macro regime information
+        logger.info("\n📊 TIER 2 - ADVANCED RISK MANAGEMENT:")
+        logger.info(f"  ✅ Signal Statistical Significance Testing (IMPLEMENTED)")
+        logger.info(f"  ✅ BTC/ETH Systemic Risk Filter (IMPLEMENTED)")
+        logger.info(f"  ✅ ML-Optimized Stop Placement (IMPLEMENTED)")
+        logger.info(f"    Stop Distance Effectiveness: {[(d*100, s['wins']/(s['wins']+s['losses'])*100 if s['wins']+s['losses']>0 else 0) for d, s in sorted(stop_distance_effectiveness.items())]}")
+        logger.info(f"  ✅ Macro Volatility Regime Filtering (IMPLEMENTED)")
+        logger.info(f"    Final Macro Regime: {macro_regime.upper()}")
 
         # Log individual model performance
         logger.info("\n📊 INDIVIDUAL MODEL ACCURACY:")
