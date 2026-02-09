@@ -2004,7 +2004,7 @@ class WalkForwardBacktester:
         logger.info(f"  Total Actionable Signals: {signals_generated:,}")
         logger.info(f"  Total Filtered Out: {total_filtered:,}")
         logger.info(f"  Positions Actually Opened: {positions_opened}")
-        logger.info(f"  Filtering Rate: {total_filtered/signals_generated*100:.1f}% filtered")
+        logger.info(f"  Filtering Rate: {total_filtered/signals_generated*100:.1f}% filtered" if signals_generated > 0 else f"  Filtering Rate: N/A (0 signals generated)")
         logger.info(f"  Breakdown:")
         logger.info(f"    - Low Statistical Significance: {filtered_signals['low_statistical_significance']:,}")
         logger.info(f"    - Low Confidence (< 0.80): {filtered_signals['low_confidence']:,}")
