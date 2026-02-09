@@ -2654,7 +2654,7 @@ class ModelPreTrainer:
         features: np.ndarray,
         labels: np.ndarray,
         rewards: np.ndarray,
-        epochs: int = 100,  # NOTE: Actual training stopped by early stopping (patience=2), not this limit
+        epochs: int = 999999,  # Effectively unlimited: early stopping (patience=2) controls actual length
         batch_size: int = 256,
         validation_split: float = 0.2
     ) -> TrainingMetrics:
@@ -3934,7 +3934,7 @@ def get_alpha_manager() -> AlphaSourceManager:
 
 async def run_full_training_pipeline(
     days_of_data: int = 730,  # 2 years: Required for 1600h pattern learning
-    training_epochs: int = 100  # Upper bound: early stopping (patience=2) will likely stop before this
+    training_epochs: int = 999999  # Effectively unlimited: early stopping (patience=2) controls actual length
 ) -> Dict:
     """
     Run the complete pre-training pipeline:
