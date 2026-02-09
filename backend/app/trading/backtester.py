@@ -1984,7 +1984,7 @@ class ModelPreTrainer:
         # Early stopping setup - check for resume state (must be before wf_fold calculation)
         start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
-        patience = 3  # Stop if no improvement for 3 epochs (balanced: learn more, catch overfitting)
+        patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting)
         patience_counter = getattr(self, '_patience_counter', 0)
 
         n = len(features)
