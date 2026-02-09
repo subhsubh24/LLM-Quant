@@ -2434,7 +2434,48 @@ class ModelPreTrainer:
             logger.info(f"   • No prediction horizon blindness")
             logger.info("=" * 80)
 
-        logger.info(f"Training complete! Best accuracy: {best_val_accuracy:.2%}")
+        # TIER 1 FIX: ADVERSARIAL VALIDATION
+        # Test on completely unseen data to catch overfitting before live trading
+        logger.info("\n" + "="*80)
+        logger.info("🔍 ADVERSARIAL VALIDATION: Testing on unseen out-of-sample data")
+        logger.info("="*80)
+
+        if len(features) >= 100:
+            # Use last 10% of data that was never seen during training
+            test_start = int(n * 0.90)
+            test_end = n
+            X_test = features[test_start:test_end]
+            y_test_primary = primary_labels[test_start:test_end]
+
+            if len(X_test) > 0:
+                # Evaluate ensemble on test set
+                test_preds = []
+                test_correct = 0
+                for i, state in enumerate(X_test[:min(1000, len(X_test))]):  # Sample for speed
+                    pred = self.predict(state)
+                    predicted_action = pred.get("action", 1)
+                    actual_action = y_test_primary[test_start + i] if test_start + i < len(primary_labels) else 1
+                    test_correct += (predicted_action == actual_action)
+
+                test_accuracy = test_correct / min(1000, len(X_test)) if len(X_test) > 0 else 0
+                val_test_gap = best_val_accuracy - test_accuracy
+
+                logger.info(f"Validation Accuracy: {best_val_accuracy:.2%}")
+                logger.info(f"Test Accuracy (unseen data): {test_accuracy:.2%}")
+                logger.info(f"Generalization Gap: {val_test_gap:.2%}")
+
+                if val_test_gap > 0.10:
+                    logger.warning(
+                        f"⚠️ OVERFITTING DETECTED: Validation-Test gap = {val_test_gap:.2%} (>10%)\n"
+                        f"   Models may perform worse on live data than backtest results suggest.\n"
+                        f"   Consider: more regularization, reduce model complexity, or more training data"
+                    )
+                elif val_test_gap < 0.02:
+                    logger.info(f"✅ EXCELLENT GENERALIZATION: Models likely to perform similarly on live data")
+                else:
+                    logger.info(f"✅ GOOD GENERALIZATION: Reasonable gap ({val_test_gap:.2%}) suggests sound training")
+
+        logger.info(f"\nTraining complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
 
     def reset_state_buffer(self):
