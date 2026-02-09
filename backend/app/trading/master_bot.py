@@ -3089,7 +3089,7 @@ def create_master_bot(
 
 async def run_training_pipeline(
     days_of_data: int = 180,
-    training_epochs: int = 20  # Reduced: early stopping (patience=2) + L2 regularization prevent overfitting
+    training_epochs: int = 100  # Upper bound: early stopping (patience=2) will likely stop sooner
 ) -> Dict:
     """
     Run the full ML training pipeline.

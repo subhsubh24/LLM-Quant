@@ -2654,7 +2654,7 @@ class ModelPreTrainer:
         features: np.ndarray,
         labels: np.ndarray,
         rewards: np.ndarray,
-        epochs: int = 20,
+        epochs: int = 100,  # NOTE: Actual training stopped by early stopping (patience=2), not this limit
         batch_size: int = 256,
         validation_split: float = 0.2
     ) -> TrainingMetrics:
@@ -2667,6 +2667,10 @@ class ModelPreTrainer:
 
         Multi-horizon training fixes the critical prediction mismatch where models trained
         for 5h predictions but held trades for 48h+. Now ensemble learns across all timescales.
+
+        NOTE: Early stopping with patience=2 will typically stop training before reaching the
+        epochs limit. The epoch parameter (default 100) sets an upper bound, but the actual
+        number of epochs trained is controlled by validation accuracy improvement.
         """
         if len(features) == 0:
             logger.error("No training data provided")
@@ -3930,7 +3934,7 @@ def get_alpha_manager() -> AlphaSourceManager:
 
 async def run_full_training_pipeline(
     days_of_data: int = 730,  # 2 years: Required for 1600h pattern learning
-    training_epochs: int = 20  # Reduced: early stopping prevents overfitting (patience=2)
+    training_epochs: int = 100  # Upper bound: early stopping (patience=2) will likely stop before this
 ) -> Dict:
     """
     Run the complete pre-training pipeline:
