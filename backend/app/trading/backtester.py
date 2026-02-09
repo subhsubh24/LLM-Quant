@@ -3075,19 +3075,75 @@ class ModelPreTrainer:
                 test_preds = []
                 test_correct = 0
                 test_sample_count = 0
+
+                # DEBUG: Log model initialization
+                logger.info("🔧 DEBUG: Model Status Before Test")
+                logger.info(f"  DQN weights loaded: {self.dqn.q_network is not None}")
+                logger.info(f"  PPO weights loaded: {self.ppo.actor is not None}")
+                logger.info(f"  LSTM weights loaded: {self.lstm.lstm is not None}")
+                logger.info(f"  Transformer weights loaded: {self.transformer.model is not None}")
+                logger.info(f"  State buffer: {len(self.state_buffer)} / {self.seq_len}")
+                logger.info(f"  Test samples: {len(X_test)}")
+                logger.info(f"  Test labels unique: {np.unique(y_test_primary, return_counts=True)}")
+
+                # Sample a few predictions for inspection
+                sample_indices = np.random.choice(len(X_test), min(5, len(X_test)), replace=False)
+                logger.info("\n📋 Sample Predictions (first 5 test samples):")
+
+                for sample_idx in sample_indices:
+                    state = X_test[sample_idx]
+                    pred = self.predict(state)
+                    actual = y_test_primary[sample_idx]
+                    logger.info(
+                        f"  Sample {sample_idx}: Predicted={pred['action']} (conf={pred['confidence']:.2f}), "
+                        f"Actual={actual}, Models={pred.get('predictions', [])}, "
+                        f"Agreement={pred.get('agreement', 0):.2f}"
+                    )
+
+                # Now do full evaluation with detailed logging
+                logger.info("\n🧪 Full Test Evaluation:")
+                self.reset_state_buffer()
+                action_distribution = {0: 0, 1: 0, 2: 0}
+                correct_distribution = {0: 0, 1: 0, 2: 0}
+
                 for i, state in enumerate(X_test[:min(1000, len(X_test))]):  # Sample for speed
                     pred = self.predict(state)
                     predicted_action = pred.get("action", 1)
                     actual_action = y_test_primary[i] if i < len(y_test_primary) else 1
-                    test_correct += (predicted_action == actual_action)
+                    is_correct = (predicted_action == actual_action)
+
+                    test_correct += is_correct
                     test_sample_count += 1
+                    action_distribution[predicted_action] += 1
+                    if is_correct:
+                        correct_distribution[predicted_action] += 1
 
                 test_accuracy = test_correct / test_sample_count if test_sample_count > 0 else 0
                 val_test_gap = best_val_accuracy - test_accuracy
 
-                logger.info(f"Validation Accuracy: {best_val_accuracy:.2%}")
-                logger.info(f"Test Accuracy (unseen data): {test_accuracy:.2%}")
-                logger.info(f"Generalization Gap: {val_test_gap:.2%}")
+                # Log detailed breakdown
+                logger.info(f"\n📊 Prediction Breakdown:")
+                for action in [0, 1, 2]:
+                    action_name = {0: "SHORT", 1: "HOLD", 2: "LONG"}.get(action)
+                    total = action_distribution[action]
+                    correct = correct_distribution[action]
+                    acc = (correct / total * 100) if total > 0 else 0
+                    logger.info(f"  {action_name}: {correct}/{total} correct ({acc:.1f}%)")
+
+                logger.info(f"\n✅ RESULTS:")
+                logger.info(f"  Validation Accuracy: {best_val_accuracy:.2%}")
+                logger.info(f"  Test Accuracy (unseen data): {test_accuracy:.2%}")
+                logger.info(f"  Generalization Gap: {val_test_gap:.2%}")
+                logger.info(f"  Baseline (random 4-action): ~25%")
+
+                if test_accuracy < 0.26:
+                    logger.error(f"🚨 CRITICAL: Test accuracy ({test_accuracy:.1%}) ≈ random guessing!")
+                    logger.error(f"   This means models are not learning anything meaningful.")
+                    logger.error(f"   Possible causes:")
+                    logger.error(f"   1. Models not properly initialized/trained")
+                    logger.error(f"   2. Features/labels misaligned")
+                    logger.error(f"   3. State buffer corruption")
+                    logger.error(f"   4. Ensemble voting bug")
 
                 if val_test_gap > 0.10:
                     logger.warning(
@@ -3129,7 +3185,7 @@ class ModelPreTrainer:
 
         return seq.reshape(1, self.seq_len, self.state_dim)
 
-    def predict(self, state: np.ndarray) -> Dict:
+    def predict(self, state: np.ndarray, debug: bool = False) -> Dict:
         """
         Get ensemble prediction from all models.
 
@@ -3154,33 +3210,48 @@ class ModelPreTrainer:
         predictions = []
         confidences = []
 
-        # DQN prediction (single state)
-        q_values = self.dqn.get_q_values(state)
-        dqn_action = np.argmax(q_values)
-        dqn_probs = self._softmax(q_values)
-        dqn_conf = dqn_probs[dqn_action]
-        predictions.append(dqn_action)
-        confidences.append(dqn_conf)
+        try:
+            # DQN prediction (single state)
+            q_values = self.dqn.get_q_values(state)
+            dqn_action = np.argmax(q_values)
+            dqn_probs = self._softmax(q_values)
+            dqn_conf = dqn_probs[dqn_action]
+            predictions.append(dqn_action)
+            confidences.append(dqn_conf)
+            if debug:
+                logger.debug(f"    DQN: action={dqn_action}, Q-vals={q_values}, conf={dqn_conf:.3f}")
 
-        # PPO prediction (single state)
-        ppo_probs = self.ppo.get_action_probs(state)
-        ppo_action = np.argmax(ppo_probs)
-        predictions.append(ppo_action)
-        confidences.append(ppo_probs[ppo_action])
+            # PPO prediction (single state)
+            ppo_probs = self.ppo.get_action_probs(state)
+            ppo_action = np.argmax(ppo_probs)
+            predictions.append(ppo_action)
+            confidences.append(ppo_probs[ppo_action])
+            if debug:
+                logger.debug(f"    PPO: action={ppo_action}, probs={ppo_probs}, conf={ppo_probs[ppo_action]:.3f}")
 
-        # LSTM prediction (full sequence)
-        lstm_out, _ = self.lstm.forward(seq)
-        lstm_probs = self._softmax(lstm_out[-1])
-        lstm_action = np.argmax(lstm_probs)
-        predictions.append(lstm_action)
-        confidences.append(lstm_probs[lstm_action])
+            # LSTM prediction (full sequence)
+            lstm_out, _ = self.lstm.forward(seq)
+            lstm_probs = self._softmax(lstm_out[-1])
+            lstm_action = np.argmax(lstm_probs)
+            predictions.append(lstm_action)
+            confidences.append(lstm_probs[lstm_action])
+            if debug:
+                logger.debug(f"    LSTM: action={lstm_action}, probs={lstm_probs}, conf={lstm_probs[lstm_action]:.3f}")
 
-        # Transformer prediction (full sequence)
-        trans_out = self.transformer.forward(seq)
-        trans_probs = self._softmax(trans_out[-1])
-        trans_action = np.argmax(trans_probs)
-        predictions.append(trans_action)
-        confidences.append(trans_probs[trans_action])
+            # Transformer prediction (full sequence)
+            trans_out = self.transformer.forward(seq)
+            trans_probs = self._softmax(trans_out[-1])
+            trans_action = np.argmax(trans_probs)
+            predictions.append(trans_action)
+            confidences.append(trans_probs[trans_action])
+            if debug:
+                logger.debug(f"    Transformer: action={trans_action}, probs={trans_probs}, conf={trans_probs[trans_action]:.3f}")
+
+        except Exception as e:
+            logger.error(f"🚨 ERROR in model predictions: {e}")
+            logger.error(f"   State shape: {state.shape}")
+            logger.error(f"   Seq shape: {seq.shape}")
+            raise
 
         # Ensemble vote (weighted by per-model confidence)
         action_votes = {0: 0, 1: 0, 2: 0}
