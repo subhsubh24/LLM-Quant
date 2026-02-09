@@ -3062,6 +3062,10 @@ class ModelPreTrainer:
         logger.info("🔍 ADVERSARIAL VALIDATION: Testing on unseen out-of-sample data")
         logger.info("="*80)
 
+        # CRITICAL: Load the best checkpoint before testing (not the final epoch)
+        self.load_checkpoints()
+        logger.info(f"✅ Loaded best checkpoint (val accuracy: {global_best_accuracy:.2%})")
+
         if len(features) >= 100:
             # Use last 10% of data that was never seen during training
             test_start = int(n * 0.90)
