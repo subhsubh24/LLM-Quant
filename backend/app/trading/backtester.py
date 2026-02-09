@@ -2802,7 +2802,7 @@ class ModelPreTrainer:
                 # No improvement vs global best - increment patience counter
                 patience_counter += 1
                 self._patience_counter = patience_counter
-                if patience_counter >= patience and epoch >= 5:  # Min 5 epochs, then check patience
+                if patience_counter >= patience:
                     logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs (global best: {global_best_accuracy:.2%})")
                     break
 
