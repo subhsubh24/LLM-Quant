@@ -1230,6 +1230,12 @@ class WalkForwardBacktester:
 
                 unrealized_pnl = pos["size"] * pnl_pct
 
+                # TIER 1 FIX: Update highest/lowest prices for trailing stops
+                if side == "long":
+                    pos["highest_price"] = max(pos.get("highest_price", entry_price), current_price)
+                else:
+                    pos["lowest_price"] = min(pos.get("lowest_price", entry_price), current_price)
+
                 # Calculate volatility for adaptive stops (last 20 candles)
                 recent_closes = [c.close for c in window_data[symbol][-20:]] if len(window_data[symbol]) >= 20 else [entry_price]
                 if len(recent_closes) > 1:
@@ -1271,25 +1277,39 @@ class WalkForwardBacktester:
                 exit_reason = ""
                 partial_exit_pct = 0.0  # Fraction of position to exit
 
+                # TIER 1 FIX: TRAILING STOPS
+                # Exit if price reversals from highest point
+                trailing_stop_pct = 0.03  # 3% trailing stop
+                if side == "long" and pos.get("highest_price", entry_price) > entry_price:
+                    if current_price < pos["highest_price"] * (1 - trailing_stop_pct):
+                        should_exit = True
+                        exit_reason = "trailing_stop"
+                        partial_exit_pct = 1.0
+                elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
+                    if current_price > pos["lowest_price"] * (1 + trailing_stop_pct):
+                        should_exit = True
+                        exit_reason = "trailing_stop"
+                        partial_exit_pct = 1.0
+
                 # TIER 1 FIX: PROFIT PYRAMIDING
                 # Take profits gradually instead of holding to full target
                 # This locks in profits and reduces drawdown
-                if pnl_pct >= take_profit_pct * 0.5:  # 50% of target
+                if not should_exit and pnl_pct >= take_profit_pct * 0.5:  # 50% of target
                     partial_exit_pct = 0.30  # Exit 30% of position at halfway point
                     exit_reason = "profit_pyramid_1"
                     should_exit = True
 
-                if pnl_pct >= take_profit_pct:  # Full target
+                if not should_exit and pnl_pct >= take_profit_pct:  # Full target
                     partial_exit_pct = 1.0  # Exit remaining position
                     should_exit = True
                     exit_reason = "take_profit"
                 # Stop loss (aggressive: tighter on long positions, wider on short)
-                elif pnl_pct <= -stop_loss_pct:
+                elif not should_exit and pnl_pct <= -stop_loss_pct:
                     should_exit = True
                     exit_reason = "stop_loss"
                     partial_exit_pct = 1.0
                 # Time-based exit (hold max 1600 hours = 66+ days for full 1600h horizon)
-                elif (timestamp - pos["entry_time"]).total_seconds() > 1600 * 3600:
+                elif not should_exit and (timestamp - pos["entry_time"]).total_seconds() > 1600 * 3600:
                     should_exit = True
                     exit_reason = "time_exit"
                     partial_exit_pct = 1.0
@@ -1356,6 +1376,12 @@ class WalkForwardBacktester:
                                     # PHASE B: Track for adaptive weighting
                                     adaptive_weighter.record_prediction(model_name, was_correct=False)
 
+                                # TIER 1 FIX: Track per-model win rate for future signal weighting
+                                if pred == final_action:  # Model voted with ensemble
+                                    model_recent_trades[model_name].append(1 if trade_was_profitable else 0)
+                                    if len(model_recent_trades[model_name]) > 50:
+                                        model_recent_trades[model_name].pop(0)  # Keep rolling window of 50
+
                                 # PHASE C: Track P&L contribution
                                 # Credit model if it voted for the winning action
                                 if pred == final_action:  # Model agrees with ensemble
@@ -1417,12 +1443,34 @@ class WalkForwardBacktester:
                     is_long = prediction["action"] == 2
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
-                    # PHASE D: Require model agreement (3+ out of 4 models agree)
+                    # TIER 1 FIX: Model weighting by recent performance
+                    # Instead of equal voting, weight models by recent win rate
                     individual_preds = prediction.get("predictions", [])
                     final_action = prediction["action"]
+
+                    # Calculate per-model win rates from recent trades
+                    model_weights = {}
+                    for i, model_name in enumerate(model_names):
+                        if len(model_recent_trades[model_name]) > 0:
+                            recent_wr = np.mean(model_recent_trades[model_name][-20:])
+                            # Weight based on win rate (0.4 to 1.6x multiplier)
+                            model_weights[i] = 0.8 + (recent_wr - 0.5) * 1.6
+                        else:
+                            model_weights[i] = 1.0  # Equal weight if no history
+
+                    # Weighted agreement: sum weights of models agreeing with final action
+                    weighted_agreement = sum(
+                        model_weights.get(i, 1.0)
+                        for i, p in enumerate(individual_preds)
+                        if p == final_action and i < len(model_names)
+                    )
+                    total_model_weight = sum(model_weights.values())
+                    weighted_agreement_pct = weighted_agreement / total_model_weight if total_model_weight > 0 else 0
+
+                    # Require strong consensus (>60% weighted agreement)
+                    min_agreement = 3  # Fallback: require at least 3 out of 4 models
                     model_agreement = sum(1 for p in individual_preds if p == final_action)
-                    min_agreement = 3  # Require at least 3 out of 4 models to agree
-                    strong_consensus = model_agreement >= min_agreement
+                    strong_consensus = (weighted_agreement_pct > 0.60) or (model_agreement >= min_agreement)
 
                     # HORIZON-AWARE CONFIDENCE: Longer-term signals need lower confidence
                     # Higher agreement (4/4) = likely short-term = need 0.80+
@@ -1500,6 +1548,27 @@ class WalkForwardBacktester:
                                 position_size *= vol_multiplier
                                 logger.debug(f"Volatility scaling for {symbol}: {vol_multiplier:.2f}x (vol={realized_vol*100:.2f}%)")
 
+                        # TIER 1 FIX: DYNAMIC LEVERAGE
+                        # Calculate portfolio volatility (average of all open positions)
+                        portfolio_vols = []
+                        for sym in positions.keys():
+                            if sym in window_data and len(window_data[sym]) >= 30:
+                                closes = np.array([c.close for c in window_data[sym][-30:]])
+                                returns = np.diff(closes) / closes[:-1]
+                                portfolio_vols.append(np.std(returns))
+
+                        if portfolio_vols:
+                            portfolio_vol = np.mean(portfolio_vols)
+                            # Dynamic leverage: 1.5x in calm markets (vol<0.8%), 0.7x in volatile (vol>1.5%)
+                            if portfolio_vol < 0.008:
+                                leverage_mult = 1.3  # Calm: use 130% of normal sizing
+                            elif portfolio_vol > 0.015:
+                                leverage_mult = 0.7  # Volatile: use only 70% of normal sizing
+                            else:
+                                leverage_mult = 1.0  # Normal: use 100%
+                            position_size *= leverage_mult
+                            logger.debug(f"Dynamic leverage for {symbol}: {leverage_mult:.2f}x (portfolio_vol={portfolio_vol*100:.2f}%)")
+
                         if position_size > 100:  # Minimum position
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
@@ -1516,6 +1585,8 @@ class WalkForwardBacktester:
                                 "entry_cost": entry_cost,
                                 "individual_predictions": prediction.get("predictions", []),
                                 "final_action": prediction["action"],
+                                "highest_price": candle.close,  # TIER 1 FIX: Track for trailing stops
+                                "lowest_price": candle.close,   # Also track for shorts
                             }
 
                             # Log position opening (PHASE D: include model agreement)
