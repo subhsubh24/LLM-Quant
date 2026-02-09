@@ -1168,6 +1168,12 @@ class WalkForwardBacktester:
         recent_returns = []  # Track recent returns for volatility
         min_lookback_returns = 20  # Need 20 days of returns for vol calculation
 
+        # TIER 1 FIX: DRAWDOWN RECOVERY SCALING
+        # After losses, trade smaller to recover gradually (like top funds)
+        recent_pnls = []  # Rolling window of recent trade P&Ls
+        recovery_mode = False  # Are we in drawdown recovery?
+        recovery_scale = 1.0  # Position size multiplier during recovery
+
         # Progress tracking
         last_log_time = time.time()
         last_log_index = 0
@@ -1383,6 +1389,24 @@ class WalkForwardBacktester:
                     }
                     trades.append(trade)
 
+                    # TIER 1 FIX: DRAWDOWN RECOVERY SCALING
+                    # Track recent P&Ls to adjust position sizing during recovery
+                    recent_pnls.append(realized_pnl)
+                    if len(recent_pnls) > 20:
+                        recent_pnls.pop(0)
+
+                    # If we've had net losses recently, reduce position sizing
+                    if len(recent_pnls) >= 10:
+                        recent_avg_pnl = np.mean(recent_pnls[-10:])
+                        if recent_avg_pnl < 0:
+                            # Net losses: reduce sizing
+                            recovery_scale = max(0.5, 1.0 + (recent_avg_pnl / 100))  # Scale 0.5x to 1.0x
+                            recovery_mode = True
+                        else:
+                            # Net profits: restore normal sizing
+                            recovery_scale = 1.0
+                            recovery_mode = False
+
                     # Track rolling win-rate for degradation detection
                     recent_trades_window.append(1 if realized_pnl > 0 else 0)
                     if len(recent_trades_window) > max_recent_trades:
@@ -1563,6 +1587,11 @@ class WalkForwardBacktester:
 
                         kelly_fraction = base_kelly * horizon_mult
                         position_size = capital * min(kelly_fraction, 0.02)  # Cap at 2%
+
+                        # TIER 1 FIX: Apply recovery scaling (reduce sizing after losses)
+                        position_size *= recovery_scale
+                        if recovery_mode:
+                            logger.debug(f"Recovery mode active: scaling {symbol} by {recovery_scale:.2f}x")
 
                         # CORRELATION-AWARE SIZING: Reduce position if correlated with existing positions
                         if positions:
