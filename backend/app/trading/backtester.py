@@ -1692,6 +1692,12 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 
+                    # DIAGNOSTIC: Log raw model predictions (sample to avoid spam)
+                    if signals_generated % 1000 == 0:  # Log every 1000 signals
+                        action_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], f'UNK_{prediction["action"]}')
+                        individual_preds_str = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], "?")
+                        logger.debug(f"📊 Raw prediction #{signals_generated}: {symbol} → {action_name}, conf={prediction['confidence']:.3f}, regime={regime}")
+
                     # Check liquidity (require minimum volume)
                     recent_volumes = np.array([c.volume for c in window_data[symbol][-20:]])
                     avg_volume = np.mean(recent_volumes)
@@ -1728,20 +1734,21 @@ class WalkForwardBacktester:
                     total_model_weight = sum(model_weights.values())
                     weighted_agreement_pct = weighted_agreement / total_model_weight if total_model_weight > 0 else 0
 
-                    # Require strong consensus (>60% weighted agreement)
-                    min_agreement = 3  # Fallback: require at least 3 out of 4 models
+                    # Require strong consensus (>50% weighted agreement, loosened from 60% for diagnostics)
+                    min_agreement = 2  # Fallback: require at least 2 out of 4 models (loosened from 3)
                     model_agreement = sum(1 for p in individual_preds if p == final_action)
-                    strong_consensus = (weighted_agreement_pct > 0.60) or (model_agreement >= min_agreement)
+                    strong_consensus = (weighted_agreement_pct > 0.50) or (model_agreement >= min_agreement)
 
                     # HORIZON-AWARE CONFIDENCE: Longer-term signals need lower confidence
-                    # Higher agreement (4/4) = likely short-term = need 0.80+
-                    # Lower agreement (3/4) = likely longer-term = accept 0.65+
+                    # Higher agreement (4/4) = likely short-term = need 0.70+
+                    # Lower agreement (3/4) = likely longer-term = accept 0.55+
+                    # Loosened for diagnostics to understand signal generation
                     if model_agreement == 4:
-                        min_confidence = 0.80  # 4/4 models agree: require very high confidence
+                        min_confidence = 0.70  # 4/4 models agree: require high confidence (loosened from 0.80)
                     elif model_agreement == 3:
-                        min_confidence = 0.70  # 3/4 models agree: accept lower (longer-term)
+                        min_confidence = 0.55  # 3/4 models agree: accept lower (loosened from 0.70)
                     else:
-                        min_confidence = 0.60  # Fallback (unlikely)
+                        min_confidence = 0.50  # Fallback: very loose for 2/4 or 1/4
 
                     # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
                     # Adjust thresholds based on market regime
@@ -1756,9 +1763,32 @@ class WalkForwardBacktester:
 
                     # TIER 1 FIX: SIGNAL STATISTICAL SIGNIFICANCE TESTING
                     # Only trade if historical win rate for this symbol-action is statistically > 50%
+                    # NOTE: Temporarily loosening for diagnostics - will fail on first few trades with no history
                     is_statistically_significant = self.is_signal_statistically_significant(
                         symbol, prediction["action"], signal_history
                     )
+
+                    # DIAGNOSTIC LOGGING: Understand why 0 signals
+                    action_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], f'UNK_{prediction["action"]}')
+                    is_hold = prediction["action"] == 1
+
+                    if is_hold or not meets_confidence or conflicting_trade or not is_liquid or not strong_consensus:
+                        # Log why signal was rejected (sampling to avoid spam)
+                        if np.random.random() < 0.001:  # Log 0.1% of rejected signals
+                            reasons = []
+                            if is_hold:
+                                reasons.append("is_hold")
+                            if not meets_confidence:
+                                reasons.append(f"confidence={prediction['confidence']:.3f}<min={min_confidence:.3f}")
+                            if conflicting_trade:
+                                reasons.append(f"conflicts_regime={regime}")
+                            if not is_liquid:
+                                reasons.append(f"illiquid_vol={avg_volume:.0f}")
+                            if not strong_consensus:
+                                reasons.append(f"consensus={model_agreement}/4")
+                            if not is_statistically_significant:
+                                reasons.append("not_sig_significant")
+                            logger.debug(f"❌ Signal rejected {action_name} {symbol}: {', '.join(reasons)}")
 
                     if (prediction["action"] != 1 and
                         meets_confidence and
@@ -1766,6 +1796,9 @@ class WalkForwardBacktester:
                         is_liquid and
                         strong_consensus and
                         is_statistically_significant):
+                        # ✅ SIGNAL ACCEPTED: Log for diagnostics
+                        logger.info(f"✅ SIGNAL ACCEPTED: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
+
                         # HORIZON-AWARE KELLY CRITERION SIZING
                         # Longer-term positions need smaller sizes (more time = more risk)
                         # Shorter-term positions can be larger (less time = less risk)
@@ -2757,11 +2790,12 @@ class ModelPreTrainer:
                 patience_counter = 0
                 self._patience_counter = 0
                 self.save_checkpoints()  # Save best model
+                logger.info(f"🏆 New best val accuracy: {val_accuracy:.2%}")
             else:
                 patience_counter += 1
                 self._patience_counter = patience_counter
-                if patience_counter >= patience and epoch >= 10:  # Minimum 10 epochs
-                    logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs")
+                if patience_counter >= patience and epoch >= 5:  # Min 5 epochs, then check patience
+                    logger.info(f"⏹️  Early stopping at epoch {epoch+1} - no improvement for {patience} epochs (best was {best_val_accuracy:.2%})")
                     break
 
         self.training_metrics.epochs_completed = epoch + 1  # Actual epochs completed
