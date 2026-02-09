@@ -873,6 +873,41 @@ class WalkForwardBacktester:
             # Return volatility (how volatile are returns?)
             return_vol = np.std(log_returns) if len(log_returns) > 1 else 0
 
+            # TIER 1 FIX: MICROSTRUCTURE FEATURES (approximated from OHLC)
+            # These capture institutional behavior patterns
+
+            # 1. Volume acceleration: Rate of change of volume
+            if len(window_vol) >= 5:
+                vol_recent = np.mean(window_vol[-5:])
+                vol_historical = np.mean(window_vol[-20:-5]) if len(window_vol) >= 20 else vol_recent
+                vol_accel = (vol_recent - vol_historical) / (vol_historical + 1e-8)
+            else:
+                vol_accel = 0
+
+            # 2. Bid-ask spread approximation: High-Low as proxy for spread
+            hl_spread = (np.max(window_high) - np.min(window_low)) / (np.mean(window_close) + 1e-8)
+
+            # 3. Order flow imbalance: Where did price close in the range?
+            if len(window_high) > 0:
+                hl_range = window_high[-1] - window_low[-1]
+                if hl_range > 0:
+                    order_imbalance = (closes[i] - window_low[-1]) / hl_range - 0.5  # Range -0.5 to 0.5
+                else:
+                    order_imbalance = 0
+            else:
+                order_imbalance = 0
+
+            # 4. VWAP (Volume-weighted average price)
+            if np.sum(window_vol[-20:]) > 0:
+                vwap = np.sum(window_close[-20:] * window_vol[-20:]) / np.sum(window_vol[-20:])
+                price_to_vwap = (closes[i] - vwap) / (vwap + 1e-8)
+            else:
+                price_to_vwap = 0
+
+            # 5. Volume concentration: Is volume above/below average?
+            avg_vol = np.mean(window_vol[-20:]) if len(window_vol) >= 20 else 1
+            vol_concentration = window_vol[-1] / (avg_vol + 1e-8) - 1  # 0 = avg, +0.5 = 50% above, etc.
+
             feature_vector = [
                 returns_1, returns_5, returns_10, returns_20,
                 realized_vol, parkinson_vol,
@@ -892,6 +927,12 @@ class WalkForwardBacktester:
                 vol_regime,
                 accel,
                 return_vol,
+                # TIER 1 FIX: Microstructure features
+                vol_accel,
+                hl_spread,
+                order_imbalance,
+                price_to_vwap,
+                vol_concentration,
             ]
 
             features.append(feature_vector)
@@ -1481,6 +1522,15 @@ class WalkForwardBacktester:
                         min_confidence = 0.70  # 3/4 models agree: accept lower (longer-term)
                     else:
                         min_confidence = 0.60  # Fallback (unlikely)
+
+                    # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
+                    # Adjust thresholds based on market regime
+                    regime = self.detect_market_regime(window_data[symbol][-100:])
+                    if regime == 'bull':
+                        min_confidence *= 0.85  # Bull: Easier to profit, lower threshold
+                    elif regime == 'bear':
+                        min_confidence *= 1.15  # Bear: Harder to profit, higher threshold (be selective)
+                    # sideways: no change, use default
 
                     meets_confidence = prediction["confidence"] >= min_confidence
 
