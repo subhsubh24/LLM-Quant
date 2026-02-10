@@ -1690,16 +1690,20 @@ class WalkForwardBacktester:
                                 future_price = None
                                 lookahead_candles = 0
 
-                                if symbol_key in window_data:
+                                if symbol_key in window_data and len(window_data[symbol_key]) > 0:
                                     # Find current position in window_data by timestamp
+                                    found_idx = None
                                     for j, candle in enumerate(window_data[symbol_key]):
                                         if candle.timestamp >= pred_timestamp:
-                                            # Found prediction time, now look ahead by horizon hours
-                                            target_idx = j + horizon_h  # horizon is in hours, each candle is 1 hour
-                                            if target_idx < len(window_data[symbol_key]):
-                                                future_price = window_data[symbol_key][target_idx].close
-                                                lookahead_candles = horizon_h
+                                            found_idx = j
                                             break
+
+                                    # Verify we found the timestamp and have future data
+                                    if found_idx is not None:
+                                        target_idx = found_idx + horizon_h  # horizon is in hours, each candle is 1 hour
+                                        if target_idx < len(window_data[symbol_key]):
+                                            future_price = window_data[symbol_key][target_idx].close
+                                            lookahead_candles = horizon_h
 
                                 if future_price is None:
                                     # Not enough future data for this horizon
@@ -1758,17 +1762,19 @@ class WalkForwardBacktester:
                                 model_trainer.save_checkpoints()
                                 logger.info(f"  ✅ Models retrained on {len(features_for_training)} samples and checkpoints updated")
                                 last_retrain_candle = candles_processed
+
+                                # CRITICAL FIX: Only clear buffer AFTER successful retraining
+                                # If we skip retrain due to < 50 valid labels, keep the samples for next cycle
+                                retraining_buffer["features"] = []
+                                retraining_buffer["predictions"] = []
+                                retraining_buffer["timestamps"] = []
+                                retraining_buffer["symbols"] = []
+                                retraining_buffer["prices_at_prediction"] = []
                             except Exception as e:
                                 logger.warning(f"  ⚠️ Retraining failed: {e}")
+                                # Don't clear buffer - keep samples for next attempt
                         else:
-                            logger.info(f"  ⚠️ Not enough valid labels ({valid_count} < 50), skipping retrain")
-
-                        # Reset buffer after retraining attempt
-                        retraining_buffer["features"] = []
-                        retraining_buffer["predictions"] = []
-                        retraining_buffer["timestamps"] = []
-                        retraining_buffer["symbols"] = []
-                        retraining_buffer["prices_at_prediction"] = []
+                            logger.info(f"  ⚠️ Not enough valid labels ({valid_count} < 50), skipping retrain (kept {len(retraining_buffer['features'])} samples for next cycle)")
 
             window_data[symbol].append(candle)
 
@@ -2483,12 +2489,17 @@ class WalkForwardBacktester:
                         # Neutral: no adjustment
 
                         # CRITICAL FIX: Ensure minimum position size AFTER all scaling
-                        # Position size could be scaled to $0.55 through cascading multipliers
-                        # and never open a position. If we have a valid trade signal, use minimum.
+                        # Track if we're applying the minimum (indicates over-scaling)
+                        min_position_applied = False
                         if position_size < 100:
+                            # Log when minimum is applied (indicates risk calcs were too aggressive)
+                            if signals_generated <= 50 or np.random.random() < 0.01:  # Log first 50 + 1%
+                                logger.debug(f"🔸 Position size capped at minimum: {symbol} ${position_size:.2f} → $100 (cascade scaled too aggressively)")
                             position_size = 100  # Minimum viable position size
+                            min_position_applied = True
 
-                        if position_size > 0:  # Any valid position (now minimum $100)
+                        # Only open position if we have enough capital
+                        if position_size > 0 and position_size <= capital:  # Ensure we can afford it
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
 
@@ -3691,35 +3702,37 @@ class ModelPreTrainer:
             }
 
         # TIER 3: REGIME-AWARE BIAS
-        # Adjust confidences based on regime before voting
+        # Adjust relative weight (not absolute confidence) based on regime
+        # Use additive adjustment instead of multiplicative to keep confidences normalized
+        regime_adjustments = {0: 0, 1: 0, 2: 0}
         if regime == 'bull':
-            # Boost long signals, penalize shorts
-            for i in range(len(predictions)):
-                if predictions[i] == 2:  # Long action
-                    confidences[i] *= 1.2  # +20% confidence boost
-                elif predictions[i] == 0:  # Short action
-                    confidences[i] *= 0.8  # -20% confidence penalty
+            # Boost long signals relative to others
+            regime_adjustments[2] = +0.15  # Long: +15% relative boost
+            regime_adjustments[0] = -0.15  # Short: -15% relative penalty
         elif regime == 'bear':
-            # Boost short signals, penalize longs
-            for i in range(len(predictions)):
-                if predictions[i] == 0:  # Short action
-                    confidences[i] *= 1.2  # +20% confidence boost
-                elif predictions[i] == 2:  # Long action
-                    confidences[i] *= 0.8  # -20% confidence penalty
+            # Boost short signals relative to others
+            regime_adjustments[0] = +0.15  # Short: +15% relative boost
+            regime_adjustments[2] = -0.15  # Long: -15% relative penalty
         # Neutral: no adjustment
+
+        # Apply regime adjustments (additive to keep confidences normalized)
+        adjusted_confidences = []
+        for i, conf in enumerate(confidences):
+            adj_conf = np.clip(conf + regime_adjustments[predictions[i]], 0.0, 1.0)
+            adjusted_confidences.append(adj_conf)
 
         # Ensemble vote (weighted by regime-adjusted confidences)
         action_votes = {0: 0, 1: 0, 2: 0}
-        for pred, conf in zip(predictions, confidences):
+        for pred, conf in zip(predictions, adjusted_confidences):
             action_votes[pred] += conf
 
         final_action = max(action_votes, key=action_votes.get)
 
-        # Confidence = vote strength (how much the final action dominated)
-        # This properly reflects regime-adjusted voting where aligned signals get higher weight
+        # Confidence = vote strength properly normalized
+        # This reflects which action won consensus, properly calibrated 0-1
         total_vote_weight = sum(action_votes.values())
         if total_vote_weight > 0:
-            final_confidence = action_votes[final_action] / total_vote_weight
+            final_confidence = action_votes[final_action] / (len(predictions) * 1.0)  # Normalize by number of models
         else:
             final_confidence = 0.0
 
