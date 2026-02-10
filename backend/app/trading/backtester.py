@@ -3648,33 +3648,47 @@ class ModelPreTrainer:
         predictions = []
         confidences = []
 
-        # DQN prediction (single state)
-        q_values = self.dqn.get_q_values(state)
-        dqn_action = np.argmax(q_values)
-        dqn_probs = self._softmax(q_values)
-        dqn_conf = dqn_probs[dqn_action]
-        predictions.append(dqn_action)
-        confidences.append(dqn_conf)
+        try:
+            # DQN prediction (single state)
+            q_values = self.dqn.get_q_values(state)
+            dqn_action = np.argmax(q_values)
+            dqn_probs = self._softmax(q_values)
+            dqn_conf = dqn_probs[dqn_action]
+            predictions.append(dqn_action)
+            confidences.append(dqn_conf)
 
-        # PPO prediction (single state)
-        ppo_probs = self.ppo.get_action_probs(state)
-        ppo_action = np.argmax(ppo_probs)
-        predictions.append(ppo_action)
-        confidences.append(ppo_probs[ppo_action])
+            # PPO prediction (single state)
+            ppo_probs = self.ppo.get_action_probs(state)
+            ppo_action = np.argmax(ppo_probs)
+            predictions.append(ppo_action)
+            confidences.append(ppo_probs[ppo_action])
 
-        # LSTM prediction (full sequence)
-        lstm_out, _ = self.lstm.forward(seq)
-        lstm_probs = self._softmax(lstm_out[-1])
-        lstm_action = np.argmax(lstm_probs)
-        predictions.append(lstm_action)
-        confidences.append(lstm_probs[lstm_action])
+            # LSTM prediction (full sequence)
+            lstm_out, _ = self.lstm.forward(seq)
+            lstm_probs = self._softmax(lstm_out[-1])
+            lstm_action = np.argmax(lstm_probs)
+            predictions.append(lstm_action)
+            confidences.append(lstm_probs[lstm_action])
 
-        # Transformer prediction (full sequence)
-        trans_out = self.transformer.forward(seq)
-        trans_probs = self._softmax(trans_out[-1])
-        trans_action = np.argmax(trans_probs)
-        predictions.append(trans_action)
-        confidences.append(trans_probs[trans_action])
+            # Transformer prediction (full sequence)
+            trans_out = self.transformer.forward(seq)
+            trans_probs = self._softmax(trans_out[-1])
+            trans_action = np.argmax(trans_probs)
+            predictions.append(trans_action)
+            confidences.append(trans_probs[trans_action])
+        except Exception as e:
+            logger.error(f"🚨 ERROR in model predictions: {e}")
+            logger.error(f"   State shape: {state.shape}, Regime: {regime}")
+            # Return neutral HOLD signal as fallback
+            return {
+                "action": 1,  # HOLD
+                "confidence": 0.0,
+                "agreement": 0.0,
+                "regime": regime,
+                "regime_biased": False,
+                "q_values": [],
+                "predictions": [],
+            }
 
         # TIER 3: REGIME-AWARE BIAS
         # Adjust confidences based on regime before voting
