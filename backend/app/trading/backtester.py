@@ -1234,7 +1234,7 @@ class WalkForwardBacktester:
             "portfolio_dd_resume_pct": 0.70,         # Resume trading at 70% of DD limit
 
             # Position Sizing & Kelly Criterion
-            "kelly_cap_pct": 0.02,                   # Cap position at 2% of capital
+            "kelly_cap_pct": 0.04,                   # Cap position at 4% of capital (increased from 2% for more positions)
             "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
 
             # Confidence Thresholds (loosened for diagnostics)
@@ -1276,8 +1276,8 @@ class WalkForwardBacktester:
             "rolling_window_size": 20,               # Keep last 20 trades
 
             # Continuous Learning
-            "continuous_learning_interval": 100,    # Retrain every 100 candles
-            "continuous_learning_window": 5000,     # Keep last 5000 samples
+            "continuous_learning_interval": 5000,   # Retrain every 5000 candles (~1 week)
+            "continuous_learning_window": 10000,    # Keep last 10000 samples for retraining
             "continuous_learning_threshold": 0.45,  # Alert if win rate < 45%
 
             # Trading Safeguards
@@ -1485,6 +1485,18 @@ class WalkForwardBacktester:
                 )
                 last_log_time = current_time
                 last_log_index = candles_processed
+
+                # PHASE B ENHANCEMENT: Periodic continuous learning (every 5000 candles)
+                # Log model ensemble weights and performance by model
+                if candles_processed % config["continuous_learning_interval"] == 0 and len(model_recent_trades[model_names[0]]) >= 10:
+                    logger.info(f"\n🔄 CONTINUOUS LEARNING UPDATE (Candle {candles_processed:,}):")
+                    for i, model_name in enumerate(model_names):
+                        if len(model_recent_trades[model_name]) > 0:
+                            recent_wr = np.mean(model_recent_trades[model_name][-20:])
+                            weight = 0.8 + (recent_wr - 0.5) * 1.6  # Same formula as voting
+                            logger.info(f"  {model_name}: Win rate={recent_wr:.1%}, Ensemble weight={weight:.2f}x")
+                    portfolio_wr = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
+                    logger.info(f"  Portfolio: Recent win rate={portfolio_wr:.1%}")
 
             window_data[symbol].append(candle)
 
@@ -2008,9 +2020,9 @@ class WalkForwardBacktester:
                         # Shorter-term positions can be larger (less time = less risk)
                         confidence = prediction["confidence"]
 
-                        # Base Kelly fraction
-                        # Scale: 0.6 confidence -> 0.3% size, 1.0 confidence -> 1.5% size
-                        base_kelly = 0.003 + (confidence - 0.6) * 0.015 / 0.4 if confidence >= 0.6 else 0.001
+                        # Base Kelly fraction (INCREASED for more concurrent positions)
+                        # Scale: 0.6 confidence -> 0.6% size, 1.0 confidence -> 3.0% size (was 0.3%-1.5%)
+                        base_kelly = 0.006 + (confidence - 0.6) * 0.030 / 0.4 if confidence >= 0.6 else 0.002
 
                         # Adjust for position duration (proxy for horizon)
                         # Lower confidence = likely longer-term = apply multiplier
