@@ -3113,9 +3113,9 @@ class ModelPreTrainer:
         # ============================================================
         # WALK-FORWARD VALIDATION (expanding window)
         # ============================================================
-        # REVERT TO EXPANDING WINDOW with patience=3:
+        # EXPANDING WINDOW with patience=2:
         # - Expanding allows models to learn patterns across full historical range
-        # - Early stopping (patience=3) catches overfitting without underfitting
+        # - Early stopping (patience=2) is aggressive to prevent overfitting
         # - Better than rolling window which was too restrictive (0 trades generated)
         #
         # Fold structure (3 folds, expanding window):
@@ -3131,7 +3131,7 @@ class ModelPreTrainer:
         start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
         global_best_accuracy = best_val_accuracy  # Track GLOBAL best across all folds
-        patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting)
+        patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting on expanding window)
         patience_counter = getattr(self, '_patience_counter', 0)  # Persists across folds
 
         n = len(features)
