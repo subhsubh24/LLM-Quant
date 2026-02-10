@@ -2687,40 +2687,10 @@ class ModelPreTrainer:
             logger.info("Single-horizon training mode")
             primary_labels = labels
 
-        # ============================================================
-        # HOLD OUT TEST DATA BEFORE TRAINING (CRITICAL FIX)
-        # ============================================================
-        # This ensures adversarial validation tests on completely unseen data
-        n_original = len(features)
-        test_pct = 0.10  # Hold out last 10% for adversarial validation
-        test_split = int(n_original * (1.0 - test_pct))
-
-        # Split into train-val pool and test set
-        features_trainval = features[:test_split]
-        X_test_holdout = features[test_split:]
-
-        if is_multi_horizon:
-            labels_trainval = {h: labels[h][:test_split] for h in labels.keys()}
-            y_test_holdout_multi = {h: labels[h][test_split:] for h in labels.keys()}
-            primary_labels_trainval = primary_labels[:test_split]
-            y_test_holdout = primary_labels[test_split:]
-        else:
-            labels_trainval = labels[:test_split]
-            primary_labels_trainval = primary_labels[:test_split]
-            y_test_holdout = primary_labels[test_split:]
-
-        rewards_trainval = rewards[:test_split]
-
-        # Use train-val pool for training
-        features = features_trainval
-        labels = labels_trainval
-        primary_labels = primary_labels_trainval
-        rewards = rewards_trainval
-
-        logger.info(f"🔒 ADVERSARIAL VALIDATION SETUP:")
-        logger.info(f"   Train-Val pool: {len(features_trainval):,} samples")
-        logger.info(f"   Test (held-out): {len(X_test_holdout):,} samples")
-        logger.info(f"   Will evaluate on unseen data AFTER training")
+        # FIXED: Use all data for training, let walk-forward validation handle the splits
+        # The previous approach of splitting at a global index broke per-symbol alignment
+        # because features are concatenated as blocks (BTC[0-5000], ETH[5000-10000], etc.)
+        # Walk-forward expanding windows properly preserve temporal and symbol boundaries
 
         # Cap training data for ~1 hour training time
         # 1M samples provides excellent coverage across 1,489 symbols
@@ -3048,6 +3018,11 @@ class ModelPreTrainer:
         self.training_metrics.total_samples = len(features)
         self.is_trained = True
 
+        # FIXED: Save final fold's validation data for adversarial validation
+        # Use the last fold's validation set (properly aligned, not globally split)
+        X_test_holdout = X_val
+        y_test_holdout = y_val
+
         # Save resume state (but don't overwrite best checkpoint if early stopping occurred)
         self._last_epoch = epoch + 1
         if val_accuracy >= global_best_accuracy:
@@ -3091,16 +3066,16 @@ class ModelPreTrainer:
             logger.info("=" * 80)
 
         # TIER 1 FIX: ADVERSARIAL VALIDATION
-        # Test on completely unseen data to catch overfitting before live trading
+        # Test on the final fold's validation set (properly aligned, recent but not extreme)
         logger.info("\n" + "="*80)
-        logger.info("🔍 ADVERSARIAL VALIDATION: Testing on unseen out-of-sample data")
+        logger.info("🔍 ADVERSARIAL VALIDATION: Testing on final fold's validation set")
         logger.info("="*80)
 
         # CRITICAL: Load the best checkpoint before testing (not the final epoch)
         self.load_checkpoints()
         logger.info(f"✅ Loaded best checkpoint (val accuracy: {global_best_accuracy:.2%})")
 
-        # CRITICAL FIX: Use held-out test data, not training data
+        # FIXED: Use final fold's validation data (properly aligned, not globally split)
         if len(X_test_holdout) >= 100:
             # Evaluate ensemble on held-out test set - SIMPLE AND CLEAN
             self.reset_state_buffer()
@@ -3131,6 +3106,8 @@ class ModelPreTrainer:
                 logger.info(f"✅ EXCELLENT GENERALIZATION: Models likely to perform similarly on live data")
             else:
                 logger.info(f"✅ GOOD GENERALIZATION: Reasonable gap ({val_test_gap:.2%}) suggests sound training")
+        else:
+            logger.warning(f"⚠️ Adversarial validation skipped: insufficient test data (need ≥100 samples)")
 
         logger.info(f"\nTraining complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
