@@ -977,10 +977,14 @@ class WalkForwardBacktester:
             else:
                 jump_ratio = 0
 
-            # 14. Tail risk (skewness of returns)
+            # 14. Tail risk (skewness of returns) - FIXED: use centered returns
             if len(log_returns) >= 20:
                 try:
-                    return_skew = (np.sum(log_returns[-20:]**3) / len(log_returns[-20:])) / ((np.std(log_returns[-20:])** 3) + 1e-8)
+                    recent_returns = log_returns[-20:]
+                    mean_return = np.mean(recent_returns)
+                    # Correct skewness formula: E[(X - mean)^3] / std^3
+                    centered_returns = recent_returns - mean_return
+                    return_skew = (np.mean(centered_returns ** 3)) / ((np.std(recent_returns) ** 3) + 1e-8)
                 except:
                     return_skew = 0
             else:
@@ -1495,7 +1499,8 @@ class WalkForwardBacktester:
             "predictions": [],  # Model predictions (0=SHORT, 1=HOLD, 2=LONG)
             "timestamps": [],  # Timestamps for each feature
             "symbols": [],  # Which symbol for each feature
-            "horizons": [24, 48, 100, 200, 400, 800, 1600],  # Multi-horizon labels
+            "prices_at_prediction": [],  # Price when prediction was made (for lookahead reference)
+            "horizons": [24, 48, 100, 200, 400, 800, 1600],  # Multi-horizon labels (in hours)
         }
         last_retrain_candle = 0  # Track when we last retrained
 
@@ -1658,84 +1663,93 @@ class WalkForwardBacktester:
                         last_corr_update = candles_processed
 
                     # CONTINUOUS LEARNING: RETRAIN MODELS WITH FORWARD-LOOKING LABELS
-                    # Create labels by looking ahead at price movement
+                    # Create labels by looking at ACTUAL FUTURE price movement (not past data)
                     if len(retraining_buffer["features"]) >= 100 and candles_processed - last_retrain_candle >= config["continuous_learning_interval"]:
-                        logger.info(f"🧠 Creating forward-looking labels and retraining models...")
+                        logger.info(f"🧠 Creating forward-looking labels from actual future prices...")
 
-                        # Create multi-horizon labels
+                        # Create multi-horizon labels by looking at actual future prices
                         labels_multi = {h: [] for h in retraining_buffer["horizons"]}
                         features_for_training = []
-                        valid_indices = []
+                        valid_count = 0
 
-                        for idx, (ts, candle_idx) in enumerate(retraining_buffer["timestamps"]):
+                        for idx in range(len(retraining_buffer["features"])):
+                            pred_timestamp = retraining_buffer["timestamps"][idx]
                             symbol_key = retraining_buffer["symbols"][idx]
-                            if symbol_key not in window_data or len(window_data[symbol_key]) < 100:
+                            price_at_pred = retraining_buffer["prices_at_prediction"][idx]
+
+                            if price_at_pred <= 0:  # Invalid price
                                 continue
 
-                            # Look ahead at each horizon
-                            current_idx = len(all_candles) - (candles_processed - candle_idx) if candles_processed > candle_idx else 0
                             has_valid_label = True
+                            sample_labels = {}
 
+                            # For each horizon, look ahead in actual price data
                             for horizon_h in retraining_buffer["horizons"]:
-                                # Calculate bars to look ahead (roughly horizon_h candles)
-                                lookahead_bars = min(horizon_h // 2, len(all_candles) - current_idx - 1)  # Conservative lookahead
-                                if lookahead_bars < 1:
+                                # Find future price by looking ahead from prediction timestamp
+                                # Search in window_data for prices AFTER pred_timestamp
+                                future_price = None
+                                lookahead_candles = 0
+
+                                if symbol_key in window_data:
+                                    # Find current position in window_data by timestamp
+                                    for j, candle in enumerate(window_data[symbol_key]):
+                                        if candle.timestamp >= pred_timestamp:
+                                            # Found prediction time, now look ahead by horizon hours
+                                            target_idx = j + horizon_h  # horizon is in hours, each candle is 1 hour
+                                            if target_idx < len(window_data[symbol_key]):
+                                                future_price = window_data[symbol_key][target_idx].close
+                                                lookahead_candles = horizon_h
+                                            break
+
+                                if future_price is None:
+                                    # Not enough future data for this horizon
                                     has_valid_label = False
                                     break
 
-                                # Get future price
-                                future_idx = min(current_idx + lookahead_bars, len(all_candles) - 1)
-                                if symbol_key in window_data and len(window_data[symbol_key]) > 0:
-                                    current_close = window_data[symbol_key][-1].close
-                                    # For this simplified approach, use recent data trend
-                                    recent_returns = np.array([c.close for c in window_data[symbol_key][-min(lookahead_bars, len(window_data[symbol_key])):]])
-                                    if len(recent_returns) > 1:
-                                        future_return = (recent_returns[-1] - recent_returns[0]) / recent_returns[0]
-                                    else:
-                                        future_return = 0
-
-                                    # Create label: 0=SHORT move, 1=HOLD, 2=LONG move
-                                    if future_return > 0.01:  # Up 1%+
-                                        label = 2
-                                    elif future_return < -0.01:  # Down 1%+
-                                        label = 0
-                                    else:
-                                        label = 1
-                                    labels_multi[horizon_h].append(label)
+                                # Create label based on actual price movement
+                                price_return = (future_price - price_at_pred) / price_at_pred
+                                if price_return > 0.01:  # Up 1%+
+                                    label = 2  # LONG
+                                elif price_return < -0.01:  # Down 1%+
+                                    label = 0  # SHORT
                                 else:
-                                    has_valid_label = False
-                                    break
+                                    label = 1  # HOLD
+                                sample_labels[horizon_h] = label
 
-                            if has_valid_label and len(labels_multi[retraining_buffer["horizons"][0]]) == len(retraining_buffer["horizons"]):
+                            if has_valid_label and len(sample_labels) == len(retraining_buffer["horizons"]):
                                 features_for_training.append(retraining_buffer["features"][idx])
-                                valid_indices.append(idx)
+                                for h in retraining_buffer["horizons"]:
+                                    labels_multi[h].append(sample_labels[h])
+                                valid_count += 1
 
                         # Retrain if we have enough labeled data
                         if len(features_for_training) >= 50:
-                            logger.info(f"  Retraining on {len(features_for_training)} samples with forward-looking labels")
+                            logger.info(f"  ✅ Created {valid_count} valid forward-looking labels, retraining models...")
                             X_retrain = np.array(features_for_training)
-                            y_retrain_multi = {h: np.array(labels_multi[h][:len(features_for_training)]) for h in retraining_buffer["horizons"]}
+                            y_retrain_multi = {h: np.array(labels_multi[h]) for h in retraining_buffer["horizons"]}
 
-                            # Retrain with expanded window + new data
+                            # Retrain with new forward-looking labels
                             try:
                                 _ = model_trainer.train(
                                     X_retrain, y_retrain_multi, rewards=None,
-                                    epochs=2,  # Light retraining
+                                    epochs=2,  # Light retraining (2 epochs to adapt without overfitting)
                                     batch_size=32,
-                                    is_retraining=True  # Flag for lighter training
                                 )
                                 # Save updated checkpoints
                                 model_trainer.save_checkpoints()
-                                logger.info(f"✅ Models retrained and checkpoints updated")
+                                logger.info(f"  ✅ Models retrained on {len(features_for_training)} samples and checkpoints updated")
                                 last_retrain_candle = candles_processed
                             except Exception as e:
-                                logger.warning(f"⚠️ Retraining failed: {e}")
+                                logger.warning(f"  ⚠️ Retraining failed: {e}")
+                        else:
+                            logger.info(f"  ⚠️ Not enough valid labels ({valid_count} < 50), skipping retrain")
 
                         # Reset buffer after retraining attempt
                         retraining_buffer["features"] = []
                         retraining_buffer["predictions"] = []
                         retraining_buffer["timestamps"] = []
                         retraining_buffer["symbols"] = []
+                        retraining_buffer["prices_at_prediction"] = []
 
             window_data[symbol].append(candle)
 
@@ -2103,12 +2117,13 @@ class WalkForwardBacktester:
                     signals_generated += 1
 
                     # CONTINUOUS LEARNING: Collect feature-prediction pairs for retraining
-                    # We'll create labels later by looking at price movement at different horizons
+                    # Store current price so we can look ahead from this point in time
                     if len(retraining_buffer["features"]) < config["continuous_learning_window"]:
                         retraining_buffer["features"].append(state.copy())
                         retraining_buffer["predictions"].append(prediction["action"])
-                        retraining_buffer["timestamps"].append((timestamp, candles_processed))
+                        retraining_buffer["timestamps"].append(timestamp)
                         retraining_buffer["symbols"].append(symbol)
+                        retraining_buffer["prices_at_prediction"].append(candle.close if 'candle' in locals() else 0)
 
                     # DIAGNOSTIC: Log raw model predictions (especially first 50 for detailed debugging)
                     filter_stage_counters["total_predictions"] += 1
@@ -2175,10 +2190,11 @@ class WalkForwardBacktester:
 
                     # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
                     # Adjust thresholds based on market regime (already computed above)
+                    # Counter-trend trades (shorts in bull, longs in bear) require HIGHER confidence
                     if regime == 'bull':
-                        min_confidence *= config["regime_bull_confidence_mult"]  # Bull: Easier to profit, lower threshold
+                        min_confidence *= config["regime_bull_confidence_mult"]  # Bull: Shorts are counter-trend, require 15% HIGHER confidence
                     elif regime == 'bear':
-                        min_confidence *= config["regime_bear_confidence_mult"]  # Bear: Harder to profit, higher threshold (be selective)
+                        min_confidence *= config["regime_bear_confidence_mult"]  # Bear: Longs are counter-trend, require 15% HIGHER confidence
                     # sideways: no change, use default
 
                     meets_confidence = prediction["confidence"] >= min_confidence
@@ -2214,8 +2230,8 @@ class WalkForwardBacktester:
                                 reasons.append("is_hold")
                             if not meets_confidence:
                                 reasons.append(f"confidence={prediction['confidence']:.3f}<min={min_confidence:.3f}")
-                            if conflicting_trade:
-                                reasons.append(f"conflicts_regime={regime}")
+                            # NOTE: conflicting_trade is NOT a rejection reason anymore - it just increases required confidence
+                            # So we don't log it here, but we DO log it separately as debug info if it applies
                             if not is_liquid:
                                 reasons.append(f"illiquid_vol={avg_volume:.0f}")
                             if not strong_consensus:
@@ -2223,6 +2239,8 @@ class WalkForwardBacktester:
                             if not is_statistically_significant:
                                 reasons.append("not_sig_significant")
                             logger.debug(f"❌ Signal rejected {action_name} {symbol}: {', '.join(reasons)}")
+                            if conflicting_trade:
+                                logger.debug(f"   (Note: {action_name} is counter-trend to {regime} regime, required higher confidence)")
 
                     # SAFEGUARD: Check for per-symbol trading cooldown (prevent thrashing)
                     in_cooldown = False
@@ -2293,36 +2311,40 @@ class WalkForwardBacktester:
                         # Size positions to maintain total portfolio volatility at 1.2-1.5% daily
                         # This replaces pure Kelly Criterion with risk parity across portfolio
                         target_portfolio_vol = 0.012  # Target 1.2% daily portfolio volatility
-                        portfolio_current_vol = 0.0
-                        position_weights_sum = 0.0
 
-                        for existing_sym, existing_pos in positions.items():
-                            if existing_sym in window_data and len(window_data[existing_sym]) >= 30:
-                                closes = np.array([c.close for c in window_data[existing_sym][-30:]])
+                        # SAFETY CHECK: Only apply vol targeting if we have positive capital
+                        if capital > 0:
+                            portfolio_current_vol = 0.0
+                            position_weights_sum = 0.0
+
+                            for existing_sym, existing_pos in positions.items():
+                                if existing_sym in window_data and len(window_data[existing_sym]) >= 30:
+                                    closes = np.array([c.close for c in window_data[existing_sym][-30:]])
+                                    returns = np.diff(closes) / closes[:-1]
+                                    sym_vol = np.std(returns)
+                                    position_weight = existing_pos["size"] / capital
+                                    position_weights_sum += position_weight
+                                    portfolio_current_vol += sym_vol * position_weight
+
+                            # Add new position's contribution
+                            if symbol in window_data and len(window_data[symbol]) >= 30:
+                                closes = np.array([c.close for c in window_data[symbol][-30:]])
                                 returns = np.diff(closes) / closes[:-1]
-                                sym_vol = np.std(returns)
-                                position_weight = existing_pos["size"] / capital if capital > 0 else 0
-                                position_weights_sum += position_weight
-                                portfolio_current_vol += sym_vol * position_weight
+                                symbol_vol = np.std(returns)
 
-                        # Add new position's contribution
-                        if symbol in window_data and len(window_data[symbol]) >= 30:
-                            closes = np.array([c.close for c in window_data[symbol][-30:]])
-                            returns = np.diff(closes) / closes[:-1]
-                            symbol_vol = np.std(returns)
+                                # Calculate required scaling to hit target portfolio vol
+                                new_position_weight = position_size / capital
+                                portfolio_expected_vol = portfolio_current_vol + symbol_vol * new_position_weight
+                                portfolio_weight_sum = position_weights_sum + new_position_weight
 
-                            # Calculate required scaling to hit target portfolio vol
-                            portfolio_expected_vol = portfolio_current_vol + (position_size / capital) * symbol_vol if capital > 0 else 0
-                            portfolio_weight_sum = position_weights_sum + (position_size / capital)
+                                if portfolio_weight_sum > 0:
+                                    portfolio_expected_vol /= portfolio_weight_sum
 
-                            if portfolio_weight_sum > 0:
-                                portfolio_expected_vol /= portfolio_weight_sum
-
-                                # If we're going over target vol, scale down this position
-                                if portfolio_expected_vol > target_portfolio_vol * 1.2:  # Allow 20% buffer
-                                    vol_scaling = (target_portfolio_vol * 1.2) / portfolio_expected_vol if portfolio_expected_vol > 0 else 1.0
-                                    position_size *= vol_scaling
-                                    logger.debug(f"Portfolio vol cap: scaling {symbol} by {vol_scaling:.2f}x (portfolio_vol={portfolio_expected_vol*100:.2f}%)")
+                                    # If we're going over target vol, scale down this position
+                                    if portfolio_expected_vol > target_portfolio_vol * 1.2:  # Allow 20% buffer
+                                        vol_scaling = (target_portfolio_vol * 1.2) / portfolio_expected_vol if portfolio_expected_vol > 0 else 1.0
+                                        position_size *= vol_scaling
+                                        logger.debug(f"Portfolio vol cap: scaling {symbol} by {vol_scaling:.2f}x (portfolio_vol={portfolio_expected_vol*100:.2f}%)")
 
                         # TIER 2 FIX: Calculate optimal stop distance for this new position
                         optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
