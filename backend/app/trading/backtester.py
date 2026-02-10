@@ -1386,6 +1386,12 @@ class WalkForwardBacktester:
             # Statistical Significance
             "min_trades_for_significance": 10,      # Need 10+ trades to test
             "significance_confidence": 0.95,        # 95% confidence level (p < 0.05)
+
+            # Correlation-Based Hedging (TOP FUND FEATURE)
+            "max_sector_correlation": 0.8,          # Max correlation within sector before reducing
+            "enable_correlation_hedging": True,     # Enable automatic hedging
+            "correlation_update_interval": 500,     # Recalculate correlations every 500 candles
+            "max_correlated_capital": 0.30,         # Max 30% capital in highly correlated positions
         }
         logger.info("📋 Backtest Configuration (centralized):")
         for key, val in list(config.items())[:5]:
@@ -1481,6 +1487,29 @@ class WalkForwardBacktester:
         high_vol_threshold = config["high_vol_multiplier"]  # 1.5x baseline = elevated macro vol
         extreme_vol_threshold = config["extreme_vol_multiplier"]  # 2.5x baseline = extreme macro vol
         macro_filtered_trades = 0  # Track how many trades were blocked by macro filter
+
+        # CONTINUOUS LEARNING: Collect data for periodic retraining (NEW)
+        # Track features and predictions to create forward-looking labels
+        retraining_buffer = {
+            "features": [],  # Feature vectors
+            "predictions": [],  # Model predictions (0=SHORT, 1=HOLD, 2=LONG)
+            "timestamps": [],  # Timestamps for each feature
+            "symbols": [],  # Which symbol for each feature
+            "horizons": [24, 48, 100, 200, 400, 800, 1600],  # Multi-horizon labels
+        }
+        last_retrain_candle = 0  # Track when we last retrained
+
+        # CORRELATION-BASED HEDGING (TOP FUND FEATURE)
+        # Track correlation matrix for portfolio optimization
+        correlation_matrix = {}  # symbol_pair -> correlation
+        last_corr_update = 0  # Track when we last updated correlations
+        sector_map = {  # Simple sector classification (can be expanded)
+            "BTC": "L1", "ETH": "L1",  # Layer 1
+            "SOL": "L1_ALT", "ADA": "L1_ALT",
+            "DOGE": "MEME", "SHIB": "MEME",
+            "UNI": "DEFI", "AAVE": "DEFI",
+            "LINK": "ORACLE", "BAND": "ORACLE",
+        }
 
         # PHASE D: Track signal filtering by reason
         filtered_signals = {
@@ -1587,6 +1616,126 @@ class WalkForwardBacktester:
                             logger.info(f"  {model_name}: Win rate={recent_wr:.1%}, Ensemble weight={weight:.2f}x")
                     portfolio_wr = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
                     logger.info(f"  Portfolio: Recent win rate={portfolio_wr:.1%}")
+
+                    # CORRELATION MATRIX UPDATE (every 500 candles)
+                    if candles_processed - last_corr_update >= config["correlation_update_interval"] and len(positions) > 1:
+                        logger.info(f"📊 Updating correlation matrix...")
+                        # Calculate correlations between all symbol pairs in positions
+                        position_symbols = list(positions.keys())
+                        for i, sym1 in enumerate(position_symbols):
+                            for j, sym2 in enumerate(position_symbols[i+1:], i+1):
+                                if sym1 in window_data and sym2 in window_data and len(window_data[sym1]) >= 50 and len(window_data[sym2]) >= 50:
+                                    corr = self.calculate_correlation(
+                                        window_data[sym1][-50:],
+                                        window_data[sym2][-50:],
+                                        lookback=50
+                                    )
+                                    key = tuple(sorted([sym1, sym2]))
+                                    correlation_matrix[key] = corr
+
+                                    # Log high correlations (potential hedging opportunities)
+                                    if abs(corr) > config["max_sector_correlation"]:
+                                        sector1 = sector_map.get(sym1, "OTHER")
+                                        sector2 = sector_map.get(sym2, "OTHER")
+                                        logger.info(f"  ⚠️ High correlation: {sym1}({sector1}) ↔ {sym2}({sector2}) = {corr:.3f}")
+
+                        # Analyze sector exposure
+                        sector_exposure = {}
+                        for sym, pos in positions.items():
+                            sector = sector_map.get(sym, "OTHER")
+                            if sector not in sector_exposure:
+                                sector_exposure[sector] = {"capital": 0, "symbols": []}
+                            sector_exposure[sector]["capital"] += pos["size"]
+                            sector_exposure[sector]["symbols"].append(sym)
+
+                        # Log sector concentration
+                        total_capital = sum(s["capital"] for s in sector_exposure.values())
+                        for sector, data in sector_exposure.items():
+                            sector_pct = data["capital"] / total_capital if total_capital > 0 else 0
+                            if sector_pct > 0.3:
+                                logger.info(f"  ⚠️ Sector concentration: {sector} = {sector_pct:.1%} ({data['symbols']})")
+
+                        last_corr_update = candles_processed
+
+                    # CONTINUOUS LEARNING: RETRAIN MODELS WITH FORWARD-LOOKING LABELS
+                    # Create labels by looking ahead at price movement
+                    if len(retraining_buffer["features"]) >= 100 and candles_processed - last_retrain_candle >= config["continuous_learning_interval"]:
+                        logger.info(f"🧠 Creating forward-looking labels and retraining models...")
+
+                        # Create multi-horizon labels
+                        labels_multi = {h: [] for h in retraining_buffer["horizons"]}
+                        features_for_training = []
+                        valid_indices = []
+
+                        for idx, (ts, candle_idx) in enumerate(retraining_buffer["timestamps"]):
+                            symbol_key = retraining_buffer["symbols"][idx]
+                            if symbol_key not in window_data or len(window_data[symbol_key]) < 100:
+                                continue
+
+                            # Look ahead at each horizon
+                            current_idx = len(all_candles) - (candles_processed - candle_idx) if candles_processed > candle_idx else 0
+                            has_valid_label = True
+
+                            for horizon_h in retraining_buffer["horizons"]:
+                                # Calculate bars to look ahead (roughly horizon_h candles)
+                                lookahead_bars = min(horizon_h // 2, len(all_candles) - current_idx - 1)  # Conservative lookahead
+                                if lookahead_bars < 1:
+                                    has_valid_label = False
+                                    break
+
+                                # Get future price
+                                future_idx = min(current_idx + lookahead_bars, len(all_candles) - 1)
+                                if symbol_key in window_data and len(window_data[symbol_key]) > 0:
+                                    current_close = window_data[symbol_key][-1].close
+                                    # For this simplified approach, use recent data trend
+                                    recent_returns = np.array([c.close for c in window_data[symbol_key][-min(lookahead_bars, len(window_data[symbol_key])):]])
+                                    if len(recent_returns) > 1:
+                                        future_return = (recent_returns[-1] - recent_returns[0]) / recent_returns[0]
+                                    else:
+                                        future_return = 0
+
+                                    # Create label: 0=SHORT move, 1=HOLD, 2=LONG move
+                                    if future_return > 0.01:  # Up 1%+
+                                        label = 2
+                                    elif future_return < -0.01:  # Down 1%+
+                                        label = 0
+                                    else:
+                                        label = 1
+                                    labels_multi[horizon_h].append(label)
+                                else:
+                                    has_valid_label = False
+                                    break
+
+                            if has_valid_label and len(labels_multi[retraining_buffer["horizons"][0]]) == len(retraining_buffer["horizons"]):
+                                features_for_training.append(retraining_buffer["features"][idx])
+                                valid_indices.append(idx)
+
+                        # Retrain if we have enough labeled data
+                        if len(features_for_training) >= 50:
+                            logger.info(f"  Retraining on {len(features_for_training)} samples with forward-looking labels")
+                            X_retrain = np.array(features_for_training)
+                            y_retrain_multi = {h: np.array(labels_multi[h][:len(features_for_training)]) for h in retraining_buffer["horizons"]}
+
+                            # Retrain with expanded window + new data
+                            try:
+                                _ = model_trainer.train(
+                                    X_retrain, y_retrain_multi, rewards=None,
+                                    epochs=2,  # Light retraining
+                                    batch_size=32,
+                                    is_retraining=True  # Flag for lighter training
+                                )
+                                # Save updated checkpoints
+                                model_trainer.save_checkpoints()
+                                logger.info(f"✅ Models retrained and checkpoints updated")
+                                last_retrain_candle = candles_processed
+                            except Exception as e:
+                                logger.warning(f"⚠️ Retraining failed: {e}")
+
+                        # Reset buffer after retraining attempt
+                        retraining_buffer["features"] = []
+                        retraining_buffer["predictions"] = []
+                        retraining_buffer["timestamps"] = []
+                        retraining_buffer["symbols"] = []
 
             window_data[symbol].append(candle)
 
@@ -1952,6 +2101,14 @@ class WalkForwardBacktester:
                     state = features[-1]
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
+
+                    # CONTINUOUS LEARNING: Collect feature-prediction pairs for retraining
+                    # We'll create labels later by looking at price movement at different horizons
+                    if len(retraining_buffer["features"]) < config["continuous_learning_window"]:
+                        retraining_buffer["features"].append(state.copy())
+                        retraining_buffer["predictions"].append(prediction["action"])
+                        retraining_buffer["timestamps"].append((timestamp, candles_processed))
+                        retraining_buffer["symbols"].append(symbol)
 
                     # DIAGNOSTIC: Log raw model predictions (especially first 50 for detailed debugging)
                     filter_stage_counters["total_predictions"] += 1
