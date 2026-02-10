@@ -1460,8 +1460,16 @@ class WalkForwardBacktester:
         logger.info(f"  Continuous Learner: Retrain every 100 candles")
         logger.info(f"  Adaptive Ensemble: Reweight models by recent performance")
 
+        previous_symbol = None  # Track symbol changes to reset state buffer
         for timestamp, symbol, candle in all_candles:
             candles_processed += 1
+
+            # CRITICAL FIX: Reset state buffer when symbol changes
+            # Candles are sorted by timestamp (not symbol), so BTC→ETH→XRP→BTC transitions occur
+            # LSTM/Transformer must not see mixed context from different symbols
+            if previous_symbol is not None and symbol != previous_symbol:
+                model_trainer.reset_state_buffer()
+            previous_symbol = symbol
 
             # Periodic progress logging (every 10 seconds or 5000 candles)
             current_time = time.time()
