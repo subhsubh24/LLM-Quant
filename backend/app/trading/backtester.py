@@ -2514,7 +2514,9 @@ class ModelPreTrainer:
     Saves trained weights to disk for production use.
     """
 
-    def __init__(self, state_dim: int = 64, action_dim: int = 3):
+    def __init__(self, state_dim: int = 24, action_dim: int = 3):
+        # state_dim=24 matches prepare_features() which generates 24-element feature vectors
+        # Previously 64 with 40-element zero padding (wasteful, reduced efficiency)
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
 
