@@ -2290,7 +2290,7 @@ class WalkForwardBacktester:
 
                     if (prediction["action"] != 1 and
                         meets_confidence and
-                        not conflicting_trade and
+                        # NOTE: conflicting_trade is NOT a hard ban - it's handled by increased confidence requirement above
                         is_liquid and
                         strong_consensus and
                         is_statistically_significant and
@@ -3701,15 +3701,18 @@ class ModelPreTrainer:
 
         final_action = max(action_votes, key=action_votes.get)
 
-        # Confidence = model agreement * average confidence of agreeing models
+        # Confidence = vote strength (how much the final action dominated)
+        # This properly reflects regime-adjusted voting where aligned signals get higher weight
+        total_vote_weight = sum(action_votes.values())
+        if total_vote_weight > 0:
+            final_confidence = action_votes[final_action] / total_vote_weight
+        else:
+            final_confidence = 0.0
+
+        # For compatibility: also track raw model agreement
         n_models = len(predictions)
         n_agree = sum(1 for p in predictions if p == final_action)
         agreement = n_agree / n_models
-
-        agreeing_confs = [c for p, c in zip(predictions, confidences) if p == final_action]
-        avg_conf = float(np.mean(agreeing_confs)) if agreeing_confs else 0
-
-        final_confidence = agreement * avg_conf
 
         return {
             "action": final_action,
