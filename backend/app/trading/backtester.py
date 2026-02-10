@@ -914,6 +914,84 @@ class WalkForwardBacktester:
             avg_vol = np.mean(window_vol[-20:]) if len(window_vol) >= 20 else 1
             vol_concentration = window_vol[-1] / (avg_vol + 1e-8) - 1  # 0 = avg, +0.5 = 50% above, etc.
 
+            # ADVANCED FEATURES (Top funds use 50-100+ features)
+            # 6. Stochastic Oscillator (captures momentum differently than RSI)
+            period = 14
+            if len(window_close) >= period:
+                lowest_low = np.min(window_close[-period:])
+                highest_high = np.max(window_close[-period:])
+                stoch = (closes[i] - lowest_low) / (highest_high - lowest_low + 1e-8) if highest_high > lowest_low else 0.5
+            else:
+                stoch = 0.5
+
+            # 7. Average True Range (ATR) normalized by price
+            tr_values = []
+            for j in range(max(1, len(window_close) - 14), len(window_close)):
+                tr = max(window_high[j] - window_low[j],
+                        abs(window_high[j] - window_close[j-1] if j > 0 else window_high[j]),
+                        abs(window_low[j] - window_close[j-1] if j > 0 else window_low[j]))
+                tr_values.append(tr)
+            atr_value = np.mean(tr_values) if tr_values else 0
+            atr_ratio = atr_value / (closes[i] + 1e-8)
+
+            # 8. Mean Reversion Strength (how far from moving averages)
+            sma_100 = np.mean(window_close[-100:]) if len(window_close) >= 100 else np.mean(window_close)
+            sma_200 = np.mean(window_close[-200:]) if len(window_close) >= 200 else np.mean(window_close)
+            mean_reversion_100 = (closes[i] - sma_100) / (sma_100 + 1e-8)
+            mean_reversion_200 = (closes[i] - sma_200) / (sma_200 + 1e-8)
+
+            # 9. Volatility mean reversion (vol above/below average)
+            if len(log_returns) >= 20:
+                recent_vol_20 = np.std(log_returns[-20:])
+                long_vol = np.std(log_returns)
+                vol_mean_reversion = (recent_vol_20 - long_vol) / (long_vol + 1e-8)
+            else:
+                vol_mean_reversion = 0
+
+            # 10. Volume trend (volume increasing or decreasing)
+            if len(window_vol) >= 5:
+                vol_recent_mean = np.mean(window_vol[-5:])
+                vol_old_mean = np.mean(window_vol[-20:-5]) if len(window_vol) >= 20 else vol_recent_mean
+                vol_trend = (vol_recent_mean - vol_old_mean) / (vol_old_mean + 1e-8)
+            else:
+                vol_trend = 0
+
+            # 11. Price Range over Close
+            if len(window_close) >= 1:
+                price_range_ratio = (np.max(window_close[-10:]) - np.min(window_close[-10:])) / (closes[i] + 1e-8) if len(window_close) >= 10 else 0
+            else:
+                price_range_ratio = 0
+
+            # 12. Price breakout detection (new highs/lows in 20-period)
+            if len(window_close) >= 20:
+                is_new_high = closes[i] >= np.max(window_close[-20:-1]) if len(window_close) > 20 else False
+                is_new_low = closes[i] <= np.min(window_close[-20:-1]) if len(window_close) > 20 else False
+                breakout_signal = float(is_new_high) - float(is_new_low)
+            else:
+                breakout_signal = 0
+
+            # 13. Jump detection (large single-bar moves)
+            if len(log_returns) > 0:
+                recent_jumps = np.sum(np.abs(log_returns[-10:]) > np.mean(np.abs(log_returns)) * 2) if len(log_returns) >= 10 else 0
+                jump_ratio = recent_jumps / 10 if len(log_returns) >= 10 else 0
+            else:
+                jump_ratio = 0
+
+            # 14. Tail risk (skewness of returns)
+            if len(log_returns) >= 20:
+                try:
+                    return_skew = (np.sum(log_returns[-20:]**3) / len(log_returns[-20:])) / ((np.std(log_returns[-20:])** 3) + 1e-8)
+                except:
+                    return_skew = 0
+            else:
+                return_skew = 0
+
+            # 15. Price close pattern (above/below open, above/below previous)
+            if len(window_close) >= 2:
+                closes_above_prev = 1.0 if closes[i] > window_close[-2] else -1.0
+            else:
+                closes_above_prev = 0
+
             feature_vector = [
                 returns_1, returns_5, returns_10, returns_20,
                 realized_vol, parkinson_vol,
@@ -939,6 +1017,18 @@ class WalkForwardBacktester:
                 order_imbalance,
                 price_to_vwap,
                 vol_concentration,
+                # NEW: Advanced features (10+ more for 30 total)
+                stoch,
+                atr_ratio,
+                mean_reversion_100,
+                mean_reversion_200,
+                vol_mean_reversion,
+                vol_trend,
+                price_range_ratio,
+                breakout_signal,
+                jump_ratio,
+                return_skew,
+                closes_above_prev,
             ]
 
             features.append(feature_vector)
@@ -2040,7 +2130,42 @@ class WalkForwardBacktester:
                             horizon_mult = 0.30    # 1600h: 30% Kelly (3x more conservative)
 
                         kelly_fraction = base_kelly * horizon_mult
-                        position_size = capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 2%
+                        position_size = capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 4%
+
+                        # NEW: PORTFOLIO-LEVEL VOLATILITY TARGETING (Top Funds Approach)
+                        # Size positions to maintain total portfolio volatility at 1.2-1.5% daily
+                        # This replaces pure Kelly Criterion with risk parity across portfolio
+                        target_portfolio_vol = 0.012  # Target 1.2% daily portfolio volatility
+                        portfolio_current_vol = 0.0
+                        position_weights_sum = 0.0
+
+                        for existing_sym, existing_pos in positions.items():
+                            if existing_sym in window_data and len(window_data[existing_sym]) >= 30:
+                                closes = np.array([c.close for c in window_data[existing_sym][-30:]])
+                                returns = np.diff(closes) / closes[:-1]
+                                sym_vol = np.std(returns)
+                                position_weight = existing_pos["size"] / capital if capital > 0 else 0
+                                position_weights_sum += position_weight
+                                portfolio_current_vol += sym_vol * position_weight
+
+                        # Add new position's contribution
+                        if symbol in window_data and len(window_data[symbol]) >= 30:
+                            closes = np.array([c.close for c in window_data[symbol][-30:]])
+                            returns = np.diff(closes) / closes[:-1]
+                            symbol_vol = np.std(returns)
+
+                            # Calculate required scaling to hit target portfolio vol
+                            portfolio_expected_vol = portfolio_current_vol + (position_size / capital) * symbol_vol if capital > 0 else 0
+                            portfolio_weight_sum = position_weights_sum + (position_size / capital)
+
+                            if portfolio_weight_sum > 0:
+                                portfolio_expected_vol /= portfolio_weight_sum
+
+                                # If we're going over target vol, scale down this position
+                                if portfolio_expected_vol > target_portfolio_vol * 1.2:  # Allow 20% buffer
+                                    vol_scaling = (target_portfolio_vol * 1.2) / portfolio_expected_vol if portfolio_expected_vol > 0 else 1.0
+                                    position_size *= vol_scaling
+                                    logger.debug(f"Portfolio vol cap: scaling {symbol} by {vol_scaling:.2f}x (portfolio_vol={portfolio_expected_vol*100:.2f}%)")
 
                         # TIER 2 FIX: Calculate optimal stop distance for this new position
                         optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
