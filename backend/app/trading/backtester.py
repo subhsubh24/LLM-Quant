@@ -2138,7 +2138,13 @@ class WalkForwardBacktester:
                             logger.debug(f"Regime penalty (bear long): -20% size")
                         # Neutral: no adjustment
 
-                        if position_size > 100:  # Minimum position
+                        # CRITICAL FIX: Ensure minimum position size AFTER all scaling
+                        # Position size could be scaled to $0.55 through cascading multipliers
+                        # and never open a position. If we have a valid trade signal, use minimum.
+                        if position_size < 100:
+                            position_size = 100  # Minimum viable position size
+
+                        if position_size > 0:  # Any valid position (now minimum $100)
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
 
