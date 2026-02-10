@@ -3712,7 +3712,7 @@ class ModelPreTrainer:
         # For compatibility: also track raw model agreement
         n_models = len(predictions)
         n_agree = sum(1 for p in predictions if p == final_action)
-        agreement = n_agree / n_models
+        agreement = (n_agree / n_models) if n_models > 0 else 0.0
 
         return {
             "action": final_action,
