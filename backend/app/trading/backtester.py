@@ -1831,7 +1831,7 @@ class WalkForwardBacktester:
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
-                    prediction = model_trainer.predict_regime_aware(state, regime)
+                    prediction = self.predict_regime_aware(state, regime)
                     signals_generated += 1
 
                     # DIAGNOSTIC: Log raw model predictions (especially first 50 for detailed debugging)
