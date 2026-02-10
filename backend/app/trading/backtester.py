@@ -1829,12 +1829,22 @@ class WalkForwardBacktester:
 
             # Generate trading signal (only if we have enough data AND portfolio not paused AND not during extreme macro vol)
             macro_vol_safe = macro_regime != "extreme"
-            if len(window_data[symbol]) >= config["feature_lookback_window"] and symbol not in positions and not portfolio_trading_paused and macro_vol_safe:
-                features = self.prepare_features(window_data[symbol][-config["feature_lookback_window"]:])
+            # CRITICAL FIX: Need enough data for feature preparation
+            # prepare_features needs lookback (400) + 20 candles = 420 minimum
+            # But config["feature_lookback_window"] is only 100!
+            # Must pass more candles or specify smaller lookback explicitly
+            feature_window_size = max(config["feature_lookback_window"], 420)  # 420 = 400 lookback + 20
+
+            if len(window_data[symbol]) >= feature_window_size and symbol not in positions and not portfolio_trading_paused and macro_vol_safe:
+                features = self.prepare_features(
+                    window_data[symbol][-feature_window_size:],
+                    lookback=min(400, feature_window_size - 20)  # Ensure valid lookback
+                )
 
                 if len(features) > 0:
                     # Detect market regime FIRST (needed for regime-aware prediction)
-                    regime = self.detect_market_regime(window_data[symbol][-config["feature_lookback_window"]:])
+                    # Use same window as features for consistency
+                    regime = self.detect_market_regime(window_data[symbol][-feature_window_size:])
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
@@ -1905,8 +1915,7 @@ class WalkForwardBacktester:
                         min_confidence = config["confidence_fallback"]  # Fallback: very loose for 2/4 or 1/4
 
                     # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
-                    # Adjust thresholds based on market regime
-                    regime = self.detect_market_regime(window_data[symbol][-config["feature_lookback_window"]:])
+                    # Adjust thresholds based on market regime (already computed above)
                     if regime == 'bull':
                         min_confidence *= config["regime_bull_confidence_mult"]  # Bull: Easier to profit, lower threshold
                     elif regime == 'bear':
