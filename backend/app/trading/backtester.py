@@ -86,25 +86,31 @@ class BacktestResult:
     trades: List[Dict] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
+        # Helper to handle inf/nan values for JSON serialization
+        def safe_round(val: float, decimals: int = 2) -> float:
+            if not np.isfinite(val):
+                return 0.0
+            return round(val, decimals)
+
         return {
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
             "initial_capital": self.initial_capital,
-            "final_capital": round(self.final_capital, 2),
-            "total_return": round(self.total_return, 2),
-            "total_return_pct": round(self.total_return_pct, 2),
-            "sharpe_ratio": round(self.sharpe_ratio, 3),
-            "sortino_ratio": round(self.sortino_ratio, 3),
-            "max_drawdown": round(self.max_drawdown, 2),
-            "max_drawdown_pct": round(self.max_drawdown_pct, 2),
-            "win_rate": round(self.win_rate * 100, 1),
-            "profit_factor": round(self.profit_factor, 2),
+            "final_capital": safe_round(self.final_capital, 2),
+            "total_return": safe_round(self.total_return, 2),
+            "total_return_pct": safe_round(self.total_return_pct, 2),
+            "sharpe_ratio": safe_round(self.sharpe_ratio, 3),
+            "sortino_ratio": safe_round(self.sortino_ratio, 3),
+            "max_drawdown": safe_round(self.max_drawdown, 2),
+            "max_drawdown_pct": safe_round(self.max_drawdown_pct, 2),
+            "win_rate": safe_round(self.win_rate * 100, 1),
+            "profit_factor": safe_round(self.profit_factor, 2),
             "total_trades": self.total_trades,
             "winning_trades": self.winning_trades,
             "losing_trades": self.losing_trades,
-            "avg_win": round(self.avg_win, 2),
-            "avg_loss": round(self.avg_loss, 2),
-            "avg_holding_period_hours": round(self.avg_holding_period, 1),
+            "avg_win": safe_round(self.avg_win, 2),
+            "avg_loss": safe_round(self.avg_loss, 2),
+            "avg_holding_period_hours": safe_round(self.avg_holding_period, 1),
         }
 
 
@@ -1212,6 +1218,14 @@ class WalkForwardBacktester:
         """
         logger.info("Starting walk-forward backtest...")
 
+        # CRITICAL FIX: Load trained checkpoints before backtest
+        # The training method trains models and saves them to disk,
+        # but this backtest method runs as a fresh instance that doesn't have models loaded.
+        # Must load checkpoints before making predictions.
+        if not self.load_checkpoints():
+            logger.error("❌ Failed to load trained models! Backtest cannot proceed without trained models.")
+            return self._empty_result()
+
         # ============================================================
         # CONFIG: Centralized hardcoded parameters (easy to tune)
         # ============================================================
@@ -1255,8 +1269,8 @@ class WalkForwardBacktester:
 
             # Macro Regime Detection
             "baseline_portfolio_vol": 0.008,         # 0.8% daily baseline
-            "high_vol_multiplier": 1.5,              # 1.5x baseline = elevated
-            "extreme_vol_multiplier": 2.5,           # 2.5x baseline = extreme
+            "high_vol_multiplier": 1.5,              # 1.5x baseline = elevated (reduce position sizing)
+            "extreme_vol_multiplier": 4.0,           # 4.0x baseline = extreme (changed from 2.5 - was too aggressive)
 
             # Model Degradation Detection
             "degradation_threshold": 0.35,           # Alert if win rate < 35%
@@ -2366,10 +2380,10 @@ class WalkForwardBacktester:
 
         # Sortino Ratio (downside deviation only)
         downside_returns = returns[returns < 0]
-        if len(downside_returns) > 0:
+        if len(downside_returns) > 0 and np.std(downside_returns) > 0:
             sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(252 * 24)
         else:
-            sortino = sharpe
+            sortino = sharpe  # Use Sharpe if no downside risk
 
         logger.info("Calculating drawdown...")
         # Max Drawdown
@@ -2391,10 +2405,16 @@ class WalkForwardBacktester:
         avg_win = np.mean([t["pnl"] for t in winning_trades]) if winning_trades else 0
         avg_loss = np.mean([abs(t["pnl"]) for t in losing_trades]) if losing_trades else 0
 
-        # Profit factor
+        # Profit factor (handle edge cases for JSON serialization)
         gross_profit = sum(t["pnl"] for t in winning_trades)
         gross_loss = abs(sum(t["pnl"] for t in losing_trades))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        if len(trades) == 0:
+            profit_factor = 0.0  # No trades
+        elif gross_loss > 0:
+            profit_factor = gross_profit / gross_loss
+        else:
+            # Only winning trades (no losses) - use 100.0 instead of inf for JSON serialization
+            profit_factor = 100.0 if gross_profit > 0 else 0.0
 
         # Average holding period
         holding_periods = []
