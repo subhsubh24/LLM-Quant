@@ -1403,13 +1403,12 @@ class WalkForwardBacktester:
         # PRE-TRADING SANITY CHECKS (ensure we'll actually trade)
         # ============================================================
         logger.info("\n🔍 PRE-TRADING SANITY CHECKS:")
-        logger.info(f"  Models loaded: DQN={hasattr(self, 'dqn')}, PPO={hasattr(self, 'ppo')}, LSTM={hasattr(self, 'lstm')}, Transformer={hasattr(self, 'transformer')}")
+        logger.info(f"  Models loaded: DQN={hasattr(self, 'dqn') and self.dqn is not None}, PPO={hasattr(self, 'ppo') and self.ppo is not None}, LSTM={hasattr(self, 'lstm') and self.lstm is not None}, Transformer={hasattr(self, 'transformer') and self.transformer is not None}")
         logger.info(f"  Initial capital: ${capital:,.2f}")
         logger.info(f"  Minimum position size: $100")
         logger.info(f"  Symbols to trade: {len(data)} symbols")
         logger.info(f"  Training window: {self.train_window} candles (~{self.train_window/24:.0f} days)")
         logger.info(f"  Data available: {len(all_candles):,} candles")
-        logger.info(f"  Features required: {features.shape[1] if len(features) > 0 else 0} features")
         logger.info(f"  Filter thresholds (LOOSENED for diagnostics):")
         logger.info(f"    - Min confidence: 0.50-0.70 (by model agreement)")
         logger.info(f"    - Min model agreement: 2/4 models (weighted >50%)")
@@ -2688,6 +2687,41 @@ class ModelPreTrainer:
             logger.info("Single-horizon training mode")
             primary_labels = labels
 
+        # ============================================================
+        # HOLD OUT TEST DATA BEFORE TRAINING (CRITICAL FIX)
+        # ============================================================
+        # This ensures adversarial validation tests on completely unseen data
+        n_original = len(features)
+        test_pct = 0.10  # Hold out last 10% for adversarial validation
+        test_split = int(n_original * (1.0 - test_pct))
+
+        # Split into train-val pool and test set
+        features_trainval = features[:test_split]
+        X_test_holdout = features[test_split:]
+
+        if is_multi_horizon:
+            labels_trainval = {h: labels[h][:test_split] for h in labels.keys()}
+            y_test_holdout_multi = {h: labels[h][test_split:] for h in labels.keys()}
+            primary_labels_trainval = primary_labels[:test_split]
+            y_test_holdout = primary_labels[test_split:]
+        else:
+            labels_trainval = labels[:test_split]
+            primary_labels_trainval = primary_labels[:test_split]
+            y_test_holdout = primary_labels[test_split:]
+
+        rewards_trainval = rewards[:test_split]
+
+        # Use train-val pool for training
+        features = features_trainval
+        labels = labels_trainval
+        primary_labels = primary_labels_trainval
+        rewards = rewards_trainval
+
+        logger.info(f"🔒 ADVERSARIAL VALIDATION SETUP:")
+        logger.info(f"   Train-Val pool: {len(features_trainval):,} samples")
+        logger.info(f"   Test (held-out): {len(X_test_holdout):,} samples")
+        logger.info(f"   Will evaluate on unseen data AFTER training")
+
         # Cap training data for ~1 hour training time
         # 1M samples provides excellent coverage across 1,489 symbols
         max_samples = 1000000
@@ -3066,43 +3100,37 @@ class ModelPreTrainer:
         self.load_checkpoints()
         logger.info(f"✅ Loaded best checkpoint (val accuracy: {global_best_accuracy:.2%})")
 
-        if len(features) >= 100:
-            # Use last 10% of data that was never seen during training
-            test_start = int(n * 0.90)
-            test_end = n
-            X_test = features[test_start:test_end]
-            y_test_primary = primary_labels[test_start:test_end]
+        # CRITICAL FIX: Use held-out test data, not training data
+        if len(X_test_holdout) >= 100:
+            # Evaluate ensemble on held-out test set - SIMPLE AND CLEAN
+            self.reset_state_buffer()
+            test_correct = 0
+            test_sample_count = 0
 
-            if len(X_test) > 0:
-                # Evaluate ensemble on test set - SIMPLE AND CLEAN
-                self.reset_state_buffer()
-                test_correct = 0
-                test_sample_count = 0
+            for i, state in enumerate(X_test_holdout[:min(1000, len(X_test_holdout))]):
+                pred = self.predict(state)
+                predicted_action = pred.get("action", 1)
+                actual_action = y_test_holdout[i] if i < len(y_test_holdout) else 1
+                test_correct += (predicted_action == actual_action)
+                test_sample_count += 1
 
-                for i, state in enumerate(X_test[:min(1000, len(X_test))]):
-                    pred = self.predict(state)
-                    predicted_action = pred.get("action", 1)
-                    actual_action = y_test_primary[i] if i < len(y_test_primary) else 1
-                    test_correct += (predicted_action == actual_action)
-                    test_sample_count += 1
+            test_accuracy = test_correct / test_sample_count if test_sample_count > 0 else 0
+            val_test_gap = best_val_accuracy - test_accuracy
 
-                test_accuracy = test_correct / test_sample_count if test_sample_count > 0 else 0
-                val_test_gap = best_val_accuracy - test_accuracy
+            logger.info(f"Validation Accuracy: {best_val_accuracy:.2%}")
+            logger.info(f"Test Accuracy (unseen data): {test_accuracy:.2%}")
+            logger.info(f"Generalization Gap: {val_test_gap:.2%}")
 
-                logger.info(f"Validation Accuracy: {best_val_accuracy:.2%}")
-                logger.info(f"Test Accuracy (unseen data): {test_accuracy:.2%}")
-                logger.info(f"Generalization Gap: {val_test_gap:.2%}")
-
-                if val_test_gap > 0.10:
-                    logger.warning(
-                        f"⚠️ OVERFITTING DETECTED: Validation-Test gap = {val_test_gap:.2%} (>10%)\n"
-                        f"   Models may perform worse on live data than backtest results suggest.\n"
-                        f"   Consider: more regularization, reduce model complexity, or more training data"
-                    )
-                elif val_test_gap < 0.02:
-                    logger.info(f"✅ EXCELLENT GENERALIZATION: Models likely to perform similarly on live data")
-                else:
-                    logger.info(f"✅ GOOD GENERALIZATION: Reasonable gap ({val_test_gap:.2%}) suggests sound training")
+            if val_test_gap > 0.10:
+                logger.warning(
+                    f"⚠️ OVERFITTING DETECTED: Validation-Test gap = {val_test_gap:.2%} (>10%)\n"
+                    f"   Models may perform worse on live data than backtest results suggest.\n"
+                    f"   Consider: more regularization, reduce model complexity, or more training data"
+                )
+            elif val_test_gap < 0.02:
+                logger.info(f"✅ EXCELLENT GENERALIZATION: Models likely to perform similarly on live data")
+            else:
+                logger.info(f"✅ GOOD GENERALIZATION: Reasonable gap ({val_test_gap:.2%}) suggests sound training")
 
         logger.info(f"\nTraining complete! Best accuracy: {best_val_accuracy:.2%}")
         return self.training_metrics
@@ -3980,6 +4008,19 @@ async def run_full_training_pipeline(
         return {"error": "Failed to obtain historical data"}
 
     logger.info(f"Loaded data for {len(historical_data)} symbols")
+
+    # PRE-FILTER: Remove symbols with insufficient data (0 candles)
+    min_candles_required = 900  # ~37 days at 1h resolution
+    symbols_before = len(historical_data)
+    historical_data = {
+        sym: candles for sym, candles in historical_data.items()
+        if len(candles) >= min_candles_required
+    }
+    symbols_after = len(historical_data)
+    symbols_filtered = symbols_before - symbols_after
+    if symbols_filtered > 0:
+        logger.info(f"🔍 Filtered out {symbols_filtered} symbols with <{min_candles_required} candles")
+        logger.info(f"   Remaining: {symbols_after} symbols with sufficient data")
 
     # Step 2: Prepare training data
     logger.info("\n🔧 Step 2: Preparing training data...")
