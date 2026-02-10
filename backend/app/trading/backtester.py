@@ -1241,8 +1241,8 @@ class WalkForwardBacktester:
             "confidence_4x4_models": 0.70,           # 4/4 models agree
             "confidence_3x4_models": 0.55,           # 3/4 models agree
             "confidence_fallback": 0.50,             # 2/4 or fewer models
-            "regime_bull_confidence_mult": 0.85,     # Bull: lower threshold by 15%
-            "regime_bear_confidence_mult": 1.15,     # Bear: raise threshold by 15%
+            "regime_bull_confidence_mult": 1.15,     # Bull: require HIGHER confidence for shorts (counter-trend)
+            "regime_bear_confidence_mult": 1.15,     # Bear: require HIGHER confidence for longs (counter-trend)
 
             # Model Agreement & Consensus
             "min_model_agreement": 2,                # Minimum 2/4 models required
@@ -1957,7 +1957,9 @@ class WalkForwardBacktester:
                     action_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], f'UNK_{prediction["action"]}')
                     # (is_hold already defined above)
 
-                    if is_hold or not meets_confidence or conflicting_trade or not is_liquid or not strong_consensus:
+                    # NOTE: Removed 'conflicting_trade' hard ban - now we require HIGHER confidence for counter-trend trades instead
+                    # This allows shorts in bull markets (and longs in bear markets) if confidence is high enough
+                    if is_hold or not meets_confidence or not is_liquid or not strong_consensus:
                         # Log why signal was rejected (sampling to avoid spam)
                         if np.random.random() < 0.001:  # Log 0.1% of rejected signals
                             reasons = []
@@ -2067,6 +2069,13 @@ class WalkForwardBacktester:
                                 correlation_discount = 1.0 - (max_correlation - config["max_correlation_threshold"]) / (1.0 - config["max_correlation_threshold"])  # Linear decay from 0.7 to 1.0
                                 position_size *= correlation_discount
                                 logger.debug(f"Correlation discount for {symbol}: {correlation_discount:.2f}x (corr={max_correlation:.2f})")
+
+                        # COUNTER-TREND POSITION SIZING: Reduce size for trades against market regime
+                        # Shorts in bull market = 70% size, Longs in bear market = 70% size
+                        if conflicting_trade:
+                            counter_trend_mult = 0.70
+                            position_size *= counter_trend_mult
+                            logger.debug(f"Counter-trend sizing for {symbol}: {counter_trend_mult:.2f}x (trade_against_regime={regime})")
 
                         # TIER 1 FIX: VOLATILITY-BASED POSITION SIZING
                         # Trade smaller when volatility is high (improves Sharpe ratio)
