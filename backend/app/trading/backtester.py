@@ -1728,10 +1728,29 @@ class WalkForwardBacktester:
                             X_retrain = np.array(features_for_training)
                             y_retrain_multi = {h: np.array(labels_multi[h]) for h in retraining_buffer["horizons"]}
 
+                            # Create rewards from multi-horizon labels (ensemble consensus)
+                            # Use majority vote across horizons: LONG(2)=+1, SHORT(0)=-1, HOLD(1)=0
+                            rewards_retrain = []
+                            for sample_idx in range(len(labels_multi[retraining_buffer["horizons"][0]])):
+                                # Get labels across all horizons for this sample
+                                horizon_labels = [labels_multi[h][sample_idx] for h in retraining_buffer["horizons"]]
+                                majority_label = np.median(horizon_labels)
+
+                                # Convert to reward: LONG=+1, SHORT=-1, HOLD=0
+                                if majority_label >= 1.5:  # Consensus LONG
+                                    reward = 1.0
+                                elif majority_label <= 0.5:  # Consensus SHORT
+                                    reward = -1.0
+                                else:  # Hold or uncertain
+                                    reward = 0.0
+                                rewards_retrain.append(reward)
+
+                            rewards_retrain = np.array(rewards_retrain)
+
                             # Retrain with new forward-looking labels
                             try:
                                 _ = model_trainer.train(
-                                    X_retrain, y_retrain_multi, rewards=None,
+                                    X_retrain, y_retrain_multi, rewards_retrain,
                                     epochs=2,  # Light retraining (2 epochs to adapt without overfitting)
                                     batch_size=32,
                                 )
