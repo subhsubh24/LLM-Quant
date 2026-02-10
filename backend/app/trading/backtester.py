@@ -1219,10 +1219,9 @@ class WalkForwardBacktester:
         logger.info("Starting walk-forward backtest...")
 
         # CRITICAL FIX: Load trained checkpoints before backtest
-        # The training method trains models and saves them to disk,
-        # but this backtest method runs as a fresh instance that doesn't have models loaded.
-        # Must load checkpoints before making predictions.
-        if not self.load_checkpoints():
+        # Training saves models to disk, but backtest is a separate code path.
+        # model_trainer needs its models loaded before making predictions.
+        if not model_trainer.load_checkpoints():
             logger.error("❌ Failed to load trained models! Backtest cannot proceed without trained models.")
             return self._empty_result()
 
@@ -1831,7 +1830,7 @@ class WalkForwardBacktester:
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
-                    prediction = self.predict_regime_aware(state, regime)
+                    prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 
                     # DIAGNOSTIC: Log raw model predictions (especially first 50 for detailed debugging)
