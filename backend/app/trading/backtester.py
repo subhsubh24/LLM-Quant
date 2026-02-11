@@ -1155,8 +1155,9 @@ class WalkForwardBacktester:
             closes2 = np.array([c.close for c in candles2[-lookback:]])
 
             # Calculate returns
-            returns1 = np.diff(closes1) / closes1[:-1]
-            returns2 = np.diff(closes2) / closes2[:-1]
+            # BUG FIX #19: Add epsilon protection for division by zero in correlation calculation
+            returns1 = np.diff(closes1) / (closes1[:-1] + 1e-8)
+            returns2 = np.diff(closes2) / (closes2[:-1] + 1e-8)
 
             # Calculate Pearson correlation
             if len(returns1) == 0 or np.std(returns1) == 0 or np.std(returns2) == 0:
@@ -1202,7 +1203,13 @@ class WalkForwardBacktester:
 
             # Binomial test: is win rate > 50% at 95% confidence?
             # H0: p = 0.5, H1: p > 0.5 (one-tailed test)
-            p_value = stats.binom_test(wins, total, 0.5, alternative='greater')
+            # BUG FIX #20: Handle scipy API compatibility (1.7+ uses binomtest instead of binom_test)
+            try:
+                # Try newer scipy API first (scipy >= 1.7)
+                p_value = stats.binomtest(wins, total, 0.5, alternative='greater').pvalue
+            except AttributeError:
+                # Fall back to older API (scipy < 1.7)
+                p_value = stats.binom_test(wins, total, 0.5, alternative='greater')
 
             # If p < 0.05, we reject null hypothesis at 95% confidence
             is_significant = p_value < 0.05
@@ -1918,7 +1925,8 @@ class WalkForwardBacktester:
                 # Calculate volatility for adaptive stops (last 20 candles)
                 recent_closes = [c.close for c in window_data[symbol][-20:]] if len(window_data[symbol]) >= 20 else [entry_price]
                 if len(recent_closes) > 1:
-                    volatility = np.std(np.diff(recent_closes) / np.array(recent_closes[:-1]))
+                    # BUG FIX #18: Add epsilon protection for division by zero in stop loss calculation
+                    volatility = np.std(np.diff(recent_closes) / (np.array(recent_closes[:-1]) + 1e-8))
                 else:
                     volatility = 0.02  # Default 2% volatility
 
