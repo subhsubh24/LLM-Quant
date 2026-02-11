@@ -1735,12 +1735,24 @@ class WalkForwardBacktester:
                             X_retrain = np.array(features_for_training)
                             y_retrain_multi = {h: np.array(labels_multi[h]) for h in retraining_buffer["horizons"]}
 
+                            # CRITICAL FIX: Validate all horizons have aligned lengths before iterating
+                            horizon_lengths = {h: len(labels_multi[h]) for h in retraining_buffer["horizons"]}
+                            if len(set(horizon_lengths.values())) > 1:
+                                logger.warning(f"⚠️ Horizon label misalignment detected: {horizon_lengths}")
+                                min_length = min(horizon_lengths.values())
+                                logger.info(f"  Using only first {min_length} samples (discarding {sum(h - min_length for h in horizon_lengths.values())} misaligned)")
+                                # Trim all horizons to shortest
+                                y_retrain_multi = {h: y_retrain_multi[h][:min_length] for h in retraining_buffer["horizons"]}
+                                X_retrain = X_retrain[:min_length]
+                            else:
+                                logger.info(f"✅ All {len(retraining_buffer['horizons'])} horizons aligned: {list(horizon_lengths.values())[0]} samples each")
+
                             # Create rewards from multi-horizon labels (ensemble consensus)
                             # Use majority vote across horizons: LONG(2)=+1, SHORT(0)=-1, HOLD(1)=0
                             rewards_retrain = []
-                            for sample_idx in range(len(labels_multi[retraining_buffer["horizons"][0]])):
-                                # Get labels across all horizons for this sample
-                                horizon_labels = [labels_multi[h][sample_idx] for h in retraining_buffer["horizons"]]
+                            for sample_idx in range(len(y_retrain_multi[retraining_buffer["horizons"][0]])):
+                                # Get labels across all horizons for this sample (now safe - all aligned)
+                                horizon_labels = [y_retrain_multi[h][sample_idx] for h in retraining_buffer["horizons"]]
                                 majority_label = np.median(horizon_labels)
 
                                 # Convert to reward: LONG=+1, SHORT=-1, HOLD=0
@@ -1801,11 +1813,15 @@ class WalkForwardBacktester:
                 entry_price = pos["entry_price"]
                 side = pos["side"]
 
-                # Calculate unrealized P&L
-                if side == "long":
-                    pnl_pct = (current_price - entry_price) / entry_price
+                # Calculate unrealized P&L (CRITICAL FIX: guard against zero entry_price)
+                if entry_price != 0:
+                    if side == "long":
+                        pnl_pct = (current_price - entry_price) / entry_price
+                    else:
+                        pnl_pct = (entry_price - current_price) / entry_price
                 else:
-                    pnl_pct = (entry_price - current_price) / entry_price
+                    pnl_pct = 0.0
+                    logger.warning(f"⚠️ Position {symbol} has entry_price=0, skipping P&L calculation")
 
                 unrealized_pnl = pos["size"] * pnl_pct
 
@@ -1903,11 +1919,15 @@ class WalkForwardBacktester:
                     # Mark that we hit first pyramid level
                     if partial_exit_pct < 1.0:
                         pos["pyramided_1"] = True
+                    logger.debug(f"📊 Pyramid 1: {symbol} at {pnl_pct*100:.2f}% gain, exiting 30%")
 
-                if not should_exit and pnl_pct >= pyramid_target_2:  # Final target
+                # CRITICAL FIX: Add missing guard for pyramided_2 to prevent double exit
+                if not should_exit and not pos.get("pyramided_2", False) and pnl_pct >= pyramid_target_2:  # Final target
                     partial_exit_pct = 1.0  # Exit remaining position
                     should_exit = True
                     exit_reason = "take_profit"
+                    pos["pyramided_2"] = True  # Mark that we hit final pyramid level
+                    logger.debug(f"📊 Pyramid 2: {symbol} at {pnl_pct*100:.2f}% gain, exiting remaining 70%")
                 # Stop loss (aggressive: tighter on long positions, wider on short)
                 elif not should_exit and pnl_pct <= -stop_loss_pct:
                     should_exit = True
@@ -2489,11 +2509,14 @@ class WalkForwardBacktester:
                     if sym in window_data and window_data[sym]:
                         current_price = window_data[sym][-1].close
                         entry_price = pos["entry_price"]
-                        if pos["side"] == "long":
-                            pnl_pct = (current_price - entry_price) / entry_price
+                        if entry_price != 0:  # CRITICAL FIX: guard against zero entry price
+                            if pos["side"] == "long":
+                                pnl_pct = (current_price - entry_price) / entry_price
+                            else:
+                                pnl_pct = (entry_price - current_price) / entry_price
+                            total_equity += pos["size"] * (1 + pnl_pct)
                         else:
-                            pnl_pct = (entry_price - current_price) / entry_price
-                        total_equity += pos["size"] * (1 + pnl_pct)
+                            logger.warning(f"Equity curve update skipped for {sym}: entry_price=0")
 
                 equity_curve.append((timestamp, total_equity))
 
@@ -2502,10 +2525,14 @@ class WalkForwardBacktester:
             if symbol in window_data and window_data[symbol]:
                 current_price = window_data[symbol][-1].close
                 entry_price = pos["entry_price"]
-                if pos["side"] == "long":
-                    pnl_pct = (current_price - entry_price) / entry_price
+                if entry_price != 0:  # CRITICAL FIX: guard against zero entry price
+                    if pos["side"] == "long":
+                        pnl_pct = (current_price - entry_price) / entry_price
+                    else:
+                        pnl_pct = (entry_price - current_price) / entry_price
                 else:
-                    pnl_pct = (entry_price - current_price) / entry_price
+                    pnl_pct = 0.0
+                    logger.warning(f"Final position closure skipped P&L for {symbol}: entry_price=0")
 
                 exit_cost = pos["size"] * COST_PER_SIDE
                 realized_pnl = pos["size"] * pnl_pct - exit_cost
@@ -2705,7 +2732,7 @@ class WalkForwardBacktester:
         for value in equity_values:
             if value > peak:
                 peak = value
-            dd = (peak - value) / peak
+            dd = (peak - value) / peak if peak > 0 else 0  # CRITICAL FIX: guard against zero peak
             if dd > max_dd:
                 max_dd = dd
 
@@ -3770,6 +3797,9 @@ class ModelPreTrainer:
             "last_epoch": getattr(self, '_last_epoch', 0),
             "best_val_accuracy": getattr(self, '_best_val_accuracy', 0),
             "patience_counter": getattr(self, '_patience_counter', 0),
+            # CRITICAL FIX: Save feature normalization params (must restore in load_checkpoints)
+            "feature_mean": getattr(self, 'feature_mean', None),
+            "feature_std": getattr(self, 'feature_std', None),
         }
 
         checkpoint_path = CHECKPOINT_DIR / "model_checkpoint.pkl"
@@ -3809,6 +3839,14 @@ class ModelPreTrainer:
             self._last_epoch = checkpoint.get("last_epoch", 0)
             self._best_val_accuracy = checkpoint.get("best_val_accuracy", 0)
             self._patience_counter = checkpoint.get("patience_counter", 0)
+
+            # CRITICAL FIX: Restore feature normalization params (required for proper predictions)
+            if checkpoint.get("feature_mean") is not None:
+                self.feature_mean = checkpoint["feature_mean"]
+                self.feature_std = checkpoint["feature_std"]
+                logger.info(f"✅ Restored feature normalization (mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f})")
+            else:
+                logger.warning("⚠️ Feature normalization params not found in checkpoint - predictions may use wrong scale")
 
             logger.info(f"Loaded checkpoint from {checkpoint['timestamp']}")
             logger.info(f"DQN epsilon: {self.dqn.epsilon:.4f}")
