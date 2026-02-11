@@ -1888,7 +1888,11 @@ class WalkForwardBacktester:
             # Update existing positions
             if symbol in positions:
                 pos = positions[symbol]
-                current_price = candle.close
+                # BUG FIX #36: Use HIGH/LOW for exit triggers, CLOSE for P&L calculation
+                # Must check if price touches stop/target during candle, not just close
+                current_price = candle.close  # For P&L calculation
+                high_price = candle.high  # For stop loss (longs)
+                low_price = candle.low  # For stop loss (shorts)
                 entry_price = pos["entry_price"]
                 side = pos["side"]
 
@@ -1993,45 +1997,77 @@ class WalkForwardBacktester:
 
                 # TIER 1 FIX: TRAILING STOPS
                 # Exit if price reversals from highest point
+                # BUG FIX #36: Use LOW price for long stops, HIGH price for short stops
                 trailing_stop_pct = 0.03  # 3% trailing stop
                 if side == "long" and pos.get("highest_price", entry_price) > entry_price:
-                    if current_price < pos["highest_price"] * (1 - trailing_stop_pct):
+                    if low_price < pos["highest_price"] * (1 - trailing_stop_pct):  # Use low, not close
                         should_exit = True
                         exit_reason = "trailing_stop"
                         partial_exit_pct = 1.0
+                        current_price = low_price  # Exit at the triggered price
                 elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
-                    if current_price > pos["lowest_price"] * (1 + trailing_stop_pct):
+                    if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):  # Use high, not close
                         should_exit = True
                         exit_reason = "trailing_stop"
                         partial_exit_pct = 1.0
+                        current_price = high_price  # Exit at the triggered price
 
                 # TIER 1 FIX: PROFIT PYRAMIDING (CRITICAL FIX BUG #3: Use fixed targets set at entry)
                 # Take profits gradually instead of holding to full target
                 # This locks in profits and reduces drawdown
+                # BUG FIX #36: Check HIGH price for profit targets (longs), LOW for shorts
                 pyramid_target_1 = pos.get("pyramid_target_1", 0.05)  # Default 5% if not set
                 pyramid_target_2 = pos.get("pyramid_target_2", 0.15)  # Default 15% if not set
 
-                if not should_exit and not pos.get("pyramided_1", False) and pnl_pct >= pyramid_target_1:
+                # For profit targets, check if price has TOUCHED the target (using high/low)
+                if side == "long":
+                    # Longs hit profit target when high_price reaches entry * (1 + target)
+                    target_1_price = entry_price * (1 + pyramid_target_1)
+                    target_2_price = entry_price * (1 + pyramid_target_2)
+                    hit_target_1 = high_price >= target_1_price
+                    hit_target_2 = high_price >= target_2_price
+                else:
+                    # Shorts hit profit target when low_price reaches entry * (1 - target)
+                    target_1_price = entry_price * (1 - pyramid_target_1)
+                    target_2_price = entry_price * (1 - pyramid_target_2)
+                    hit_target_1 = low_price <= target_1_price
+                    hit_target_2 = low_price <= target_2_price
+
+                if not should_exit and not pos.get("pyramided_1", False) and hit_target_1:
                     partial_exit_pct = 0.30  # Exit 30% of position at first target
                     exit_reason = "profit_pyramid_1"
                     should_exit = True
                     # Mark that we hit first pyramid level
                     if partial_exit_pct < 1.0:
                         pos["pyramided_1"] = True
-                    logger.debug(f"📊 Pyramid 1: {symbol} at {pnl_pct*100:.2f}% gain, exiting 30%")
+                    # Exit at the target price, not current close
+                    current_price = target_1_price
+                    logger.debug(f"📊 Pyramid 1: {symbol} at {pyramid_target_1*100:.2f}% target, exiting 30%")
 
                 # CRITICAL FIX: Add missing guard for pyramided_2 to prevent double exit
-                if not should_exit and not pos.get("pyramided_2", False) and pnl_pct >= pyramid_target_2:  # Final target
+                if not should_exit and not pos.get("pyramided_2", False) and hit_target_2:  # Final target
                     partial_exit_pct = 1.0  # Exit remaining position
                     should_exit = True
                     exit_reason = "take_profit"
                     pos["pyramided_2"] = True  # Mark that we hit final pyramid level
-                    logger.debug(f"📊 Pyramid 2: {symbol} at {pnl_pct*100:.2f}% gain, exiting remaining 70%")
+                    # Exit at the target price, not current close
+                    current_price = target_2_price
+                    logger.debug(f"📊 Pyramid 2: {symbol} at {pyramid_target_2*100:.2f}% target, exiting remaining 70%")
+
                 # Stop loss (aggressive: tighter on long positions, wider on short)
-                elif not should_exit and pnl_pct <= -stop_loss_pct:
+                # BUG FIX #36: Use LOW price for long stops, HIGH price for short stops
+                if side == "long":
+                    stop_price = entry_price * (1 - stop_loss_pct)
+                    hit_stop = low_price <= stop_price
+                else:
+                    stop_price = entry_price * (1 + stop_loss_pct)
+                    hit_stop = high_price >= stop_price
+
+                if not should_exit and hit_stop:
                     should_exit = True
                     exit_reason = "stop_loss"
                     partial_exit_pct = 1.0
+                    current_price = stop_price  # Exit at the stop price
                 # TIER 1 FIX: ADAPTIVE HOLD PERIODS
                 # Let winners run longer, exit losers faster based on recent performance
                 max_hold_hours = config["max_hold_hours_default"]  # Default: 66+ days
@@ -2315,7 +2351,17 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 
-                    # BUG FIX: Detect model prediction failures (confidence=0, action=HOLD fallback)
+                    # BUG FIX #38: Detect model prediction failures (NaN/inf confidence, missing fields)
+                    # Check for corrupted predictions before using them
+                    if (not isinstance(prediction, dict) or
+                        "confidence" not in prediction or
+                        "action" not in prediction or
+                        not np.isfinite(prediction.get("confidence", 0.0)) or
+                        np.isnan(prediction.get("confidence", 0.0))):
+                        logger.warning(f"⚠️ Invalid model prediction for {symbol} - confidence={prediction.get('confidence', 'MISSING')}")
+                        continue  # Skip this signal, models not working
+
+                    # Also check for the specific case where models explicitly fail (confidence=0, action=HOLD)
                     if prediction["confidence"] == 0.0 and prediction["action"] == 1:
                         logger.warning(f"⚠️ Model prediction failed for {symbol} - using HOLD fallback")
                         continue  # Skip this signal, models not working
