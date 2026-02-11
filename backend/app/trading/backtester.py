@@ -2067,7 +2067,7 @@ class WalkForwardBacktester:
                         for idx, pred in enumerate(individual_preds):
                             if idx < len(model_names):
                                 model_name = model_names[idx]
-                                model_was_correct = (pred == final_action) == trade_was_profitable
+                                model_was_correct = (pred == final_action) and trade_was_profitable
 
                                 if model_was_correct:
                                     model_predictions[model_name]["correct"] += 1
@@ -2184,6 +2184,11 @@ class WalkForwardBacktester:
                     state = features[-1]
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
+
+                    # BUG FIX: Detect model prediction failures (confidence=0, action=HOLD fallback)
+                    if prediction["confidence"] == 0.0 and prediction["action"] == 1:
+                        logger.warning(f"⚠️ Model prediction failed for {symbol} - using HOLD fallback")
+                        continue  # Skip this signal, models not working
 
                     # CONTINUOUS LEARNING: Collect feature-prediction pairs for retraining
                     # Store current price so we can look ahead from this point in time
@@ -2467,9 +2472,10 @@ class WalkForwardBacktester:
                             min_position_applied = True
 
                         # CRITICAL FIX: Prevent opening positions if capital is negative or too low
-                        # Only open position if we have enough capital
+                        # Only open position if we have enough capital AND will maintain minimum buffer
                         min_capital_to_trade = 100  # Need at least $100 to open position
-                        if position_size > 0 and position_size <= capital and capital >= min_capital_to_trade:  # Ensure we can afford it
+                        capital_after_position = capital - position_size
+                        if position_size > 0 and position_size <= capital and capital >= min_capital_to_trade and capital_after_position >= min_capital_to_trade:  # Ensure we keep buffer
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
 
@@ -2509,7 +2515,7 @@ class WalkForwardBacktester:
                             trade_direction = "LONG" if side == "long" else "SHORT"
                             logger.debug(
                                 f"Position Opened: {symbol} {trade_direction} | "
-                                f"Price: ${candle.close:.4f} | Size: ${effective_size:.2f} | "
+                                f"Price: ${candle.close:.4f} | Size: ${position_size:.2f} | "
                                 f"Confidence: {prediction['confidence']:.2f} | "
                                 f"Models: {model_agreement}/{len(individual_preds)}"
                             )
@@ -2530,8 +2536,9 @@ class WalkForwardBacktester:
                         elif not strong_consensus:
                             filtered_signals["low_model_agreement"] += 1
 
-            # Update equity curve periodically
-            if len(equity_curve) == 0 or (timestamp - equity_curve[-1][0]).total_seconds() > 3600:
+            # Update equity curve periodically or when positions close (to capture P&L)
+            should_update_equity = len(equity_curve) == 0 or (timestamp - equity_curve[-1][0]).total_seconds() > 3600
+            if should_update_equity:
                 # Calculate total equity
                 total_equity = capital
                 for sym, pos in positions.items():
