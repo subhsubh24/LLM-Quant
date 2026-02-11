@@ -1331,12 +1331,12 @@ class WalkForwardBacktester:
             "kelly_cap_pct": 0.04,                   # Cap position at 4% of capital (increased from 2% for more positions)
             "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
 
-            # Confidence Thresholds (loosened for diagnostics)
-            "confidence_4x4_models": 0.70,           # 4/4 models agree
-            "confidence_3x4_models": 0.55,           # 3/4 models agree
-            "confidence_fallback": 0.50,             # 2/4 or fewer models
-            "regime_bull_confidence_mult": 1.15,     # Bull: require HIGHER confidence for shorts (counter-trend)
-            "regime_bear_confidence_mult": 1.15,     # Bear: require HIGHER confidence for longs (counter-trend)
+            # Confidence Thresholds (FIXED: Lowered from 0.50-0.70 to 0.30-0.50 for signal generation)
+            "confidence_4x4_models": 0.45,           # 4/4 models agree (was 0.70)
+            "confidence_3x4_models": 0.35,           # 3/4 models agree (was 0.55)
+            "confidence_fallback": 0.25,             # 2/4 or fewer models (was 0.50)
+            "regime_bull_confidence_mult": 1.10,     # Bull: require HIGHER confidence for shorts (counter-trend) (was 1.15)
+            "regime_bear_confidence_mult": 1.10,     # Bear: require HIGHER confidence for longs (counter-trend) (was 1.15)
 
             # Model Agreement & Consensus
             "min_model_agreement": 2,                # Minimum 2/4 models required
@@ -2307,29 +2307,16 @@ class WalkForwardBacktester:
                         filter_stage_counters["positions_opened"] += 1
                         logger.info(f"✅ TRADE #{filter_stage_counters['positions_opened']}: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
 
-                        # HORIZON-AWARE KELLY CRITERION SIZING
-                        # Longer-term positions need smaller sizes (more time = more risk)
-                        # Shorter-term positions can be larger (less time = less risk)
+                        # SIMPLIFIED POSITION SIZING (FIXED: Removed cascading multipliers that reduced positions to $0.30)
+                        # Issue: Base Kelly * horizon * vol targeting * correlation * counter-trend * vol scaling * leverage
+                        #        multiplied together gave 0.002 * 0.30 * 0.5 * 0.7 * 0.7 * 0.67 * 0.7 = 0.00003 = $0.30 per position!
+                        # Fix: Use simple Kelly Criterion with portfolio vol targeting overlay
                         confidence = prediction["confidence"]
 
-                        # Base Kelly fraction (INCREASED for more concurrent positions)
-                        # Scale: 0.6 confidence -> 0.6% size, 1.0 confidence -> 3.0% size (was 0.3%-1.5%)
-                        base_kelly = 0.006 + (confidence - 0.6) * 0.030 / 0.4 if confidence >= 0.6 else 0.002
-
-                        # Adjust for position duration (proxy for horizon)
-                        # Lower confidence = likely longer-term = apply multiplier
-                        if confidence > 0.80:
-                            horizon_mult = 1.0     # 24h-48h: full Kelly
-                        elif confidence > 0.75:
-                            horizon_mult = 0.90    # 100h: 90% Kelly
-                        elif confidence > 0.70:
-                            horizon_mult = 0.75    # 200h-400h: 75% Kelly
-                        elif confidence > 0.65:
-                            horizon_mult = 0.50    # 800h: 50% Kelly
-                        else:
-                            horizon_mult = 0.30    # 1600h: 30% Kelly (3x more conservative)
-
-                        kelly_fraction = base_kelly * horizon_mult
+                        # Simple Kelly: 2-3% per position (with 10 positions = 20-30% risk, 70-80% cash)
+                        # This is more aggressive than before but allows actual trading
+                        base_kelly = 0.03  # 3% per position
+                        kelly_fraction = base_kelly
                         position_size = capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 4%
 
                         # NEW: PORTFOLIO-LEVEL VOLATILITY TARGETING (Top Funds Approach)
@@ -2375,98 +2362,17 @@ class WalkForwardBacktester:
                         optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
                         effective_stop_distance = optimal_stop  # Track which stop will be used
 
-                        # TIER 1 FIX: Apply recovery scaling (reduce sizing after losses)
-                        position_size *= recovery_scale
-                        if recovery_mode:
-                            logger.debug(f"Recovery mode active: scaling {symbol} by {recovery_scale:.2f}x")
+                        # REMOVED: Cascading multipliers (recovery, correlation, counter-trend, vol scaling, leverage)
+                        # These were multiplying together: base * 0.30-1.0 * 0.5-1.0 * 0.7 * 0.67-1.5 * 0.7-1.3 = 0.00003x
+                        # Causing positions to be $0.30 instead of $100-300
+                        # Will be handled by portfolio volatility targeting below instead
 
-                        # CORRELATION-AWARE SIZING: Reduce position if correlated with existing positions
-                        if positions:
-                            max_correlation = 0.0
-                            for existing_symbol in positions.keys():
-                                if symbol in window_data and existing_symbol in window_data:
-                                    if len(window_data[symbol]) >= 50 and len(window_data[existing_symbol]) >= 50:
-                                        corr = self.calculate_correlation(
-                                            window_data[symbol][-config["feature_lookback_window"]:],
-                                            window_data[existing_symbol][-100:],
-                                            lookback=50
-                                        )
-                                        max_correlation = max(max_correlation, abs(corr))
+                        # REMOVED: Systemic risk, macro regime, and regime-aware multipliers
+                        # These were adding additional 0.7x reductions on top of already-low positions
+                        # Portfolio vol targeting is sufficient safeguard against systemic risk
+                        # (higher correlations automatically reduce positions via vol calculation)
 
-                            # Scale down position if highly correlated (>0.7)
-                            if max_correlation > config["max_correlation_threshold"]:
-                                correlation_discount = 1.0 - (max_correlation - config["max_correlation_threshold"]) / (1.0 - config["max_correlation_threshold"])  # Linear decay from 0.7 to 1.0
-                                position_size *= correlation_discount
-                                logger.debug(f"Correlation discount for {symbol}: {correlation_discount:.2f}x (corr={max_correlation:.2f})")
-
-                        # COUNTER-TREND POSITION SIZING: Reduce size for trades against market regime
-                        # Shorts in bull market = 70% size, Longs in bear market = 70% size
-                        if conflicting_trade:
-                            counter_trend_mult = 0.70
-                            position_size *= counter_trend_mult
-                            logger.debug(f"Counter-trend sizing for {symbol}: {counter_trend_mult:.2f}x (trade_against_regime={regime})")
-
-                        # TIER 1 FIX: VOLATILITY-BASED POSITION SIZING
-                        # Trade smaller when volatility is high (improves Sharpe ratio)
-                        if len(window_data[symbol]) >= 30:
-                            closes = np.array([c.close for c in window_data[symbol][-30:]])
-                            returns = np.diff(closes) / closes[:-1]
-                            realized_vol = np.std(returns)
-
-                            # Scale position inversely to volatility
-                            # Base volatility = 1% daily
-                            base_vol = 0.01
-                            if realized_vol > 0:
-                                vol_multiplier = min(base_vol / realized_vol, 1.5)  # Don't scale up too much in low vol
-                                position_size *= vol_multiplier
-                                logger.debug(f"Volatility scaling for {symbol}: {vol_multiplier:.2f}x (vol={realized_vol*100:.2f}%)")
-
-                        # TIER 1 FIX: DYNAMIC LEVERAGE
-                        # Calculate portfolio volatility (average of all open positions)
-                        portfolio_vols = []
-                        for sym in positions.keys():
-                            if sym in window_data and len(window_data[sym]) >= 30:
-                                closes = np.array([c.close for c in window_data[sym][-30:]])
-                                returns = np.diff(closes) / closes[:-1]
-                                portfolio_vols.append(np.std(returns))
-
-                        if portfolio_vols:
-                            portfolio_vol = np.mean(portfolio_vols)
-                            # Dynamic leverage: 1.5x in calm markets (vol<0.8%), 0.7x in volatile (vol>1.5%)
-                            if portfolio_vol < 0.008:
-                                leverage_mult = 1.3  # Calm: use 130% of normal sizing
-                            elif portfolio_vol > 0.015:
-                                leverage_mult = 0.7  # Volatile: use only 70% of normal sizing
-                            else:
-                                leverage_mult = 1.0  # Normal: use 100%
-                            position_size *= leverage_mult
-                            logger.debug(f"Dynamic leverage for {symbol}: {leverage_mult:.2f}x (portfolio_vol={portfolio_vol*100:.2f}%)")
-
-                        # TIER 1 FIX: SYSTEMIC RISK FILTER - BTC/ETH CORRELATION
-                        # If BTC and ETH are highly correlated (>0.8), reduce all position sizes
-                        # This indicates systemic risk where all assets move together
-                        if "BTC" in window_data and "ETH" in window_data:
-                            if len(window_data["BTC"]) >= 100 and len(window_data["ETH"]) >= 100:
-                                btc_eth_corr = abs(self.calculate_correlation(
-                                    window_data["BTC"][-100:],
-                                    window_data["ETH"][-100:],
-                                    lookback=100
-                                ))
-
-                                if btc_eth_corr > config["btc_eth_systemic_threshold"]:
-                                    # High systemic risk: reduce position sizing
-                                    systemic_risk_discount = 1.0 - (btc_eth_corr - config["btc_eth_systemic_threshold"]) / (1.0 - config["btc_eth_systemic_threshold"])  # Linear decay from 0.8 to 1.0
-                                    position_size *= systemic_risk_discount
-                                    logger.debug(f"⚠️ Systemic risk detected: BTC-ETH corr={btc_eth_corr:.2f} | Reducing {symbol} by {systemic_risk_discount:.2f}x")
-
-                        # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
-                        # Reduce position sizing during elevated macro volatility
-                        if macro_regime == "elevated":
-                            macro_regime_discount = 0.7  # Reduce to 70% during elevated vol
-                            position_size *= macro_regime_discount
-                            logger.debug(f"Macro regime (elevated): scaling {symbol} by {macro_regime_discount:.2f}x")
-
-                        # TIER 3 FIX: REGIME-AWARE POSITION SIZING
+                        # TIER 3 FIX: REGIME-AWARE POSITION SIZING (KEPT - minimal impact)
                         # Adjust position sizes based on market regime alignment
                         is_long = prediction["action"] == 2
                         is_short = prediction["action"] == 0
