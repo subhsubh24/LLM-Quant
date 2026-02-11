@@ -1331,10 +1331,12 @@ class WalkForwardBacktester:
             "kelly_cap_pct": 0.04,                   # Cap position at 4% of capital (increased from 2% for more positions)
             "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
 
-            # Confidence Thresholds (FIXED: Lowered from 0.50-0.70 to 0.30-0.50 for signal generation)
-            "confidence_4x4_models": 0.45,           # 4/4 models agree (was 0.70)
-            "confidence_3x4_models": 0.35,           # 3/4 models agree (was 0.55)
-            "confidence_fallback": 0.25,             # 2/4 or fewer models (was 0.50)
+            # Confidence Thresholds (AGGRESSIVELY LOWERED: 0.30/0.20/0.10 to fix 80% filter rate)
+            # Previous: 0.70/0.55/0.50 (too strict) → 0.45/0.35/0.25 (still filtered 80%)
+            # Now: 0.30/0.20/0.10 (match actual confidence values from ensemble voting)
+            "confidence_4x4_models": 0.30,           # 4/4 models agree
+            "confidence_3x4_models": 0.20,           # 3/4 models agree
+            "confidence_fallback": 0.10,             # 2/4 or fewer models
             "regime_bull_confidence_mult": 1.10,     # Bull: require HIGHER confidence for shorts (counter-trend) (was 1.15)
             "regime_bear_confidence_mult": 1.10,     # Bear: require HIGHER confidence for longs (counter-trend) (was 1.15)
 
