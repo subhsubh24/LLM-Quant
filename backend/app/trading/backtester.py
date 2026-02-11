@@ -1331,6 +1331,15 @@ class WalkForwardBacktester:
             "kelly_cap_pct": 0.04,                   # Cap position at 4% of capital (increased from 2% for more positions)
             "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
 
+            # Confidence-Based Position Sizing (NEW!)
+            # Higher confidence = bigger position = bigger returns
+            "confidence_ultra_high_mult": 2.0,       # >=80% confidence: 2.0x position size (double bet)
+            "confidence_high_mult": 1.5,             # 70-80% confidence: 1.5x position size
+            "confidence_medium_high_mult": 1.2,      # 60-70% confidence: 1.2x position size
+            "confidence_medium_mult": 1.0,           # 50-60% confidence: 1.0x position size (baseline)
+            "confidence_low_mult": 0.6,              # 45-50% confidence: 0.6x position size
+            "confidence_very_low_mult": 0.3,         # <45% confidence: 0.3x position size (skip if forced to minimum)
+
             # Confidence Thresholds (AGGRESSIVELY LOWERED: 0.30/0.20/0.10 to fix 80% filter rate)
             # CRITICAL FIX: Increased thresholds to filter marginal signals
             # Previous: 0.30/0.20/0.10 (allowed trades with only 2% safety margin)
@@ -2439,7 +2448,39 @@ class WalkForwardBacktester:
                         # Portfolio vol targeting is sufficient safeguard against systemic risk
                         # (higher correlations automatically reduce positions via vol calculation)
 
-                        # TIER 3 FIX: REGIME-AWARE POSITION SIZING (KEPT - minimal impact)
+                        # TIER 3A: CONFIDENCE-BASED POSITION SIZING (NEW!)
+                        # Higher confidence = bigger position = bigger returns
+                        # This allows the system to allocate MORE capital on its highest-conviction trades
+                        confidence = prediction["confidence"]
+                        confidence_multiplier = 1.0
+
+                        if confidence >= 0.80:
+                            # Very high confidence: 2.0x size (double bet on best ideas)
+                            confidence_multiplier = 2.0
+                            logger.debug(f"🚀 Ultra-high confidence (>80%): +100% position size")
+                        elif confidence >= 0.70:
+                            # High confidence: 1.5x size
+                            confidence_multiplier = 1.5
+                            logger.debug(f"📈 High confidence (70-80%): +50% position size")
+                        elif confidence >= 0.60:
+                            # Medium-high confidence: 1.2x size
+                            confidence_multiplier = 1.2
+                            logger.debug(f"➡️ Medium-high confidence (60-70%): +20% position size")
+                        elif confidence >= 0.50:
+                            # Medium confidence: 1.0x size (baseline)
+                            confidence_multiplier = 1.0
+                        elif confidence >= 0.45:
+                            # Low confidence: 0.6x size (minimal bet)
+                            confidence_multiplier = 0.6
+                            logger.debug(f"⚠️ Low confidence (45-50%): -40% position size")
+                        else:
+                            # Very low confidence: 0.3x size (tiny bet)
+                            confidence_multiplier = 0.3
+                            logger.debug(f"🛑 Very low confidence (<45%): -70% position size")
+
+                        position_size *= confidence_multiplier
+
+                        # TIER 3B: REGIME-AWARE POSITION SIZING (KEPT - minimal impact)
                         # Adjust position sizes based on market regime alignment
                         is_long = prediction["action"] == 2
                         is_short = prediction["action"] == 0
@@ -2461,15 +2502,23 @@ class WalkForwardBacktester:
                             logger.debug(f"Regime penalty (bear long): -20% size")
                         # Neutral: no adjustment
 
-                        # CRITICAL FIX: Ensure minimum position size AFTER all scaling
-                        # Track if we're applying the minimum (indicates over-scaling)
-                        min_position_applied = False
-                        if position_size < 100:
-                            # Log when minimum is applied (indicates risk calcs were too aggressive)
-                            if signals_generated <= 50 or np.random.random() < 0.01:  # Log first 50 + 1%
-                                logger.debug(f"🔸 Position size capped at minimum: {symbol} ${position_size:.2f} → $100 (cascade scaled too aggressively)")
+                        # IMPROVED: Smart minimum position logic
+                        # Don't force very low-confidence signals into expensive positions
+                        # Only skip signal if BOTH:
+                        #  1. Position size is below $100 (would hit minimum)
+                        #  2. Confidence is very low (<45%)
+                        if position_size < 100 and confidence < 0.45:
+                            # Very low confidence signal would be forced to minimum $100 → skip entirely
+                            # This saves capital for higher-conviction ideas
+                            filter_stage_counters["low_confidence_skip"] = filter_stage_counters.get("low_confidence_skip", 0) + 1
+                            if signals_generated <= 50 or np.random.random() < 0.01:
+                                logger.debug(f"⏭️ Skipped low-confidence signal: {symbol} (confidence={confidence:.2f}, would be forced to $100 minimum)")
+                            continue  # Skip this signal entirely
+                        elif position_size < 100:
+                            # Medium+ confidence: force to minimum $100 (worth trading despite sizing)
+                            if signals_generated <= 50 or np.random.random() < 0.01:
+                                logger.debug(f"🔸 Position size increased to minimum: {symbol} ${position_size:.2f} → $100 (medium confidence trade worth executing)")
                             position_size = 100  # Minimum viable position size
-                            min_position_applied = True
 
                         # CRITICAL FIX: Prevent opening positions if capital is negative or too low
                         # Only open position if we have enough capital AND will maintain minimum buffer
