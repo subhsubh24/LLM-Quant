@@ -2192,7 +2192,9 @@ class WalkForwardBacktester:
                         retraining_buffer["predictions"].append(prediction["action"])
                         retraining_buffer["timestamps"].append(timestamp)
                         retraining_buffer["symbols"].append(symbol)
-                        retraining_buffer["prices_at_prediction"].append(candle.close if 'candle' in locals() else 0)
+                        # CRITICAL FIX: Use symbol's current price, not last candle (which is from different symbol!)
+                        symbol_price = window_data[symbol][-1].close if symbol in window_data and len(window_data[symbol]) > 0 else 0
+                        retraining_buffer["prices_at_prediction"].append(symbol_price)
 
                     # DIAGNOSTIC: Log raw model predictions (especially first 50 for detailed debugging)
                     filter_stage_counters["total_predictions"] += 1
@@ -2473,23 +2475,24 @@ class WalkForwardBacktester:
 
                             # Apply entry-side slippage + commission
                             entry_cost = position_size * COST_PER_SIDE
-                            effective_size = position_size - entry_cost
+                            # CRITICAL FIX: Store position_size (not effective_size) to avoid capital leakage
+                            # Capital deduction: position_size (line 2511)
+                            # Capital return at exit: position_size + pnl (not effective_size + pnl)
+                            # This ensures: out $300, back $300 + profit, cost is embedded in pnl calc
 
                             # CRITICAL FIX BUG #3: Set pyramid targets at entry time, not recalculated each candle
                             # This prevents time-dependent changes to exit levels
-                            # CRITICAL FIX: Shorts should have NEGATIVE targets (exit on loss, not profit!)
-                            if side == "long":
-                                pyramid_target_1 = 0.05   # Long: exit 30% at +5% profit
-                                pyramid_target_2 = 0.15   # Long: exit rest at +15% profit
-                            else:
-                                pyramid_target_1 = -0.05  # Short: exit 30% at -5% loss (when underwater)
-                                pyramid_target_2 = -0.15  # Short: exit rest at -15% loss (when very underwater)
+                            # CRITICAL FIX: Both long and short use POSITIVE targets (exit at profit!)
+                            # For shorts: pnl_pct = (entry - price) / entry → positive when price falls = profit ✓
+                            # So shorts also want to exit when pnl_pct > 0.05 (profit), same as longs!
+                            pyramid_target_1 = 0.05   # Exit 30% at +5% profit (for BOTH long AND short)
+                            pyramid_target_2 = 0.15   # Exit rest at +15% profit (for BOTH long AND short)
 
                             positions[symbol] = {
                                 "side": side,
                                 "entry_price": candle.close,
                                 "entry_time": timestamp,
-                                "size": effective_size,
+                                "size": position_size,  # CRITICAL FIX: Use position_size (not effective_size) for capital tracking
                                 "entry_cost": entry_cost,
                                 "individual_predictions": prediction.get("predictions", []),
                                 "final_action": prediction["action"],
@@ -2499,6 +2502,7 @@ class WalkForwardBacktester:
                                 "pyramid_target_1": pyramid_target_1,  # TIER 1 FIX: Fixed pyramid targets at entry
                                 "pyramid_target_2": pyramid_target_2,  # TIER 1 FIX: Fixed final target
                                 "pyramided_1": False,  # Track if first level was hit
+                                "pyramided_2": False,  # Track if second level was hit (CRITICAL FIX: ensure this exists)
                             }
 
                             # Log position opening (PHASE D: include model agreement)
