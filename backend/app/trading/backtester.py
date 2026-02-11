@@ -2105,11 +2105,21 @@ class WalkForwardBacktester:
                     )
 
             # TIER 1 FIX: Portfolio-level drawdown check - stop trading if DD > 15%
-            current_equity = capital + sum(
-                pos["size"] * window_data[sym][-1].close / pos["entry_price"]
-                for sym, pos in positions.items()
-                if sym in window_data and len(window_data[sym]) > 0
-            )
+            # CRITICAL FIX: Calculate unrealized P&L correctly (was 10-100x inflated!)
+            # Old formula: pos["size"] * current_price / entry_price (returns total position value)
+            # Correct formula: pos["size"] * (current_price / entry_price - 1) (returns profit/loss)
+            unrealized_pnl = 0.0
+            for sym, pos in positions.items():
+                if sym in window_data and len(window_data[sym]) > 0:
+                    current_price = window_data[sym][-1].close
+                    entry_price = pos["entry_price"]
+                    if entry_price > 0:
+                        if pos["side"] == "long":
+                            unrealized_pnl += pos["size"] * (current_price / entry_price - 1)
+                        else:
+                            unrealized_pnl += pos["size"] * (entry_price / current_price - 1)
+
+            current_equity = capital + unrealized_pnl
             rolling_max_equity = max(rolling_max_equity, current_equity)
             current_dd = (rolling_max_equity - current_equity) / rolling_max_equity if rolling_max_equity > 0 else 0
 
@@ -2288,7 +2298,8 @@ class WalkForwardBacktester:
 
                     # NOTE: Removed 'conflicting_trade' hard ban - now we require HIGHER confidence for counter-trend trades instead
                     # This allows shorts in bull markets (and longs in bear markets) if confidence is high enough
-                    if is_hold or not meets_confidence or not is_liquid or not strong_consensus:
+                    # CRITICAL FIX: Include is_statistically_significant in rejection check (was missing, causing inconsistency)
+                    if is_hold or not meets_confidence or not is_liquid or not strong_consensus or not is_statistically_significant:
                         # Log why signal was rejected (sampling to avoid spam)
                         if np.random.random() < 0.001:  # Log 0.1% of rejected signals
                             reasons = []
@@ -2354,11 +2365,20 @@ class WalkForwardBacktester:
                         # Fix: Use simple Kelly Criterion with portfolio vol targeting overlay
                         confidence = prediction["confidence"]
 
+                        # CRITICAL FIX: Track available capital (accounting for positions opened THIS CANDLE)
+                        # Calculate how much capital we've already spent opening positions this iteration
+                        capital_used_this_candle = sum(
+                            pos["size"] + pos["entry_cost"]
+                            for pos in positions.values()
+                        )
+                        available_capital = capital - capital_used_this_candle
+
                         # Simple Kelly: 2-3% per position (with 10 positions = 20-30% risk, 70-80% cash)
                         # This is more aggressive than before but allows actual trading
                         base_kelly = 0.03  # 3% per position
                         kelly_fraction = base_kelly
-                        position_size = capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 4%
+                        # Use available_capital instead of total capital (CRITICAL FIX)
+                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 4%
 
                         # NEW: PORTFOLIO-LEVEL VOLATILITY TARGETING (Top Funds Approach)
                         # Size positions to maintain total portfolio volatility at 1.2-1.5% daily
@@ -2457,8 +2477,13 @@ class WalkForwardBacktester:
 
                             # CRITICAL FIX BUG #3: Set pyramid targets at entry time, not recalculated each candle
                             # This prevents time-dependent changes to exit levels
-                            pyramid_target_1 = 0.05 if side == "long" else 0.05  # First 5% target
-                            pyramid_target_2 = 0.15 if side == "long" else 0.15  # Final 15% target
+                            # CRITICAL FIX: Shorts should have NEGATIVE targets (exit on loss, not profit!)
+                            if side == "long":
+                                pyramid_target_1 = 0.05   # Long: exit 30% at +5% profit
+                                pyramid_target_2 = 0.15   # Long: exit rest at +15% profit
+                            else:
+                                pyramid_target_1 = -0.05  # Short: exit 30% at -5% loss (when underwater)
+                                pyramid_target_2 = -0.15  # Short: exit rest at -15% loss (when very underwater)
 
                             positions[symbol] = {
                                 "side": side,
@@ -3745,11 +3770,17 @@ class ModelPreTrainer:
         else:
             final_action = tied_actions[0]
 
-        # Confidence = vote strength properly normalized
-        # This reflects which action won consensus, properly calibrated 0-1
+        # CRITICAL FIX: Confidence should NOT include regime adjustments (they distort calibration)
+        # Use ORIGINAL (unadjusted) confidences for confidence calculation
+        # Regime adjustments should affect VOTING (which action wins), not CONFIDENCE (signal strength)
         total_vote_weight = sum(action_votes.values())
         if total_vote_weight > 0:
-            final_confidence = action_votes[final_action] / (len(predictions) * 1.0)  # Normalize by number of models
+            # Use original unadjusted confidences to get true signal strength
+            original_action_votes = {0: 0, 1: 0, 2: 0}
+            for pred, conf in zip(predictions, confidences):  # Use unadjusted confidences
+                original_action_votes[pred] += conf
+            # Confidence is the average confidence of models voting for the winning action
+            final_confidence = original_action_votes[final_action] / (len(predictions) * 1.0)
         else:
             final_confidence = 0.0
 
