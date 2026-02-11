@@ -2225,11 +2225,18 @@ class WalkForwardBacktester:
                     # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
                     # Adjust thresholds based on market regime (already computed above)
                     # Counter-trend trades (shorts in bull, longs in bear) require HIGHER confidence
-                    if regime == 'bull':
-                        min_confidence *= config["regime_bull_confidence_mult"]  # Bull: Shorts are counter-trend, require 15% HIGHER confidence
-                    elif regime == 'bear':
-                        min_confidence *= config["regime_bear_confidence_mult"]  # Bear: Longs are counter-trend, require 15% HIGHER confidence
-                    # sideways: no change, use default
+                    # CRITICAL FIX: Only apply multiplier to COUNTER-TREND trades, not all trades!
+                    is_short = prediction["action"] == 0
+                    is_long = prediction["action"] == 2
+
+                    if regime == 'bull' and is_short:
+                        # Shorts in bull market are counter-trend: require HIGHER confidence
+                        min_confidence *= config["regime_bull_confidence_mult"]
+                    elif regime == 'bear' and is_long:
+                        # Longs in bear market are counter-trend: require HIGHER confidence
+                        min_confidence *= config["regime_bear_confidence_mult"]
+                    # Trend-aligned trades (longs in bull, shorts in bear) use base confidence
+                    # Sideways: no adjustment, use base confidence
 
                     meets_confidence = prediction["confidence"] >= min_confidence
                     if meets_confidence:
