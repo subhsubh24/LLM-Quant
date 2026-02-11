@@ -1267,7 +1267,8 @@ class WalkForwardBacktester:
         labels = []
 
         for i in range(len(closes) - lookahead):
-            future_return = (closes[i + lookahead] - closes[i]) / closes[i]
+            # BUG FIX #22: Add epsilon protection for division by zero in basic label generation
+            future_return = (closes[i + lookahead] - closes[i]) / (closes[i] + 1e-8)
 
             if future_return > threshold:
                 labels.append(2)  # Buy
@@ -1321,7 +1322,8 @@ class WalkForwardBacktester:
         for lookahead in horizons:
             labels = []
             for i in range(len(closes) - lookahead):
-                future_return = (closes[i + lookahead] - closes[i]) / closes[i]
+                # BUG FIX #23: Add epsilon protection for division by zero in multi-horizon label generation
+                future_return = (closes[i + lookahead] - closes[i]) / (closes[i] + 1e-8)
 
                 if future_return > threshold:
                     labels.append(2)  # Buy
@@ -1786,7 +1788,8 @@ class WalkForwardBacktester:
                                     break
 
                                 # Create label based on actual price movement
-                                price_return = (future_price - price_at_pred) / price_at_pred
+                                # BUG FIX #21: Add epsilon protection for division by zero in retraining labels
+                                price_return = (future_price - price_at_pred) / (price_at_pred + 1e-8)
                                 if price_return > 0.01:  # Up 1%+
                                     label = 2  # LONG
                                 elif price_return < -0.01:  # Down 1%+
