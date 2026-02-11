@@ -1072,13 +1072,17 @@ class WalkForwardBacktester:
             ema = (price - ema) * multiplier + ema
         return ema
 
-    def detect_market_regime(self, candles: List[OHLCV], window: int = 50) -> str:
+    def detect_market_regime(self, candles: List[OHLCV], window: int = 50, prev_regime: str = 'sideways', switch_threshold: float = 1.0) -> str:
         """
-        Detect current market regime (bull, bear, or sideways).
+        Detect current market regime (bull, bear, or sideways) with hysteresis to prevent whipsaw.
 
         Args:
             candles: Recent candles to analyze
             window: Look-back window
+            prev_regime: Previous regime (for hysteresis/stickiness)
+            switch_threshold: Multiplier for trend needed to switch regime (>1.0 = hysteresis)
+                             1.0 = no hysteresis (original behavior)
+                             1.3 = require 30% larger trend change to switch
 
         Returns:
             'bull', 'bear', or 'sideways'
@@ -1098,13 +1102,36 @@ class WalkForwardBacktester:
         returns = np.diff(closes) / closes[:-1]
         volatility = np.std(returns)
 
-        # Regime logic
-        if trend > 0.02 and volatility > 0.01:
-            return 'bull'
-        elif trend < -0.02 and volatility > 0.01:
-            return 'bear'
-        else:
-            return 'sideways'
+        # BUG FIX #11: Add hysteresis to regime detection
+        # Require higher threshold to switch regime, prevents whipsaw from noise
+        base_threshold = 0.02
+        vol_threshold = 0.01
+
+        # If already in a regime, require stronger signal to leave it
+        if prev_regime == 'bull':
+            # In bull: require trend to drop to -0.02*1.3=-0.026 to switch to bear (harder to leave)
+            if trend < -base_threshold * switch_threshold and volatility > vol_threshold:
+                return 'bear'
+            elif trend > base_threshold and volatility > vol_threshold:
+                return 'bull'  # Stay in bull if still positive
+            else:
+                return 'sideways'  # Or go to sideways if uncertain
+        elif prev_regime == 'bear':
+            # In bear: require trend to rise to 0.02*1.3=0.026 to switch to bull
+            if trend > base_threshold * switch_threshold and volatility > vol_threshold:
+                return 'bull'
+            elif trend < -base_threshold and volatility > vol_threshold:
+                return 'bear'  # Stay in bear if still negative
+            else:
+                return 'sideways'
+        else:  # prev_regime == 'sideways'
+            # Not in strong regime: normal thresholds apply
+            if trend > base_threshold * switch_threshold and volatility > vol_threshold:
+                return 'bull'
+            elif trend < -base_threshold * switch_threshold and volatility > vol_threshold:
+                return 'bear'
+            else:
+                return 'sideways'
 
     def calculate_correlation(self, candles1: List[OHLCV], candles2: List[OHLCV], lookback: int = 50) -> float:
         """
@@ -1504,6 +1531,11 @@ class WalkForwardBacktester:
         extreme_vol_threshold = config["extreme_vol_multiplier"]  # 2.5x baseline = extreme macro vol
         macro_filtered_trades = 0  # Track how many trades were blocked by macro filter
 
+        # BUG FIX #11: Regime stickiness (prevent whipsaw flips)
+        # Track per-symbol regime to add hysteresis
+        symbol_regime = {}  # Maps symbol -> (regime, regime_age_candles)
+        regime_switch_threshold = 1.3  # Require 30% trend change to switch regime (vs 0% now)
+
         # CONTINUOUS LEARNING: Collect data for periodic retraining (NEW)
         # Track features and predictions to create forward-looking labels
         retraining_buffer = {
@@ -1823,14 +1855,33 @@ class WalkForwardBacktester:
                 side = pos["side"]
 
                 # Calculate unrealized P&L (CRITICAL FIX: guard against zero entry_price)
-                if entry_price != 0:
-                    if side == "long":
-                        pnl_pct = (current_price - entry_price) / entry_price
-                    else:
-                        pnl_pct = (entry_price - current_price) / entry_price
+                if entry_price <= 0:
+                    # BUG FIX #8: Entry price zero/negative prevents stop loss triggering
+                    # Force exit position immediately (liquidate)
+                    logger.error(f"🚨 CRITICAL: Position {symbol} has invalid entry_price={entry_price}, force-liquidating")
+                    capital += pos["size"]  # Return capital, ignore loss
+                    trades.append({
+                        "symbol": symbol,
+                        "entry_time": pos["entry_time"],
+                        "exit_time": timestamp,
+                        "entry_price": entry_price if entry_price > 0 else current_price,
+                        "exit_price": current_price,
+                        "side": side,
+                        "size": pos["size"],
+                        "pnl": 0,  # Mark as zero loss (data error)
+                        "pnl_pct": 0,
+                        "exit_reason": "invalid_entry_price",
+                        "trade_costs": pos.get("entry_cost", 0) + pos["size"] * COST_PER_SIDE,
+                        "hours_held": (timestamp - pos["entry_time"]).total_seconds() / 3600,
+                    })
+                    del positions[symbol]
+                    continue  # Skip to next position
+
+                # Normal P&L calculation
+                if side == "long":
+                    pnl_pct = (current_price - entry_price) / entry_price
                 else:
-                    pnl_pct = 0.0
-                    logger.warning(f"⚠️ Position {symbol} has entry_price=0, skipping P&L calculation")
+                    pnl_pct = (entry_price - current_price) / entry_price
 
                 unrealized_pnl = pos["size"] * pnl_pct
 
@@ -1989,7 +2040,15 @@ class WalkForwardBacktester:
                         trade_directions[symbol] = current_direction
                         del positions[symbol]
                     else:
+                        # BUG FIX #6: Reset highest/lowest prices for trailing stop calculation
+                        # After partial exit, the new peak/trough should be current price, not the old peak
+                        # Otherwise trailing stop triggers on old price levels (premature exit)
                         pos["size"] *= (1.0 - partial_exit_pct)
+                        if side == "long":
+                            pos["highest_price"] = current_price  # Reset peak for remaining position
+                        else:
+                            pos["lowest_price"] = current_price   # Reset trough for remaining position
+                        logger.debug(f"📊 Partial exit {symbol}: reset trailing stop, size now ${pos['size']:.0f}")
 
                     trade = {
                         "symbol": symbol,
@@ -2187,7 +2246,19 @@ class WalkForwardBacktester:
                 if len(features) > 0:
                     # Detect market regime FIRST (needed for regime-aware prediction)
                     # Use same window as features for consistency
-                    regime = self.detect_market_regime(window_data[symbol][-feature_window_size:])
+                    # BUG FIX #11: Pass previous regime for hysteresis (prevent whipsaw)
+                    prev_regime = symbol_regime.get(symbol, ('sideways', 0))[0] if symbol in symbol_regime else 'sideways'
+                    regime = self.detect_market_regime(
+                        window_data[symbol][-feature_window_size:],
+                        prev_regime=prev_regime,
+                        switch_threshold=regime_switch_threshold
+                    )
+                    # Update regime tracker
+                    if symbol in symbol_regime:
+                        prev_r, age = symbol_regime[symbol]
+                        symbol_regime[symbol] = (regime, age+1 if regime == prev_r else 0)  # Reset age on switch
+                    else:
+                        symbol_regime[symbol] = (regime, 0)
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
@@ -2502,6 +2573,16 @@ class WalkForwardBacktester:
                             logger.debug(f"Regime penalty (bear long): -20% size")
                         # Neutral: no adjustment
 
+                        # BUG FIX #4: Cap maximum position size at 1.5x Kelly for safety
+                        # Without this cap, (confidence 2.0x * regime 1.15x) = 2.3x Kelly = too risky
+                        # Kelly Criterion safety margin requires position_size <= 1.5 * kelly_base_size
+                        max_kelly_position = available_capital * 0.03 * 1.5  # 1.5x of base 3% Kelly
+                        if position_size > max_kelly_position:
+                            kelly_excess = position_size / max_kelly_position
+                            original_size = position_size
+                            position_size = max_kelly_position
+                            logger.debug(f"🔒 Position size capped at 1.5x Kelly: {symbol} {kelly_excess:.2f}x excess → {max_kelly_position:.0f} (was ${original_size:.0f})")
+
                         # IMPROVED: Smart minimum position logic
                         # Don't force very low-confidence signals into expensive positions
                         # Only skip signal if BOTH:
@@ -2802,8 +2883,9 @@ class WalkForwardBacktester:
         returns = np.diff(equity_values) / (np.array(equity_values[:-1]) + 1e-8)
 
         # Sharpe Ratio (annualized, assuming hourly data)
+        # BUG FIX #1: Use sqrt(365*24) for crypto (24/7 trading), not sqrt(252*24) (stock market)
         if len(returns) > 1 and np.std(returns) > 0:
-            sharpe = np.mean(returns) / np.std(returns) * np.sqrt(252 * 24)
+            sharpe = np.mean(returns) / np.std(returns) * np.sqrt(365 * 24)  # 365 days for crypto
         else:
             sharpe = 0
 
@@ -2813,9 +2895,14 @@ class WalkForwardBacktester:
         # but only downside std in denominator, measuring return per unit downside risk
         downside_returns = returns[returns < 0]
         if len(downside_returns) > 0 and np.std(downside_returns) > 0:
-            sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(252 * 24)
+            sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(365 * 24)  # 365 days for crypto
         else:
             sortino = sharpe  # Use Sharpe if no downside risk
+
+        # BUG FIX #19 & #20: Handle NaN values in metrics
+        # Protect against NaN/inf from edge cases
+        sharpe = 0.0 if not np.isfinite(sharpe) else sharpe
+        sortino = 0.0 if not np.isfinite(sortino) else sortino
 
         logger.info("Calculating drawdown...")
         # Max Drawdown
