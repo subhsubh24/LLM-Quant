@@ -2904,11 +2904,29 @@ class ModelPreTrainer:
             # Generate labels for all horizons at once
             multi_labels = backtester.generate_multi_horizon_labels(candles)
 
-            # Find the minimum label length (longest horizon will have fewest labels)
-            min_label_len = min(len(labels) for labels in multi_labels.values())
+            # CRITICAL FIX: Properly align features with labels
+            # features[k] corresponds to candles[lookback+k] where lookback=400
+            # labels[k] corresponds to candles[k] → candles[k+lookahead]
+            # They're offset by 400! We need to skip first 400 samples of labels to align!
+            # labels[400:] corresponds to candles[400:] → candles[400+lookahead:]
+            # Now features[k] pairs with labels[k+400] ✓
 
-            # Align all features and labels to the minimum length
-            # (this ensures no look-ahead bias at any horizon)
+            feature_lookback = 400  # Same as default in prepare_features
+            aligned_multi_labels = {}
+            for horizon, labels in multi_labels.items():
+                # Skip first lookback samples to align with features
+                if len(labels) > feature_lookback:
+                    aligned_multi_labels[horizon] = labels[feature_lookback:]
+                else:
+                    aligned_multi_labels[horizon] = np.array([])
+            multi_labels = aligned_multi_labels
+
+            # Now find minimum aligned label length
+            min_label_len = min((len(labels) for labels in multi_labels.values() if len(labels) > 0), default=0)
+            if min_label_len == 0:
+                continue
+
+            # Align features and labels to the minimum length
             features = features[:min_label_len]
 
             if len(features) < 100:  # Need minimum samples
@@ -2921,13 +2939,17 @@ class ModelPreTrainer:
             for horizon, labels in multi_labels.items():
                 all_multi_labels[horizon].append(labels[:min_label_len])
 
-            # Calculate rewards based on 200h horizon (mid-range of our horizons)
+            # CRITICAL FIX: Calculate rewards with proper time alignment
+            # features[i] corresponds to candles[400+i] (after alignment fix)
+            # So future_return should use closes[400+i], not closes[i]
             # This balances between short-term tactical and long-term strategic
             closes = np.array([c.close for c in candles])
             rewards = []
+            feature_lookback = 400
             for i in range(len(features)):
-                if i + 200 < len(closes):
-                    future_return = (closes[i + 200] - closes[i]) / closes[i]
+                candle_idx = feature_lookback + i  # Index in closes array
+                if candle_idx + 200 < len(closes):
+                    future_return = (closes[candle_idx + 200] - closes[candle_idx]) / closes[candle_idx]
                     # Get majority vote across horizons
                     horizon_votes = []
                     for horizon, labels in multi_labels.items():
