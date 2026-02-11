@@ -3655,7 +3655,15 @@ class ModelPreTrainer:
         for pred, conf in zip(predictions, adjusted_confidences):
             action_votes[pred] += conf
 
-        final_action = max(action_votes, key=action_votes.get)
+        # CRITICAL FIX: Break ties fairly instead of dict ordering bias
+        # When multiple actions have equal vote weight, don't default to action 0 (SHORT)
+        max_vote = max(action_votes.values())
+        tied_actions = [a for a, v in action_votes.items() if v == max_vote]
+        if len(tied_actions) > 1:
+            # Multiple actions tied: choose randomly to avoid SHORT bias
+            final_action = np.random.choice(tied_actions)
+        else:
+            final_action = tied_actions[0]
 
         # Confidence = vote strength properly normalized
         # This reflects which action won consensus, properly calibrated 0-1
