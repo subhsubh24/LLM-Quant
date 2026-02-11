@@ -1793,10 +1793,13 @@ class WalkForwardBacktester:
 
                                 # Create label based on actual price movement
                                 # BUG FIX #21: Add epsilon protection for division by zero in retraining labels
+                                # BUG FIX #49: CRITICAL - Changed > and < to >= and <= for label thresholds
+                                # Was: exactly ±1% return → HOLD (off-by-one boundary error)
+                                # Now: ±1% and above → LONG/SHORT (correct boundary)
                                 price_return = (future_price - price_at_pred) / (price_at_pred + 1e-8)
-                                if price_return > 0.01:  # Up 1%+
+                                if price_return >= 0.01:  # Up 1%+
                                     label = 2  # LONG
-                                elif price_return < -0.01:  # Down 1%+
+                                elif price_return <= -0.01:  # Down 1%+
                                     label = 0  # SHORT
                                 else:
                                     label = 1  # HOLD
@@ -2080,7 +2083,10 @@ class WalkForwardBacktester:
                     # Otherwise: 1600h normal
 
                 # Time-based exit (hold max based on recent performance)
-                elif not should_exit and (timestamp - pos["entry_time"]).total_seconds() > max_hold_hours * 3600:
+                # BUG FIX #46: CRITICAL - Changed elif to if (was unreachable when 10+ recent trades!)
+                # With elif, if recent_trades_window >= 10, the if block at line 2074 executes
+                # and this elif never runs, preventing all time-based exits after 10 trades
+                if not should_exit and (timestamp - pos["entry_time"]).total_seconds() > max_hold_hours * 3600:
                     should_exit = True
                     exit_reason = "time_exit"
                     partial_exit_pct = 1.0
@@ -2143,7 +2149,11 @@ class WalkForwardBacktester:
 
                     # TIER 1 FIX: TRACK SIGNAL OUTCOMES FOR STATISTICAL SIGNIFICANCE TESTING
                     # Record whether this signal was a win (1) or loss (0) by symbol and action
-                    if "final_action" in pos:
+                    # BUG FIX #47: CRITICAL - Only record outcome for FULL exits, not partial pyramid exits!
+                    # Was recording partial exits as separate signals, biasing win rate calculation:
+                    # Example: Long 100 shares, pyramid 30% at +5% (recorded as win), then 70% at -5% (recorded as loss)
+                    # But overall position is -30%, yet signal_history shows 50% win rate!
+                    if "final_action" in pos and partial_exit_pct >= 1.0:  # Only for full exits
                         final_action = pos["final_action"]
                         if symbol not in signal_history:
                             signal_history[symbol] = {0: [], 2: []}  # 0=short, 2=long
@@ -2750,13 +2760,17 @@ class WalkForwardBacktester:
                         # CRITICAL FIX: Prevent opening positions if capital is negative or too low
                         # BUG FIX #3: Check multi-position margin (not just this position)
                         # With N positions open, need N * min_capital_to_trade buffer (not just 1x)
+                        # BUG FIX #48: CRITICAL - Only check margin requirement, not separate <= capital check
+                        # Old logic: position_size <= capital AND capital_after >= margin (can conflict)
+                        # New logic: ONLY check that remaining capital after position >= margin requirement
                         min_capital_to_trade = 100  # Need at least $100 per position
                         num_existing_positions = len(positions)
                         total_margin_required = (num_existing_positions + 1) * min_capital_to_trade  # +1 for new position
                         capital_after_position = capital - position_size
 
                         # Only open if we maintain minimum margin for all positions
-                        if position_size > 0 and position_size <= capital and capital_after_position >= total_margin_required:
+                        # Remove redundant checks: if capital_after >= margin, then position_size <= capital automatically
+                        if position_size > 0 and capital_after_position >= total_margin_required:
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
 
@@ -3415,6 +3429,11 @@ class ModelPreTrainer:
             logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
             logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
             # Use 200h (mid-range) as primary for compatibility with existing code
+            # BUG FIX #50: CRITICAL - Check if labels dict is empty before accessing
+            # list(labels.values())[0] raises IndexError if labels is empty dict
+            if len(labels) == 0:
+                logger.error("❌ CRITICAL: Labels dict is empty! No training data available.")
+                return None
             primary_labels = labels.get(200, list(labels.values())[0])
         else:
             logger.info("Single-horizon training mode")
