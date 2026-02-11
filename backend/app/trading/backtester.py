@@ -1099,7 +1099,8 @@ class WalkForwardBacktester:
         trend = (sma_short - sma_long) / sma_long
 
         # Calculate volatility
-        returns = np.diff(closes) / closes[:-1]
+        # BUG FIX #17: Add epsilon protection for division by zero (close prices near zero)
+        returns = np.diff(closes) / (closes[:-1] + 1e-8)
         volatility = np.std(returns)
 
         # BUG FIX #11: Add hysteresis to regime detection
@@ -2526,7 +2527,8 @@ class WalkForwardBacktester:
                             # Add new position's contribution
                             if symbol in window_data and len(window_data[symbol]) >= 30:
                                 closes = np.array([c.close for c in window_data[symbol][-30:]])
-                                returns = np.diff(closes) / closes[:-1]
+                                # BUG FIX #17: Add epsilon protection for division by zero (close prices near zero)
+                                returns = np.diff(closes) / (closes[:-1] + 1e-8)
                                 symbol_vol = np.std(returns)
 
                                 # Calculate required scaling to hit target portfolio vol
