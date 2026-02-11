@@ -2372,13 +2372,13 @@ class WalkForwardBacktester:
                         # Fix: Use simple Kelly Criterion with portfolio vol targeting overlay
                         confidence = prediction["confidence"]
 
-                        # CRITICAL FIX: Track available capital (accounting for positions opened THIS CANDLE)
-                        # Calculate how much capital we've already spent opening positions this iteration
-                        capital_used_this_candle = sum(
-                            pos["size"] + pos["entry_cost"]
-                            for pos in positions.values()
-                        )
-                        available_capital = capital - capital_used_this_candle
+                        # BUG FIX #2: Available capital calculation
+                        # CRITICAL: positions.values() contains positions opened in PREVIOUS candles
+                        # Capital has ALREADY been reduced when those positions were opened
+                        # Subtracting them again is double-subtraction → available_capital becomes too small
+                        # FIX: Just use capital directly (it's already net of open positions)
+                        # If we want to track new positions THIS candle, we'd need to track them separately
+                        available_capital = capital
 
                         # Simple Kelly: 2-3% per position (with 10 positions = 20-30% risk, 70-80% cash)
                         # This is more aggressive than before but allows actual trading
@@ -2550,7 +2550,11 @@ class WalkForwardBacktester:
                                 pnl_pct = (current_price - entry_price) / entry_price
                             else:
                                 pnl_pct = (entry_price - current_price) / entry_price
-                            total_equity += pos["size"] * (1 + pnl_pct)
+                            # BUG FIX #1: Only add the P&L, not position_size*(1+pnl_pct)
+                            # OLD: total_equity += pos["size"] * (1 + pnl_pct)  ❌ Inflates equity 10-100x!
+                            # NEW: Add only the unrealized P&L
+                            unrealized_pnl = pos["size"] * pnl_pct
+                            total_equity += unrealized_pnl
                         else:
                             logger.warning(f"Equity curve update skipped for {sym}: entry_price=0")
 
@@ -2755,6 +2759,9 @@ class WalkForwardBacktester:
             sharpe = 0
 
         # Sortino Ratio (downside deviation only)
+        # Formula: (Mean Return) / (Downside Deviation) * sqrt(periods/year)
+        # Note: Uses mean of ALL returns (upside + downside) in numerator for excess return
+        # but only downside std in denominator, measuring return per unit downside risk
         downside_returns = returns[returns < 0]
         if len(downside_returns) > 0 and np.std(downside_returns) > 0:
             sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(252 * 24)
@@ -3643,7 +3650,15 @@ class ModelPreTrainer:
         for pred, conf in zip(predictions, confidences):
             action_votes[pred] += conf
 
-        final_action = max(action_votes, key=action_votes.get)
+        # BUG FIX #3: Tie-breaking bias toward SHORT
+        # OLD: max(action_votes, key=...) uses dict order → ties resolve to action 0 (SHORT)
+        # NEW: When tied, randomly choose among tied actions
+        max_vote = max(action_votes.values())
+        tied_actions = [a for a, v in action_votes.items() if v == max_vote]
+        if len(tied_actions) > 1:
+            final_action = np.random.choice(tied_actions)
+        else:
+            final_action = tied_actions[0]
 
         # Confidence = model agreement * average confidence of agreeing models
         # This captures BOTH "how many models agree" and "how sure are they"
