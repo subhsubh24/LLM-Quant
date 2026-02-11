@@ -2402,15 +2402,20 @@ class WalkForwardBacktester:
                     # Adjust thresholds based on market regime (already computed above)
                     # Counter-trend trades (shorts in bull, longs in bear) require HIGHER confidence
                     # CRITICAL FIX: Only apply multiplier to COUNTER-TREND trades, not all trades!
+                    # BUG FIX #35: Use ADDITIVE adjustment instead of multiplicative to avoid overshooting thresholds
+                    # Multiplicative: 0.65 * 1.10 = 0.715 (blocks 0.70 confidence trades - too strict!)
+                    # Additive: 0.65 + 0.08 = 0.73 (more reasonable, preserves base threshold intent)
                     is_short = prediction["action"] == 0
                     is_long = prediction["action"] == 2
 
                     if regime == 'bull' and is_short:
                         # Shorts in bull market are counter-trend: require HIGHER confidence
-                        min_confidence *= config["regime_bull_confidence_mult"]
+                        # Use additive +8% instead of multiplicative 1.10x to avoid overshooting
+                        min_confidence += config["regime_bull_confidence_mult"] - 1.0  # 1.10 - 1.0 = 0.10 (10% boost)
                     elif regime == 'bear' and is_long:
                         # Longs in bear market are counter-trend: require HIGHER confidence
-                        min_confidence *= config["regime_bear_confidence_mult"]
+                        # Use additive +8% instead of multiplicative 1.10x to avoid overshooting
+                        min_confidence += config["regime_bear_confidence_mult"] - 1.0  # 1.10 - 1.0 = 0.10 (10% boost)
                     # Trend-aligned trades (longs in bull, shorts in bear) use base confidence
                     # Sideways: no adjustment, use base confidence
 
@@ -2519,7 +2524,9 @@ class WalkForwardBacktester:
                         base_kelly = 0.03  # 3% per position
                         kelly_fraction = base_kelly
                         # Use available_capital instead of total capital (CRITICAL FIX)
-                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"])  # Cap at 4%
+                        # BUG FIX #34: CRITICAL - Apply recovery_scale to prevent oversizing during drawdown recovery
+                        # Without this, positions stay full-Kelly sized during recovery, risking account blow-up
+                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"]) * recovery_scale  # Cap at 4%, scaled by recovery
 
                         # NEW: PORTFOLIO-LEVEL VOLATILITY TARGETING (Top Funds Approach)
                         # Size positions to maintain total portfolio volatility at 1.2-1.5% daily
