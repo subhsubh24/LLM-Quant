@@ -3479,9 +3479,33 @@ class ModelPreTrainer:
                     f"train={len(X_train):,}, val={len(X_val):,}"
                 )
 
-            # Shuffle training data
+            # =====================================================================
+            # CRITICAL FIX #24: DQN NEEDS TEMPORAL SEQUENCES, NOT SHUFFLED DATA
+            # =====================================================================
+            # DQN uses next_state to bootstrap Q-value targets.
+            # If next_state is just the next sample in shuffled batch,
+            # DQN learns WRONG value estimates → suboptimal actions → negative ROI.
+            #
+            # Solution: Create DQN experiences BEFORE shuffling, using correct
+            # temporal next_state. Then shuffle for other models (they don't need temporal order).
+
+            # Create DQN experiences using UNSHUFFLED data (temporal sequences)
+            for j in range(len(X_train) - 1):
+                state = X_train[j]
+                action = int(y_train[j])
+                reward = r_train[j]
+                next_state = X_train[j + 1]  # ✓ CORRECT: Actual next state in time
+                done = (j == len(X_train) - 2)
+
+                from .ml_models import Experience
+                exp = Experience(state, action, reward, next_state, done)
+                self.dqn.replay_buffer.push(exp)
+
+            # NOW shuffle for other models (PPO, LSTM, Transformer don't use next_state)
             perm = np.random.permutation(len(X_train))
-            X_train, y_train, r_train = X_train[perm], y_train[perm], r_train[perm]
+            X_train_shuffled = X_train[perm]
+            y_train_shuffled = y_train[perm]
+            r_train_shuffled = r_train[perm]
 
             # For multi-horizon: also shuffle the multi-horizon labels
             if is_multi_horizon:
@@ -3514,30 +3538,22 @@ class ModelPreTrainer:
                 if horizon_agreement:
                     logger.info(f"  Epoch {epoch+1}: Horizon agreement: {', '.join(f'{k}={v:.2%}' for k, v in horizon_agreement.items())}")
 
-            # Mini-batch training
-            for i in range(0, len(X_train), batch_size):
+            # Mini-batch training (using SHUFFLED data for non-DQN models)
+            for i in range(0, len(X_train_shuffled), batch_size):
                 batch_count += 1
 
                 # Progress logging every 1000 batches
                 if batch_count % 1000 == 0:
                     logger.info(f"  Epoch {epoch+1}: batch {batch_count}/{total_batches} ({100*batch_count/total_batches:.1f}%)")
-                batch_X = X_train[i:i+batch_size]
-                batch_y = y_train[i:i+batch_size]
-                batch_r = r_train[i:i+batch_size]
+                batch_X = X_train_shuffled[i:i+batch_size]
+                batch_y = y_train_shuffled[i:i+batch_size]
+                batch_r = r_train_shuffled[i:i+batch_size]
 
                 # =====================
-                # TRAIN DQN (Experience Replay)
+                # TRAIN DQN (Experience Replay) - Already added before shuffle
                 # =====================
-                for j in range(len(batch_X) - 1):
-                    state = batch_X[j]
-                    action = int(batch_y[j])
-                    reward = batch_r[j]
-                    next_state = batch_X[j + 1]
-                    done = (j == len(batch_X) - 2)
-
-                    from .ml_models import Experience
-                    exp = Experience(state, action, reward, next_state, done)
-                    self.dqn.replay_buffer.push(exp)
+                # DQN experiences were added to replay_buffer above using temporal sequences
+                # Here we just call train_step which samples from the buffer
 
                 dqn_loss = self.dqn.train_step(batch_size=min(32, len(batch_X)))
                 if dqn_loss:
