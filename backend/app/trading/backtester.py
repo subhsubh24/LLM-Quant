@@ -1620,7 +1620,7 @@ class WalkForwardBacktester:
         # PRE-TRADING SANITY CHECKS (ensure we'll actually trade)
         # ============================================================
         logger.info("\n🔍 PRE-TRADING SANITY CHECKS:")
-        logger.info(f"  Models loaded: DQN={hasattr(self, 'dqn') and self.dqn is not None}, PPO={hasattr(self, 'ppo') and self.ppo is not None}, LSTM={hasattr(self, 'lstm') and self.lstm is not None}, Transformer={hasattr(self, 'transformer') and self.transformer is not None}")
+        logger.info(f"  Models loaded: DQN={hasattr(model_trainer, 'dqn') and model_trainer.dqn is not None}, PPO={hasattr(model_trainer, 'ppo') and model_trainer.ppo is not None}, LSTM={hasattr(model_trainer, 'lstm') and model_trainer.lstm is not None}, Transformer={hasattr(model_trainer, 'transformer') and model_trainer.transformer is not None}")
         logger.info(f"  Initial capital: ${capital:,.2f}")
         logger.info(f"  Minimum position size: $100")
         logger.info(f"  Symbols to trade: {len(data)} symbols")
@@ -3439,6 +3439,20 @@ class ModelPreTrainer:
             logger.info("Single-horizon training mode")
             primary_labels = labels
 
+        # Validate and normalize features to state_dim
+        logger.info(f"Feature dimension before normalization: {features.shape[1]}")
+
+        # Pad/truncate features to state_dim (critical for model compatibility)
+        if features.shape[1] < self.state_dim:
+            padding = np.zeros((features.shape[0], self.state_dim - features.shape[1]))
+            features = np.hstack([features, padding])
+            logger.info(f"✅ Padded features from {features.shape[1] - (self.state_dim - features.shape[1])} to {self.state_dim}")
+        elif features.shape[1] > self.state_dim:
+            features = features[:, :self.state_dim]
+            logger.info(f"✅ Truncated features to {self.state_dim}")
+
+        logger.info(f"✅ Final feature dimension: {features.shape}")
+
         # FIXED: Use all data for training, let walk-forward validation handle the splits
         # The previous approach of splitting at a global index broke per-symbol alignment
         # because features are concatenated as blocks (BTC[0-5000], ETH[5000-10000], etc.)
@@ -3664,6 +3678,11 @@ class ModelPreTrainer:
                 batch_X = X_train_shuffled[i:i+batch_size]
                 batch_y = y_train_shuffled[i:i+batch_size]
                 batch_r = r_train_shuffled[i:i+batch_size]
+
+                # Validate batch shapes
+                if batch_X.shape[1] != self.state_dim:
+                    logger.error(f"❌ BATCH SHAPE MISMATCH: batch_X.shape={batch_X.shape}, expected state_dim={self.state_dim}")
+                    raise ValueError(f"Batch feature dimension {batch_X.shape[1]} doesn't match state_dim {self.state_dim}")
 
                 # =====================
                 # TRAIN DQN (Experience Replay) - Already added before shuffle
@@ -4861,20 +4880,28 @@ async def run_full_training_pipeline(
 
     # Step 2: Prepare training data
     logger.info("\n🔧 Step 2: Preparing training data...")
-    features, labels, rewards = pretrainer.prepare_training_data(historical_data, backtester)
+    try:
+        features, labels, rewards = pretrainer.prepare_training_data(historical_data, backtester)
+    except Exception as e:
+        logger.error(f"❌ Error in prepare_training_data: {e}", exc_info=True)
+        return {"error": f"Failed to prepare training data: {str(e)}"}
 
     if len(features) == 0:
-        return {"error": "Failed to prepare training data"}
+        return {"error": "Failed to prepare training data - no samples generated"}
 
-    logger.info(f"Prepared {len(features)} training samples")
+    logger.info(f"Prepared {len(features)} training samples with shape {features.shape}")
 
     # Step 3: Train models
     logger.info("\n🧠 Step 3: Training ML models...")
-    training_metrics = pretrainer.train(
-        features, labels, rewards,
-        epochs=training_epochs,
-        batch_size=256  # Larger batch = faster training
-    )
+    try:
+        training_metrics = pretrainer.train(
+            features, labels, rewards,
+            epochs=training_epochs,
+            batch_size=256  # Larger batch = faster training
+        )
+    except Exception as e:
+        logger.error(f"❌ Error during training: {e}", exc_info=True)
+        return {"error": f"Training failed: {str(e)}"}
 
     # Step 4: Run backtest
     logger.info("\n📊 Step 4: Running walk-forward backtest...")
