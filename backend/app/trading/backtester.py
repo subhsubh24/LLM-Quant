@@ -1096,7 +1096,8 @@ class WalkForwardBacktester:
         # Calculate trend
         sma_short = np.mean(closes[-20:])
         sma_long = np.mean(closes)
-        trend = (sma_short - sma_long) / sma_long
+        # BUG FIX #24: Add epsilon protection for division by zero (if all closes near zero)
+        trend = (sma_short - sma_long) / (sma_long + 1e-8)
 
         # Calculate volatility
         # BUG FIX #17: Add epsilon protection for division by zero (close prices near zero)
@@ -1160,7 +1161,8 @@ class WalkForwardBacktester:
             returns2 = np.diff(closes2) / (closes2[:-1] + 1e-8)
 
             # Calculate Pearson correlation
-            if len(returns1) == 0 or np.std(returns1) == 0 or np.std(returns2) == 0:
+            # BUG FIX #29: Use epsilon comparison instead of exact zero (avoid unreliable float comparison)
+            if len(returns1) == 0 or np.std(returns1) < 1e-8 or np.std(returns2) < 1e-8:
                 return 0.0
 
             correlation = np.corrcoef(returns1, returns2)[0, 1]
@@ -1216,7 +1218,8 @@ class WalkForwardBacktester:
 
             if not is_significant and total >= 20:
                 # Log when we're filtering due to statistical significance
-                win_rate = wins / total * 100
+                # BUG FIX #33: Defensive division - ensure total is not zero (already checked but explicit protection)
+                win_rate = (wins / max(total, 1)) * 100 if total > 0 else 0.0
                 if total >= 10:
                     logger.debug(f"🔍 Signal {symbol}:{action} filtered: {win_rate:.1f}% win rate ({wins}/{total}) not significantly > 50% (p={p_value:.3f})")
 
@@ -1732,8 +1735,9 @@ class WalkForwardBacktester:
 
                         # Log sector concentration
                         total_capital = sum(s["capital"] for s in sector_exposure.values())
+                        # BUG FIX #30: Use epsilon for robust division with tiny capital values
                         for sector, data in sector_exposure.items():
-                            sector_pct = data["capital"] / total_capital if total_capital > 0 else 0
+                            sector_pct = data["capital"] / max(total_capital, 1e-8) if total_capital > 1e-8 else 0
                             if sector_pct > 0.3:
                                 logger.info(f"  ⚠️ Sector concentration: {sector} = {sector_pct:.1%} ({data['symbols']})")
 
@@ -2259,7 +2263,8 @@ class WalkForwardBacktester:
                     baseline_portfolio_vol = baseline_portfolio_vol * 0.99 + current_macro_vol * 0.01  # Exponential moving average
 
                 # Detect regime shifts
-                vol_ratio = current_macro_vol / baseline_portfolio_vol
+                # BUG FIX #25: Add epsilon protection for division by zero in vol_ratio
+                vol_ratio = current_macro_vol / max(baseline_portfolio_vol, 1e-8)
                 prev_regime = macro_regime
 
                 if vol_ratio > extreme_vol_threshold:
@@ -2298,7 +2303,8 @@ class WalkForwardBacktester:
                         switch_threshold=regime_switch_threshold
                     )
                     # Update regime tracker
-                    if symbol in symbol_regime:
+                    # BUG FIX #28: Validate regime state before unpacking (prevents ValueError from corrupted data)
+                    if symbol in symbol_regime and isinstance(symbol_regime[symbol], tuple) and len(symbol_regime[symbol]) == 2:
                         prev_r, age = symbol_regime[symbol]
                         symbol_regime[symbol] = (regime, age+1 if regime == prev_r else 0)  # Reset age on switch
                     else:
@@ -2520,8 +2526,10 @@ class WalkForwardBacktester:
                         # This replaces pure Kelly Criterion with risk parity across portfolio
                         target_portfolio_vol = 0.012  # Target 1.2% daily portfolio volatility
 
-                        # SAFETY CHECK: Only apply vol targeting if we have positive capital
-                        if capital > 0:
+                        # SAFETY CHECK: Only apply vol targeting if we have sufficient capital
+                        # BUG FIX #31: Require minimum $100 capital to avoid micro-positions and numerical errors
+                        min_capital_threshold = 100.0  # Don't trade with less than $100
+                        if capital >= min_capital_threshold:
                             portfolio_current_vol = 0.0
                             position_weights_sum = 0.0
 
@@ -2543,7 +2551,8 @@ class WalkForwardBacktester:
                                 symbol_vol = np.std(returns)
 
                                 # Calculate required scaling to hit target portfolio vol
-                                new_position_weight = position_size / capital
+                                # BUG FIX #26: Add epsilon protection for capital division (prevent numerical errors when capital very small)
+                                new_position_weight = position_size / max(capital, 1e-8)
                                 portfolio_expected_vol = portfolio_current_vol + symbol_vol * new_position_weight
                                 # NOTE: portfolio_expected_vol is already a weighted sum - do NOT normalize by weight_sum!
                                 # portfolio_current_vol = vol1*w1 + vol2*w2 + ... (already weighted)
@@ -2627,7 +2636,8 @@ class WalkForwardBacktester:
                         # Without this cap, (confidence 2.0x * regime 1.15x) = 2.3x Kelly = too risky
                         # Kelly Criterion safety margin requires position_size <= 1.5 * kelly_base_size
                         max_kelly_position = available_capital * 0.03 * 1.5  # 1.5x of base 3% Kelly
-                        if position_size > max_kelly_position:
+                        # BUG FIX #27: Guard against zero max_kelly_position (prevents division by zero crash)
+                        if position_size > max_kelly_position and max_kelly_position > 1e-8:
                             kelly_excess = position_size / max_kelly_position
                             original_size = position_size
                             position_size = max_kelly_position
@@ -4614,7 +4624,8 @@ Be contrarian when sentiment is extreme. Consider:
 
         # Normalize weights
         total_weight = sum(weights.values())
-        weights = {k: v / total_weight for k, v in weights.items()}
+        # BUG FIX #32: Add epsilon protection for weight normalization
+        weights = {k: v / max(total_weight, 1e-8) for k, v in weights.items()}
 
         # Combine signals
         combined_signal = (
