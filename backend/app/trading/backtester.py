@@ -1332,11 +1332,12 @@ class WalkForwardBacktester:
             "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
 
             # Confidence Thresholds (AGGRESSIVELY LOWERED: 0.30/0.20/0.10 to fix 80% filter rate)
-            # Previous: 0.70/0.55/0.50 (too strict) → 0.45/0.35/0.25 (still filtered 80%)
-            # Now: 0.30/0.20/0.10 (match actual confidence values from ensemble voting)
-            "confidence_4x4_models": 0.30,           # 4/4 models agree
-            "confidence_3x4_models": 0.20,           # 3/4 models agree
-            "confidence_fallback": 0.10,             # 2/4 or fewer models
+            # CRITICAL FIX: Increased thresholds to filter marginal signals
+            # Previous: 0.30/0.20/0.10 (allowed trades with only 2% safety margin)
+            # Now: 0.65/0.55/0.45 (require minimum 10-20% safety margin, better quality)
+            "confidence_4x4_models": 0.65,           # 4/4 models agree - highest quality signals
+            "confidence_3x4_models": 0.55,           # 3/4 models agree - good quality signals
+            "confidence_fallback": 0.45,             # 2/4 or fewer models - lower quality, higher risk
             "regime_bull_confidence_mult": 1.10,     # Bull: require HIGHER confidence for shorts (counter-trend) (was 1.15)
             "regime_bear_confidence_mult": 1.10,     # Bear: require HIGHER confidence for longs (counter-trend) (was 1.15)
 
@@ -1889,15 +1890,21 @@ class WalkForwardBacktester:
                         exit_reason = "trailing_stop"
                         partial_exit_pct = 1.0
 
-                # TIER 1 FIX: PROFIT PYRAMIDING
+                # TIER 1 FIX: PROFIT PYRAMIDING (CRITICAL FIX BUG #3: Use fixed targets set at entry)
                 # Take profits gradually instead of holding to full target
                 # This locks in profits and reduces drawdown
-                if not should_exit and pnl_pct >= take_profit_pct * 0.5:  # 50% of target
-                    partial_exit_pct = 0.30  # Exit 30% of position at halfway point
+                pyramid_target_1 = pos.get("pyramid_target_1", 0.05)  # Default 5% if not set
+                pyramid_target_2 = pos.get("pyramid_target_2", 0.15)  # Default 15% if not set
+
+                if not should_exit and not pos.get("pyramided_1", False) and pnl_pct >= pyramid_target_1:
+                    partial_exit_pct = 0.30  # Exit 30% of position at first target
                     exit_reason = "profit_pyramid_1"
                     should_exit = True
+                    # Mark that we hit first pyramid level
+                    if partial_exit_pct < 1.0:
+                        pos["pyramided_1"] = True
 
-                if not should_exit and pnl_pct >= take_profit_pct:  # Full target
+                if not should_exit and pnl_pct >= pyramid_target_2:  # Final target
                     partial_exit_pct = 1.0  # Exit remaining position
                     should_exit = True
                     exit_reason = "take_profit"
@@ -2205,15 +2212,15 @@ class WalkForwardBacktester:
                     strong_consensus = (weighted_agreement_pct > config["weighted_agreement_threshold"]) or (model_agreement >= min_agreement)
 
                     # HORIZON-AWARE CONFIDENCE: Longer-term signals need lower confidence
-                    # Higher agreement (4/4) = likely short-term = need 0.70+
-                    # Lower agreement (3/4) = likely longer-term = accept 0.55+
-                    # Loosened for diagnostics to understand signal generation
+                    # Higher agreement (4/4) = likely short-term = need highest confidence
+                    # Lower agreement (3/4) = likely longer-term = accept lower
+                    # CRITICAL FIX: Increase base thresholds - 0.10-0.30 allows too many marginal trades
                     if model_agreement == 4:
-                        min_confidence = config["confidence_4x4_models"]  # 4/4 models agree: require high confidence (loosened from 0.80)
+                        min_confidence = config["confidence_4x4_models"]  # 4/4 models: require 0.65+ (was 0.30)
                     elif model_agreement == 3:
-                        min_confidence = config["confidence_3x4_models"]  # 3/4 models agree: accept lower (loosened from 0.70)
+                        min_confidence = config["confidence_3x4_models"]  # 3/4 models: require 0.55+ (was 0.20)
                     else:
-                        min_confidence = config["confidence_fallback"]  # Fallback: very loose for 2/4 or 1/4
+                        min_confidence = config["confidence_fallback"]  # Fallback: require 0.45+ (was 0.10)
 
                     # TIER 1 FIX: REGIME-AWARE CONFIDENCE ADJUSTMENT
                     # Adjust thresholds based on market regime (already computed above)
@@ -2349,16 +2356,15 @@ class WalkForwardBacktester:
                                 # Calculate required scaling to hit target portfolio vol
                                 new_position_weight = position_size / capital
                                 portfolio_expected_vol = portfolio_current_vol + symbol_vol * new_position_weight
-                                portfolio_weight_sum = position_weights_sum + new_position_weight
+                                # NOTE: portfolio_expected_vol is already a weighted sum - do NOT normalize by weight_sum!
+                                # portfolio_current_vol = vol1*w1 + vol2*w2 + ... (already weighted)
+                                # Adding symbol_vol * new_position_weight gives the correct weighted vol
 
-                                if portfolio_weight_sum > 0:
-                                    portfolio_expected_vol /= portfolio_weight_sum
-
-                                    # If we're going over target vol, scale down this position
-                                    if portfolio_expected_vol > target_portfolio_vol * 1.2:  # Allow 20% buffer
-                                        vol_scaling = (target_portfolio_vol * 1.2) / portfolio_expected_vol if portfolio_expected_vol > 0 else 1.0
-                                        position_size *= vol_scaling
-                                        logger.debug(f"Portfolio vol cap: scaling {symbol} by {vol_scaling:.2f}x (portfolio_vol={portfolio_expected_vol*100:.2f}%)")
+                                # If we're going over target vol, scale down this position
+                                if portfolio_expected_vol > target_portfolio_vol * 1.2:  # Allow 20% buffer
+                                    vol_scaling = (target_portfolio_vol * 1.2) / portfolio_expected_vol if portfolio_expected_vol > 0 else 1.0
+                                    position_size *= vol_scaling
+                                    logger.debug(f"Portfolio vol cap: scaling {symbol} by {vol_scaling:.2f}x (expected_vol={portfolio_expected_vol*100:.2f}%, target={target_portfolio_vol*100:.2f}%)")
 
                         # TIER 2 FIX: Calculate optimal stop distance for this new position
                         optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
@@ -2415,6 +2421,11 @@ class WalkForwardBacktester:
                             entry_cost = position_size * COST_PER_SIDE
                             effective_size = position_size - entry_cost
 
+                            # CRITICAL FIX BUG #3: Set pyramid targets at entry time, not recalculated each candle
+                            # This prevents time-dependent changes to exit levels
+                            pyramid_target_1 = 0.05 if side == "long" else 0.05  # First 5% target
+                            pyramid_target_2 = 0.15 if side == "long" else 0.15  # Final 15% target
+
                             positions[symbol] = {
                                 "side": side,
                                 "entry_price": candle.close,
@@ -2426,6 +2437,9 @@ class WalkForwardBacktester:
                                 "highest_price": candle.close,  # TIER 1 FIX: Track for trailing stops
                                 "lowest_price": candle.close,   # Also track for shorts
                                 "stop_distance": effective_stop_distance,  # TIER 2 FIX: Track which stop was used
+                                "pyramid_target_1": pyramid_target_1,  # TIER 1 FIX: Fixed pyramid targets at entry
+                                "pyramid_target_2": pyramid_target_2,  # TIER 1 FIX: Fixed final target
+                                "pyramided_1": False,  # Track if first level was hit
                             }
 
                             # Log position opening (PHASE D: include model agreement)
