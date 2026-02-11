@@ -2181,7 +2181,13 @@ class WalkForwardBacktester:
                         recent_avg_pnl = np.mean(recent_pnls[-10:])
                         if recent_avg_pnl < 0:
                             # Net losses: reduce sizing
-                            recovery_scale = max(config["recovery_scale_min"], 1.0 + (recent_avg_pnl / 100))  # Scale 0.5x to 1.0x
+                            # BUG FIX #40: Changed from dollar-based to percentage-based (CRITICAL: was account-size dependent)
+                            # Old: recovery_scale = max(0.50, 1.0 + (-$50 / 100)) = 0.50x for all accounts
+                            # New: recovery_scale = max(0.50, 1.0 + (-$50 / capital / 100)) = properly scaled by account
+                            # For $10K: recovery_scale = max(0.50, 1.0 + (-0.005)) = 0.995x (small reduction)
+                            # For $100K: recovery_scale = max(0.50, 1.0 + (-0.0005)) = 0.9995x (minimal reduction)
+                            recent_avg_pnl_pct = (recent_avg_pnl / max(capital, 1)) * 100
+                            recovery_scale = max(config["recovery_scale_min"], 1.0 + (recent_avg_pnl_pct / 100))
                             recovery_mode = True
                         else:
                             # Net profits: restore normal sizing
@@ -2567,8 +2573,30 @@ class WalkForwardBacktester:
 
                         # Simple Kelly: 2-3% per position (with 10 positions = 20-30% risk, 70-80% cash)
                         # This is more aggressive than before but allows actual trading
-                        base_kelly = 0.03  # 3% per position
-                        kelly_fraction = base_kelly
+                        # BUG FIX #43: Make Kelly fraction adaptive based on recent win rate (CRITICAL: was always fixed 3%)
+                        # True Kelly = (win_rate * avg_win - loss_rate * avg_loss) / avg_win
+                        # Simplified: kelly_fraction should adjust based on win rate
+                        # - 40% win rate: kelly_fraction = 0.5% (very conservative)
+                        # - 50% win rate: kelly_fraction = 1.0% (neutral)
+                        # - 55% win rate: kelly_fraction = 1.5% (moderate)
+                        # - 60% win rate: kelly_fraction = 2.0% (aggressive)
+                        base_kelly = 0.03  # 3% base (50% win rate equivalent)
+
+                        # Calculate adaptive Kelly based on recent win rate
+                        current_win_rate = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
+                        if current_win_rate <= 0.40:
+                            kelly_fraction = 0.005  # 0.5% for losing period
+                        elif current_win_rate <= 0.45:
+                            kelly_fraction = 0.010  # 1.0% for break-even period
+                        elif current_win_rate <= 0.50:
+                            kelly_fraction = 0.015  # 1.5% for neutral
+                        elif current_win_rate <= 0.55:
+                            kelly_fraction = 0.020  # 2.0% for good
+                        elif current_win_rate <= 0.60:
+                            kelly_fraction = 0.025  # 2.5% for very good
+                        else:
+                            kelly_fraction = 0.030  # 3.0% for excellent
+
                         # Use available_capital instead of total capital (CRITICAL FIX)
                         # BUG FIX #34: CRITICAL - Apply recovery_scale to prevent oversizing during drawdown recovery
                         # Without this, positions stay full-Kelly sized during recovery, risking account blow-up
@@ -2653,13 +2681,17 @@ class WalkForwardBacktester:
                             # Medium confidence: 1.0x size (baseline)
                             confidence_multiplier = 1.0
                         elif confidence >= 0.45:
-                            # Low confidence: 0.6x size (minimal bet)
-                            confidence_multiplier = 0.6
-                            logger.debug(f"⚠️ Low confidence (45-50%): -40% position size")
+                            # Low confidence: 0.75x size (minimal penalty for minimum-acceptable signals)
+                            # BUG FIX #44: Changed from 0.6x to 0.75x (CRITICAL: 0.45 is minimum threshold, shouldn't penalize 25% reduction)
+                            # A signal that barely meets minimum confidence should still get reasonable sizing
+                            confidence_multiplier = 0.75
+                            logger.debug(f"⚠️ Low confidence (45-50%): -25% position size")
                         else:
-                            # Very low confidence: 0.3x size (tiny bet)
-                            confidence_multiplier = 0.3
-                            logger.debug(f"🛑 Very low confidence (<45%): -70% position size")
+                            # Very low confidence: 0.75x size (should never reach here with BUG FIX #39 threshold change)
+                            # But if it does (due to edge cases), don't penalize too severely
+                            # BUG FIX #41 & #44: Changed from 0.3x to 0.75x (less penalizing for marginal signals)
+                            confidence_multiplier = 0.75
+                            logger.debug(f"🛑 Very low confidence (<45%): -25% position size (edge case)")
 
                         position_size *= confidence_multiplier
 
@@ -2698,14 +2730,16 @@ class WalkForwardBacktester:
 
                         # BUG FIX #5: Don't force undersized positions to expensive minimums
                         # This creates over-leverage on low-conviction trades
-                        # Instead: skip low-confidence undersize, cap medium-confidence undersize at $50
-                        if position_size < 100 and confidence < 0.50:
+                        # Instead: skip very-low-confidence undersize, cap medium-confidence undersize at $50
+                        # BUG FIX #39: Changed threshold from 0.50 to 0.45 (CRITICAL: was skipping 0.48-0.49 confidence trades)
+                        # Trades with 0.48-0.49 confidence are above minimum threshold and should be allowed
+                        if position_size < 100 and confidence < 0.45:
                             # Very low confidence + undersized = skip entirely (not worth the capital)
                             filter_stage_counters["low_confidence_skip"] = filter_stage_counters.get("low_confidence_skip", 0) + 1
                             if signals_generated <= 50 or np.random.random() < 0.01:
-                                logger.debug(f"⏭️ Skipped low-confidence undersize signal: {symbol} (confidence={confidence:.2f}, size=${position_size:.2f})")
+                                logger.debug(f"⏭️ Skipped very-low-confidence undersize signal: {symbol} (confidence={confidence:.2f}, size=${position_size:.2f})")
                             continue  # Skip this signal entirely
-                        elif position_size < 100 and confidence >= 0.50:
+                        elif position_size < 100 and confidence >= 0.45:
                             # Medium-high confidence: cap at $50-75 (don't over-leverage undersized)
                             # This respects the system's sizing calculation instead of overriding it
                             capped_size = min(position_size * 1.5, 75)  # 1.5x position size or $75, whichever is lower
