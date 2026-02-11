@@ -1302,6 +1302,14 @@ class WalkForwardBacktester:
         closes = np.array([c.close for c in candles])
         multi_labels = {}
 
+        # BUG FIX #10: All horizons must have same length to prevent 80% data truncation
+        # Compute max lookahead (longest horizon = tightest constraint)
+        max_lookahead = max(horizons) if horizons else 1600
+
+        # All labels should have length = len(closes) - max_lookahead
+        # Then pad horizon-specific labels to this length
+        min_samples = max(1, len(closes) - max_lookahead)  # Ensure at least 1 sample
+
         for lookahead in horizons:
             labels = []
             for i in range(len(closes) - lookahead):
@@ -1314,12 +1322,16 @@ class WalkForwardBacktester:
                 else:
                     labels.append(1)  # Hold
 
-            # Pad labels to match feature length (shortest horizon determines max samples)
-            # All horizons will have same number of labels by padding with neutral (hold)
-            if labels:
-                multi_labels[lookahead] = np.array(labels)
+            # Pad or truncate to min_samples length (all horizons same length)
+            # This prevents training data being truncated by shortest horizon
+            if len(labels) < min_samples:
+                # Pad with HOLD (1) to reach min_samples
+                labels.extend([1] * (min_samples - len(labels)))
             else:
-                multi_labels[lookahead] = np.array([1] * (len(closes) - lookahead))
+                # Truncate to min_samples (shouldn't happen with max_lookahead logic)
+                labels = labels[:min_samples]
+
+            multi_labels[lookahead] = np.array(labels)
 
         return multi_labels
 
@@ -2583,29 +2595,33 @@ class WalkForwardBacktester:
                             position_size = max_kelly_position
                             logger.debug(f"🔒 Position size capped at 1.5x Kelly: {symbol} {kelly_excess:.2f}x excess → {max_kelly_position:.0f} (was ${original_size:.0f})")
 
-                        # IMPROVED: Smart minimum position logic
-                        # Don't force very low-confidence signals into expensive positions
-                        # Only skip signal if BOTH:
-                        #  1. Position size is below $100 (would hit minimum)
-                        #  2. Confidence is very low (<45%)
-                        if position_size < 100 and confidence < 0.45:
-                            # Very low confidence signal would be forced to minimum $100 → skip entirely
-                            # This saves capital for higher-conviction ideas
+                        # BUG FIX #5: Don't force undersized positions to expensive minimums
+                        # This creates over-leverage on low-conviction trades
+                        # Instead: skip low-confidence undersize, cap medium-confidence undersize at $50
+                        if position_size < 100 and confidence < 0.50:
+                            # Very low confidence + undersized = skip entirely (not worth the capital)
                             filter_stage_counters["low_confidence_skip"] = filter_stage_counters.get("low_confidence_skip", 0) + 1
                             if signals_generated <= 50 or np.random.random() < 0.01:
-                                logger.debug(f"⏭️ Skipped low-confidence signal: {symbol} (confidence={confidence:.2f}, would be forced to $100 minimum)")
+                                logger.debug(f"⏭️ Skipped low-confidence undersize signal: {symbol} (confidence={confidence:.2f}, size=${position_size:.2f})")
                             continue  # Skip this signal entirely
-                        elif position_size < 100:
-                            # Medium+ confidence: force to minimum $100 (worth trading despite sizing)
+                        elif position_size < 100 and confidence >= 0.50:
+                            # Medium-high confidence: cap at $50-75 (don't over-leverage undersized)
+                            # This respects the system's sizing calculation instead of overriding it
+                            capped_size = min(position_size * 1.5, 75)  # 1.5x position size or $75, whichever is lower
                             if signals_generated <= 50 or np.random.random() < 0.01:
-                                logger.debug(f"🔸 Position size increased to minimum: {symbol} ${position_size:.2f} → $100 (medium confidence trade worth executing)")
-                            position_size = 100  # Minimum viable position size
+                                logger.debug(f"🔸 Position size capped: {symbol} ${position_size:.2f} → ${capped_size:.2f} (medium confidence)")
+                            position_size = capped_size
 
                         # CRITICAL FIX: Prevent opening positions if capital is negative or too low
-                        # Only open position if we have enough capital AND will maintain minimum buffer
-                        min_capital_to_trade = 100  # Need at least $100 to open position
+                        # BUG FIX #3: Check multi-position margin (not just this position)
+                        # With N positions open, need N * min_capital_to_trade buffer (not just 1x)
+                        min_capital_to_trade = 100  # Need at least $100 per position
+                        num_existing_positions = len(positions)
+                        total_margin_required = (num_existing_positions + 1) * min_capital_to_trade  # +1 for new position
                         capital_after_position = capital - position_size
-                        if position_size > 0 and position_size <= capital and capital >= min_capital_to_trade and capital_after_position >= min_capital_to_trade:  # Ensure we keep buffer
+
+                        # Only open if we maintain minimum margin for all positions
+                        if position_size > 0 and position_size <= capital and capital_after_position >= total_margin_required:
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
 
@@ -3130,6 +3146,10 @@ class ModelPreTrainer:
             # Now find minimum aligned label length
             min_label_len = min((len(labels) for labels in multi_labels.values() if len(labels) > 0), default=0)
             if min_label_len == 0:
+                # BUG FIX #9: Log why this symbol was skipped (was silent before)
+                logger.debug(f"⏭️ Skipping {symbol}: insufficient data for multi-horizon training")
+                logger.debug(f"   Candles: {len(candles)}, Horizons: {list(multi_labels.keys())}")
+                logger.debug(f"   Label lengths: {[(h, len(l)) for h, l in multi_labels.items()]}")
                 continue
 
             # Align features and labels to the minimum length
@@ -3413,6 +3433,12 @@ class ModelPreTrainer:
 
             # For multi-horizon: also shuffle the multi-horizon labels
             if is_multi_horizon:
+                # BUG FIX #2: Validate all horizons have aligned lengths before shuffling
+                for h in y_train_multi.keys():
+                    if len(y_train_multi[h]) != len(X_train):
+                        logger.error(f"Shape mismatch for horizon {h}: labels={len(y_train_multi[h])}, X_train={len(X_train)}")
+                        raise ValueError(f"Multi-horizon label shape mismatch (horizon {h})")
+
                 y_train_multi = {h: y_train_multi[h][perm] for h in y_train_multi.keys()}
 
             epoch_losses = []
