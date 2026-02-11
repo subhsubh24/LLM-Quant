@@ -1358,6 +1358,10 @@ class WalkForwardBacktester:
             logger.error("❌ Failed to load trained models! Backtest cannot proceed without trained models.")
             return self._empty_result()
 
+        # BUG FIX #15: Set random seed for reproducible tie-breaking (backtest should be deterministic)
+        # This ensures np.random.choice(tied_actions) produces same result across runs
+        np.random.seed(42)
+
         # ============================================================
         # CONFIG: Centralized hardcoded parameters (easy to tune)
         # ============================================================
@@ -1405,6 +1409,13 @@ class WalkForwardBacktester:
             "stop_loss_max": 0.30,                   # 30% maximum stop loss
             "take_profit_min": 0.05,                 # 5% minimum take profit
             "take_profit_max": 0.60,                 # 60% maximum take profit
+
+            # Profit Pyramiding (BUG FIX #6: Now configurable!)
+            # Exit strategy: take profits gradually at different profit levels
+            "pyramid_target_1_pct": 0.05,            # Exit 30% at +5% profit
+            "pyramid_target_2_pct": 0.15,            # Exit remaining at +15% profit
+            "pyramid_exit_1_size": 0.30,             # Exit 30% of position at target 1
+            "pyramid_exit_2_size": 1.0,              # Exit remaining 100% at target 2
 
             # Holding Periods (hours)
             "max_hold_hours_default": 1600,          # Default: 66+ days
@@ -2052,15 +2063,16 @@ class WalkForwardBacktester:
                         trade_directions[symbol] = current_direction
                         del positions[symbol]
                     else:
-                        # BUG FIX #6: Reset highest/lowest prices for trailing stop calculation
-                        # After partial exit, the new peak/trough should be current price, not the old peak
-                        # Otherwise trailing stop triggers on old price levels (premature exit)
+                        # BUG FIX #6: Reset highest/lowest prices AFTER PARTIAL EXIT
+                        # After taking profit on 30%, the remaining 70% gets a fresh trailing stop baseline
+                        # New peak/trough = current price (not old peak), so trailing stop is relative to exit point
+                        # The daily update at line 1913-1915 continues updating peak/trough normally
                         pos["size"] *= (1.0 - partial_exit_pct)
                         if side == "long":
                             pos["highest_price"] = current_price  # Reset peak for remaining position
                         else:
                             pos["lowest_price"] = current_price   # Reset trough for remaining position
-                        logger.debug(f"📊 Partial exit {symbol}: reset trailing stop, size now ${pos['size']:.0f}")
+                        logger.debug(f"📊 Partial exit {symbol}: reset trailing stop baseline, size now ${pos['size']:.0f}")
 
                     trade = {
                         "symbol": symbol,
@@ -2129,7 +2141,8 @@ class WalkForwardBacktester:
                     if len(recent_trades_window) > max_recent_trades:
                         recent_trades_window.pop(0)
 
-                    rolling_win_rate = np.mean(recent_trades_window) if recent_trades_window else 0
+                    # BUG FIX #13: Robust rolling window calculation (use neutral default, not 0)
+                    rolling_win_rate = np.mean(recent_trades_window) if len(recent_trades_window) > 0 else 0.5
                     if len(recent_trades_window) >= 10 and rolling_win_rate < degradation_threshold:
                         logger.warning(
                             f"⚠️ Model degradation detected! Rolling win rate: {rolling_win_rate*100:.1f}% "
@@ -2142,6 +2155,12 @@ class WalkForwardBacktester:
                     if "individual_predictions" in pos and "final_action" in pos:
                         individual_preds = pos.get("individual_predictions", [])
                         final_action = pos.get("final_action", 1)
+
+                        # BUG FIX #12: Log when model count mismatches (detect crashes)
+                        if len(individual_preds) != len(model_names):
+                            logger.debug(f"⚠️ Model prediction count mismatch: got {len(individual_preds)}, expected {len(model_names)}")
+                            if len(individual_preds) < len(model_names):
+                                logger.debug(f"   Missing models: {[model_names[i] for i in range(len(individual_preds), len(model_names))]}")
 
                         # Check which models predicted the same as final action
                         for idx, pred in enumerate(individual_preds):
@@ -2216,7 +2235,8 @@ class WalkForwardBacktester:
             for sym in list(window_data.keys())[:5]:  # Sample first 5 symbols for efficiency
                 if len(window_data[sym]) >= 30:
                     closes = np.array([c.close for c in window_data[sym][-30:]])
-                    returns = np.diff(closes) / closes[:-1]
+                    # BUG FIX #11: Add epsilon to prevent division by zero (defensive programming)
+                    returns = np.diff(closes) / (closes[:-1] + 1e-8)
                     portfolio_vols_for_macro.append(np.std(returns))
 
             if portfolio_vols_for_macro:
@@ -2340,10 +2360,14 @@ class WalkForwardBacktester:
                     total_model_weight = sum(model_weights.values())
                     weighted_agreement_pct = weighted_agreement / total_model_weight if total_model_weight > 0 else 0
 
-                    # Require strong consensus (>50% weighted agreement, loosened from 60% for diagnostics)
-                    min_agreement = config["min_model_agreement"]  # Fallback: require at least 2 out of 4 models (loosened from 3)
+                    # Require strong consensus - both weighted AND simple agreement (BUG FIX #7)
+                    # Using OR would allow weak signals (e.g., 2 good models + 2 bad models agree)
+                    # Using AND ensures both consensus metrics agree on the signal quality
+                    min_agreement = config["min_model_agreement"]  # Require at least 2 out of 4 models
                     model_agreement = sum(1 for p in individual_preds if p == final_action)
-                    strong_consensus = (weighted_agreement_pct > config["weighted_agreement_threshold"]) or (model_agreement >= min_agreement)
+
+                    # STRICT: Require BOTH weighted consensus AND minimum simple agreement
+                    strong_consensus = (weighted_agreement_pct > config["weighted_agreement_threshold"]) and (model_agreement >= min_agreement)
 
                     # HORIZON-AWARE CONFIDENCE: Longer-term signals need lower confidence
                     # Higher agreement (4/4) = likely short-term = need highest confidence
@@ -2492,9 +2516,10 @@ class WalkForwardBacktester:
                             for existing_sym, existing_pos in positions.items():
                                 if existing_sym in window_data and len(window_data[existing_sym]) >= 30:
                                     closes = np.array([c.close for c in window_data[existing_sym][-30:]])
-                                    returns = np.diff(closes) / closes[:-1]
+                                    returns = np.diff(closes) / (closes[:-1] + 1e-8)  # BUG FIX #14: Add epsilon
                                     sym_vol = np.std(returns)
-                                    position_weight = existing_pos["size"] / capital
+                                    # BUG FIX #14: Defensive programming - capital should not be <= 0 due to guard, but be safe
+                                    position_weight = existing_pos["size"] / max(capital, 1e-8)
                                     position_weights_sum += position_weight
                                     portfolio_current_vol += sym_vol * position_weight
 
@@ -2633,12 +2658,13 @@ class WalkForwardBacktester:
                             # This ensures: out $300, back $300 + profit, cost is embedded in pnl calc
 
                             # CRITICAL FIX BUG #3: Set pyramid targets at entry time, not recalculated each candle
+                            # BUG FIX #6: Now uses config values (not hardcoded)
                             # This prevents time-dependent changes to exit levels
                             # CRITICAL FIX: Both long and short use POSITIVE targets (exit at profit!)
                             # For shorts: pnl_pct = (entry - price) / entry → positive when price falls = profit ✓
                             # So shorts also want to exit when pnl_pct > 0.05 (profit), same as longs!
-                            pyramid_target_1 = 0.05   # Exit 30% at +5% profit (for BOTH long AND short)
-                            pyramid_target_2 = 0.15   # Exit rest at +15% profit (for BOTH long AND short)
+                            pyramid_target_1 = config["pyramid_target_1_pct"]   # Exit 30% at configurable profit target
+                            pyramid_target_2 = config["pyramid_target_2_pct"]   # Exit rest at configurable profit target
 
                             positions[symbol] = {
                                 "side": side,
@@ -2886,6 +2912,14 @@ class WalkForwardBacktester:
         if not equity_curve:
             return self._empty_result()
 
+        # BUG FIX #8: Need minimum samples for statistics (not just 1 point)
+        # With only 1 point, np.diff() produces empty array, std becomes 0
+        if len(equity_curve) < 10:
+            logger.warning(f"⚠️ Insufficient equity curve samples: {len(equity_curve)} (need ≥10 for statistics)")
+            # Still calculate what we can, but metrics will be limited
+            if len(equity_curve) == 1:
+                logger.warning("   Only 1 point in equity curve - no trades occurred or single candle backtest")
+
         logger.info("Calculating returns and Sharpe/Sortino ratios...")
         initial = self.initial_capital
         final = equity_curve[-1][1]
@@ -2913,7 +2947,12 @@ class WalkForwardBacktester:
         if len(downside_returns) > 0 and np.std(downside_returns) > 0:
             sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(365 * 24)  # 365 days for crypto
         else:
-            sortino = sharpe  # Use Sharpe if no downside risk
+            # BUG FIX #4: Don't default to Sharpe when no downside
+            # If all returns are positive, Sortino is undefined (infinite)
+            # Set to a large number and log this rare condition
+            sortino = 999.9
+            if len(downside_returns) == 0:
+                logger.info("✅ PERFECT BACKTEST: All returns positive, Sortino = infinite (set to 999.9)")
 
         # BUG FIX #19 & #20: Handle NaN values in metrics
         # Protect against NaN/inf from edge cases
@@ -3690,6 +3729,15 @@ class ModelPreTrainer:
             self.reset_state_buffer()
             test_correct = 0
             test_sample_count = 0
+
+            # BUG FIX #1: Ensure test data is aligned before evaluation
+            # Validate that X_test_holdout and y_test_holdout have same length
+            if len(X_test_holdout) != len(y_test_holdout):
+                logger.warning(f"⚠️ Test data misalignment: X_test={len(X_test_holdout)}, y_test={len(y_test_holdout)}")
+                # Truncate to shorter length to prevent IndexError
+                test_size = min(len(X_test_holdout), len(y_test_holdout))
+                X_test_holdout = X_test_holdout[:test_size]
+                y_test_holdout = y_test_holdout[:test_size]
 
             for i, state in enumerate(X_test_holdout[:min(1000, len(X_test_holdout))]):
                 pred = self.predict(state)
