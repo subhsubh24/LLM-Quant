@@ -154,7 +154,9 @@ class CointegrationTester:
         try:
             beta = np.linalg.lstsq(X, a_norm, rcond=None)[0]
             hedge_ratio = beta[1]
-        except:
+        except Exception as e:
+            # BUG FIX #2: Use specific exception handling instead of bare except
+            logger.warning(f"OLS regression failed for hedge ratio calculation: {e}")
             hedge_ratio = 1.0
 
         # Compute spread

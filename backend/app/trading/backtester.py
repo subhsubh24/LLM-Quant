@@ -1193,7 +1193,8 @@ class WalkForwardBacktester:
             correlation = np.corrcoef(returns1, returns2)[0, 1]
             return correlation if not np.isnan(correlation) else 0.0
         except Exception as e:
-            logger.error(f"Correlation calculation failed for {symbol1}/{symbol2}: {e}")
+            # BUG FIX #8: Use generic error message (symbol names not in scope)
+            logger.error(f"Correlation calculation failed: {e}")
             return 0.0  # If any error, assume uncorrelated
 
     def is_signal_statistically_significant(self, symbol: str, action: int, signal_history: Dict) -> bool:

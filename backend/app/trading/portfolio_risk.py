@@ -185,7 +185,8 @@ class PortfolioRiskManager:
 
         for symbol in symbols:
             prices = np.array(price_data[symbol][-min_len:])
-            ret = np.diff(prices) / prices[:-1]
+            # BUG FIX #6: Protect against division by zero in returns calculation
+            ret = np.diff(prices) / (prices[:-1] + 1e-8)
             returns.append(ret)
 
         returns = np.array(returns)
@@ -203,8 +204,10 @@ class PortfolioRiskManager:
         scores = []
 
         # Drawdown score
-        if self.rolling_max > 0:
-            current_dd = 1 - (sum(self.equity_history[-1:]) / self.rolling_max)  # Approximate
+        # BUG FIX #1: equity_history contains (timestamp, capital) tuples, not just numbers
+        if self.rolling_max > 0 and self.equity_history:
+            current_capital = self.equity_history[-1][1]  # Extract capital from tuple
+            current_dd = 1 - (current_capital / self.rolling_max)
             dd_score = min(1.0, current_dd / self.max_drawdown)
             scores.append(dd_score)
 

@@ -159,7 +159,8 @@ class ContinuousLearner:
         rewards = np.array(self.reward_buffer)
 
         # Recency weights (exponential: recent samples = higher weight)
-        if recent_weight != 1.0:
+        # BUG FIX #7: Validate recent_weight > 0 to avoid NaN from np.log()
+        if recent_weight != 1.0 and recent_weight > 0:
             positions = np.arange(n_samples)
             # Exponential weighting: earlier samples lower weight
             weights = np.exp((positions - (n_samples - 1)) * np.log(recent_weight) / n_samples)
@@ -168,6 +169,7 @@ class ContinuousLearner:
             # Apply weights (optional: use for weighted training)
             # Most frameworks don't support sample weights, so just use recent data
         else:
+            # Default to equal weighting if recent_weight is invalid
             weights = np.ones(n_samples)
 
         return RetrainingWindow(
@@ -265,10 +267,11 @@ class ContinuousLearner:
         recent_vol = np.std(recent_returns[-20:])
         historical_vol = np.std(recent_returns[:30])
 
-        if historical_vol == 0:
+        # BUG FIX #4 & #5: Use epsilon for float comparison and division protection
+        if historical_vol < 1e-8:
             return False
 
-        vol_change = abs(recent_vol - historical_vol) / historical_vol
+        vol_change = abs(recent_vol - historical_vol) / (historical_vol + 1e-8)
 
         return vol_change > threshold
 
