@@ -81,8 +81,9 @@ class Dense(Layer):
         elif self.activation == "sigmoid":
             return 1 / (1 + np.exp(-np.clip(self.z, -500, 500)))
         elif self.activation == "softmax":
-            exp_z = np.exp(self.z - np.max(self.z, axis=-1, keepdims=True))
-            return exp_z / np.sum(exp_z, axis=-1, keepdims=True)
+            # CRITICAL FIX: Add epsilon protection to prevent division by zero
+            exp_z = np.exp(np.clip(self.z - np.max(self.z, axis=-1, keepdims=True), -500, 500))
+            return exp_z / (np.sum(exp_z, axis=-1, keepdims=True) + 1e-8)
         else:  # linear
             return self.z
 
@@ -227,8 +228,9 @@ class MultiHeadAttention(Layer):
         return output.squeeze(0) if batch_size == 1 else output
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:
-        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
-        return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+        # CRITICAL FIX: Add clipping and epsilon protection to prevent overflow/division by zero
+        exp_x = np.exp(np.clip(x - np.max(x, axis=-1, keepdims=True), -500, 500))
+        return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
 
     def parameters(self) -> List[np.ndarray]:
         return [self.W_q, self.W_k, self.W_v, self.W_o]

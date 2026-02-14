@@ -326,7 +326,8 @@ class BinanceDataFetcher:
             cached_time, cached_data = _price_cache[cache_key]
             if datetime.now() - cached_time < _cache_duration:
                 prices = cached_data
-                returns = np.diff(prices) / prices[:-1]
+                # CRITICAL FIX: Add epsilon protection for division by zero
+                returns = np.diff(prices) / (prices[:-1] + 1e-8)
                 return prices, returns
 
         # Fetch klines
@@ -339,8 +340,8 @@ class BinanceDataFetcher:
             # Cache the data
             _price_cache[cache_key] = (datetime.now(), prices)
 
-            # Compute returns
-            returns = np.diff(prices) / prices[:-1]
+            # Compute returns with epsilon protection for division by zero
+            returns = np.diff(prices) / (prices[:-1] + 1e-8)
 
             return prices, returns
 

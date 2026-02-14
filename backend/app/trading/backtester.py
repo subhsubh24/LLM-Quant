@@ -2036,6 +2036,18 @@ class WalkForwardBacktester:
                 optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
                 base_stop = optimal_stop  # Replace hardcoded stop with learned value
 
+                # CRITICAL FIX: Recalculate regime for position exit (not yet calculated for current timestamp)
+                if symbol in window_data and len(window_data[symbol]) >= feature_window_size:
+                    prev_regime = symbol_regime.get(symbol, ('sideways', 0))[0] if symbol in symbol_regime else 'sideways'
+                    regime = self.detect_market_regime(
+                        window_data[symbol][-feature_window_size:],
+                        window=50,
+                        prev_regime=prev_regime,
+                        switch_threshold=1.0
+                    )
+                else:
+                    regime = symbol_regime.get(symbol, ('sideways', 0))[0] if symbol in symbol_regime else 'sideways'
+
                 # TIER 3 FIX: REGIME-AWARE STOP ADJUSTMENTS
                 # Tighten stops for trades against regime, loosen for trades with regime
                 if regime == 'bull':
@@ -2346,7 +2358,8 @@ class WalkForwardBacktester:
                 if sym in window_data and len(window_data[sym]) > 0:
                     current_price = window_data[sym][-1].close
                     entry_price = pos["entry_price"]
-                    if entry_price > 0:
+                    # CRITICAL FIX: Validate both prices before division (prevent NaN propagation)
+                    if entry_price > 0 and current_price > 0:
                         if pos["side"] == "long":
                             unrealized_pnl += pos["size"] * (current_price / entry_price - 1)
                         else:
@@ -3570,6 +3583,15 @@ class ModelPreTrainer:
         epochs limit. The epoch parameter (default 100) sets an upper bound, but the actual
         number of epochs trained is controlled by validation accuracy improvement.
         """
+        # CRITICAL FIX: Delete old checkpoints before training to prevent resuming on stale models
+        checkpoint_file = CHECKPOINT_DIR / "model_checkpoint.pkl"
+        if checkpoint_file.exists():
+            try:
+                checkpoint_file.unlink()
+                logger.info("✅ Deleted old checkpoint to ensure fresh training (no resume on old weights)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to delete old checkpoint: {e}")
+
         if len(features) == 0:
             logger.error("No training data provided")
             return self.training_metrics
@@ -3771,16 +3793,18 @@ class ModelPreTrainer:
             # temporal next_state. Then shuffle for other models (they don't need temporal order).
 
             # Create DQN experiences using UNSHUFFLED data (temporal sequences)
-            for j in range(len(X_train) - 1):
-                state = X_train[j]
-                action = int(y_train[j])
-                reward = r_train[j]
-                next_state = X_train[j + 1]  # ✓ CORRECT: Actual next state in time
-                done = (j == len(X_train) - 2)
+            # CRITICAL FIX: Add bounds check to prevent IndexError when X_train has only 1 sample
+            if len(X_train) >= 2:
+                for j in range(len(X_train) - 1):
+                    state = X_train[j]
+                    action = int(y_train[j])
+                    reward = r_train[j]
+                    next_state = X_train[j + 1]  # ✓ CORRECT: Actual next state in time
+                    done = (j == len(X_train) - 2)
 
-                from .ml_models import Experience
-                exp = Experience(state, action, reward, next_state, done)
-                self.dqn.replay_buffer.push(exp)
+                    from .ml_models import Experience
+                    exp = Experience(state, action, reward, next_state, done)
+                    self.dqn.replay_buffer.push(exp)
 
             # NOW shuffle for other models (PPO, LSTM, Transformer don't use next_state)
             perm = np.random.permutation(len(X_train))
@@ -3876,7 +3900,8 @@ class ModelPreTrainer:
                         seq = batch_X[j:j+seq_len]
                         target = batch_y[j+seq_len-1:j+seq_len]  # Label for last timestep
 
-                        if len(target) > 0:
+                        # CRITICAL FIX: Validate sequence shape before reshape
+                        if len(seq) == seq_len and len(target) > 0:
                             # Proper backpropagation through time
                             lstm_loss = self.lstm.train_step(
                                 seq.reshape(1, seq_len, -1),

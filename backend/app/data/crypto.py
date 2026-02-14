@@ -838,7 +838,9 @@ class CryptoMarketService:
 
             # Calculate market stats
             total_mcap = sum(q.market_cap for q in quotes.values())
-            btc_dominance = (quotes.get("BTC").market_cap / total_mcap * 100) if quotes.get("BTC") and total_mcap > 0 else 0
+            # CRITICAL FIX: Check None before accessing .market_cap (prevent AttributeError)
+            btc_quote = quotes.get("BTC")
+            btc_dominance = (btc_quote.market_cap / total_mcap * 100) if btc_quote and total_mcap > 0 else 0
 
             # Gainers and losers
             gainers = sorted(quotes.values(), key=lambda x: x.change_percent_24h, reverse=True)[:5]
