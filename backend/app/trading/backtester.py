@@ -1445,6 +1445,7 @@ class WalkForwardBacktester:
             "baseline_portfolio_vol": 0.008,         # 0.8% daily baseline
             "high_vol_multiplier": 1.5,              # 1.5x baseline = elevated (reduce position sizing)
             "extreme_vol_multiplier": 4.0,           # 4.0x baseline = extreme (changed from 2.5 - was too aggressive)
+            "regime_switch_threshold": 1.3,          # Require 30% trend change to switch regime (prevents whipsaw)
 
             # Model Degradation Detection
             "degradation_threshold": 0.35,           # Alert if win rate < 35%
@@ -1477,6 +1478,9 @@ class WalkForwardBacktester:
             "enable_correlation_hedging": True,     # Enable automatic hedging
             "correlation_update_interval": 500,     # Recalculate correlations every 500 candles
             "max_correlated_capital": 0.30,         # Max 30% capital in highly correlated positions
+
+            # Microstructure (Order Book) Parameters
+            "order_book_cache_interval_sec": 300,   # Fetch order books every 5 minutes (300s) to avoid rate limiting
         }
         logger.info("📋 Backtest Configuration (centralized):")
         for key, val in list(config.items())[:5]:
@@ -1576,7 +1580,7 @@ class WalkForwardBacktester:
         # BUG FIX #11: Regime stickiness (prevent whipsaw flips)
         # Track per-symbol regime to add hysteresis
         symbol_regime = {}  # Maps symbol -> (regime, regime_age_candles)
-        regime_switch_threshold = 1.3  # Require 30% trend change to switch regime (vs 0% now)
+        regime_switch_threshold = config["regime_switch_threshold"]  # Configurable threshold (default: 30% trend change)
 
         # CONTINUOUS LEARNING: Collect data for periodic retraining (NEW)
         # Track features and predictions to create forward-looking labels
@@ -1668,7 +1672,7 @@ class WalkForwardBacktester:
         ob_fetcher = OrderBookFetcher(exchange="binance_us")
         microstructure_extractors = {symbol: MicrostructureExtractor(lookback=20) for symbol in symbols}
         order_book_cache = {}  # Cache for recent order books to avoid excessive API calls
-        ob_fetch_interval = 5 * 60  # Fetch order books every 5 minutes (300 seconds)
+        ob_fetch_interval = config["order_book_cache_interval_sec"]  # Fetch interval from config
         last_ob_fetch_times = {symbol: 0 for symbol in symbols}
 
         logger.info(f"📊 PHASE A: Microstructure Order Book Integration initialized")
