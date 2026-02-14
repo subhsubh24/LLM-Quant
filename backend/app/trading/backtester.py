@@ -1054,8 +1054,10 @@ class WalkForwardBacktester:
             median = np.median(col_data)
             mad = np.median(np.abs(col_data - median))
             if mad < 1e-8:
-                # Near-constant feature: clip to ±1 around median
-                result[:, col] = np.clip(col_data, median - 1, median + 1)
+                # Near-constant feature: clip using percentage bounds (±10% or ±0.001)
+                # BUG FIX #18: Use relative bounds instead of fixed ±1 for robustness with small-magnitude features
+                relative_limit = max(abs(median) * 0.1, 0.001)
+                result[:, col] = np.clip(col_data, median - relative_limit, median + relative_limit)
             else:
                 limit = 5 * mad
                 result[:, col] = np.clip(col_data, median - limit, median + limit)
@@ -1167,7 +1169,8 @@ class WalkForwardBacktester:
 
             correlation = np.corrcoef(returns1, returns2)[0, 1]
             return correlation if not np.isnan(correlation) else 0.0
-        except:
+        except Exception as e:
+            logger.error(f"Correlation calculation failed for {symbol1}/{symbol2}: {e}")
             return 0.0  # If any error, assume uncorrelated
 
     def is_signal_statistically_significant(self, symbol: str, action: int, signal_history: Dict) -> bool:
@@ -1226,8 +1229,8 @@ class WalkForwardBacktester:
             return is_significant
 
         except Exception as e:
-            logger.debug(f"Error in significance test: {e}")
-            return True  # If error, allow the signal (neutral)
+            logger.error(f"❌ CRITICAL: Significance test failed for {symbol}:{action}: {e}")
+            return False  # If error, reject the signal (safe default)
 
     def get_optimal_stop_distance(self, stop_distance_effectiveness: Dict) -> float:
         """
@@ -1254,7 +1257,8 @@ class WalkForwardBacktester:
                         best_distance = distance
 
             return best_distance
-        except:
+        except Exception as e:
+            logger.error(f"Optimal stop distance calculation failed: {e} - using default 5%")
             return 0.05  # Fallback to 5% if any error
 
     def generate_labels(self, candles: List[OHLCV], lookahead: int = 5, threshold: float = 0.02) -> np.ndarray:
@@ -1411,7 +1415,7 @@ class WalkForwardBacktester:
             "weighted_agreement_threshold": 0.50,    # 50% weighted agreement
 
             # Liquidity & Volume
-            "min_volume_threshold": 1000,            # Minimum acceptable volume
+            "min_volume_threshold": 1000,            # Minimum acceptable volume (in quote currency units, e.g., USDT)
 
             # Correlation & Systemic Risk
             "max_correlation_threshold": 0.70,       # Reduce sizing if correlation > 70%
@@ -1645,6 +1649,7 @@ class WalkForwardBacktester:
             "not_in_cooldown": 0,     # cooldown check passed
             "no_conflict": 0,         # position conflict passed
             "not_already_open": 0,    # position not already open
+            "good_microstructure": 0, # microstructure filter passed
             "positions_opened": 0,    # actually opened
         }
 
@@ -1898,7 +1903,13 @@ class WalkForwardBacktester:
 
                 if time_since_last_fetch >= ob_fetch_interval:
                     # Fetch fresh order book from Binance API
-                    order_book = asyncio.run(ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
+                    # BUG FIX #26: asyncio.run() creates/destroys event loop every call (inefficient)
+                    # For now, wrap with error handling and aggressive caching (ob_fetch_interval=300s)
+                    try:
+                        order_book = asyncio.run(ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
+                    except Exception as e:
+                        logger.warning(f"Order book fetch failed for {symbol}: {e} - using cached data")
+                        order_book = None  # Fall back to cached data
 
                     if order_book is not None:
                         # Store in cache and update last fetch time
@@ -2454,6 +2465,11 @@ class WalkForwardBacktester:
                                 microstructure_filters_pass = False
                                 microstructure_flags.append(f"spread_bps={spread_bps:.1f}")
 
+                            # MOVED HERE: Define is_long, is_short, is_hold BEFORE using in filters
+                            is_short = prediction["action"] == 0
+                            is_long = prediction["action"] == 2
+                            is_hold = prediction["action"] == 1
+
                             # Micro Filter 2: Order Book Imbalance - check for extreme imbalance
                             ob_imbalance = micro_features.get("ob_imbalance", 0.5)  # Range: 0-1
                             if is_long and ob_imbalance > 0.6:
@@ -2502,9 +2518,7 @@ class WalkForwardBacktester:
 
                     # PHASE D: Aggressive Signal Filtering
                     # Only trade on ULTRA-STRONG signals
-                    is_short = prediction["action"] == 0
-                    is_long = prediction["action"] == 2
-                    is_hold = prediction["action"] == 1
+                    # NOTE: is_short, is_long, is_hold already defined above in microstructure filter section
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
                     # DIAGNOSTIC: Track filter stages
@@ -2850,9 +2864,9 @@ class WalkForwardBacktester:
                                 logger.debug(f"⏭️ Skipped very-low-confidence undersize signal: {symbol} (confidence={confidence:.2f}, size=${position_size:.2f})")
                             continue  # Skip this signal entirely
                         elif position_size < 100 and confidence >= 0.45:
-                            # Medium-high confidence: cap at $50-75 (don't over-leverage undersized)
-                            # This respects the system's sizing calculation instead of overriding it
-                            capped_size = min(position_size * 1.5, 75)  # 1.5x position size or $75, whichever is lower
+                            # Medium-high confidence: cap at maximum $75 (don't over-leverage undersized)
+                            # BUG FIX #11: Don't multiply - cap respects original calculation without oversizing
+                            capped_size = min(position_size, 75)  # Use original size or $75, whichever is lower
                             if signals_generated <= 50 or np.random.random() < 0.01:
                                 logger.debug(f"🔸 Position size capped: {symbol} ${position_size:.2f} → ${capped_size:.2f} (medium confidence)")
                             position_size = capped_size
@@ -2933,6 +2947,8 @@ class WalkForwardBacktester:
                             filtered_signals["low_model_agreement"] += 1
 
             # Update equity curve periodically or when positions close (to capture P&L)
+            # BUG FIX #20: Check ensures we don't update multiple times per hour (with hourly data, this is ~every candle)
+            # This prevents duplicate equity entries for the same timestamp
             should_update_equity = len(equity_curve) == 0 or (timestamp - equity_curve[-1][0]).total_seconds() > 3600
             if should_update_equity:
                 # Calculate total equity
@@ -2941,18 +2957,20 @@ class WalkForwardBacktester:
                     if sym in window_data and window_data[sym]:
                         current_price = window_data[sym][-1].close
                         entry_price = pos["entry_price"]
-                        if entry_price != 0:  # CRITICAL FIX: guard against zero entry price
-                            if pos["side"] == "long":
-                                pnl_pct = (current_price - entry_price) / entry_price
-                            else:
-                                pnl_pct = (entry_price - current_price) / entry_price
-                            # BUG FIX #1: Only add the P&L, not position_size*(1+pnl_pct)
-                            # OLD: total_equity += pos["size"] * (1 + pnl_pct)  ❌ Inflates equity 10-100x!
-                            # NEW: Add only the unrealized P&L
-                            unrealized_pnl = pos["size"] * pnl_pct
-                            total_equity += unrealized_pnl
-                        else:
+                        if entry_price == 0:  # CRITICAL FIX: guard against zero entry price
                             logger.warning(f"Equity curve update skipped for {sym}: entry_price=0")
+                            continue  # Skip P&L calculation for this position
+
+                        # Only reached if entry_price != 0
+                        if pos["side"] == "long":
+                            pnl_pct = (current_price - entry_price) / entry_price
+                        else:
+                            pnl_pct = (entry_price - current_price) / entry_price
+                        # BUG FIX #1: Only add the P&L, not position_size*(1+pnl_pct)
+                        # OLD: total_equity += pos["size"] * (1 + pnl_pct)  ❌ Inflates equity 10-100x!
+                        # NEW: Add only the unrealized P&L
+                        unrealized_pnl = pos["size"] * pnl_pct
+                        total_equity += unrealized_pnl
 
                 equity_curve.append((timestamp, total_equity))
 
@@ -3159,7 +3177,7 @@ class WalkForwardBacktester:
         # Sharpe Ratio (annualized, assuming hourly data)
         # BUG FIX #1: Use sqrt(365*24) for crypto (24/7 trading), not sqrt(252*24) (stock market)
         if len(returns) > 1 and np.std(returns) > 0:
-            sharpe = np.mean(returns) / np.std(returns) * np.sqrt(365 * 24)  # 365 days for crypto
+            sharpe = np.mean(returns) / np.std(returns) * np.sqrt(365 * 24)  # 8760 hours/year for hourly data annualization
         else:
             sharpe = 0
 
@@ -3184,13 +3202,13 @@ class WalkForwardBacktester:
         sortino = 0.0 if not np.isfinite(sortino) else sortino
 
         logger.info("Calculating drawdown...")
-        # Max Drawdown
+        # Max Drawdown - use epsilon protection for robustness
         peak = equity_values[0]
         max_dd = 0
         for value in equity_values:
             if value > peak:
                 peak = value
-            dd = (peak - value) / peak if peak > 0 else 0  # CRITICAL FIX: guard against zero peak
+            dd = (peak - value) / max(peak, 1e-8)  # Use epsilon for robust protection
             if dd > max_dd:
                 max_dd = dd
 
@@ -3526,14 +3544,13 @@ class ModelPreTrainer:
         is_multi_horizon = isinstance(labels, dict)
         if is_multi_horizon:
             logger.info("🎯 MULTI-HORIZON TRAINING MODE")
-            logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
-            logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
-            # Use 200h (mid-range) as primary for compatibility with existing code
-            # BUG FIX #50: CRITICAL - Check if labels dict is empty before accessing
-            # list(labels.values())[0] raises IndexError if labels is empty dict
+            # BUG FIX: CRITICAL - Defensive check for empty labels dict
             if len(labels) == 0:
                 logger.error("❌ CRITICAL: Labels dict is empty! No training data available.")
                 return None
+            logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
+            logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
+            # Use 200h (mid-range) as primary for compatibility with existing code
             primary_labels = labels.get(200, list(labels.values())[0])
         else:
             logger.info("Single-horizon training mode")
