@@ -985,7 +985,9 @@ class WalkForwardBacktester:
                     # Correct skewness formula: E[(X - mean)^3] / std^3
                     centered_returns = recent_returns - mean_return
                     return_skew = (np.mean(centered_returns ** 3)) / ((np.std(recent_returns) ** 3) + 1e-8)
-                except:
+                except Exception as e:
+                    # BUG #1: Bare except masks all exceptions - log actual error
+                    logger.debug(f"Skewness calculation error for {symbol}: {e}")
                     return_skew = 0
             else:
                 return_skew = 0
@@ -1937,7 +1939,8 @@ class WalkForwardBacktester:
                 side = pos["side"]
 
                 # Calculate unrealized P&L (CRITICAL FIX: guard against zero entry_price)
-                if entry_price <= 0:
+                # BUG #12: Also check for NaN - NaN <= 0 returns False, bypassing validation
+                if not np.isfinite(entry_price) or entry_price <= 0:
                     # BUG FIX #8: Entry price zero/negative prevents stop loss triggering
                     # Force exit position immediately (liquidate)
                     logger.error(f"🚨 CRITICAL: Position {symbol} has invalid entry_price={entry_price}, force-liquidating")
@@ -2884,6 +2887,11 @@ class WalkForwardBacktester:
 
                         # Only open if we maintain minimum margin for all positions
                         # Remove redundant checks: if capital_after >= margin, then position_size <= capital automatically
+                        # BUG #10: Validate position_size is finite before opening
+                        if not np.isfinite(position_size):
+                            logger.error(f"🚨 CRITICAL: Invalid position_size={position_size} (NaN/inf) for {symbol}, skipping")
+                            continue
+
                         if position_size > 0 and capital_after_position >= total_margin_required:
                             side = "long" if prediction["action"] == 2 else "short"
                             positions_opened += 1
@@ -4101,40 +4109,65 @@ class ModelPreTrainer:
         predictions = []
         confidences = []
 
+        # BUG #14: Handle individual model failures instead of crashing on first error
+        # This allows partial predictions when one model fails
+
+        # DQN prediction (single state)
         try:
-            # DQN prediction (single state)
             q_values = self.dqn.get_q_values(state)
-            dqn_action = np.argmax(q_values)
-            dqn_probs = self._softmax(q_values)
-            dqn_conf = dqn_probs[dqn_action]
-            predictions.append(dqn_action)
-            confidences.append(dqn_conf)
+            if np.any(np.isnan(q_values)) or np.any(np.isinf(q_values)):
+                logger.warning(f"DQN returned NaN/inf q_values, skipping")
+            else:
+                dqn_action = np.argmax(q_values)
+                dqn_probs = self._softmax(q_values)
+                dqn_conf = dqn_probs[dqn_action]
+                predictions.append(dqn_action)
+                confidences.append(dqn_conf)
+        except Exception as e:
+            logger.warning(f"DQN prediction failed: {e}")
 
-            # PPO prediction (single state)
+        # PPO prediction (single state)
+        try:
             ppo_probs = self.ppo.get_action_probs(state)
-            ppo_action = np.argmax(ppo_probs)
-            predictions.append(ppo_action)
-            confidences.append(ppo_probs[ppo_action])
+            if np.any(np.isnan(ppo_probs)) or np.any(np.isinf(ppo_probs)):
+                logger.warning(f"PPO returned NaN/inf probs, skipping")
+            else:
+                ppo_action = np.argmax(ppo_probs)
+                predictions.append(ppo_action)
+                confidences.append(ppo_probs[ppo_action])
+        except Exception as e:
+            logger.warning(f"PPO prediction failed: {e}")
 
-            # LSTM prediction (full sequence)
+        # LSTM prediction (full sequence)
+        try:
             lstm_out, _ = self.lstm.forward(seq)
             lstm_probs = self._softmax(lstm_out[-1])
-            lstm_action = np.argmax(lstm_probs)
-            predictions.append(lstm_action)
-            confidences.append(lstm_probs[lstm_action])
+            if np.any(np.isnan(lstm_probs)) or np.any(np.isinf(lstm_probs)):
+                logger.warning(f"LSTM returned NaN/inf probs, skipping")
+            else:
+                lstm_action = np.argmax(lstm_probs)
+                predictions.append(lstm_action)
+                confidences.append(lstm_probs[lstm_action])
+        except Exception as e:
+            logger.warning(f"LSTM prediction failed: {e}")
 
-            # Transformer prediction (full sequence)
+        # Transformer prediction (full sequence)
+        try:
             trans_out = self.transformer.forward(seq)
             trans_probs = self._softmax(trans_out[-1])
-            trans_action = np.argmax(trans_probs)
-            predictions.append(trans_action)
-            confidences.append(trans_probs[trans_action])
-
+            if np.any(np.isnan(trans_probs)) or np.any(np.isinf(trans_probs)):
+                logger.warning(f"Transformer returned NaN/inf probs, skipping")
+            else:
+                trans_action = np.argmax(trans_probs)
+                predictions.append(trans_action)
+                confidences.append(trans_probs[trans_action])
         except Exception as e:
-            logger.error(f"🚨 ERROR in model predictions: {e}")
-            logger.error(f"   State shape: {state.shape}")
-            logger.error(f"   Seq shape: {seq.shape}")
-            raise
+            logger.warning(f"Transformer prediction failed: {e}")
+
+        # Fail gracefully if ALL models fail
+        if len(predictions) == 0:
+            logger.error(f"🚨 ALL model predictions failed, using HOLD fallback")
+            return {"action": 1, "confidence": 0.0}  # HOLD with 0 confidence
 
         # Ensemble vote (weighted by per-model confidence)
         action_votes = {0: 0, 1: 0, 2: 0}
@@ -4158,7 +4191,8 @@ class ModelPreTrainer:
         # - 2/4 agree at 50% each → 0.50 * 0.50 = 0.25
         n_models = len(predictions)
         n_agree = sum(1 for p in predictions if p == final_action)
-        agreement = n_agree / n_models
+        # BUG #2: Guard against empty predictions list (all models failed)
+        agreement = n_agree / max(n_models, 1)
 
         agreeing_confs = [c for p, c in zip(predictions, confidences) if p == final_action]
         avg_conf = float(np.mean(agreeing_confs)) if agreeing_confs else 0
