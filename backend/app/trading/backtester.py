@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import numpy as np
 
-from .microstructure import MicrostructureExtractor, OrderBook
+from .microstructure import MicrostructureExtractor, OrderBook, OrderBookFetcher
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
 from .macro_strategy import MacroStrategy, get_macro_strategy
 from .portfolio_risk import PortfolioRiskManager, get_portfolio_risk_manager
@@ -1656,9 +1656,18 @@ class WalkForwardBacktester:
         )
         adaptive_weighter = AdaptiveEnsembleWeighter(model_names=model_names, lookback=50)
 
-        # PHASE A: Microstructure (waiting for real order book data APIs)
-        # Microstructure extractors removed from backtest until we have real data
-        # TODO: Integrate when Binance/Coinbase order book APIs are available
+        # PHASE A: Microstructure - Order Book Integration
+        # Initialize order book fetcher and microstructure extractors
+        ob_fetcher = OrderBookFetcher(exchange="binance_us")
+        microstructure_extractors = {symbol: MicrostructureExtractor(lookback=20) for symbol in symbols}
+        order_book_cache = {}  # Cache for recent order books to avoid excessive API calls
+        ob_fetch_interval = 5 * 60  # Fetch order books every 5 minutes (300 seconds)
+        last_ob_fetch_times = {symbol: 0 for symbol in symbols}
+
+        logger.info(f"📊 PHASE A: Microstructure Order Book Integration initialized")
+        logger.info(f"  Order Book Fetcher: Binance US API (depth=20)")
+        logger.info(f"  Microstructure Extractors: {len(symbols)} symbols")
+        logger.info(f"  Fetch Interval: {ob_fetch_interval}s to avoid rate limiting")
 
         logger.info(f"📊 PHASE B: Continuous Learning initialized")
         logger.info(f"  Continuous Learner: Retrain every 100 candles")
@@ -1880,13 +1889,30 @@ class WalkForwardBacktester:
             if len(window_data[symbol]) > max_window * 24:  # hourly data
                 window_data[symbol] = window_data[symbol][-max_window * 24:]
 
-            # PHASE A: Microstructure data
-            # NOTE: Real order book data must come from live APIs (Binance, Coinbase, Kraken)
-            # or from properly recorded historical order book snapshots
-            # NO synthetic/made-up data allowed
-            # TODO: Implement live order book fetching during backtest simulation
-            # For now, microstructure extractors are initialized but will be empty in backtest
-            # This ensures we only use REAL market data
+            # PHASE A: Microstructure data - Live order book fetching
+            # Fetch order book data from Binance API periodically to avoid rate limiting
+            # Real order book data only - no synthetic data
+            try:
+                current_time_unix = timestamp.timestamp() if hasattr(timestamp, 'timestamp') else time.time()
+                time_since_last_fetch = current_time_unix - last_ob_fetch_times.get(symbol, 0)
+
+                if time_since_last_fetch >= ob_fetch_interval:
+                    # Fetch fresh order book from Binance API
+                    order_book = asyncio.run(ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
+
+                    if order_book is not None:
+                        # Store in cache and update last fetch time
+                        order_book_cache[symbol] = order_book
+                        last_ob_fetch_times[symbol] = current_time_unix
+
+                        # Update microstructure extractor with real order book data
+                        if symbol in microstructure_extractors:
+                            microstructure_extractors[symbol].add_order_book(order_book)
+                            logger.debug(f"✓ Order book fetched for {symbol}: {len(order_book.bids)} bids, {len(order_book.asks)} asks")
+                    else:
+                        logger.debug(f"⚠ Order book fetch failed for {symbol}, using cached data")
+            except Exception as e:
+                logger.debug(f"Order book fetch error for {symbol}: {e}")
 
             # Update existing positions
             if symbol in positions:
@@ -2405,6 +2431,75 @@ class WalkForwardBacktester:
                     min_volume_threshold = config["min_volume_threshold"]  # Minimum acceptable volume
                     is_liquid = avg_volume >= min_volume_threshold
 
+                    # PHASE A: Microstructure signal quality filter
+                    # Extract microstructure features from order book data
+                    microstructure_score = 1.0  # Default to good conditions
+                    microstructure_filters_pass = True
+                    microstructure_flags = []
+
+                    if symbol in microstructure_extractors and order_book_cache.get(symbol) is not None:
+                        try:
+                            micro_features = microstructure_extractors[symbol].extract_features()
+
+                            # Micro Filter 1: Bid-Ask Spread - lower is better (tighter spread = higher quality)
+                            spread_bps = micro_features.get("spread_bps", 5.0)  # Default 5 bps if not available
+                            if spread_bps < 2:
+                                spread_score = 1.0  # Excellent: < 2 bps
+                            elif spread_bps < 5:
+                                spread_score = 0.9  # Good: 2-5 bps
+                            elif spread_bps < 10:
+                                spread_score = 0.7  # Acceptable: 5-10 bps
+                            else:
+                                spread_score = 0.4  # Poor: > 10 bps
+                                microstructure_filters_pass = False
+                                microstructure_flags.append(f"spread_bps={spread_bps:.1f}")
+
+                            # Micro Filter 2: Order Book Imbalance - check for extreme imbalance
+                            ob_imbalance = micro_features.get("ob_imbalance", 0.5)  # Range: 0-1
+                            if is_long and ob_imbalance > 0.6:
+                                imbalance_score = 1.0  # Buying pressure for long
+                            elif is_short and ob_imbalance < 0.4:
+                                imbalance_score = 1.0  # Selling pressure for short
+                            elif abs(ob_imbalance - 0.5) < 0.15:
+                                imbalance_score = 0.8  # Balanced market
+                            else:
+                                imbalance_score = 0.5  # Conflicting imbalance
+                                microstructure_flags.append(f"imbalance={ob_imbalance:.2f}")
+
+                            # Micro Filter 3: Order Flow - check for consistent flow direction
+                            order_flow = micro_features.get("order_flow_imbalance", 0.0)  # Range: -1 to 1
+                            if is_long and order_flow > 0.3:
+                                flow_score = 1.0  # Positive flow for long
+                            elif is_short and order_flow < -0.3:
+                                flow_score = 1.0  # Negative flow for short
+                            else:
+                                flow_score = 0.6  # Weak or conflicting flow
+                                microstructure_flags.append(f"flow={order_flow:.2f}")
+
+                            # Micro Filter 4: Large Order Presence
+                            large_buy = micro_features.get("large_buy_presence", 0.0)
+                            large_sell = micro_features.get("large_sell_presence", 0.0)
+                            if is_long and large_buy > 0.5:
+                                whale_score = 1.0  # Whale buying pressure
+                            elif is_short and large_sell > 0.5:
+                                whale_score = 1.0  # Whale selling pressure
+                            else:
+                                whale_score = 0.7  # Neutral whale activity
+
+                            # Composite microstructure score
+                            microstructure_score = (spread_score * 0.3 + imbalance_score * 0.35 + flow_score * 0.25 + whale_score * 0.1)
+
+                            if microstructure_score < 0.6:
+                                microstructure_filters_pass = False
+                                logger.debug(f"⚠️ Microstructure score low: {symbol} score={microstructure_score:.2f} flags={microstructure_flags}")
+
+                        except Exception as e:
+                            logger.debug(f"Microstructure feature extraction error for {symbol}: {e}")
+                            # Continue without microstructure filter if extraction fails
+                    else:
+                        # No order book data available yet - use default conditions
+                        logger.debug(f"⚠️ No order book data for {symbol} yet - skipping microstructure filter")
+
                     # PHASE D: Aggressive Signal Filtering
                     # Only trade on ULTRA-STRONG signals
                     is_short = prediction["action"] == 0
@@ -2490,6 +2585,8 @@ class WalkForwardBacktester:
                         filter_stage_counters["is_liquid"] += 1
                     if strong_consensus:
                         filter_stage_counters["strong_consensus"] += 1
+                    if microstructure_filters_pass:
+                        filter_stage_counters["good_microstructure"] = filter_stage_counters.get("good_microstructure", 0) + 1
 
                     # TIER 1 FIX: SIGNAL STATISTICAL SIGNIFICANCE TESTING
                     # Only trade if historical win rate for this symbol-action is statistically > 50%
@@ -2507,7 +2604,8 @@ class WalkForwardBacktester:
                     # NOTE: Removed 'conflicting_trade' hard ban - now we require HIGHER confidence for counter-trend trades instead
                     # This allows shorts in bull markets (and longs in bear markets) if confidence is high enough
                     # CRITICAL FIX: Include is_statistically_significant in rejection check (was missing, causing inconsistency)
-                    if is_hold or not meets_confidence or not is_liquid or not strong_consensus or not is_statistically_significant:
+                    # PHASE A ENHANCEMENT: Include microstructure filter for better signal quality
+                    if is_hold or not meets_confidence or not is_liquid or not strong_consensus or not is_statistically_significant or not microstructure_filters_pass:
                         # Log why signal was rejected (sampling to avoid spam)
                         if np.random.random() < 0.001:  # Log 0.1% of rejected signals
                             reasons = []
@@ -2523,6 +2621,8 @@ class WalkForwardBacktester:
                                 reasons.append(f"consensus={model_agreement}/4")
                             if not is_statistically_significant:
                                 reasons.append("not_sig_significant")
+                            if not microstructure_filters_pass:
+                                reasons.append(f"microstructure_score={microstructure_score:.2f}")
                             logger.debug(f"❌ Signal rejected {action_name} {symbol}: {', '.join(reasons)}")
                             if conflicting_trade:
                                 logger.debug(f"   (Note: {action_name} is counter-trend to {regime} regime, required higher confidence)")
