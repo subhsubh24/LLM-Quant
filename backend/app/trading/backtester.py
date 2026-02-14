@@ -1714,7 +1714,12 @@ class WalkForwardBacktester:
             # Candles are sorted by timestamp (not symbol), so BTC→ETH→XRP→BTC transitions occur
             # LSTM/Transformer must not see mixed context from different symbols
             if previous_symbol is not None and symbol != previous_symbol:
-                model_trainer.reset_state_buffer()
+                # CRITICAL FIX: Add error handling to state reset (prevents state corruption)
+                try:
+                    model_trainer.reset_state_buffer()
+                except Exception as e:
+                    logger.error(f"State buffer reset failed for symbol transition {previous_symbol}→{symbol}: {e}")
+                    # Continue anyway - state may be partially corrupted but backtest continues
             previous_symbol = symbol
 
             # Periodic progress logging (every 10 seconds or 5000 candles)
@@ -2384,10 +2389,17 @@ class WalkForwardBacktester:
                     closes = np.array([c.close for c in window_data[sym][-30:]])
                     # BUG FIX #11: Add epsilon to prevent division by zero (defensive programming)
                     returns = np.diff(closes) / (closes[:-1] + 1e-8)
-                    portfolio_vols_for_macro.append(np.std(returns))
+                    vol = np.std(returns)
+                    # CRITICAL FIX: Filter out NaN volatilities before averaging (prevents NaN regime detection)
+                    if np.isfinite(vol) and vol > 0:
+                        portfolio_vols_for_macro.append(vol)
 
             if portfolio_vols_for_macro:
                 current_macro_vol = np.mean(portfolio_vols_for_macro)
+                # CRITICAL FIX: Validate macro volatility is finite before using in division
+                if not np.isfinite(current_macro_vol):
+                    logger.warning("Macro volatility is non-finite, keeping previous regime")
+                    current_macro_vol = baseline_portfolio_vol
 
                 # Update baseline if we're in normal conditions
                 if current_macro_vol < baseline_portfolio_vol * 1.2:
@@ -3223,8 +3235,10 @@ class WalkForwardBacktester:
 
         # Sharpe Ratio (annualized, assuming hourly data)
         # BUG FIX #1: Use sqrt(365*24) for crypto (24/7 trading), not sqrt(252*24) (stock market)
-        if len(returns) > 1 and np.std(returns) > 0:
-            sharpe = np.mean(returns) / np.std(returns) * np.sqrt(365 * 24)  # 8760 hours/year for hourly data annualization
+        # CRITICAL FIX: Use epsilon comparison instead of float equality (> 1e-8 instead of > 0)
+        returns_std = np.std(returns)
+        if len(returns) > 1 and returns_std > 1e-8:
+            sharpe = np.mean(returns) / returns_std * np.sqrt(365 * 24)  # 8760 hours/year for hourly data annualization
         else:
             sharpe = 0
 

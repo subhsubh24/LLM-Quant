@@ -19,6 +19,7 @@ Usage:
 """
 
 from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass  # CRITICAL FIX: Missing import for @dataclass decorator
 import numpy as np
 import pandas as pd
 import logging

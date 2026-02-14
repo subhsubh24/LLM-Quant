@@ -146,14 +146,21 @@ class CointegrationTester:
             cointegration_score: 0-1 where 1=strongly cointegrated
         """
         # Normalize prices to same scale
-        a_norm = (price_a - price_a.mean()) / price_a.std()
-        b_norm = (price_b - price_b.mean()) / price_b.std()
+        # CRITICAL FIX: Add epsilon protection for zero volatility (stablecoins, flat periods)
+        a_std = max(price_a.std(), 1e-8)
+        b_std = max(price_b.std(), 1e-8)
+        a_norm = (price_a - price_a.mean()) / a_std
+        b_norm = (price_b - price_b.mean()) / b_std
 
         # Find hedge ratio using OLS regression
         X = np.column_stack([np.ones(len(a_norm)), b_norm])
         try:
             beta = np.linalg.lstsq(X, a_norm, rcond=None)[0]
             hedge_ratio = beta[1]
+            # CRITICAL FIX: Validate hedge ratio is finite (protect against singular matrices)
+            if not np.isfinite(hedge_ratio):
+                logger.warning(f"Invalid hedge ratio (non-finite): {hedge_ratio}, using 1.0")
+                hedge_ratio = 1.0
         except Exception as e:
             # BUG FIX #2: Use specific exception handling instead of bare except
             logger.warning(f"OLS regression failed for hedge ratio calculation: {e}")
@@ -332,8 +339,13 @@ class PairsTradingEngine:
                 spread_std = spread_hist.std()
 
                 # Current Z-score
-                if spread_std > 0:
+                # CRITICAL FIX: Validate spread_std is finite before division (prevents NaN from corrupted spreads)
+                if np.isfinite(spread_std) and spread_std > 1e-8:
                     zscore = (spread.iloc[-1] - spread_mean) / spread_std
+                    # Validate zscore is finite
+                    if not np.isfinite(zscore):
+                        zscore = 0
+                        logger.debug(f"Z-score non-finite for pair, resetting to 0")
                 else:
                     zscore = 0
 
