@@ -17,6 +17,7 @@ import os
 import json
 import pickle
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
@@ -30,6 +31,26 @@ from .portfolio_risk import PortfolioRiskManager, get_portfolio_risk_manager
 from .trading_system_1600h import TradingSystem1600h, get_trading_system
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async_in_thread(coro):
+    """
+    Run async coroutine from sync context or running event loop.
+
+    Detects if we're in a running event loop and handles appropriately:
+    - If running event loop exists: Uses ThreadPoolExecutor to run in separate thread
+    - If no event loop: Uses asyncio.run()
+
+    This avoids "asyncio.run() cannot be called from a running event loop" error.
+    """
+    try:
+        asyncio.get_running_loop()
+        # We're inside a running event loop, need to run async code in thread pool
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        # No running event loop, safe to use asyncio.run()
+        return asyncio.run(coro)
 
 # Model checkpoint directory
 CHECKPOINT_DIR = Path(__file__).parent / "checkpoints"
@@ -1909,10 +1930,10 @@ class WalkForwardBacktester:
 
                 if time_since_last_fetch >= ob_fetch_interval:
                     # Fetch fresh order book from Binance API
-                    # BUG FIX #26: asyncio.run() creates/destroys event loop every call (inefficient)
-                    # For now, wrap with error handling and aggressive caching (ob_fetch_interval=300s)
+                    # BUG FIX #26: Use thread-safe async handler to avoid event loop conflicts
+                    # Handles both sync and async contexts (web frameworks, etc.)
                     try:
-                        order_book = asyncio.run(ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
+                        order_book = _run_async_in_thread(ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
                     except Exception as e:
                         logger.warning(f"Order book fetch failed for {symbol}: {e} - using cached data")
                         order_book = None  # Fall back to cached data
