@@ -945,13 +945,12 @@ class DQN:
     def load(self, path: str):
         """Load model parameters."""
         data = np.load(path)
-        idx = 0
-        for layer in self._q_network:
-            for param in layer.parameters():
-                key = f"layer_{idx}_param_{0}"
+        # CRITICAL BUG FIX #3: Use correct indexing (i, j) to match save() method
+        for i, layer in enumerate(self._q_network):
+            for j, param in enumerate(layer.parameters()):
+                key = f"layer_{i}_param_{j}"
                 if key in data:
                     param[:] = data[key]
-                idx += 1
 
 
 # =============================================================================

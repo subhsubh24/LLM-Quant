@@ -391,8 +391,12 @@ class PaperTrader:
                         self.positions[ticker] = self.positions.get(ticker, 0) + quantity_change
                         self.cash -= executed_price * quantity_change + trade["commission"]
                     else:
-                        self.positions[ticker] = self.positions.get(ticker, 0) - quantity_change
-                        self.cash += executed_price * quantity_change - trade["commission"]
+                        # CRITICAL BUG FIX #5: SELL logic was inverted
+                        # quantity_change is already negative for sells (target - current)
+                        # So we add it to positions (which decreases since it's negative)
+                        self.positions[ticker] = self.positions.get(ticker, 0) + quantity_change
+                        # Cash goes UP when we sell (subtract negative = add positive)
+                        self.cash -= executed_price * quantity_change + trade["commission"]
 
                 except Exception as e:
                     logger.warning(f"Error trading {ticker}: {e}")

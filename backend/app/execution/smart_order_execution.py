@@ -163,17 +163,19 @@ class VWAPExecutor(ExecutionAlgorithm):
         Participate at expected volume profile throughout day.
         """
         # Estimate average execution price
-        spread_cost = market_data.bid_ask_spread / 2
+        # CRITICAL BUG FIX #6: spread_cost and impact_cost are fractions, need to multiply by price
+        spread_cost = market_data.price * market_data.bid_ask_spread / 2
         avg_price = market_data.price + (spread_cost if quantity > 0 else -spread_cost)
 
         # Market impact estimation
         impact_model = MarketImpactModel()
-        impact_cost = impact_model.estimate_impact(
+        impact_cost_fraction = impact_model.estimate_impact(
             quantity,
             market_data.daily_volume,
             market_data.volatility,
         )
-
+        # Convert fraction to dollar amount
+        impact_cost = market_data.price * impact_cost_fraction
         avg_price += impact_cost if quantity > 0 else -impact_cost
 
         # Commission
@@ -212,17 +214,19 @@ class TWAPExecutor(ExecutionAlgorithm):
     ) -> ExecutionResult:
         """Execute using TWAP algorithm."""
         # Similar to VWAP but assumes even volume distribution over time
-        spread_cost = market_data.bid_ask_spread / 2
+        # CRITICAL BUG FIX #6: spread_cost is fraction, convert to dollars
+        spread_cost = market_data.price * market_data.bid_ask_spread / 2
         avg_price = market_data.price + (spread_cost if quantity > 0 else -spread_cost)
 
         # Market impact (faster execution = higher impact)
         impact_model = MarketImpactModel()
-        impact_cost = impact_model.estimate_impact(
+        impact_cost_fraction = impact_model.estimate_impact(
             quantity,
             market_data.daily_volume,
             market_data.volatility,
         ) * 1.2  # 20% higher impact for TWAP (faster execution)
-
+        # Convert fraction to dollars
+        impact_cost = market_data.price * impact_cost_fraction
         avg_price += impact_cost if quantity > 0 else -impact_cost
 
         # Commission

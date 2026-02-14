@@ -2085,12 +2085,16 @@ class WalkForwardBacktester:
                         exit_reason = "trailing_stop"
                         partial_exit_pct = 1.0
                         current_price = low_price  # Exit at the triggered price
+                        # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
+                        pnl_pct = (current_price - entry_price) / entry_price
                 elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
                     if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):  # Use high, not close
                         should_exit = True
                         exit_reason = "trailing_stop"
                         partial_exit_pct = 1.0
                         current_price = high_price  # Exit at the triggered price
+                        # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
+                        pnl_pct = (entry_price - current_price) / entry_price
 
                 # TIER 1 FIX: PROFIT PYRAMIDING (CRITICAL FIX BUG #3: Use fixed targets set at entry)
                 # Take profits gradually instead of holding to full target
@@ -2122,6 +2126,11 @@ class WalkForwardBacktester:
                         pos["pyramided_1"] = True
                     # Exit at the target price, not current close
                     current_price = target_1_price
+                    # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
+                    if side == "long":
+                        pnl_pct = (current_price - entry_price) / entry_price
+                    else:
+                        pnl_pct = (entry_price - current_price) / entry_price
                     logger.debug(f"📊 Pyramid 1: {symbol} at {pyramid_target_1*100:.2f}% target, exiting 30%")
 
                 # CRITICAL FIX: Add missing guard for pyramided_2 to prevent double exit
@@ -2132,6 +2141,11 @@ class WalkForwardBacktester:
                     pos["pyramided_2"] = True  # Mark that we hit final pyramid level
                     # Exit at the target price, not current close
                     current_price = target_2_price
+                    # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
+                    if side == "long":
+                        pnl_pct = (current_price - entry_price) / entry_price
+                    else:
+                        pnl_pct = (entry_price - current_price) / entry_price
                     logger.debug(f"📊 Pyramid 2: {symbol} at {pyramid_target_2*100:.2f}% target, exiting remaining 70%")
 
                 # Stop loss (aggressive: tighter on long positions, wider on short)
@@ -2148,6 +2162,11 @@ class WalkForwardBacktester:
                     exit_reason = "stop_loss"
                     partial_exit_pct = 1.0
                     current_price = stop_price  # Exit at the stop price
+                    # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
+                    if side == "long":
+                        pnl_pct = (current_price - entry_price) / entry_price
+                    else:
+                        pnl_pct = (entry_price - current_price) / entry_price
                 # TIER 1 FIX: ADAPTIVE HOLD PERIODS
                 # Let winners run longer, exit losers faster based on recent performance
                 max_hold_hours = config["max_hold_hours_default"]  # Default: 66+ days
@@ -4168,6 +4187,9 @@ class ModelPreTrainer:
 
         # BUG #14: Handle individual model failures instead of crashing on first error
         # This allows partial predictions when one model fails
+
+        # CRITICAL BUG FIX #1: Initialize q_values before try block
+        q_values = np.zeros(self.action_dim)  # Default fallback
 
         # DQN prediction (single state)
         try:

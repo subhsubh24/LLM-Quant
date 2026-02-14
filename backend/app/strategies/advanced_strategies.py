@@ -46,9 +46,9 @@ class RegimeAwareStrategy(BaseStrategy):
 
     def __init__(self):
         """Initialize regime strategy"""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="regime_aware_v1",
-            strategy_name="Regime Aware Meta",
+            name="Regime Aware Meta",
             description="Routes capital by market regime",
         )
         self.regime_history = []
@@ -215,9 +215,9 @@ class SkewStrategy(BaseStrategy):
         Args:
             skew_threshold: Threshold for extreme skew (20% = 0.20)
         """
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="skew_v1",
-            strategy_name="Implied Vol Skew",
+            name="Implied Vol Skew",
             description="Trades volatility smile anomalies",
         )
         self.skew_threshold = skew_threshold
@@ -328,9 +328,9 @@ class EarningsEventStrategy(BaseStrategy):
             vol_expansion_threshold: IV expansion threshold (1.5x = 50%)
             mean_reversion_threshold: Price move threshold in sigmas
         """
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="earnings_v1",
-            strategy_name="Earnings Event",
+            name="Earnings Event",
             description="Pre/post earnings volatility trades",
         )
         self.vol_expansion_threshold = vol_expansion_threshold

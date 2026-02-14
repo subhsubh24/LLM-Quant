@@ -46,9 +46,9 @@ class TrendFollowingStrategy(BaseStrategy):
         min_volume_ratio: float = 1.0,
     ):
         """Initialize trend following strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="trend_following_v1",
-            strategy_name="Trend Following (Dual MA)",
+            name="Trend Following (Dual MA)",
             description="Trend following using dual moving average crossover",
         )
         self.fast_period = fast_period
@@ -133,9 +133,9 @@ class MeanReversionStrategy(BaseStrategy):
         min_band_squeeze: float = 0.02,
     ):
         """Initialize mean reversion strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="mean_reversion_v1",
-            strategy_name="Mean Reversion (Bollinger Bands)",
+            name="Mean Reversion (Bollinger Bands)",
             description="Mean reversion using Bollinger Bands with volume confirmation",
         )
         self.period = period
@@ -211,9 +211,9 @@ class VolatilityTradingStrategy(BaseStrategy):
         lookback: int = 20,
     ):
         """Initialize volatility trading strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="volatility_v1",
-            strategy_name="Volatility Trading (VIX-based)",
+            name="Volatility Trading (VIX-based)",
             description="Volatility trading based on VIX levels",
         )
         self.vix_low_threshold = vix_low_threshold
@@ -283,9 +283,9 @@ class SectorRotationStrategy(BaseStrategy):
         top_n_sectors: int = 3,
     ):
         """Initialize sector rotation strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="sector_rotation_v1",
-            strategy_name="Sector Rotation (Relative Strength)",
+            name="Sector Rotation (Relative Strength)",
             description="Sector rotation based on relative performance",
         )
         self.lookback = lookback
@@ -331,9 +331,9 @@ class CarryTradingStrategy(BaseStrategy):
         risk_on_threshold: float = 0.0,
     ):
         """Initialize carry trading strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="carry_v1",
-            strategy_name="Carry Trading (Risk-On/Off)",
+            name="Carry Trading (Risk-On/Off)",
             description="Carry trading with dynamic risk regime switching",
         )
         self.risk_on_threshold = risk_on_threshold
@@ -389,9 +389,9 @@ class TechnicalPatternsStrategy(BaseStrategy):
         rsi_oversold: float = 30.0,
     ):
         """Initialize technical patterns strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="technical_v1",
-            strategy_name="Technical Patterns (RSI + MACD)",
+            name="Technical Patterns (RSI + MACD)",
             description="Technical analysis using RSI and MACD",
         )
         self.rsi_period = rsi_period
@@ -464,9 +464,9 @@ class SentimentAnalysisStrategy(BaseStrategy):
         sentiment_threshold: float = 0.5,
     ):
         """Initialize sentiment analysis strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="sentiment_v1",
-            strategy_name="Sentiment Analysis (Alt Data)",
+            name="Sentiment Analysis (Alt Data)",
             description="Trading based on alternative data sentiment signals",
         )
         self.sentiment_threshold = sentiment_threshold
@@ -521,9 +521,9 @@ class FactorRotationStrategy(BaseStrategy):
         rotation_period: int = 21,  # Monthly rotation
     ):
         """Initialize factor rotation strategy."""
+        # CRITICAL BUG FIX #9: Use correct super().__init__() parameters
         super().__init__(
-            strategy_id="factor_rotation_v1",
-            strategy_name="Factor Rotation (Value/Growth/Momentum)",
+            name="Factor Rotation (Value/Growth/Momentum)",
             description="Dynamic rotation between equity factors",
         )
         self.rotation_period = rotation_period
