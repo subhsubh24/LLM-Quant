@@ -20,15 +20,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
-from .microstructure import MicrostructureExtractor, OrderBook, OrderBookFetcher
+from .microstructure import MicrostructureExtractor, OrderBookFetcher
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
-from .macro_strategy import MacroStrategy, get_macro_strategy
-from .portfolio_risk import PortfolioRiskManager, get_portfolio_risk_manager
-from .trading_system_1600h import TradingSystem1600h, get_trading_system
 
 logger = logging.getLogger(__name__)
 
@@ -1543,7 +1540,6 @@ class WalkForwardBacktester:
         max_portfolio_dd = config["max_portfolio_drawdown"]
         portfolio_trading_paused = False  # Pause trading if DD exceeds limit
         recent_returns = []  # Track recent returns for volatility
-        min_lookback_returns = 20  # Need 20 days of returns for vol calculation
 
         # TIER 1 FIX: DRAWDOWN RECOVERY SCALING (using config)
         # After losses, trade smaller to recover gradually (like top funds)
@@ -1580,7 +1576,6 @@ class WalkForwardBacktester:
         # Track per-symbol, per-action (long/short) trades to test if win rate > 50% is statistically significant
         signal_history = {}  # symbol -> {action -> [wins/losses]}
         min_trades_for_significance = 10  # Need at least 10 historical trades to test
-        significance_threshold = 0.95  # 95% confidence (p < 0.05)
 
         # TIER 2 FIX: LEARN OPTIMAL STOP PLACEMENT FROM HISTORICAL DATA
         # Track effectiveness of different stop distances (learn what works)
@@ -1597,7 +1592,6 @@ class WalkForwardBacktester:
         macro_regime = "normal"  # Track current regime (normal, elevated, extreme)
         high_vol_threshold = config["high_vol_multiplier"]  # 1.5x baseline = elevated macro vol
         extreme_vol_threshold = config["extreme_vol_multiplier"]  # 2.5x baseline = extreme macro vol
-        macro_filtered_trades = 0  # Track how many trades were blocked by macro filter
 
         # BUG FIX #11: Regime stickiness (prevent whipsaw flips)
         # Track per-symbol regime to add hysteresis
@@ -2758,8 +2752,6 @@ class WalkForwardBacktester:
                         # - 50% win rate: kelly_fraction = 1.0% (neutral)
                         # - 55% win rate: kelly_fraction = 1.5% (moderate)
                         # - 60% win rate: kelly_fraction = 2.0% (aggressive)
-                        base_kelly = 0.03  # 3% base (50% win rate equivalent)
-
                         # Calculate adaptive Kelly based on recent win rate
                         current_win_rate = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
                         if current_win_rate <= 0.40:

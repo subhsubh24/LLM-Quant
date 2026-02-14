@@ -13,9 +13,9 @@ Key references:
 - Johansen & Juselius (1990) "Cointegration in VAR"
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime
 from enum import Enum
 import numpy as np
 import pandas as pd
