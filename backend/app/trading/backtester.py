@@ -4345,9 +4345,8 @@ class ModelPreTrainer:
             confidences.append(ppo_probs[ppo_action])
 
             # LSTM prediction (full sequence)
-            # FIX #3: LSTM.forward() returns ndarray only, not tuple
-            lstm_out = self.lstm.forward(seq)
-            lstm_probs = self._softmax(lstm_out[-1])
+            # FIX #3: LSTM.forward() returns (probs, hidden_state) tuple
+            lstm_probs, _ = self.lstm.forward(seq)  # Unpack probs and discard hidden state
             lstm_action = np.argmax(lstm_probs)
             predictions.append(lstm_action)
             confidences.append(lstm_probs[lstm_action])
