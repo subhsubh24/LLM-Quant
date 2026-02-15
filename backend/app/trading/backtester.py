@@ -1639,6 +1639,8 @@ class WalkForwardBacktester:
         # SAFEGUARD: Per-symbol trading cooldown (prevent thrashing)
         last_exit_time = {}  # symbol -> timestamp of last exit
         min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 5 candles before re-entering same symbol
+        # BUG FIX #2: Enhanced flip-flop cooldown - apply longer cooldown for direction changes
+        min_flip_cooldown_candles = min_cooldown_candles * 2  # 2x longer cooldown for direction flips (10 vs 5 candles)
         trade_churn = {}  # symbol -> count of direction flips (long->short or short->long)
         trade_directions = {}  # symbol -> last direction (for detecting flips)
 
@@ -1856,6 +1858,15 @@ class WalkForwardBacktester:
                         if len(features_for_training) >= 50:
                             logger.info(f"  ✅ Created {valid_count} valid forward-looking labels, retraining models...")
                             X_retrain = np.array(features_for_training)
+
+                            # BUG FIX #7: Validate feature dimensions before retraining
+                            # Features should be 35-dimensional from prepare_features() or state_dim if already padded
+                            expected_dim = 35  # Native feature dimension from prepare_features()
+                            if X_retrain.shape[1] not in [expected_dim, model_trainer.state_dim]:
+                                logger.error(f"❌ Feature dimension mismatch in retraining: got {X_retrain.shape[1]}, expected {expected_dim} or {model_trainer.state_dim}")
+                                # Skip retraining with malformed features to prevent model corruption
+                                continue
+
                             y_retrain_multi = {h: np.array(labels_multi[h]) for h in retraining_buffer["horizons"]}
 
                             # CRITICAL FIX: Validate all horizons have aligned lengths before iterating
@@ -2577,7 +2588,8 @@ class WalkForwardBacktester:
                                 logger.debug(f"⚠️ Microstructure score low: {symbol} score={microstructure_score:.2f} flags={microstructure_flags}")
 
                         except Exception as e:
-                            logger.debug(f"Microstructure feature extraction error for {symbol}: {e}")
+                            # BUG FIX #4: Use warning level for better visibility into order book API failures
+                            logger.warning(f"Microstructure feature extraction error for {symbol}: {type(e).__name__}: {e}")
                             # Continue without microstructure filter if extraction fails
                     else:
                         # No order book data available yet - use default conditions
@@ -2709,13 +2721,20 @@ class WalkForwardBacktester:
                                 logger.debug(f"   (Note: {action_name} is counter-trend to {regime} regime, required higher confidence)")
 
                     # SAFEGUARD: Check for per-symbol trading cooldown (prevent thrashing)
+                    # BUG FIX #2: Enhanced flip-flop cooldown - apply longer cooldown for direction changes
                     in_cooldown = False
                     if symbol in last_exit_time:
                         candles_since_exit = candles_processed - last_exit_time[symbol]
-                        if candles_since_exit < min_cooldown_candles:
+                        # Determine required cooldown based on direction change
+                        new_direction = "long" if prediction["action"] == 2 else "short"
+                        is_direction_flip = symbol in trade_directions and trade_directions[symbol] != new_direction
+                        required_cooldown = min_flip_cooldown_candles if is_direction_flip else min_cooldown_candles
+
+                        if candles_since_exit < required_cooldown:
                             in_cooldown = True
+                            cooldown_type = "flip-flop" if is_direction_flip else "standard"
                             if signals_generated <= 100 or np.random.random() < 0.001:  # Log first 100 + 0.1% sample
-                                logger.debug(f"⏳ {symbol} in cooldown ({candles_since_exit}/{min_cooldown_candles} candles since exit)")
+                                logger.debug(f"⏳ {symbol} in {cooldown_type} cooldown ({candles_since_exit}/{required_cooldown} candles since exit)")
                     else:
                         filter_stage_counters["not_in_cooldown"] += 1
 
@@ -2974,16 +2993,22 @@ class WalkForwardBacktester:
                             pyramid_target_1 = config["pyramid_target_1_pct"]   # Exit 30% at configurable profit target
                             pyramid_target_2 = config["pyramid_target_2_pct"]   # Exit rest at configurable profit target
 
+                            # BUG FIX #9: Entry price sanity check (prevent extreme values that cause numerical instability)
+                            entry_price = candle.close
+                            if not (1e-4 <= entry_price <= 1e6):
+                                logger.warning(f"⚠️ Extreme entry price rejected: {symbol} ${entry_price:.10f} (outside 1e-4 to 1e6 range)")
+                                continue  # Skip this position entirely
+
                             positions[symbol] = {
                                 "side": side,
-                                "entry_price": candle.close,
+                                "entry_price": entry_price,
                                 "entry_time": timestamp,
                                 "size": position_size,  # CRITICAL FIX: Use position_size (not effective_size) for capital tracking
                                 "entry_cost": entry_cost,
                                 "individual_predictions": prediction.get("predictions", []),
                                 "final_action": prediction["action"],
-                                "highest_price": candle.close,  # TIER 1 FIX: Track for trailing stops
-                                "lowest_price": candle.close,   # Also track for shorts
+                                "highest_price": entry_price,  # TIER 1 FIX: Track for trailing stops
+                                "lowest_price": entry_price,   # Also track for shorts
                                 "stop_distance": effective_stop_distance,  # TIER 2 FIX: Track which stop was used
                                 "pyramid_target_1": pyramid_target_1,  # TIER 1 FIX: Fixed pyramid targets at entry
                                 "pyramid_target_2": pyramid_target_2,  # TIER 1 FIX: Fixed final target
@@ -3017,9 +3042,9 @@ class WalkForwardBacktester:
                             filtered_signals["low_model_agreement"] += 1
 
             # Update equity curve periodically or when positions close (to capture P&L)
-            # BUG FIX #20: Check ensures we don't update multiple times per hour (with hourly data, this is ~every candle)
-            # This prevents duplicate equity entries for the same timestamp
-            should_update_equity = len(equity_curve) == 0 or (timestamp - equity_curve[-1][0]).total_seconds() > 3600
+            # BUG FIX #3: With hourly candles, timing check is redundant (always true)
+            # Simply check if this is a new timestamp to prevent duplicates
+            should_update_equity = len(equity_curve) == 0 or timestamp != equity_curve[-1][0]
             if should_update_equity:
                 # Calculate total equity
                 total_equity = capital
@@ -3584,6 +3609,13 @@ class ModelPreTrainer:
                     f"Data alignment error for horizon {horizon}h: features={X.shape[0]}, labels={len(y_multi[horizon])}"
         assert X.shape[0] == len(r), \
             f"Data alignment error: features={X.shape[0]}, rewards={len(r)}"
+
+        # BUG FIX #5: Validate feature dimension consistency before padding
+        # Features generated by prepare_features() should always be 35-dimensional
+        # If this changes, it indicates a bug in feature generation
+        expected_feature_dim = 35  # From prepare_features() feature_vector (lines 1019-1056)
+        if X.shape[1] != expected_feature_dim and X.shape[1] != self.state_dim:
+            logger.warning(f"⚠️ Feature dimension mismatch: generated={X.shape[1]}, expected={expected_feature_dim}")
 
         # Pad/truncate features to state_dim
         if X.shape[1] < self.state_dim:
