@@ -2,7 +2,7 @@
 API routes for QuantLab.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import date, datetime, timedelta
@@ -3076,9 +3076,8 @@ async def get_strategy_presets():
 class BrokerCredentialsRequest(BaseModel):
     """Request model for setting broker credentials."""
     broker: str  # "alpaca" or "binance"
-    api_key: str
-    api_secret: str
     is_paper: bool = True  # Paper/testnet mode by default for safety
+    # FIX #15: Credentials now passed via Authorization header (not in request body)
 
 
 class LiveOrderRequest(BaseModel):
@@ -3091,7 +3090,10 @@ class LiveOrderRequest(BaseModel):
 
 
 @router.post("/broker/credentials")
-async def set_broker_credentials(request: BrokerCredentialsRequest):
+async def set_broker_credentials(
+    request: BrokerCredentialsRequest,
+    authorization: str = Header(None)
+):
     """
     Set API credentials for a broker (Alpaca or Binance).
 
@@ -3106,8 +3108,30 @@ async def set_broker_credentials(request: BrokerCredentialsRequest):
     - Get API keys at: https://www.binance.com/en/my/settings/api-management
     - Testnet available at: https://testnet.binancefuture.com
     - Set is_paper=false only when ready for live trading
+
+    **Authorization Header Format:**
+    Authorization: Bearer api_key:api_secret
     """
     from ..trading.live_brokers import get_broker_manager, BrokerType
+
+    # FIX #15: Extract credentials from Authorization header (not request body)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header. Format: Bearer api_key:api_secret"
+        )
+
+    try:
+        # Extract credentials from "Bearer api_key:api_secret" format
+        credentials_str = authorization[7:]  # Remove "Bearer " prefix
+        if ":" not in credentials_str:
+            raise ValueError("Credentials must be in format: api_key:api_secret")
+        api_key, api_secret = credentials_str.split(":", 1)
+    except (ValueError, IndexError):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid credentials format. Use: api_key:api_secret"
+        )
 
     manager = get_broker_manager()
 
@@ -3120,8 +3144,8 @@ async def set_broker_credentials(request: BrokerCredentialsRequest):
 
     manager.set_credentials(
         broker=broker_type,
-        api_key=request.api_key,
-        api_secret=request.api_secret,
+        api_key=api_key,
+        api_secret=api_secret,
         is_paper=request.is_paper,
     )
 

@@ -3570,6 +3570,14 @@ class ModelPreTrainer:
         # Stack rewards
         r = np.concatenate(all_rewards) if all_rewards else np.array([])
 
+        # FIX #2: Validate data alignment (features, labels, rewards must match)
+        for horizon in y_multi:
+            if len(y_multi[horizon]) > 0:
+                assert X.shape[0] == len(y_multi[horizon]), \
+                    f"Data alignment error for horizon {horizon}h: features={X.shape[0]}, labels={len(y_multi[horizon])}"
+        assert X.shape[0] == len(r), \
+            f"Data alignment error: features={X.shape[0]}, rewards={len(r)}"
+
         # Pad/truncate features to state_dim
         if X.shape[1] < self.state_dim:
             padding = np.zeros((X.shape[0], self.state_dim - X.shape[1]))
