@@ -15,12 +15,13 @@ from websockets.exceptions import ConnectionClosed
 
 logger = logging.getLogger(__name__)
 
-# Create SSL context that doesn't verify certificates
-# (needed for networks with SSL inspection proxies)
+# CRITICAL SECURITY FIX: Enable SSL certificate verification
+# Disabling verification creates MITM attack vulnerability
 def _create_ssl_context():
+    # Use default context which enables proper certificate validation
     ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
+    # DO NOT disable hostname checking or certificate verification in production
+    # If you have SSL issues, fix the certificates, don't disable security
     return ssl_context
 
 

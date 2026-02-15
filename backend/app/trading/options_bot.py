@@ -1375,6 +1375,10 @@ class OptionsQuantBot:
         t = expiry_days / 365
         r = 0.05  # Risk-free rate
 
+        # CRITICAL FIX: Validate prices before logarithm
+        if current_price <= 0 or strike <= 0 or iv <= 0 or t <= 0:
+            return None  # Invalid input, cannot price option
+
         # Black-Scholes for call/put
         d1 = (math.log(current_price / strike) + (r + iv**2 / 2) * t) / (iv * math.sqrt(t))
         d2 = d1 - iv * math.sqrt(t)
@@ -1468,6 +1472,10 @@ class OptionsQuantBot:
         iv = position.iv if position.iv > 0 else 0.80
         r = 0.05
         t = max(0.01, 7 / 365)  # Assume ~1 week left (simplified)
+
+        # CRITICAL FIX: Validate prices before logarithm
+        if underlying_price <= 0 or strike <= 0:
+            return 0.0  # Cannot calculate Greeks with invalid prices
 
         d1 = (math.log(underlying_price / strike) + (r + iv**2 / 2) * t) / (iv * math.sqrt(t))
         d2 = d1 - iv * math.sqrt(t)

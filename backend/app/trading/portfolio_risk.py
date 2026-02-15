@@ -12,6 +12,9 @@ Handles:
 import numpy as np
 from typing import Dict, List, Tuple
 from collections import defaultdict
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PortfolioRiskManager:
     """Manage portfolio-level risks for 1600h trading."""

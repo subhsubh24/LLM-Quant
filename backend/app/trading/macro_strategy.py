@@ -267,7 +267,8 @@ class MacroStrategy:
             if len(closes) >= period:
                 recent_sma = np.mean(closes[-20:])
                 long_sma = np.mean(closes[-period:])
-                trend_strength = (recent_sma - long_sma) / long_sma
+                # CRITICAL FIX: Add epsilon guard for division by zero
+                trend_strength = (recent_sma - long_sma) / max(long_sma, 1e-8)
 
                 if trend_strength > 0.03:
                     regime = "STRONG_UP"

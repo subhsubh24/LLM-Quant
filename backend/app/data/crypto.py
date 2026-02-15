@@ -798,7 +798,7 @@ class CryptoMarketService:
                 name=name,
                 price=price,
                 change_24h=change_24h,  # FIX #1: Already in USD from API, don't recalculate
-                change_percent_24h=(change_24h / (price - change_24h) * 100) if (price > 0 and price != change_24h) else 0,  # Calculate percent from prices
+                change_percent_24h=(change_24h / (price - change_24h + 1e-8) * 100) if (price > 0 and abs(price - change_24h) > 1e-8) else 0,  # CRITICAL FIX: Add epsilon guard
                 high_24h=price * 1.02,  # Estimate
                 low_24h=price * 0.98,   # Estimate
                 volume_24h=volume,

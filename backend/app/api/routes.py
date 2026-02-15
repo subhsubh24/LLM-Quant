@@ -1111,10 +1111,12 @@ async def create_bracket_order(
 
 
 @router.post("/trading/order/stop")
-async def create_stop_order(request: StopOrderRequest,
-    limit_price: Optional[float] = None,
-):
-    """Create a stop or stop-limit order with validation."""
+async def create_stop_order(request: StopOrderRequest):
+    """Create a stop or stop-limit order with validation.
+
+    CRITICAL FIX: Removed unused limit_price parameter - was never used.
+    If stop-limit orders needed, add limit_price to StopOrderRequest model.
+    """
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
@@ -1125,7 +1127,7 @@ async def create_stop_order(request: StopOrderRequest,
         side=order_side,
         quantity=request.quantity,
         stop_price=request.stop_price,
-        limit_price=None,  # Optional limit price not in StopOrderRequest
+        limit_price=None,  # Stop-market order (not stop-limit)
     )
 
     return order.to_dict()

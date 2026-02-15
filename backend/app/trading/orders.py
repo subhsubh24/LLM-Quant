@@ -398,12 +398,24 @@ class OrderManager:
 
             if order.side == OrderSide.SELL:  # Trailing stop for long positions
                 order._peak_price = max(order._peak_price, current_price)
-                trailing_distance = order._peak_price * (1 - order.trailing_percent / 100)
+                # CRITICAL FIX: Use trailing_amount (numeric value), not trailing_percent (boolean)
+                if order.trailing_percent:
+                    # Percentage-based trailing stop
+                    trailing_distance = order._peak_price * (1 - order.trailing_amount / 100)
+                else:
+                    # Absolute dollar trailing stop
+                    trailing_distance = order._peak_price - order.trailing_amount
                 if current_price <= trailing_distance:
                     return {"price": current_price, "quantity": order.quantity}
             elif order.side == OrderSide.BUY:  # Trailing stop for short positions
                 order._peak_price = min(order._peak_price, current_price)
-                trailing_distance = order._peak_price * (1 + order.trailing_percent / 100)
+                # CRITICAL FIX: Use trailing_amount (numeric value), not trailing_percent (boolean)
+                if order.trailing_percent:
+                    # Percentage-based trailing stop
+                    trailing_distance = order._peak_price * (1 + order.trailing_amount / 100)
+                else:
+                    # Absolute dollar trailing stop
+                    trailing_distance = order._peak_price + order.trailing_amount
                 if current_price >= trailing_distance:
                     return {"price": current_price, "quantity": order.quantity}
 

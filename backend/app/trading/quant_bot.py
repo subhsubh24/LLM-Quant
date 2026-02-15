@@ -272,6 +272,8 @@ class QuantMath:
         if len(prices) < 20:
             return 0.5
 
+        # CRITICAL FIX: Validate prices before logarithm
+        prices = np.array([max(p, 1e-8) for p in prices])  # Replace non-positive with epsilon
         returns = np.diff(np.log(prices))
         n = len(returns)
 
@@ -2971,6 +2973,11 @@ class QuantBot:
         position_value = self.total_value * confidence_adjusted_size
         position_value = max(position_value, self.min_trade_value)
         position_value = min(position_value, available)  # Cap at available
+
+        # CRITICAL FIX: Validate price before division
+        if price <= 0:
+            logger.error(f"Invalid price for {symbol}: {price}")
+            return False
 
         quantity = position_value / price
 
