@@ -372,7 +372,8 @@ class LSTMClassifier:
         return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
 
     def _softmax(self, x):
-        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        # FIX #5: Add clipping to prevent overflow with large logits
+        exp_x = np.exp(np.clip(x - np.max(x, axis=-1, keepdims=True), -500, 500))
         return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
 
     def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

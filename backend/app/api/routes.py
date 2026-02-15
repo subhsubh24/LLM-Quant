@@ -81,10 +81,11 @@ class BacktestRequest(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     rebalance_frequency: str = "weekly"
-    initial_cash: float = 100000.0
-    transaction_cost_bps: float = 10.0
-    max_position_weight: float = 0.10
-    target_volatility: float = 0.15
+    # FIX #8: Add validators to prevent invalid input values
+    initial_cash: float = Field(default=100000.0, gt=0, description="Initial cash must be positive")
+    transaction_cost_bps: float = Field(default=10.0, ge=0, le=1000, description="Transaction cost in basis points")
+    max_position_weight: float = Field(default=0.10, gt=0, le=1.0, description="Max position weight 0-100%")
+    target_volatility: float = Field(default=0.15, gt=0, le=1.0, description="Target volatility 0-100%")
 
 
 class PaperTradeRequest(BaseModel):
@@ -215,10 +216,11 @@ async def get_prices(
         raise HTTPException(status_code=404, detail="No price data available")
 
     # Convert to dict for JSON serialization
+    # FIX #7: Don't mask missing data with fillna(0) - return NaN/null instead
     return {
         "dates": [str(d.date()) for d in prices.index],
         "tickers": prices.columns.tolist(),
-        "prices": prices.fillna(0).values.tolist(),
+        "prices": prices.where(pd.notna(prices), None).values.tolist(),  # Convert NaN to None for JSON
     }
 
 
@@ -3252,7 +3254,8 @@ async def get_broker_accounts():
                 futures_account = await manager.binance.get_futures_account()
                 futures_balance = float(futures_account.get("totalWalletBalance", 0))
                 futures_unrealized = float(futures_account.get("totalUnrealizedProfit", 0))
-            except:
+            except Exception as e:  # FIX #10: Use Exception instead of bare except
+                logger.warning(f"Failed to fetch futures account: {e}")
                 futures_balance = 0
                 futures_unrealized = 0
 

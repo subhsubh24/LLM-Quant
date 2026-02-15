@@ -263,9 +263,13 @@ class CorrelationMonitor:
         correlation_scores = {}
 
         for symbol in corr_matrix.columns:
-            # Average correlation with all other symbols
+            # Average correlation with all other symbols - FIX #3: Add NaN validation
             avg_corr = corr_matrix[symbol].drop(symbol).mean()
-            correlation_scores[symbol] = max(0, avg_corr)
+            # Skip if correlation is NaN (indicates zero-variance asset)
+            if pd.isna(avg_corr):
+                correlation_scores[symbol] = 0.0
+            else:
+                correlation_scores[symbol] = max(0, avg_corr)
 
         return correlation_scores
 

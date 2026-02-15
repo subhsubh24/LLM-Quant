@@ -203,14 +203,14 @@ def compute_volume_features(
             avg_dv = dollar_vol.rolling(window, min_periods=window//2).mean()
             result[f"{ticker}_avg_dollar_vol_{window}d"] = avg_dv.shift(1)
 
-            # Volume trend (current vs average)
-            vol_trend = volume / volume.rolling(window, min_periods=window//2).mean()
+            # Volume trend (current vs average) - FIX #9: Add epsilon to prevent division by zero
+            vol_trend = volume / (volume.rolling(window, min_periods=window//2).mean() + 1e-8)
             result[f"{ticker}_vol_trend_{window}d"] = vol_trend.shift(1)
 
-        # Volume volatility
+        # Volume volatility - FIX #9: Add epsilon to prevent division by zero
         vol_std = volume.rolling(21, min_periods=10).std()
         vol_mean = volume.rolling(21, min_periods=10).mean()
-        result[f"{ticker}_vol_cv"] = (vol_std / vol_mean).shift(1)
+        result[f"{ticker}_vol_cv"] = (vol_std / (vol_mean + 1e-8)).shift(1)
 
     return result
 
@@ -243,10 +243,10 @@ def compute_risk_features(
         rets = stock_rets[ticker]
 
         for window in windows:
-            # Rolling beta = Cov(stock, market) / Var(market)
+            # Rolling beta = Cov(stock, market) / Var(market) - FIX #9: Add epsilon for division guard
             cov = rets.rolling(window, min_periods=window//2).cov(market_rets)
             var = market_rets.rolling(window, min_periods=window//2).var()
-            beta = cov / var
+            beta = cov / (var + 1e-8)
 
             # Lag by 1
             result[f"{ticker}_beta_{window}d"] = beta.shift(1)

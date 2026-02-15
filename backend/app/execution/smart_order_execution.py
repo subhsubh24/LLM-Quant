@@ -368,14 +368,13 @@ class ExecutionCostAnalyzer:
 
         slippages = []
         for result in self.execution_history:
-            # Slippage relative to midpoint
-            slippage = (
-                abs(result.avg_execution_price)
-                / result.avg_execution_price
-                if result.avg_execution_price > 0
-                else 0
-            )
-            slippages.append(slippage * 10_000)
+            # FIX #4: Slippage is the spread cost relative to notional value (not abs/relative price)
+            # Spread cost is the difference between execution price and mid-price
+            notional = result.quantity * result.avg_execution_price
+            if notional > 1e-8:
+                # Convert spread cost to basis points
+                slippage_bps = (result.spread_cost / notional) * 10_000
+                slippages.append(slippage_bps)
 
         return np.mean(slippages) if slippages else 0
 

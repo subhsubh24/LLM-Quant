@@ -263,9 +263,13 @@ class StackingEnsemble:
         else:
             raw_weights = np.abs(self.meta_learner.coef_)
             total = np.sum(raw_weights)
-            weights = {
-                name: w / total for name, w in zip(self.base_models.keys(), raw_weights)
-            }
+            # FIX #6: Add zero-division guard - if all weights are 0, use equal weighting
+            if total <= 0:
+                weights = {name: 1.0 / len(self.base_models) for name in self.base_models}
+            else:
+                weights = {
+                    name: w / total for name, w in zip(self.base_models.keys(), raw_weights)
+                }
 
         return weights
 
@@ -289,7 +293,7 @@ class StackingEnsemble:
             from sklearn.base import clone
 
             return clone(model)
-        except:
+        except Exception:  # FIX #11: Use Exception instead of bare except
             # Fall back to deep copy
             return copy.deepcopy(model)
 
