@@ -804,7 +804,8 @@ class CryptoMarketService:
                 volume_24h=volume,
                 market_cap=market_cap,
                 market_cap_rank=rank,
-                circulating_supply=market_cap / price if price > 0 else 0,
+                # FIX #14: Add epsilon guard to supply division
+                circulating_supply=market_cap / max(price, 1e-8),
                 total_supply=None,
                 ath=price * 1.5,  # Estimate
                 ath_change_percent=-30,  # Estimate

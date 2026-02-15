@@ -4304,6 +4304,12 @@ class ModelPreTrainer:
         Returns:
             Prediction dict with action, confidence, etc.
         """
+        # FIX #13: Validate regime parameter to prevent crashes
+        valid_regimes = {'bull', 'bear', 'neutral'}
+        if regime not in valid_regimes:
+            logger.warning(f"Invalid regime: {regime}, using 'neutral'")
+            regime = 'neutral'
+
         # CRITICAL FIX: Apply feature normalization (same as used in training)
         # Must use same normalization for predictions to match training distribution
         if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
@@ -4339,7 +4345,8 @@ class ModelPreTrainer:
             confidences.append(ppo_probs[ppo_action])
 
             # LSTM prediction (full sequence)
-            lstm_out, _ = self.lstm.forward(seq)
+            # FIX #3: LSTM.forward() returns ndarray only, not tuple
+            lstm_out = self.lstm.forward(seq)
             lstm_probs = self._softmax(lstm_out[-1])
             lstm_action = np.argmax(lstm_probs)
             predictions.append(lstm_action)

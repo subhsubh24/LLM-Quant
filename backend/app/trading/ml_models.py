@@ -2170,7 +2170,12 @@ class EnsemblePredictor:
                 action_votes[action] += weight
 
         final_action = int(np.argmax(action_votes))
-        confidence = action_votes[final_action] / np.sum(action_votes)
+        # FIX #4: Add epsilon guard for division by zero
+        total_votes = np.sum(action_votes)
+        confidence = action_votes[final_action] / max(total_votes, 1e-8)
+        # Validate confidence is finite
+        if not np.isfinite(confidence):
+            confidence = 0.5
 
         return final_action, {
             "lstm_action": lstm_action,

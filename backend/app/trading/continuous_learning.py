@@ -16,6 +16,8 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import logging
+from collections import deque
+from threading import Lock
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +71,11 @@ class ContinuousLearner:
         self.training_history: List[Dict] = []
         self.retraining_events: List[Dict] = []
 
-        # Data buffer
-        self.feature_buffer: List[np.ndarray] = []
-        self.label_buffer: List[int] = []
-        self.reward_buffer: List[float] = []
+        # Data buffer - FIX #12: Use deque for O(1) operations and thread safety
+        self.feature_buffer: deque = deque(maxlen=window_size)
+        self.label_buffer: deque = deque(maxlen=window_size)
+        self.reward_buffer: deque = deque(maxlen=window_size)
+        self._buffer_lock = Lock()  # Thread safety for atomic operations
 
         # Performance tracking
         self.recent_trades: List[float] = []  # P&L values
@@ -117,9 +120,12 @@ class ContinuousLearner:
             label: Action label (0=sell, 1=hold, 2=buy)
             reward: Trade reward/P&L
         """
-        self.feature_buffer.append(features)
-        self.label_buffer.append(label)
-        self.reward_buffer.append(reward)
+        # FIX #12: Atomic operation with thread safety
+        with self._buffer_lock:
+            self.feature_buffer.append(features)
+            self.label_buffer.append(label)
+            self.reward_buffer.append(reward)
+            # Note: deque with maxlen automatically removes oldest items
 
         self.candles_since_retrain += 1
         self.total_candles_processed += 1
@@ -128,12 +134,6 @@ class ContinuousLearner:
         self.recent_trades.append(reward)
         if len(self.recent_trades) > self.max_recent_trades:
             self.recent_trades.pop(0)
-
-        # Keep buffer size manageable
-        if len(self.feature_buffer) > self.window_size:
-            self.feature_buffer.pop(0)
-            self.label_buffer.pop(0)
-            self.reward_buffer.pop(0)
 
     def get_training_window(
         self, recent_weight: float = 2.0
@@ -149,14 +149,20 @@ class ContinuousLearner:
         Returns:
             RetrainingWindow with weighted samples
         """
-        if len(self.feature_buffer) < 100:
-            return None  # Need minimum data
+        # FIX #12: Thread-safe buffer read
+        with self._buffer_lock:
+            if len(self.feature_buffer) < 100:
+                return None  # Need minimum data
 
-        # Create sliding window with recency weighting
-        n_samples = len(self.feature_buffer)
-        features = np.array(self.feature_buffer)
-        labels = np.array(self.label_buffer)
-        rewards = np.array(self.reward_buffer)
+            # Create sliding window with recency weighting
+            n_samples = len(self.feature_buffer)
+            features = np.array(list(self.feature_buffer))
+            labels = np.array(list(self.label_buffer))
+            rewards = np.array(list(self.reward_buffer))
+
+            # Validate buffer alignment
+            assert len(features) == len(labels) == len(rewards), \
+                f"Buffer misalignment: features={len(features)}, labels={len(labels)}, rewards={len(rewards)}"
 
         # Recency weights (exponential: recent samples = higher weight)
         # BUG FIX #7: Validate recent_weight > 0 to avoid NaN from np.log()

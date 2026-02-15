@@ -76,13 +76,15 @@ class PortfolioRiskManager:
         """
         # Check position heat (risk exposure)
         heat = position_size * stop_loss_pct
-        heat_pct = heat / current_capital
+        # FIX #1: Add epsilon guard for division by zero
+        heat_pct = heat / max(current_capital, 1e-8)
 
         if heat_pct > self.max_heat:
             return False, f"Exceeds max heat: {heat_pct:.2%} > {self.max_heat:.2%}"
 
         # Check sector exposure
-        new_sector_exposure = self.sector_exposure[sector] + (position_size / current_capital)
+        # FIX #2: Add epsilon guard for division by zero
+        new_sector_exposure = self.sector_exposure[sector] + (position_size / max(current_capital, 1e-8))
         if new_sector_exposure > self.max_sector:
             return False, f"Sector {sector} exposure too high: {new_sector_exposure:.2%} > {self.max_sector:.2%}"
 
@@ -108,8 +110,11 @@ class PortfolioRiskManager:
             return False, "No volume data"
 
         # Can we exit this position over the position horizon?
+        # FIX #3 & #4: Add epsilon guards for division by zero
+        if position_horizon_hours <= 0:
+            return False, "Invalid position horizon"
         daily_exit_amount = position_size / (position_horizon_hours / 24)
-        daily_volume_pct = daily_exit_amount / avg_daily_volume
+        daily_volume_pct = daily_exit_amount / max(avg_daily_volume, 1e-8)
 
         # Need to be able to exit without moving market >1%
         if daily_volume_pct > 0.01:
@@ -153,9 +158,11 @@ class PortfolioRiskManager:
     def update_sector_exposure(self, positions: Dict, capital: float):
         """Update tracked sector exposures."""
         self.sector_exposure.clear()
-        for symbol, pos in positions.items():
-            sector = pos.get("sector", "unknown")
-            self.sector_exposure[sector] += (pos.get("size", 0) / capital)
+        # FIX #5: Add epsilon guard for division by zero
+        if capital > 1e-8:
+            for symbol, pos in positions.items():
+                sector = pos.get("sector", "unknown")
+                self.sector_exposure[sector] += (pos.get("size", 0) / capital)
 
     def should_close_all_positions(self, current_capital: float) -> bool:
         """

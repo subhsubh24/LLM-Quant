@@ -266,8 +266,11 @@ class PairsTradingEngine:
 
                     if coint_score >= self.min_cointegration_score:
                         # Compute hedge ratio
-                        a_norm = (price_a - price_a.mean()) / price_a.std()
-                        b_norm = (price_b - price_b.mean()) / price_b.std()
+                        # FIX #6: Add epsilon guards (match pattern from line 150-151)
+                        a_std = max(price_a.std(), 1e-8)
+                        b_std = max(price_b.std(), 1e-8)
+                        a_norm = (price_a - price_a.mean()) / a_std
+                        b_norm = (price_b - price_b.mean()) / b_std
                         X = np.column_stack([np.ones(len(a_norm)), b_norm])
                         beta = np.linalg.lstsq(X, a_norm, rcond=None)[0]
                         hedge_ratio = beta[1]
