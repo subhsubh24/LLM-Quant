@@ -1086,6 +1086,12 @@ class PPOAgent:
         probs = self._forward_actor(state).flatten()
         value = self._forward_critic(state).flatten()[0]
 
+        # CRITICAL FIX: Validate probability distribution before sampling
+        # If probs contain NaN/infinity or don't sum to 1.0, use uniform distribution
+        if not np.isfinite(probs).all() or not np.isclose(probs.sum(), 1.0):
+            logger.warning(f"Invalid probability distribution detected, using uniform fallback")
+            probs = np.ones(self.action_dim) / self.action_dim
+
         # Sample from distribution
         action = np.random.choice(self.action_dim, p=probs)
         log_prob = np.log(probs[action] + 1e-10)
@@ -1404,9 +1410,14 @@ class TransformerPredictor:
 
         batch_size, seq_len, _ = x.shape
 
-        # Input projection
-        x = self.input_projection.forward(x.reshape(-1, self.input_dim))
-        x = x.reshape(batch_size, seq_len, self.d_model)
+        # Input projection - process samples separately to preserve temporal structure
+        # Instead of flattening all timesteps together (loses sequence order),
+        # process each sample in the batch independently
+        x_proj = []
+        for b in range(batch_size):
+            x_b = self.input_projection.forward(x[b])  # Shape: (seq_len, d_model)
+            x_proj.append(x_b)
+        x = np.stack(x_proj, axis=0)  # Shape: (batch_size, seq_len, d_model)
 
         # Add positional encoding
         x = x + self.pos_encoding[:seq_len]

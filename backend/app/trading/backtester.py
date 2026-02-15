@@ -4187,6 +4187,11 @@ class ModelPreTrainer:
             elif len(state) > self.state_dim:
                 state = state[:self.state_dim]
 
+        # CRITICAL FIX: Apply feature normalization (same as used in training)
+        # Must use same normalization for predictions to match training distribution
+        if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
+            state = (state - self.feature_mean) / (self.feature_std + 1e-8)
+
         # Build sequence for sequential models
         seq = self._get_sequence(state)
 
@@ -4195,6 +4200,20 @@ class ModelPreTrainer:
 
         # BUG #14: Handle individual model failures instead of crashing on first error
         # This allows partial predictions when one model fails
+
+        # CRITICAL FIX: Verify all models are initialized before predictions
+        if not hasattr(self, 'dqn') or self.dqn is None:
+            logger.error("DQN not initialized - cannot generate predictions")
+            return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
+        if not hasattr(self, 'ppo') or self.ppo is None:
+            logger.error("PPO not initialized - cannot generate predictions")
+            return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
+        if not hasattr(self, 'lstm') or self.lstm is None:
+            logger.error("LSTM not initialized - cannot generate predictions")
+            return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
+        if not hasattr(self, 'transformer') or self.transformer is None:
+            logger.error("Transformer not initialized - cannot generate predictions")
+            return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
 
         # CRITICAL BUG FIX #1: Initialize q_values before try block
         q_values = np.zeros(self.action_dim)  # Default fallback
@@ -4317,6 +4336,11 @@ class ModelPreTrainer:
         if regime not in valid_regimes:
             logger.warning(f"Invalid regime: {regime}, using 'neutral'")
             regime = 'neutral'
+
+        # CRITICAL FIX: Verify all models are initialized before predictions
+        if not hasattr(self, 'dqn') or self.dqn is None:
+            logger.error("DQN not initialized - cannot generate regime-aware predictions")
+            return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
 
         # CRITICAL FIX: Apply feature normalization (same as used in training)
         # Must use same normalization for predictions to match training distribution
