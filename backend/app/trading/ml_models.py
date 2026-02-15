@@ -225,7 +225,8 @@ class MultiHeadAttention(Layer):
         output = context @ self.W_o
 
         self.attention_weights = attention
-        return output.squeeze(0) if batch_size == 1 else output
+        # FIX #11: Don't squeeze batch dimension - preserve it
+        return output if batch_size > 1 else output[0:1]
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:
         # CRITICAL FIX: Add clipping and epsilon protection to prevent overflow/division by zero
@@ -513,7 +514,10 @@ class LSTMClassifier:
             # Gradients for next timestep
             dconcat = (df_raw @ self.Wf.T + di_raw @ self.Wi.T +
                        dc_tilde_raw @ self.Wc.T + do_raw @ self.Wo.T)
+            # FIX #10: Validate LSTM backward pass dimensions
             dh_next = dconcat[:, self.input_dim:]
+            assert dh_next.shape == (batch_size, self.hidden_dim), \
+                f"dh_next shape mismatch: expected ({batch_size}, {self.hidden_dim}), got {dh_next.shape}"
             dc_next = dc * f
 
         # Gradient clipping

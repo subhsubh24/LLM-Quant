@@ -279,7 +279,8 @@ class SmartOrderExecutor(ExecutionAlgorithm):
         - Large order (> 10% daily vol): TWAP
         - Urgent (urgency > 0.7): TWAP
         """
-        participation_rate = abs(quantity) / market_data.daily_volume
+        # FIX #8: Add epsilon guard for division by zero
+        participation_rate = abs(quantity) / max(market_data.daily_volume, 1e-8)
 
         # Route decision
         if participation_rate < 0.02:
@@ -307,7 +308,8 @@ class SmartOrderExecutor(ExecutionAlgorithm):
         """Execute market order."""
         # Use midpoint + small spread
         avg_price = market_data.price
-        spread_cost = market_data.bid_ask_spread / 2
+        # FIX #8: Convert spread from fraction to dollar amount
+        spread_cost = market_data.price * market_data.bid_ask_spread / 2
 
         avg_price += spread_cost if quantity > 0 else -spread_cost
 
