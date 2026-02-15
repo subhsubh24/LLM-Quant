@@ -328,11 +328,12 @@ class BinanceDataFetcher:
                 prices = cached_data
 
                 # CRITICAL FIX: Validate cached prices are positive
+                # BUG FIX #6: Clarify cache validation logic flow
                 if np.any(prices <= 0):
                     logger.warning(f"⚠️  Cached prices contain non-positive values for {symbol}, re-fetching")
-                    # Cache is invalid, don't return it
-                    pass
+                    # Cache is invalid, continue to fetch fresh data below
                 else:
+                    # Cache is valid - use it
                     # CRITICAL FIX: Add epsilon protection for division by zero
                     returns = np.diff(prices) / (prices[:-1] + 1e-8)
                     return prices, returns

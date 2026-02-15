@@ -821,6 +821,11 @@ class WalkForwardBacktester:
         lows = np.array([c.low for c in candles])
         volumes = np.array([c.volume for c in candles])
 
+        # BUG FIX #7: Validate price data is positive before logarithm operations
+        assert np.all(closes > 0), "Close prices contain non-positive values - cannot compute log returns"
+        assert np.all(highs > 0), "High prices contain non-positive values - cannot compute log returns"
+        assert np.all(lows > 0), "Low prices contain non-positive values - cannot compute log returns"
+
         features = []
 
         for i in range(lookback, len(candles)):
@@ -999,10 +1004,14 @@ class WalkForwardBacktester:
             if len(log_returns) >= 20:
                 try:
                     recent_returns = log_returns[-20:]
-                    mean_return = np.mean(recent_returns)
-                    # Correct skewness formula: E[(X - mean)^3] / std^3
-                    centered_returns = recent_returns - mean_return
-                    return_skew = (np.mean(centered_returns ** 3)) / ((np.std(recent_returns) ** 3) + 1e-8)
+                    # BUG FIX #1: Validate minimum returns for skewness calculation
+                    if len(recent_returns) < 3:
+                        return_skew = 0
+                    else:
+                        mean_return = np.mean(recent_returns)
+                        # Correct skewness formula: E[(X - mean)^3] / std^3
+                        centered_returns = recent_returns - mean_return
+                        return_skew = (np.mean(centered_returns ** 3)) / ((np.std(recent_returns) ** 3) + 1e-8)
                 except Exception as e:
                     # BUG #1: Bare except masks all exceptions - log actual error
                     logger.debug(f"Skewness calculation error for {symbol}: {e}")
@@ -3622,6 +3631,8 @@ class ModelPreTrainer:
             padding = np.zeros((X.shape[0], self.state_dim - X.shape[1]))
             X = np.hstack([X, padding])
         elif X.shape[1] > self.state_dim:
+            # BUG FIX #5: Log feature truncation to warn of potential information loss
+            logger.warning(f"⚠️ TRUNCATING features from {X.shape[1]} to {self.state_dim} - potential information loss")
             X = X[:, :self.state_dim]
 
         logger.info(f"✅ Prepared multi-horizon training data:")
@@ -3887,10 +3898,16 @@ class ModelPreTrainer:
             # For multi-horizon: also shuffle the multi-horizon labels
             if is_multi_horizon:
                 # BUG FIX #2: Validate all horizons have aligned lengths before shuffling
+                # BUG FIX #8: Improved error handling with detailed diagnostics
                 for h in y_train_multi.keys():
                     if len(y_train_multi[h]) != len(X_train):
-                        logger.error(f"Shape mismatch for horizon {h}: labels={len(y_train_multi[h])}, X_train={len(X_train)}")
-                        raise ValueError(f"Multi-horizon label shape mismatch (horizon {h})")
+                        logger.error(f"❌ Multi-horizon label shape mismatch for {h}h horizon:")
+                        logger.error(f"   Labels: {len(y_train_multi[h])}, X_train: {len(X_train)}")
+                        logger.error(f"   Check data alignment in prepare_training_data() or generate_multi_horizon_labels()")
+                        # Log all horizons for comparison
+                        for h2, labels in y_train_multi.items():
+                            logger.error(f"   Horizon {h2}h: {len(labels)} labels")
+                        raise ValueError(f"Multi-horizon label shape mismatch (horizon {h}h) - see logs for details")
 
                 y_train_multi = {h: y_train_multi[h][perm] for h in y_train_multi.keys()}
 
@@ -4645,7 +4662,9 @@ class AlphaSourceManager:
             settings = get_settings()
             self.finnhub_api_key = settings.finnhub_api_key
             self.anthropic_api_key = settings.anthropic_api_key
-        except Exception:
+        except Exception as e:
+            # BUG FIX #9: Add exception logging for better diagnostics
+            logger.debug(f"Failed to load API keys from settings: {type(e).__name__}: {e} - falling back to environment variables")
             self.finnhub_api_key = os.environ.get("FINNHUB_API_KEY", "")
             self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 

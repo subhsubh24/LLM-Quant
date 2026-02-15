@@ -1089,7 +1089,8 @@ class PPOAgent:
 
         # CRITICAL FIX: Validate probability distribution before sampling
         # If probs contain NaN/infinity or don't sum to 1.0, use uniform distribution
-        if not np.isfinite(probs).all() or not np.isclose(probs.sum(), 1.0):
+        # BUG FIX #2: Specify explicit tolerances for probability distribution validation
+        if not np.isfinite(probs).all() or not np.isclose(probs.sum(), 1.0, rtol=1e-4, atol=1e-6):
             logger.warning(f"Invalid probability distribution detected, using uniform fallback")
             probs = np.ones(self.action_dim) / self.action_dim
 

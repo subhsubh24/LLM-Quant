@@ -209,6 +209,12 @@ class PortfolioRiskManager:
             corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
             np.fill_diagonal(corr_matrix, 1.0)  # Restore diagonal to 1.0
 
+        # BUG FIX #3: Verify no NaN values remain after repair
+        if np.any(np.isnan(corr_matrix)):
+            logger.error("❌ Correlation matrix still contains NaN after repair - potential data corruption")
+            # Return identity matrix as safe fallback (all assets uncorrelated)
+            corr_matrix = np.eye(len(corr_matrix))
+
         return corr_matrix
 
     def get_portfolio_risk_score(self) -> float:

@@ -362,6 +362,11 @@ class AdaptiveEnsembleWeighter:
 
         # Normalize to sum to 1.0
         total = sum(adjusted_accuracies.values())
+        # BUG FIX #4: Guard against empty model_names list
+        if len(self.model_names) == 0:
+            logger.error("❌ No models to weight - model_names list is empty")
+            return {}
+
         if total > 0:
             weights = {
                 name: acc / total for name, acc in adjusted_accuracies.items()
