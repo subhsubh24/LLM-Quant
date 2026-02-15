@@ -911,6 +911,32 @@ async def analyze_portfolio(session=Depends(get_session_dependency)):
     return analysis
 
 
+# ============ Order Validation Models ============
+# FIX #7: Add input validation using Pydantic
+
+class MarketOrderRequest(BaseModel):
+    """Validated market order request."""
+    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., regex="^(buy|sell)$")
+    quantity: float = Field(..., gt=0, lt=1e8)
+
+
+class LimitOrderRequest(BaseModel):
+    """Validated limit order request."""
+    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., regex="^(buy|sell)$")
+    quantity: float = Field(..., gt=0, lt=1e8)
+    limit_price: float = Field(..., gt=0, lt=1e8)
+
+
+class StopOrderRequest(BaseModel):
+    """Validated stop order request."""
+    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., regex="^(buy|sell)$")
+    quantity: float = Field(..., gt=0, lt=1e8)
+    stop_price: float = Field(..., gt=0, lt=1e8)
+
+
 # ============ Automated Trading Endpoints ============
 
 @router.get("/signals/generate")
@@ -1021,44 +1047,35 @@ async def trigger_rebalance(
 
 
 @router.post("/trading/order/market")
-async def create_market_order(
-    symbol: str,
-    side: str,  # buy, sell
-    quantity: float,
-):
-    """Create a market order."""
+async def create_market_order(request: MarketOrderRequest):
+    """Create a market order with validation."""
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
-    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+    order_side = OrderSide.BUY if request.side.lower() == "buy" else OrderSide.SELL
 
     order = manager.create_market_order(
-        symbol=symbol,
+        symbol=request.symbol,
         side=order_side,
-        quantity=quantity,
+        quantity=request.quantity,
     )
 
     return order.to_dict()
 
 
 @router.post("/trading/order/limit")
-async def create_limit_order(
-    symbol: str,
-    side: str,
-    quantity: float,
-    limit_price: float,
-):
-    """Create a limit order."""
+async def create_limit_order(request: LimitOrderRequest):
+    """Create a limit order with validation."""
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
-    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+    order_side = OrderSide.BUY if request.side.lower() == "buy" else OrderSide.SELL
 
     order = manager.create_limit_order(
-        symbol=symbol,
+        symbol=request.symbol,
         side=order_side,
-        quantity=quantity,
-        limit_price=limit_price,
+        quantity=request.quantity,
+        limit_price=request.limit_price,
     )
 
     return order.to_dict()
@@ -1092,25 +1109,21 @@ async def create_bracket_order(
 
 
 @router.post("/trading/order/stop")
-async def create_stop_order(
-    symbol: str,
-    side: str,
-    quantity: float,
-    stop_price: float,
+async def create_stop_order(request: StopOrderRequest,
     limit_price: Optional[float] = None,
 ):
-    """Create a stop or stop-limit order."""
+    """Create a stop or stop-limit order with validation."""
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
-    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+    order_side = OrderSide.BUY if request.side.lower() == "buy" else OrderSide.SELL
 
     order = manager.create_stop_order(
-        symbol=symbol,
+        symbol=request.symbol,
         side=order_side,
-        quantity=quantity,
-        stop_price=stop_price,
-        limit_price=limit_price,
+        quantity=request.quantity,
+        stop_price=request.stop_price,
+        limit_price=None,  # Optional limit price not in StopOrderRequest
     )
 
     return order.to_dict()
