@@ -326,9 +326,16 @@ class BinanceDataFetcher:
             cached_time, cached_data = _price_cache[cache_key]
             if datetime.now() - cached_time < _cache_duration:
                 prices = cached_data
-                # CRITICAL FIX: Add epsilon protection for division by zero
-                returns = np.diff(prices) / (prices[:-1] + 1e-8)
-                return prices, returns
+
+                # CRITICAL FIX: Validate cached prices are positive
+                if np.any(prices <= 0):
+                    logger.warning(f"⚠️  Cached prices contain non-positive values for {symbol}, re-fetching")
+                    # Cache is invalid, don't return it
+                    pass
+                else:
+                    # CRITICAL FIX: Add epsilon protection for division by zero
+                    returns = np.diff(prices) / (prices[:-1] + 1e-8)
+                    return prices, returns
 
         # Fetch klines
         klines = await self.get_klines(symbol, interval=interval, limit=min(days, 1000))
@@ -336,6 +343,16 @@ class BinanceDataFetcher:
         if klines is not None and len(klines) > 0:
             # Extract close prices
             prices = klines[:, 3]  # Close price is column 3
+
+            # CRITICAL FIX: Validate prices are positive (catch corrupted data)
+            if np.any(prices <= 0):
+                logger.warning(f"⚠️  Found non-positive prices for {symbol}: min={np.min(prices)}, max={np.max(prices)}")
+                # Filter out invalid prices
+                valid_mask = prices > 0
+                if not np.any(valid_mask):
+                    logger.error(f"❌ All prices invalid for {symbol}")
+                    return np.array([]), np.array([])
+                prices = prices[valid_mask]
 
             # Cache the data
             _price_cache[cache_key] = (datetime.now(), prices)

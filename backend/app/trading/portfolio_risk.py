@@ -200,6 +200,15 @@ class PortfolioRiskManager:
 
         # Correlation matrix
         corr_matrix = np.corrcoef(returns)
+
+        # CRITICAL FIX: Validate correlation matrix doesn't contain NaN values
+        # NaN can occur when any returns series has zero variance (flat price)
+        # If NaN detected, replace with zero correlation (safe assumption)
+        if np.any(np.isnan(corr_matrix)):
+            # Replace NaN with 0 (uncorrelated), keep 1.0 on diagonal (self-correlation)
+            corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
+            np.fill_diagonal(corr_matrix, 1.0)  # Restore diagonal to 1.0
+
         return corr_matrix
 
     def get_portfolio_risk_score(self) -> float:

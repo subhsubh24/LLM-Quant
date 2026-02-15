@@ -3553,11 +3553,18 @@ class ModelPreTrainer:
             all_rewards.append(np.array(rewards))
 
         if not all_features:
-            logger.error("No training data prepared")
-            return np.array([]), {h: np.array([]) for h in [24, 48, 100, 200, 400, 800]}, np.array([])
+            logger.error("❌ CRITICAL: No training data prepared - cannot train models")
+            logger.error(f"   all_features is empty")
+            return np.array([]), {h: np.array([]) for h in [24, 48, 100, 200, 400, 800, 1600]}, np.array([])
 
         # Stack features
         X = np.vstack(all_features)
+
+        # CRITICAL FIX: Validate minimum training data requirement (must have at least 100 samples)
+        min_samples = 100
+        if len(X) < min_samples:
+            logger.error(f"❌ CRITICAL: Insufficient training data: {len(X)} samples < {min_samples} required")
+            return np.array([]), {h: np.array([]) for h in [24, 48, 100, 200, 400, 800, 1600]}, np.array([])
 
         # Concatenate labels for each horizon
         y_multi = {}
