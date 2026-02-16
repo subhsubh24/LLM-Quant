@@ -185,6 +185,7 @@ class BotActivityLogger:
 
             with get_session() as session:
                 session.add(log_record)
+                session.commit()  # CRITICAL FIX: Must commit to persist logs!
 
             # Add to buffer using the entry values (not the detached log_record)
             self._add_to_buffer_from_entry(entry, event_type, event_subtype, severity, details_json, created_at)
@@ -234,6 +235,7 @@ class BotActivityLogger:
         try:
             with get_session() as session:
                 session.add(log_record)
+                session.commit()  # CRITICAL FIX: Must commit to persist logs!
         except Exception as e:
             logger.error(f"Database error logging activity: {e}")
 

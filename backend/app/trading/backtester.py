@@ -2692,7 +2692,9 @@ class WalkForwardBacktester:
 
                     # PHASE D: Aggressive Signal Filtering
                     # Only trade on ULTRA-STRONG signals
-                    # NOTE: is_short, is_long, is_hold already defined above in microstructure filter section
+                    # Define is_short and is_long before use (CRITICAL FIX: moved from line 2753-2754)
+                    is_short = prediction["action"] == 0
+                    is_long = prediction["action"] == 2
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
                     # DIAGNOSTIC: Track filter stages
@@ -2750,8 +2752,7 @@ class WalkForwardBacktester:
                     # BUG FIX #35: Use ADDITIVE adjustment instead of multiplicative to avoid overshooting thresholds
                     # Multiplicative: 0.65 * 1.10 = 0.715 (blocks 0.70 confidence trades - too strict!)
                     # Additive: 0.65 + 0.08 = 0.73 (more reasonable, preserves base threshold intent)
-                    is_short = prediction["action"] == 0
-                    is_long = prediction["action"] == 2
+                    # NOTE: is_short and is_long already defined above (CRITICAL FIX: moved earlier)
 
                     if regime == 'bull' and is_short:
                         # Shorts in bull market are counter-trend: require HIGHER confidence

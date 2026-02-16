@@ -474,6 +474,27 @@ class NeuralNetworkModel(BaseModel):
         return dict(zip(self.feature_names, importance))
 
 
+class _LSTMModule(nn.Module):
+    """CRITICAL FIX: Custom LSTM module that properly handles LSTM tuple output."""
+    def __init__(self, input_dim: int, hidden_dim: int, num_layers: int, dropout_rate: float):
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout_rate,
+            batch_first=True,
+        )
+        self.linear = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        # LSTM returns (output, (h_n, c_n)) - we only want the output
+        lstm_out, _ = self.lstm(x)
+        # Take the last timestep output
+        last_out = lstm_out[:, -1, :]
+        return self.linear(last_out)
+
+
 class LSTMModel(BaseModel):
     """
     LSTM model for sequential/temporal pattern prediction.
@@ -513,17 +534,8 @@ class LSTMModel(BaseModel):
         self.feature_names: List[str] = []
 
     def _build_lstm(self, input_dim: int) -> nn.Module:
-        """Build LSTM architecture."""
-        return nn.Sequential(
-            nn.LSTM(
-                input_size=input_dim,
-                hidden_size=self.hidden_dim,
-                num_layers=self.num_layers,
-                dropout=self.dropout_rate,
-                batch_first=True,
-            ),
-            nn.Linear(self.hidden_dim, 1),
-        )
+        """Build LSTM architecture (CRITICAL FIX: Use custom _LSTMModule instead of nn.Sequential)."""
+        return _LSTMModule(input_dim, self.hidden_dim, self.num_layers, self.dropout_rate)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "LSTMModel":
         """Fit LSTM model."""

@@ -23,6 +23,7 @@ from dataclasses import dataclass  # CRITICAL FIX: Missing import for @dataclass
 import numpy as np
 import pandas as pd
 import logging
+import pickle  # CRITICAL FIX: Move from line 378 to here (was after use at line 350)
 from datetime import datetime
 
 from .ensemble_models import (
@@ -374,5 +375,3 @@ def compare_with_baseline(
         "baseline_mae": baseline_mae,
     }
 
-
-import pickle

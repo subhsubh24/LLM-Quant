@@ -185,8 +185,9 @@ class EnhancedSignalEngineWrapper:
 
         # Apply sector rotation to weights if enabled
         if self.enhanced.use_sector_rotation:
+            # CRITICAL FIX: sector_map should map ticker -> sector NAME (string), not weights (dict)
             sector_map = {
-                ticker.split("-")[0]: self.base_engine.get_sector_weights(ticker)
+                ticker.split("-")[0]: self.base_engine.SYMBOL_SECTOR.get(ticker.split("-")[0], "other")
                 for ticker in prices.columns
             }
             recommended_weights = self.enhanced.sector_manager.check_sector_concentration(
@@ -266,8 +267,9 @@ class EnhancedSignalEngineWrapper:
             return signals
 
         # Get sector momentum
+        # CRITICAL FIX: sector_map should map ticker -> sector NAME (string), not weights (dict)
         sector_map = {
-            ticker.split("-")[0]: self.base_engine.get_sector_weights(ticker)
+            ticker.split("-")[0]: self.base_engine.SYMBOL_SECTOR.get(ticker.split("-")[0], "other")
             for ticker in prices.columns
         }
 

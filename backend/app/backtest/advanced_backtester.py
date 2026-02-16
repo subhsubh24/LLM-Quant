@@ -314,7 +314,7 @@ class AdvancedBacktester:
         logger.info(f"Starting backtest from {start_date} to {end_date}")
 
         # Initialize tracking
-        equity_curve = [self.initial_capital]
+        equity_curve = []  # CRITICAL FIX: Don't include initial_capital - added in loop
         daily_returns = []
         trades = []
         weights_history = []

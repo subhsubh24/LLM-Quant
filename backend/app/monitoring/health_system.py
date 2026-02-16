@@ -674,7 +674,10 @@ class DataFeedHealthMonitor:
             gap_freq_score = 30
 
         # Duration score (max 5 minutes per gap)
-        avg_gap_duration = (total_gap_duration / len(self.gaps) if self.gaps else 0)
+        # CRITICAL FIX: len(self.gaps) is number of FEEDS, not total gaps!
+        # Must sum gap counts across all feeds: sum(len(gaps) for gaps in self.gaps.values())
+        total_gap_count = sum(len(gaps) for gaps in self.gaps.values()) if self.gaps else 0
+        avg_gap_duration = (total_gap_duration / total_gap_count if total_gap_count > 0 else 0)
         if avg_gap_duration < 60:
             gap_duration_score = 30
         elif avg_gap_duration < 300:
