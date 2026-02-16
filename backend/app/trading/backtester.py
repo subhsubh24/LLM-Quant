@@ -3530,7 +3530,7 @@ class ModelPreTrainer:
         # Initialize models with PROPER TRAINABLE versions
         from .ml_models import (
             create_dqn_agent, create_ppo_agent,
-            LSTMClassifier, TrainableTransformer
+            LSTMClassifier, TrainableTransformer, TrainableVAE
         )
 
         # TIER 3 FIX: REGIME-AWARE ENSEMBLE - 3x models for 3x regimes
@@ -3548,6 +3548,9 @@ class ModelPreTrainer:
                 'transformer': TrainableTransformer(
                     input_dim=state_dim, hidden_dim=64, output_dim=action_dim, lr=0.001
                 ),
+                'vae': TrainableVAE(
+                    input_dim=state_dim, hidden_dim=64, latent_dim=8, output_dim=action_dim, lr=0.001
+                ),
             }
 
         # Backwards compatibility: also keep single models for legacy code
@@ -3555,6 +3558,7 @@ class ModelPreTrainer:
         self.ppo = self.models_by_regime['neutral']['ppo']
         self.lstm = self.models_by_regime['neutral']['lstm']
         self.transformer = self.models_by_regime['neutral']['transformer']
+        self.vae = self.models_by_regime['neutral']['vae']
 
         # State buffer for sequential prediction (LSTM/Transformer)
         # Stores recent states so LSTM/Transformer see seq_len context

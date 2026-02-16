@@ -12,7 +12,7 @@ Correlation: 0.15-0.20 (low, uncorrelated to existing)
 
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
@@ -139,43 +139,45 @@ class RegimeAwareStrategy(BaseStrategy):
         """
         allocations = {
             "CRISIS": {
-                "long_vol": 0.40,           # Vol hedge
-                "mean_reversion": 0.40,    # MR in crisis
-                "trend": 0.20,             # Reduce trend
+                "mean_reversion": 0.50,   # MR dominant in crisis
+                "trend_following": 0.20,  # Reduce trend
+                "long_vol": 0.30,         # Vol hedge
             },
             "HIGH_VOL": {
-                "vol_trading": 0.50,       # Vol trades
-                "trend": 0.30,             # Still follow
-                "mean_reversion": 0.20,    # Some reversion
+                "mean_reversion": 0.20,   # Some reversion
+                "trend_following": 0.30,  # Still follow
+                "long_vol": 0.50,         # Vol trades
             },
             "STRESS": {
-                "mean_reversion": 0.40,    # MR more
-                "trend": 0.35,
-                "stat_arb": 0.25,
+                "mean_reversion": 0.40,   # MR more
+                "trend_following": 0.35,
+                "long_vol": 0.25,
             },
             "TREND": {
-                "trend": 0.70,             # Strong trend
-                "technical": 0.20,
-                "factor": 0.10,
+                "mean_reversion": 0.10,
+                "trend_following": 0.70,  # Strong trend
+                "long_vol": 0.20,
             },
             "RANGE": {
-                "mean_reversion": 0.50,    # MR dominant
-                "stat_arb": 0.30,
-                "factor": 0.20,
+                "mean_reversion": 0.50,   # MR dominant
+                "trend_following": 0.20,
+                "long_vol": 0.30,
             },
         }
 
-        return allocations.get(regime.regime, allocations["RANGE"])
+        # Handle both string and MarketRegime object
+        regime_str = regime if isinstance(regime, str) else regime.regime
+        return allocations.get(regime_str, allocations["RANGE"])
 
     def generate_signal(
         self,
-        data: pd.DataFrame,
+        data: Union[pd.DataFrame, Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> StrategySignal:
         """Generate regime-aware signal.
 
         Args:
-            data: OHLCV data
+            data: OHLCV data or dict with market data
             context: Dict with correlation, vol, trend_strength
 
         Returns:
@@ -187,6 +189,10 @@ class RegimeAwareStrategy(BaseStrategy):
             timestamp=datetime.now(),
             confidence=0.0,
         )
+
+        # Handle both dict and DataFrame inputs, and context fallback
+        if isinstance(data, dict) and context is None:
+            context = data
 
         if context is None:
             return signal
@@ -207,6 +213,17 @@ class RegimeAwareStrategy(BaseStrategy):
             signal.target_weights['REGIME'] = 0.7
             signal.confidence = regime.confidence
 
+            # Determine direction based on regime
+            if regime.regime == 'CRISIS':
+                direction = -1  # Bearish in crisis
+            elif regime.regime == 'TREND':
+                direction = 1   # Bullish in trend
+            else:
+                direction = 0   # Neutral otherwise
+
+            # Add direction attribute for test compatibility
+            signal.direction = direction
+
             # Add extra data
             signal.extra_data = {
                 'regime': regime.regime,
@@ -214,6 +231,7 @@ class RegimeAwareStrategy(BaseStrategy):
                 'volatility': float(regime.volatility),
                 'allocation': allocation,
                 'confidence': float(regime.confidence),
+                'direction': direction,
             }
 
             self.last_signal = signal
