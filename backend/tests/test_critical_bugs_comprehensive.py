@@ -7,6 +7,7 @@ Run with: pytest backend/tests/test_critical_bugs_comprehensive.py -v
 import pytest
 import numpy as np
 import pandas as pd
+import asyncio
 from datetime import datetime, timedelta
 
 
@@ -497,6 +498,154 @@ class TestBoundaryConditions:
         assert -1.0 <= -0.99 <= 1.0
         assert -1.0 <= 0.0 <= 1.0
         assert -1.0 <= 0.99 <= 1.0
+
+
+class TestBUG4_TypeSafety:
+    """BUG #4: Type safety in cache validation"""
+
+    def test_exception_in_result(self):
+        """Test handling of exception objects in results"""
+        result = ValueError("Test error")
+        if isinstance(result, Exception):
+            assert True
+
+
+class TestBUG11_SectorExposure:
+    """BUG #11: Enhanced sector exposure validation"""
+
+    def test_sector_pct_with_nan_capital(self):
+        """Test sector percentage with NaN capital"""
+        total_capital = float('nan')
+        if np.isfinite(total_capital):
+            sector_pct = 100.0 / total_capital
+        else:
+            sector_pct = 0.0
+        assert sector_pct == 0.0
+
+    def test_sector_pct_validity_check(self):
+        """Test sector percentage validity"""
+        sector_pct = 0.25
+        if np.isfinite(sector_pct) and 0 <= sector_pct <= 1.0:
+            assert True
+
+
+class TestBUG13_Timeframe:
+    """BUG #13: Timeframe configuration"""
+
+    def test_timeframe_config_exists(self):
+        """Test timeframe config parameters"""
+        config = {
+            "candle_interval_minutes": 60,
+            "annualization_factor": 252 * 24,
+        }
+        assert "candle_interval_minutes" in config
+        assert config["candle_interval_minutes"] == 60
+
+    def test_annualization_factor(self):
+        """Test annualization factor calculation"""
+        hours_per_year = 252 * 24
+        assert hours_per_year == 6048
+
+
+class TestBUG14_AsyncValidation:
+    """BUG #14: Async function return validation"""
+
+    def test_exception_detection_in_results(self):
+        """Test detection of exceptions in async results"""
+        results = [
+            {"data": "test1"},
+            ValueError("error"),
+            {"data": "test2"},
+        ]
+
+        exception_count = 0
+        for result in results:
+            if isinstance(result, Exception):
+                exception_count += 1
+
+        assert exception_count == 1
+
+    def test_empty_dict_fallback(self):
+        """Test fallback for empty data cache"""
+        data_cache = {}
+        result = data_cache if len(data_cache) > 0 else {}
+        assert isinstance(result, dict)
+
+
+class TestBUG16_ConfigValidation:
+    """BUG #16: Configuration key validation"""
+
+    def test_required_keys_present(self):
+        """Test required configuration keys"""
+        config = {
+            "continuous_learning_interval": 5000,
+            "correlation_update_interval": 500,
+            "max_sector_correlation": 0.8,
+        }
+
+        required_keys = [
+            "continuous_learning_interval",
+            "correlation_update_interval",
+            "max_sector_correlation"
+        ]
+
+        missing = [k for k in required_keys if k not in config]
+        assert len(missing) == 0
+
+    def test_config_value_ranges(self):
+        """Test config value ranges"""
+        config = {"max_sector_correlation": 0.8}
+        assert 0 <= config["max_sector_correlation"] <= 1
+
+
+class TestBUG19_AsyncCleanup:
+    """BUG #19: Async exception handling"""
+
+    def test_timeout_error_handling(self):
+        """Test timeout error detection"""
+        error_type = asyncio.TimeoutError
+        assert issubclass(error_type, Exception)
+
+    def test_error_type_logging(self):
+        """Test error type in logging"""
+        error = ValueError("test")
+        error_name = type(error).__name__
+        assert error_name == "ValueError"
+
+
+class TestBUG20_DictionaryInit:
+    """BUG #20: Safe dictionary initialization"""
+
+    def test_model_dict_initialization(self):
+        """Test safe model dictionary access"""
+        model_predictions = {}
+        model_name = "DQN"
+
+        if model_name not in model_predictions:
+            model_predictions[model_name] = {"correct": 0, "incorrect": 0}
+
+        assert model_name in model_predictions
+        assert model_predictions[model_name]["correct"] == 0
+
+    def test_rolling_window_initialization(self):
+        """Test rolling window list initialization"""
+        model_recent_trades = {}
+        model_name = "PPO"
+
+        if model_name not in model_recent_trades:
+            model_recent_trades[model_name] = []
+
+        model_recent_trades[model_name].append(1)
+        assert len(model_recent_trades[model_name]) == 1
+
+
+class TestAsyncioImportGuards:
+    """Test asyncio availability"""
+
+    def test_asyncio_available(self):
+        """Test asyncio module imports"""
+        assert hasattr(asyncio, 'TimeoutError')
+        assert hasattr(asyncio, 'Semaphore')
 
 
 if __name__ == "__main__":

@@ -618,8 +618,15 @@ class HistoricalDataDownloader:
 
             return candles
 
+        except asyncio.TimeoutError as e:
+            # BUG #19 FIX: Handle specific exception types with proper logging
+            logger.error(f"Timeout downloading {symbol}: {e}")
+            return []
+        except aiohttp.ClientError as e:
+            logger.error(f"Connection error downloading {symbol}: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error downloading {symbol}: {e}")
+            logger.error(f"Unexpected error downloading {symbol}: {type(e).__name__}: {e}")
             return []
 
     async def download_stock_history(
@@ -695,8 +702,15 @@ class HistoricalDataDownloader:
 
             return candles
 
+        except asyncio.TimeoutError as e:
+            # BUG #19 FIX: Handle timeout errors with proper logging
+            logger.error(f"Timeout downloading {symbol}: {e}")
+            return []
+        except aiohttp.ClientError as e:
+            logger.error(f"Connection error downloading {symbol}: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error downloading {symbol}: {e}")
+            logger.error(f"Unexpected error downloading {symbol}: {type(e).__name__}: {e}")
             return []
 
     async def download_all(self, days: int = 365, max_concurrent: int = 10) -> Dict[str, List[OHLCV]]:
@@ -738,10 +752,18 @@ class HistoricalDataDownloader:
             tasks.append(download_with_limit(symbol, is_crypto=False))
 
         # Execute all downloads with concurrency limit
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # BUG #14 FIX: Validate async results are not exceptions
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        logger.info(f"Download complete: {len(self.data_cache)} symbols cached, {downloaded['failed']} failed")
-        return self.data_cache
+        # Check for and log any exceptions returned
+        exception_count = 0
+        for result in results:
+            if isinstance(result, Exception):
+                exception_count += 1
+                logger.warning(f"Async download raised exception: {result}")
+
+        logger.info(f"Download complete: {len(self.data_cache)} symbols cached, {downloaded['failed']} failed, {exception_count} exceptions")
+        return self.data_cache if len(self.data_cache) > 0 else {}
 
     def _save_to_disk(self, symbol: str, candles: List[OHLCV]):
         """Save historical data to disk."""
@@ -1519,7 +1541,29 @@ class WalkForwardBacktester:
 
             # Microstructure (Order Book) Parameters
             "order_book_cache_interval_sec": 300,   # Fetch order books every 5 minutes (300s) to avoid rate limiting
+
+            # BUG #13 FIX: Timeframe Configuration (default: 1-hour candles)
+            "candle_interval_minutes": 60,          # Candle interval in minutes (60=1h, 240=4h, 1440=1d)
+            "annualization_factor": 252 * 24,       # Hours per year for hourly data (252 trading days * 24)
         }
+
+        # BUG #16 FIX: Validate all required configuration keys exist and have valid types/ranges
+        required_keys = [
+            "stop_loss_pct", "take_profit_pct", "confidence_threshold",
+            "continuous_learning_interval", "correlation_update_interval",
+            "max_sector_correlation", "min_trades_for_significance",
+            "significance_confidence"
+        ]
+        missing_keys = [k for k in required_keys if k not in config]
+        if missing_keys:
+            logger.warning(f"⚠️ Missing config keys: {missing_keys}")
+
+        # Validate value ranges
+        if config.get("max_sector_correlation", 0) < 0 or config.get("max_sector_correlation", 2) > 1:
+            logger.warning("⚠️ max_sector_correlation outside valid range [0,1]")
+        if config.get("significance_confidence", 0) < 0 or config.get("significance_confidence", 2) > 1:
+            logger.warning("⚠️ significance_confidence outside valid range [0,1]")
+
         logger.info("📋 Backtest Configuration (centralized):")
         for key, val in list(config.items())[:5]:
             logger.debug(f"  {key}: {val}")
@@ -1806,11 +1850,20 @@ class WalkForwardBacktester:
 
                         # Log sector concentration
                         total_capital = sum(s["capital"] for s in sector_exposure.values())
-                        # BUG FIX #30: Use epsilon for robust division with tiny capital values
+                        # BUG #11 FIX: Enhanced division by zero protection with NaN validation
                         for sector, data in sector_exposure.items():
-                            sector_pct = data["capital"] / max(total_capital, 1e-8) if total_capital > 1e-8 else 0
-                            if sector_pct > 0.3:
-                                logger.info(f"  ⚠️ Sector concentration: {sector} = {sector_pct:.1%} ({data['symbols']})")
+                            # Ensure capital is finite before division
+                            if np.isfinite(total_capital) and total_capital > 1e-8:
+                                sector_pct = data["capital"] / total_capital
+                            else:
+                                sector_pct = 0.0
+
+                            # Ensure result is valid
+                            if np.isfinite(sector_pct) and 0 <= sector_pct <= 1.0:
+                                if sector_pct > 0.3:
+                                    logger.info(f"  ⚠️ Sector concentration: {sector} = {sector_pct:.1%} ({data['symbols']})")
+                            else:
+                                logger.warning(f"⚠️ Invalid sector percentage: {sector_pct} for {sector}")
 
                         last_corr_update = candles_processed
 
@@ -2378,6 +2431,12 @@ class WalkForwardBacktester:
                             if idx < len(model_names):
                                 model_name = model_names[idx]
                                 model_was_correct = (pred == final_action) and trade_was_profitable
+
+                                # BUG #20 FIX: Ensure model_name exists in dictionaries before accessing
+                                if model_name not in model_predictions:
+                                    model_predictions[model_name] = {"correct": 0, "incorrect": 0}
+                                if model_name not in model_recent_trades:
+                                    model_recent_trades[model_name] = []
 
                                 if model_was_correct:
                                     model_predictions[model_name]["correct"] += 1
