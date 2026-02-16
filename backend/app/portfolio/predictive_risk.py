@@ -13,7 +13,7 @@ Mechanism: Avoid 50% of worst drawdowns by acting preemptively
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timedelta
 import logging
@@ -23,17 +23,17 @@ logger = logging.getLogger(__name__)
 
 class PortfolioRiskLevel(Enum):
     """5 Risk levels (smooth transitions)"""
-    GREEN = "green"          # 100% normal
-    YELLOW = "yellow"        # 90% allocation
-    ORANGE = "orange"        # 75% allocation
-    RED = "red"              # 50% allocation
-    DARK_RED = "dark_red"    # 25% allocation
+    GREEN = {'name': 'green', 'leverage_mult': 1.0}          # 100% normal
+    YELLOW = {'name': 'yellow', 'leverage_mult': 0.9}        # 90% allocation
+    ORANGE = {'name': 'orange', 'leverage_mult': 0.75}       # 75% allocation
+    RED = {'name': 'red', 'leverage_mult': 0.5}              # 50% allocation
+    DARK_RED = {'name': 'dark_red', 'leverage_mult': 0.25}   # 25% allocation
 
 
 @dataclass
 class WarningSignal:
     """Single warning signal"""
-    signal_type: str  # CORR_SPIKE, VOL_SPIKE, STRATEGY_DIVG, EXEC_DEGRAD, MODEL_DEGRAD
+    type: str  # correlation_spike, volatility_spike, strategy_divergence, execution_degradation, model_degradation
     severity: float  # 0-1
     timestamp: datetime
     description: str
@@ -43,10 +43,17 @@ class WarningSignal:
 class RiskAdjustments:
     """Risk adjustments for each level"""
     level: PortfolioRiskLevel
-    leverage_multiplier: float
-    position_size_multiplier: float
-    circuit_breaker_tightness: float
-    rebalance_frequency_days: int
+    leverage_mult: float = None
+    position_size_mult: float = None
+    circuit_breaker_tightness: float = 1.0
+    rebalance_frequency_days: int = 5
+
+    def __post_init__(self):
+        """Infer multipliers from level if not provided."""
+        if self.leverage_mult is None:
+            self.leverage_mult = self.level.value.get('leverage_mult', 1.0)
+        if self.position_size_mult is None:
+            self.position_size_mult = self.level.value.get('leverage_mult', 1.0)
 
 
 class PredictiveCircuitBreaker:
@@ -76,26 +83,26 @@ class PredictiveCircuitBreaker:
 
     def detect_warnings(
         self,
-        correlation: float,
-        volatility: float,
-        expected_volatility: float,
+        portfolio_correlation: float,
+        volatility_realized: float,
+        volatility_expected: float,
         strategy_returns: List[float],
-        execution_slippage: float,
-        baseline_slippage: float,
+        execution_slippage_actual: float,
+        execution_slippage_baseline: float,
         model_accuracy: float,
-        baseline_accuracy: float,
+        model_accuracy_baseline: float,
     ) -> List[WarningSignal]:
         """Detect early warning signals.
 
         Args:
-            correlation: Current portfolio correlation
-            volatility: Realized volatility
-            expected_volatility: Expected volatility
+            portfolio_correlation: Current portfolio correlation
+            volatility_realized: Realized volatility
+            volatility_expected: Expected volatility
             strategy_returns: Returns from all strategies
-            execution_slippage: Current average slippage
-            baseline_slippage: Historical average slippage
+            execution_slippage_actual: Current average slippage
+            execution_slippage_baseline: Historical average slippage
             model_accuracy: Current model accuracy
-            baseline_accuracy: Baseline accuracy
+            model_accuracy_baseline: Baseline accuracy
 
         Returns:
             List of warning signals
@@ -103,32 +110,32 @@ class PredictiveCircuitBreaker:
         warnings = []
 
         # Warning 1: Correlation spike (moderate)
-        if self.correlation_warning_threshold <= correlation < self.correlation_critical_threshold:
-            severity = (correlation - self.correlation_warning_threshold) / 0.1
+        if self.correlation_warning_threshold <= portfolio_correlation < self.correlation_critical_threshold:
+            severity = (portfolio_correlation - self.correlation_warning_threshold) / 0.1
             warnings.append(WarningSignal(
-                signal_type="CORR_SPIKE_MODERATE",
+                type="correlation_spike",
                 severity=min(0.5, severity),
                 timestamp=datetime.now(),
-                description=f"Correlation spike: {correlation:.2f}",
+                description=f"Correlation spike: {portfolio_correlation:.2f}",
             ))
 
         # Warning 1B: Correlation spike (critical)
-        if correlation >= self.correlation_critical_threshold:
-            severity = min(1.0, (correlation - self.correlation_critical_threshold) / 0.1)
+        if portfolio_correlation >= self.correlation_critical_threshold:
+            severity = min(1.0, (portfolio_correlation - self.correlation_critical_threshold) / 0.1)
             warnings.append(WarningSignal(
-                signal_type="CORR_SPIKE_CRITICAL",
+                type="correlation_spike",
                 severity=severity,
                 timestamp=datetime.now(),
-                description=f"Critical correlation: {correlation:.2f}",
+                description=f"Critical correlation: {portfolio_correlation:.2f}",
             ))
 
         # Warning 2: Volatility spike
-        if expected_volatility > 0:
-            vol_ratio = volatility / expected_volatility
+        if volatility_expected > 0:
+            vol_ratio = volatility_realized / volatility_expected
             if vol_ratio > self.vol_spike_threshold:
                 severity = min(1.0, (vol_ratio - self.vol_spike_threshold) / 0.5)
                 warnings.append(WarningSignal(
-                    signal_type="VOL_SPIKE",
+                    type="volatility_spike",
                     severity=severity,
                     timestamp=datetime.now(),
                     description=f"Volatility spike: {vol_ratio:.2f}x normal",
@@ -143,31 +150,31 @@ class PredictiveCircuitBreaker:
             if divergence > self.strategy_divergence_threshold:
                 severity = min(1.0, divergence / 0.05)
                 warnings.append(WarningSignal(
-                    signal_type="STRATEGY_DIVERGENCE",
+                    type="strategy_divergence",
                     severity=severity,
                     timestamp=datetime.now(),
                     description=f"Strategy divergence: {divergence:.2%}",
                 ))
 
         # Warning 4: Execution degradation
-        if baseline_slippage > 0:
-            slippage_ratio = execution_slippage / baseline_slippage
+        if execution_slippage_baseline > 0:
+            slippage_ratio = execution_slippage_actual / execution_slippage_baseline
             if slippage_ratio > self.execution_degradation_threshold:
                 severity = min(1.0, (slippage_ratio - self.execution_degradation_threshold) / 1.0)
                 warnings.append(WarningSignal(
-                    signal_type="EXEC_DEGRADATION",
+                    type="execution_degradation",
                     severity=severity,
                     timestamp=datetime.now(),
                     description=f"Execution slippage up {slippage_ratio:.1f}x",
                 ))
 
         # Warning 5: Model degradation
-        if baseline_accuracy > 0:
-            accuracy_ratio = model_accuracy / baseline_accuracy
+        if model_accuracy_baseline > 0:
+            accuracy_ratio = model_accuracy / model_accuracy_baseline
             if accuracy_ratio < self.model_accuracy_degradation:
                 severity = min(1.0, (1.0 - accuracy_ratio) / 0.2)
                 warnings.append(WarningSignal(
-                    signal_type="MODEL_DEGRADATION",
+                    type="model_degradation",
                     severity=severity,
                     timestamp=datetime.now(),
                     description=f"Model accuracy down to {accuracy_ratio:.2%}",
@@ -192,7 +199,8 @@ class PredictiveCircuitBreaker:
         avg_severity = np.mean([w.severity for w in warnings]) if warnings else 0
 
         # Determine level
-        critical_warnings = sum(1 for w in warnings if w.signal_type.endswith("_CRITICAL"))
+        # Critical = any warning with high severity (>0.8) or multiple warnings
+        critical_warnings = sum(1 for w in warnings if w.severity > 0.8)
 
         if critical_warnings > 0:
             return PortfolioRiskLevel.DARK_RED  # 25%
@@ -220,36 +228,36 @@ class PredictiveCircuitBreaker:
         adjustments_map = {
             PortfolioRiskLevel.GREEN: RiskAdjustments(
                 level=PortfolioRiskLevel.GREEN,
-                leverage_multiplier=1.0,
-                position_size_multiplier=1.0,
+                leverage_mult=1.0,
+                position_size_mult=1.0,
                 circuit_breaker_tightness=1.0,
                 rebalance_frequency_days=5,
             ),
             PortfolioRiskLevel.YELLOW: RiskAdjustments(
                 level=PortfolioRiskLevel.YELLOW,
-                leverage_multiplier=0.90,
-                position_size_multiplier=0.90,
+                leverage_mult=0.90,
+                position_size_mult=0.90,
                 circuit_breaker_tightness=1.1,
                 rebalance_frequency_days=3,
             ),
             PortfolioRiskLevel.ORANGE: RiskAdjustments(
                 level=PortfolioRiskLevel.ORANGE,
-                leverage_multiplier=0.75,
-                position_size_multiplier=0.75,
+                leverage_mult=0.75,
+                position_size_mult=0.75,
                 circuit_breaker_tightness=1.3,
                 rebalance_frequency_days=2,
             ),
             PortfolioRiskLevel.RED: RiskAdjustments(
                 level=PortfolioRiskLevel.RED,
-                leverage_multiplier=0.50,
-                position_size_multiplier=0.50,
+                leverage_mult=0.50,
+                position_size_mult=0.50,
                 circuit_breaker_tightness=1.6,
                 rebalance_frequency_days=1,
             ),
             PortfolioRiskLevel.DARK_RED: RiskAdjustments(
                 level=PortfolioRiskLevel.DARK_RED,
-                leverage_multiplier=0.25,
-                position_size_multiplier=0.25,
+                leverage_mult=0.25,
+                position_size_mult=0.25,
                 circuit_breaker_tightness=2.0,
                 rebalance_frequency_days=1,
             ),
@@ -275,173 +283,169 @@ class KellyCriterionSizing:
         """Initialize Kelly sizing.
 
         Args:
-            kelly_fraction: Fraction of full Kelly to use (0.25 = 25% Kelly)
+            kelly_fraction: Fraction of full Kelly to use (default 25% for safety)
         """
         self.kelly_fraction = kelly_fraction
 
     def compute_kelly_size(
         self,
         win_rate: float,
-        avg_win_pct: float,
-        avg_loss_pct: float,
-        min_size: float = 0.01,
-        max_size: float = 0.20,
+        avg_win: float,
+        avg_loss: float,
+        odds: float = 1.0,
     ) -> float:
-        """Compute Kelly-optimal position size.
+        """Calculate optimal position size using Kelly Criterion.
 
         Args:
-            win_rate: Percentage of winning trades (0-1)
-            avg_win_pct: Average win size (0.01 = 1%)
-            avg_loss_pct: Average loss size (0.01 = 1%)
-            min_size: Minimum position size
-            max_size: Maximum position size
+            win_rate: Win rate (0-1)
+            avg_win: Average winning trade size
+            avg_loss: Average losing trade size
+            odds: Odds ratio (b in Kelly formula, defaults to 1.0)
 
         Returns:
-            Optimal position size (0-1)
+            Position size as a fraction (0-0.20 recommended)
         """
-        # Validate inputs
-        if avg_loss_pct <= 0 or avg_win_pct <= 0:
-            return min_size
+        if avg_loss <= 0 or avg_win <= 0:
+            return 0
 
-        if not (0 <= win_rate <= 1):
-            return min_size
+        # If odds not provided, calculate from avg_win/avg_loss
+        if odds is None or odds <= 0:
+            odds = avg_win / avg_loss
 
-        # Compute Kelly
+        # Kelly formula: f = (bp - q) / b
+        # where p = win_rate, q = 1 - win_rate, b = odds
         loss_rate = 1 - win_rate
-        odds = avg_win_pct / avg_loss_pct
-        p = win_rate
-        q = loss_rate
+        kelly_fraction_optimal = (odds * win_rate - loss_rate) / odds if odds > 0 else 0
 
-        # Kelly formula
-        if odds > 0:
-            kelly_raw = (odds * p - q) / odds
-        else:
-            return min_size
+        # Apply safety fraction
+        kelly_fraction_safe = kelly_fraction_optimal * self.kelly_fraction
 
-        # Apply fractional Kelly
-        kelly_sized = kelly_raw * self.kelly_fraction
+        # Bounds: 0.01-0.20 (recommended max)
+        kelly_fraction_safe = np.clip(kelly_fraction_safe, -1.0, 0.20)
 
-        # Bound to safe range
-        kelly_final = np.clip(kelly_sized, min_size, max_size)
+        return kelly_fraction_safe
 
-        return float(kelly_final)
-
-    def get_strategy_sizes(
+    def calculate_position_size(
         self,
-        strategy_stats: Dict[str, Dict],
-    ) -> Dict[str, float]:
-        """Get Kelly-sized allocations for multiple strategies.
+        win_rate: float,
+        avg_win: float,
+        avg_loss: float,
+        capital: float,
+    ) -> float:
+        """Calculate optimal position size using Kelly Criterion (legacy method).
 
         Args:
-            strategy_stats: Dict of strategy_id -> {
-                'win_rate': float,
-                'avg_win': float,
-                'avg_loss': float,
-            }
+            win_rate: Win rate (0-1)
+            avg_win: Average winning trade size
+            avg_loss: Average losing trade size
+            capital: Available capital
 
         Returns:
-            Dict of strategy_id -> allocation (sums to ~1.0)
+            Position size in capital units
+        """
+        kelly_frac = self.compute_kelly_size(win_rate, avg_win, avg_loss, None)
+        return capital * kelly_frac
+
+    def get_strategy_sizes(self, strategy_params: Dict[str, Dict]) -> Dict[str, float]:
+        """Get position sizes for multiple strategies.
+
+        Args:
+            strategy_params: Dict of strategy_name -> {win_rate, avg_win, avg_loss, odds}
+
+        Returns:
+            Dict of strategy_name -> position_size
         """
         sizes = {}
-        total_size = 0
+        total_capital = 1.0  # Assume normalized
 
-        # Compute Kelly size for each strategy
-        for strat_id, stats in strategy_stats.items():
-            size = self.compute_kelly_size(
-                win_rate=stats.get('win_rate', 0.5),
-                avg_win_pct=stats.get('avg_win', 0.01),
-                avg_loss_pct=stats.get('avg_loss', 0.01),
+        for strategy, params in strategy_params.items():
+            # Use odds if provided, otherwise calculate from avg_win/avg_loss
+            odds = params.get('odds', params['avg_win'] / params['avg_loss'] if params['avg_loss'] > 0 else 1.0)
+
+            # Compute kelly fraction using odds
+            kelly_frac = self.compute_kelly_size(
+                win_rate=params['win_rate'],
+                avg_win=params['avg_win'],
+                avg_loss=params['avg_loss'],
+                odds=odds,
             )
-            sizes[strat_id] = size
-            total_size += size
+            # Only include positive Kelly sizes
+            if kelly_frac > 0:
+                size = total_capital * kelly_frac
+                sizes[strategy] = size
+            else:
+                sizes[strategy] = 0.01  # Minimum positive allocation for losing systems
 
-        # Normalize to sum to 1.0
+        # Normalize if total exceeds capital
+        total_size = sum(sizes.values())
         if total_size > 0:
-            sizes = {k: v / total_size for k, v in sizes.items()}
+            scaling_factor = total_capital / total_size
+            sizes = {k: v * scaling_factor for k, v in sizes.items()}
 
         return sizes
 
-    def compare_vs_equal_weight(
-        self,
-        strategy_stats: Dict[str, Dict],
-    ) -> Tuple[Dict[str, float], Dict[str, float], float]:
-        """Compare Kelly sizing vs equal weighting.
-
-        Args:
-            strategy_stats: Strategy statistics
-
-        Returns:
-            (kelly_sizes, equal_sizes, kelly_improvement_pct)
-        """
-        kelly_sizes = self.get_strategy_sizes(strategy_stats)
-
-        n_strategies = len(strategy_stats)
-        equal_sizes = {k: 1.0 / n_strategies for k in strategy_stats.keys()}
-
-        # Estimated improvement (rough approximation)
-        # Kelly typically improves Sharpe by 5-15%
-        kelly_improvement = 0.10  # 10% expected
-
-        return kelly_sizes, equal_sizes, kelly_improvement
-
 
 class SmoothModeTransitions:
-    """
-    Smooth transitions between 5 risk levels instead of instant jumps.
-
-    Prevents shock from sudden de-risking.
-    """
+    """Smooth transitions between risk modes over multiple days."""
 
     def __init__(self, transition_days: int = 3):
-        """Initialize transitions.
+        """Initialize smooth transitions.
 
         Args:
-            transition_days: Number of days to transition between levels
+            transition_days: Days to smooth transition over
         """
         self.transition_days = transition_days
-        self.current_level = PortfolioRiskLevel.GREEN
-        self.target_level = PortfolioRiskLevel.GREEN
-        self.transition_start = datetime.now()
 
-    def get_current_allocation(self) -> float:
-        """Get current allocation multiplier (0.25 - 1.0).
-
-        Returns:
-            Allocation multiplier
-        """
-        level_to_allocation = {
-            PortfolioRiskLevel.GREEN: 1.0,
-            PortfolioRiskLevel.YELLOW: 0.90,
-            PortfolioRiskLevel.ORANGE: 0.75,
-            PortfolioRiskLevel.RED: 0.50,
-            PortfolioRiskLevel.DARK_RED: 0.25,
-        }
-
-        # If transitioning, interpolate
-        if self.current_level != self.target_level:
-            elapsed = (datetime.now() - self.transition_start).total_seconds()
-            transition_seconds = self.transition_days * 86400
-
-            if elapsed < transition_seconds:
-                # Linear interpolation
-                progress = elapsed / transition_seconds
-                current_alloc = level_to_allocation[self.current_level]
-                target_alloc = level_to_allocation[self.target_level]
-                return current_alloc + (target_alloc - current_alloc) * progress
-            else:
-                # Transition complete
-                self.current_level = self.target_level
-
-        return level_to_allocation[self.current_level]
-
-    def set_target_level(self, new_level: PortfolioRiskLevel):
-        """Set new target risk level.
+    def get_multiplier(
+        self,
+        start_level: PortfolioRiskLevel,
+        target_level: PortfolioRiskLevel,
+        days_elapsed: int,
+    ) -> float:
+        """Get interpolated adjustment factor.
 
         Args:
-            new_level: New risk level
-        """
-        if new_level != self.target_level:
-            self.target_level = new_level
-            self.transition_start = datetime.now()
+            start_level: Starting risk level
+            target_level: Target risk level
+            days_elapsed: Days elapsed in transition
 
-            logger.info(f"Transitioning from {self.current_level.value} to {new_level.value}")
+        Returns:
+            Interpolated adjustment (0.25 to 1.0)
+        """
+        if days_elapsed == 0:
+            # At start
+            return start_level.value['leverage_mult']
+
+        if self.transition_days == 0:
+            # Instant transition
+            return target_level.value['leverage_mult']
+
+        # Linear interpolation
+        current_mult = start_level.value['leverage_mult']
+        target_mult = target_level.value['leverage_mult']
+
+        progress = min(1.0, days_elapsed / self.transition_days)
+        interpolated = current_mult + (target_mult - current_mult) * progress
+
+        return interpolated
+
+    def get_interpolated_adjustment(
+        self,
+        current_level: PortfolioRiskLevel,
+        target_level: PortfolioRiskLevel,
+        days_elapsed: int,
+    ) -> float:
+        """Get interpolated adjustment factor (legacy alias).
+
+        Args:
+            current_level: Current risk level
+            target_level: Target risk level
+            days_elapsed: Days elapsed in transition
+
+        Returns:
+            Interpolated adjustment (0.25 to 1.0)
+        """
+        return self.get_multiplier(current_level, target_level, days_elapsed)
+
+# Alias for backwards compatibility
+KellyCriterion = KellyCriterionSizing

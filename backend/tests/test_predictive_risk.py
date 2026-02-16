@@ -19,6 +19,7 @@ from app.portfolio.predictive_risk import (
     WarningSignal,
     RiskAdjustments,
     PredictiveCircuitBreaker,
+    KellyCriterionSizing,
     KellyCriterion,
     SmoothModeTransitions,
 )
@@ -324,7 +325,7 @@ class TestKellyCriterion:
 
     def test_kelly_formula_positive(self):
         """Test Kelly formula: f* = (odds*p - q) / odds."""
-        kelly = KellyCriterion()
+        kelly = KellyCriterionSizing()
 
         # Positive expected value case
         # 55% win rate, $1 avg win, $1 avg loss, 1:1 odds
@@ -340,7 +341,7 @@ class TestKellyCriterion:
 
     def test_kelly_formula_zero_expected_value(self):
         """Test Kelly with zero expected value (50% win rate)."""
-        kelly = KellyCriterion()
+        kelly = KellyCriterionSizing()
 
         size = kelly.compute_kelly_size(
             win_rate=0.50,
@@ -354,7 +355,7 @@ class TestKellyCriterion:
 
     def test_kelly_formula_negative(self):
         """Test Kelly formula negative (losing system)."""
-        kelly = KellyCriterion()
+        kelly = KellyCriterionSizing()
 
         size = kelly.compute_kelly_size(
             win_rate=0.45,
@@ -390,7 +391,7 @@ class TestKellyCriterion:
 
     def test_kelly_bounds(self):
         """Test Kelly size bounded [0.01, 0.20]."""
-        kelly = KellyCriterion()
+        kelly = KellyCriterionSizing()
 
         # Very favorable system
         size_high = kelly.compute_kelly_size(
@@ -416,7 +417,7 @@ class TestKellyCriterion:
 
     def test_get_strategy_sizes_normalization(self):
         """Test strategy sizes normalize to 1.0."""
-        kelly = KellyCriterion()
+        kelly = KellyCriterionSizing()
 
         strategy_params = {
             'trend': {'win_rate': 0.55, 'avg_win': 1.0, 'avg_loss': 1.0, 'odds': 1.0},
@@ -521,7 +522,7 @@ class TestPredictiveRiskIntegration:
 
     def test_kelly_sizing_with_multiple_strategies(self):
         """Test Kelly sizing across portfolio."""
-        kelly = KellyCriterion()
+        kelly = KellyCriterionSizing()
 
         strategy_params = {
             'trend': {'win_rate': 0.56, 'avg_win': 1.1, 'avg_loss': 1.0, 'odds': 1.0},
