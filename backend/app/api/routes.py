@@ -524,6 +524,10 @@ async def get_recommendations(
     returns_21d = prices.pct_change(21).iloc[-1].dropna()
     returns_63d = prices.pct_change(63).iloc[-1].dropna()
 
+    # CRITICAL FIX: Check if both have data before combining
+    if len(returns_21d) == 0 or len(returns_63d) == 0:
+        raise HTTPException(status_code=400, detail="Insufficient data for momentum calculations")
+
     # Combine momentum signals
     signal = (returns_21d.rank(pct=True) + returns_63d.rank(pct=True)) / 2
 
@@ -2518,7 +2522,8 @@ async def get_ml_metrics():
         "episodes": {
             "total": len(analytics.episode_rewards),
             "recent_rewards": [round(r, 2) for r in analytics.episode_rewards[-10:]] if analytics.episode_rewards else [],
-            "avg_reward": round(float(np.mean(analytics.episode_rewards[-50:])), 2) if analytics.episode_rewards else 0,
+            # CRITICAL FIX: Check if list is not empty before np.mean, otherwise returns NaN
+            "avg_reward": round(float(np.nanmean(analytics.episode_rewards[-50:]) if len(analytics.episode_rewards[-50:]) > 0 else 0.0), 2) if analytics.episode_rewards else 0,
         },
         "models_fitted": {
             "hmm": analytics.hmm_fitted,

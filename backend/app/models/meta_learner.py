@@ -362,6 +362,8 @@ class WeightedEnsemble:
 
         # Convert scores to weights (softmax)
         scores_array = np.array(list(scores.values()))
+        # CRITICAL FIX #10: Replace NaN with 0 BEFORE clipping (NaN persists through np.clip)
+        scores_array = np.nan_to_num(scores_array, nan=0.0)
         scores_array = np.clip(scores_array, 0, 1)  # Clip to [0, 1]
         weights_raw = np.exp(scores_array * 10)  # Amplify differences
         weights = weights_raw / np.sum(weights_raw)
