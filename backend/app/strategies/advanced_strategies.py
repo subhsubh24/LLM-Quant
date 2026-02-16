@@ -113,7 +113,7 @@ class RegimeAwareStrategy(BaseStrategy):
         elif correlation > 0.65:
             regime = "STRESS"
             confidence = 0.7
-        elif trend_strength > 0.6:
+        elif trend_strength > 0.15:
             regime = "TREND"
             confidence = 0.75
         else:
