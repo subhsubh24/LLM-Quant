@@ -42,7 +42,8 @@ def compute_returns(
 
         for period in periods:
             if log_returns:
-                ret = np.log(price / price.shift(period))
+                # CRITICAL FIX #1: Add epsilon to prevent log(0) = -inf
+                ret = np.log(np.maximum(price / price.shift(period), 1e-8))
             else:
                 ret = price.pct_change(period)
 
@@ -85,7 +86,8 @@ def compute_momentum(
                 continue
 
             # Price at t-window relative to price at t-skip_recent
-            mom = np.log(price.shift(skip_recent) / price.shift(window))
+            # CRITICAL FIX #3: Add epsilon to prevent log(0) = -inf
+            mom = np.log(np.maximum(price.shift(skip_recent) / price.shift(window), 1e-8))
 
             # Lag by 1 for safety
             col_name = f"{ticker}_mom_{window}d"
@@ -158,14 +160,16 @@ def compute_drawdown(prices: pd.DataFrame) -> pd.DataFrame:
         running_max = price.expanding().max()
 
         # Drawdown as percentage from peak
-        drawdown = (price - running_max) / running_max
+        # CRITICAL FIX #4: Add epsilon to prevent division by zero
+        drawdown = (price - running_max) / np.maximum(running_max, 1e-8)
 
         # Current drawdown (lagged by 1)
         result[f"{ticker}_drawdown"] = drawdown.shift(1)
 
         # Distance from 52-week high (252 trading days)
         high_252 = price.rolling(252, min_periods=126).max()
-        result[f"{ticker}_dist_from_52w_high"] = ((price / high_252) - 1).shift(1)
+        # CRITICAL FIX #5: Add epsilon to prevent division by zero
+        result[f"{ticker}_dist_from_52w_high"] = ((price / np.maximum(high_252, 1e-8)) - 1).shift(1)
 
     return result
 
@@ -236,8 +240,9 @@ def compute_risk_features(
     result = pd.DataFrame(index=prices.index)
 
     # Compute returns
-    stock_rets = np.log(prices / prices.shift(1))
-    market_rets = np.log(market_proxy / market_proxy.shift(1))
+    # CRITICAL FIX #9 & #10: Add epsilon to prevent log(0) = -inf
+    stock_rets = np.log(np.maximum(prices / prices.shift(1), 1e-8))
+    market_rets = np.log(np.maximum(market_proxy / market_proxy.shift(1), 1e-8))
 
     for ticker in prices.columns:
         rets = stock_rets[ticker]
@@ -312,15 +317,18 @@ def compute_technical_features(
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = tr.rolling(14, min_periods=7).mean()
         # Normalize by price for comparability
-        result[f"{ticker}_atr_pct"] = (atr / close).shift(1)
+        # CRITICAL FIX #6: Add epsilon to prevent division by zero
+        result[f"{ticker}_atr_pct"] = (atr / np.maximum(close, 1e-8)).shift(1)
 
         # Moving average crossover signals
         ma_20 = close.rolling(20, min_periods=10).mean()
         ma_50 = close.rolling(50, min_periods=25).mean()
         ma_200 = close.rolling(200, min_periods=100).mean()
 
-        result[f"{ticker}_ma_20_50_ratio"] = (ma_20 / ma_50).shift(1)
-        result[f"{ticker}_price_ma_200_ratio"] = (close / ma_200).shift(1)
+        # CRITICAL FIX #7: Add epsilon to prevent division by zero in MA ratios
+        result[f"{ticker}_ma_20_50_ratio"] = (ma_20 / np.maximum(ma_50, 1e-8)).shift(1)
+        # CRITICAL FIX #8: Add epsilon to prevent division by zero
+        result[f"{ticker}_price_ma_200_ratio"] = (close / np.maximum(ma_200, 1e-8)).shift(1)
 
     return result
 
