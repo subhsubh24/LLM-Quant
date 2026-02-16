@@ -46,6 +46,18 @@ class LightGBMEnhanced:
         self.model = None
         self.feature_importance = None
 
+        # Initialize default parameters
+        self.params = {
+            'num_leaves': self.n_leaves,
+            'learning_rate': self.learning_rate,
+            'lambda_l1': 1.0,  # L1 regularization
+            'lambda_l2': 1.0,  # L2 regularization
+            'feature_fraction': 0.8,
+            'bagging_fraction': 0.8,
+            'bagging_freq': 5,
+            'verbose': -1,
+        }
+
     def train(self, X: np.ndarray, y: np.ndarray, eval_set: Optional[Tuple] = None):
         """Train LightGBM model.
 
@@ -119,6 +131,17 @@ class XGBoostEnhanced:
         self.learning_rate = learning_rate
         self.model = None
         self.feature_importance = None
+
+        # Initialize default parameters
+        self.params = {
+            'max_depth': self.max_depth,
+            'learning_rate': self.learning_rate,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
+            'reg_lambda': 1.0,  # L2 regularization
+            'reg_alpha': 0.5,   # L1 regularization
+            'verbosity': 0,
+        }
 
     def train(self, X: np.ndarray, y: np.ndarray, eval_set: Optional[Tuple] = None):
         """Train XGBoost model.
@@ -198,6 +221,12 @@ class RandomForestEnhanced:
         self.max_depth = max_depth
         self.model = None
         self.feature_importance = None
+
+        # Initialize default parameters
+        self.params = {
+            'n_estimators': self.n_estimators,
+            'max_depth': self.max_depth,
+        }
 
     def train(self, X: np.ndarray, y: np.ndarray, eval_set: Optional[Tuple] = None):
         """Train Random Forest.
@@ -327,6 +356,19 @@ class ExtraTreesEnhanced:
         self.max_depth = max_depth
         self.model = None
         self.feature_importance = None
+
+        # Initialize default parameters
+        self.params = {
+            'hidden_size': 64,
+            'num_layers': 2,
+            'dropout': 0.2,
+        }
+
+        # Initialize default parameters
+        self.params = {
+            'n_estimators': self.n_estimators,
+            'max_depth': self.max_depth,
+        }
 
     def train(self, X: np.ndarray, y: np.ndarray, eval_set: Optional[Tuple] = None):
         """Train Extra Trees.
