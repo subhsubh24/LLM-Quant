@@ -22,7 +22,7 @@ def test_lstm_classifier():
     print("TEST 1: LSTMClassifier Training")
     print("="*60)
 
-    from trading.ml_models import LSTMClassifier
+    from app.trading.ml_models import LSTMClassifier
 
     # Initialize
     lstm = LSTMClassifier(input_dim=16, hidden_dim=32, output_dim=3, lr=0.01)
@@ -77,7 +77,7 @@ def test_trainable_transformer():
     print("TEST 2: TrainableTransformer Training")
     print("="*60)
 
-    from trading.ml_models import TrainableTransformer
+    from app.trading.ml_models import TrainableTransformer
 
     # Initialize
     transformer = TrainableTransformer(input_dim=16, hidden_dim=32, output_dim=3, lr=0.01)
@@ -128,7 +128,7 @@ def test_trainable_vae():
     print("TEST 3: TrainableVAE Training")
     print("="*60)
 
-    from trading.ml_models import TrainableVAE
+    from app.trading.ml_models import TrainableVAE
 
     # Initialize
     vae = TrainableVAE(input_dim=16, hidden_dim=32, latent_dim=4, output_dim=4, lr=0.01)
@@ -181,7 +181,7 @@ def test_model_pretrainer():
     print("TEST 4: ModelPreTrainer Integration")
     print("="*60)
 
-    from trading.backtester import ModelPreTrainer, TrainingMetrics
+    from app.trading.backtester import ModelPreTrainer, TrainingMetrics
 
     # Initialize with smaller dimensions for testing
     pretrainer = ModelPreTrainer(state_dim=16, action_dim=3)
@@ -221,7 +221,7 @@ def test_checkpoint_save_load():
     print("TEST 5: Checkpoint Save/Load")
     print("="*60)
 
-    from trading.backtester import ModelPreTrainer, CHECKPOINT_DIR
+    from app.trading.backtester import ModelPreTrainer, CHECKPOINT_DIR
     import pickle
 
     # Train a model
@@ -269,7 +269,7 @@ async def test_alpha_sources():
     print("TEST 6: Alpha Source APIs")
     print("="*60)
 
-    from trading.backtester import AlphaSourceManager
+    from app.trading.backtester import AlphaSourceManager
 
     alpha = AlphaSourceManager()
     print(f"[OK] Initialized AlphaSourceManager")

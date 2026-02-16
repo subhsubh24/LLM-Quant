@@ -308,7 +308,7 @@ class TestCRITICAL_BUG7_RiskContributionDivisionByZero:
 
     def test_zero_portfolio_volatility(self):
         """Test risk parity with zero portfolio volatility."""
-        from portfolio.optimizer import RiskParityOptimizer, PortfolioConfig
+        from app.portfolio.optimizer import RiskParityOptimizer, PortfolioConfig
 
         config = PortfolioConfig()
         optimizer = RiskParityOptimizer(config)
@@ -330,7 +330,7 @@ class TestCRITICAL_BUG7_RiskContributionDivisionByZero:
 
     def test_small_portfolio_volatility(self):
         """Test with very small but non-zero volatility."""
-        from portfolio.optimizer import RiskParityOptimizer, PortfolioConfig
+        from app.portfolio.optimizer import RiskParityOptimizer, PortfolioConfig
 
         config = PortfolioConfig()
         optimizer = RiskParityOptimizer(config)
