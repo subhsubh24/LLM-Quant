@@ -83,7 +83,8 @@ app.add_middleware(
         "http://127.0.0.1:3002",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    # BUG FIX #43: Restrict to safe HTTP methods (not TRACE, CONNECT)
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 

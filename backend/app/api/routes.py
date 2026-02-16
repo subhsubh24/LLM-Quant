@@ -1029,9 +1029,21 @@ async def trigger_rebalance(
         raise HTTPException(status_code=404, detail="No price data available")
 
     # Get current prices
-    market_service = get_live_market_service()
-    quotes = await market_service.get_quotes_batch(universe.tickers)
-    current_prices = {q.symbol: q.price for q in quotes.values()}
+    # BUG FIX #13: Add error handling for async market service calls
+    try:
+        market_service = get_live_market_service()
+        quotes = await market_service.get_quotes_batch(universe.tickers)
+        # Validate quotes before accessing attributes
+        if not quotes:
+            raise HTTPException(status_code=503, detail="Failed to fetch market quotes")
+        current_prices = {q.symbol: q.price for q in quotes.values() if q and hasattr(q, 'symbol') and hasattr(q, 'price')}
+        if not current_prices:
+            raise HTTPException(status_code=503, detail="No valid quotes received")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Market service error in rebalance: {e}")
+        raise HTTPException(status_code=503, detail=f"Market service unavailable: {str(e)}")
 
     # Generate signals and rebalance
     trader = get_auto_trader()
@@ -3403,7 +3415,8 @@ async def submit_live_crypto_order(request: LiveOrderRequest, is_futures: bool =
             "order_type": order.order_type,
             "order_status": order.status,
             "is_futures": is_futures,
-            "is_live": not manager.credentials[BrokerType.BINANCE].is_paper if BrokerType.BINANCE in manager.credentials else False,
+            # BUG FIX #15: Use .get() for safe dict access (prevents KeyError)
+            "is_live": not manager.credentials.get(BrokerType.BINANCE, type('obj', (), {'is_paper': True})).is_paper,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Order failed: {str(e)}")
