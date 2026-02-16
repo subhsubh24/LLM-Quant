@@ -105,6 +105,7 @@ class TradeLog:
     signal_score: Optional[float]
     order_type: str
     notes: str = ""
+    pnl: Optional[float] = None  # BUG FIX #11: Add pnl field for trade tracking
 
     def to_dict(self) -> Dict:
         return {
@@ -201,9 +202,12 @@ class AutoTrader:
                 position.current_price = current_prices[symbol]
                 position.market_value = position.quantity * position.current_price
                 position.unrealized_pnl = position.market_value - (position.quantity * position.avg_cost)
-                # BUG FIX #5: Add epsilon guard to prevent division by zero
-                position_cost = max(position.quantity * position.avg_cost, 1e-8)
-                position.unrealized_pnl_pct = position.unrealized_pnl / position_cost
+                # BUG FIX #25: Validate avg_cost before calculation (prevents massive % from dividing by epsilon)
+                if position.avg_cost > 1e-8:
+                    position_cost = position.quantity * position.avg_cost
+                    position.unrealized_pnl_pct = position.unrealized_pnl / position_cost
+                else:
+                    position.unrealized_pnl_pct = 0  # Invalid cost, can't calculate percentage
                 total_position_value += position.market_value
 
         # Update portfolio totals
@@ -212,8 +216,9 @@ class AutoTrader:
         self.portfolio.total_pnl_pct = self.portfolio.total_pnl / self.initial_cash
 
         # Update weights
+        # BUG FIX #5: Add epsilon guard for extra safety (defensive programming)
         for position in self.portfolio.positions.values():
-            position.weight = position.market_value / self.portfolio.total_value if self.portfolio.total_value > 0 else 0
+            position.weight = position.market_value / self.portfolio.total_value if self.portfolio.total_value > 1e-8 else 0
 
         # Record equity
         self.portfolio.equity_curve.append((datetime.now(), self.portfolio.total_value))
@@ -514,11 +519,10 @@ class AutoTrader:
 
         # Trade metrics
         n_trades = len(self.trade_history)
-        # BUG FIX #12: Count only profitable sells as winning trades, not ALL sells
-        # Note: TradeLog doesn't have pnl field directly, so we estimate from market movement
-        # For now, count any sell with positive P&L as winning (would need enhanced TradeLog for full accuracy)
+        # BUG FIX #11: Count trades with pnl field set (matched buy/sell pairs)
+        # Note: pnl field is optional and only set when trades are properly matched
         winning_trades = sum(1 for t in self.trade_history
-                           if t.side == "sell" and hasattr(t, "pnl") and t.pnl > 0)
+                           if t.pnl is not None and t.pnl > 0)
 
         return {
             "total_return": round(total_return, 4),

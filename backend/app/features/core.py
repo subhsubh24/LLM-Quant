@@ -369,7 +369,8 @@ def standardize_features(
 
     else:
         # Simple standardization
-        result = (features - features.mean()) / features.std()
+        # BUG FIX #1: Add epsilon guard to prevent division by zero if all features identical
+        result = (features - features.mean()) / (features.std() + 1e-8)
         result = result.clip(-clip_outliers, clip_outliers)
 
     return result

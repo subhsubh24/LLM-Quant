@@ -291,6 +291,9 @@ class LSTM(Layer):
 
         if self.h is None:
             self.reset_state(batch_size)
+        else:
+            # BUG FIX #12: Validate batch size matches previous initialization
+            assert self.h.shape[0] == batch_size, f"Batch size mismatch: expected {self.h.shape[0]}, got {batch_size}"
 
         outputs = []
 
@@ -1614,6 +1617,9 @@ class TrainableTransformer:
             self.v[name] = np.zeros_like(param)
 
     def _softmax(self, x, axis=-1):
+        # BUG FIX #16: Validate input is finite before softmax (prevents NaN propagation)
+        if not np.isfinite(x).all():
+            x = np.nan_to_num(x, nan=-500, posinf=500, neginf=-500)
         exp_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
         return exp_x / (np.sum(exp_x, axis=axis, keepdims=True) + 1e-8)
 

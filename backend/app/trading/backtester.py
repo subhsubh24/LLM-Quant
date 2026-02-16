@@ -2482,8 +2482,8 @@ class WalkForwardBacktester:
                 if sym in window_data and len(window_data[sym]) > 0:
                     current_price = window_data[sym][-1].close
                     entry_price = pos["entry_price"]
-                    # CRITICAL FIX: Validate both prices before division (prevent NaN propagation)
-                    if entry_price > 0 and current_price > 0:
+                    # BUG FIX #10: Validate both prices with epsilon guard before division (prevent Inf/NaN)
+                    if entry_price > 1e-8 and current_price > 1e-8:
                         if pos["side"] == "long":
                             unrealized_pnl += pos["size"] * (current_price / entry_price - 1)
                         else:
@@ -3378,7 +3378,8 @@ class WalkForwardBacktester:
         # Note: Uses mean of ALL returns (upside + downside) in numerator for excess return
         # but only downside std in denominator, measuring return per unit downside risk
         downside_returns = returns[returns < 0]
-        if len(downside_returns) > 0 and np.std(downside_returns) > 0:
+        # BUG FIX #3: Use epsilon comparison instead of exact > 0 for float reliability
+        if len(downside_returns) > 0 and np.std(downside_returns) > 1e-8:
             sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(365 * 24)  # 365 days for crypto
         else:
             # BUG FIX #4: Don't default to Sharpe when no downside

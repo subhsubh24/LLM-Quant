@@ -278,6 +278,10 @@ class PairsTradingEngine:
                         b_norm = (price_b - price_b.mean()) / b_std
                         X = np.column_stack([np.ones(len(a_norm)), b_norm])
                         beta = np.linalg.lstsq(X, a_norm, rcond=None)[0]
+                        # BUG FIX #4: Validate beta array has at least 2 elements and beta[1] is finite
+                        if len(beta) < 2 or not np.isfinite(beta[1]) or abs(beta[1]) > 100:
+                            logger.warning(f"Invalid hedge ratio for {ticker_a}/{ticker_b}, skipping pair")
+                            continue
                         hedge_ratio = beta[1]
 
                         self.pair_hedges[f"{ticker_a}_{ticker_b}"] = hedge_ratio
@@ -347,8 +351,9 @@ class PairsTradingEngine:
                 spread_std = spread_hist.std()
 
                 # Current Z-score
-                # CRITICAL FIX: Validate spread_std is finite before division (prevents NaN from corrupted spreads)
-                if np.isfinite(spread_std) and spread_std > 1e-8:
+                # BUG FIX #7: Validate all spread components are finite before calculation
+                if (np.isfinite(spread_std) and spread_std > 1e-8 and
+                    np.isfinite(spread_mean) and np.isfinite(spread.iloc[-1])):
                     zscore = (spread.iloc[-1] - spread_mean) / spread_std
                     # Validate zscore is finite
                     if not np.isfinite(zscore):

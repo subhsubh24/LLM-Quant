@@ -336,8 +336,11 @@ class PerformanceTracker:
         else:
             drawdown = 0
 
-        # BUG FIX #3: Check BEFORE division to prevent inflated Sharpe ratios
-        sharpe = cumulative_return / (volatility + 1e-10) if volatility > 1e-10 else 0
+        # BUG FIX #26: Add risk-free rate to Sharpe ratio calculation (proper formula)
+        # Sharpe = (return - risk_free_rate) / volatility
+        # Using 2% annual risk-free rate
+        risk_free_rate = 0.02
+        sharpe = (cumulative_return - risk_free_rate) / (volatility + 1e-10) if volatility > 1e-10 else 0
         var_95 = np.percentile(self.daily_pnls.values, 5) if len(self.daily_pnls) > 1 else 0
 
         metrics = DailyMetrics(
