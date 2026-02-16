@@ -602,7 +602,9 @@ class HistoricalDataDownloader:
                                 volume=float(kline[5])
                             ))
 
-                        # Move to next batch
+                        # Move to next batch (BUG #1 FIX: Check if data is non-empty)
+                        if not data:
+                            break
                         current_start = data[-1][0] + 1
 
                         # Rate limiting
@@ -660,7 +662,12 @@ class HistoricalDataDownloader:
 
                     quotes = result[0]
                     timestamps = quotes.get("timestamp", [])
-                    ohlcv = quotes.get("indicators", {}).get("quote", [{}])[0]
+
+                    # BUG #2 FIX: Validate quote array is non-empty before accessing
+                    quote_arr = quotes.get("indicators", {}).get("quote", [])
+                    if not quote_arr or not isinstance(quote_arr[0], dict):
+                        return []
+                    ohlcv = quote_arr[0]
 
                     opens = ohlcv.get("open", [])
                     highs = ohlcv.get("high", [])
@@ -668,7 +675,10 @@ class HistoricalDataDownloader:
                     closes = ohlcv.get("close", [])
                     volumes = ohlcv.get("volume", [])
 
-                    for i, ts in enumerate(timestamps):
+                    # BUG #3 FIX: Ensure all arrays have same length before accessing by index
+                    min_len = min(len(opens), len(highs), len(lows), len(closes), len(volumes))
+                    for i in range(min(len(timestamps), min_len)):
+                        ts = timestamps[i]
                         if all(x is not None for x in [opens[i], highs[i], lows[i], closes[i]]):
                             candles.append(OHLCV(
                                 timestamp=datetime.fromtimestamp(ts),
@@ -1744,12 +1754,15 @@ class WalkForwardBacktester:
 
                 # PHASE B ENHANCEMENT: Periodic continuous learning (every 5000 candles)
                 # Log model ensemble weights and performance by model
-                if candles_processed % config["continuous_learning_interval"] == 0 and len(model_recent_trades[model_names[0]]) >= 10:
+                # BUG #10 FIX: Check if model_names is non-empty before accessing model_names[0]
+                if candles_processed % config["continuous_learning_interval"] == 0 and len(model_names) > 0 and len(model_recent_trades[model_names[0]]) >= 10:
                     logger.info(f"\n🔄 CONTINUOUS LEARNING UPDATE (Candle {candles_processed:,}):")
                     for i, model_name in enumerate(model_names):
                         if len(model_recent_trades[model_name]) > 0:
                             recent_wr = np.mean(model_recent_trades[model_name][-20:])
-                            weight = 0.8 + (recent_wr - 0.5) * 1.6  # Same formula as voting
+                            # BUG #17 FIX: Clamp weight to positive range [0.5, 1.6] to prevent zero/negative weights
+                            weight = 0.8 + (recent_wr - 0.5) * 1.6
+                            weight = np.clip(weight, 0.5, 1.6)  # Prevent weight from becoming 0 or negative
                             logger.info(f"  {model_name}: Win rate={recent_wr:.1%}, Ensemble weight={weight:.2f}x")
                     portfolio_wr = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
                     logger.info(f"  Portfolio: Recent win rate={portfolio_wr:.1%}")
@@ -1768,13 +1781,19 @@ class WalkForwardBacktester:
                                         lookback=50
                                     )
                                     key = tuple(sorted([sym1, sym2]))
-                                    correlation_matrix[key] = corr
+                                    # BUG #15 FIX: Validate correlation is finite and in [-1, 1] range
+                                    if np.isfinite(corr) and -1.0 <= corr <= 1.0:
+                                        correlation_matrix[key] = corr
+                                    else:
+                                        logger.warning(f"⚠️ Invalid correlation {corr} for {sym1}↔{sym2}, using 0.0")
+                                        correlation_matrix[key] = 0.0
 
                                     # Log high correlations (potential hedging opportunities)
-                                    if abs(corr) > config["max_sector_correlation"]:
+                                    corr_safe = correlation_matrix[key]  # Use validated correlation
+                                    if abs(corr_safe) > config["max_sector_correlation"]:
                                         sector1 = sector_map.get(sym1, "OTHER")
                                         sector2 = sector_map.get(sym2, "OTHER")
-                                        logger.info(f"  ⚠️ High correlation: {sym1}({sector1}) ↔ {sym2}({sector2}) = {corr:.3f}")
+                                        logger.info(f"  ⚠️ High correlation: {sym1}({sector1}) ↔ {sym2}({sector2}) = {corr_safe:.3f}")
 
                         # Analyze sector exposure
                         sector_exposure = {}
@@ -1810,7 +1829,8 @@ class WalkForwardBacktester:
                             symbol_key = retraining_buffer["symbols"][idx]
                             price_at_pred = retraining_buffer["prices_at_prediction"][idx]
 
-                            if price_at_pred <= 0:  # Invalid price
+                            # BUG #7 FIX: Check for NaN and infinity in addition to non-positive prices
+                            if not np.isfinite(price_at_pred) or price_at_pred <= 0:  # Invalid price
                                 continue
 
                             has_valid_label = True
@@ -1874,6 +1894,12 @@ class WalkForwardBacktester:
                             if X_retrain.shape[1] not in [expected_dim, model_trainer.state_dim]:
                                 logger.error(f"❌ Feature dimension mismatch in retraining: got {X_retrain.shape[1]}, expected {expected_dim} or {model_trainer.state_dim}")
                                 # Skip retraining with malformed features to prevent model corruption
+                                continue
+
+                            # BUG #8 FIX: Add NaN/inf validation on features before retraining
+                            if not np.all(np.isfinite(X_retrain)):
+                                nan_count = np.sum(~np.isfinite(X_retrain))
+                                logger.error(f"❌ Found {nan_count} NaN/inf values in {X_retrain.size} retraining features")
                                 continue
 
                             y_retrain_multi = {h: np.array(labels_multi[h]) for h in retraining_buffer["horizons"]}
@@ -2142,7 +2168,8 @@ class WalkForwardBacktester:
                     exit_reason = "profit_pyramid_1"
                     should_exit = True
                     # Mark that we hit first pyramid level
-                    if partial_exit_pct < 1.0:
+                    # BUG #18 FIX: Use epsilon-based comparison for floating-point reliability
+                    if partial_exit_pct < 1.0 - 1e-8:
                         pos["pyramided_1"] = True
                     # Exit at the target price, not current close
                     current_price = target_1_price
