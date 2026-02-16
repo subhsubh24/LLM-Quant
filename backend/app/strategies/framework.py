@@ -505,6 +505,10 @@ class StrategyRegistry:
         """Get all registered strategies."""
         return list(self.strategies.values())
 
+    def list_strategies(self) -> List[BaseStrategy]:
+        """List all registered strategies (alias for get_all_strategies)."""
+        return self.get_all_strategies()
+
     def get_active_strategies(self) -> List[BaseStrategy]:
         """Get only active strategies."""
         return [
@@ -559,9 +563,9 @@ class StrategyExecutor:
     - Fails gracefully without affecting others
     """
 
-    def __init__(self, registry: StrategyRegistry):
+    def __init__(self, registry: Optional[StrategyRegistry] = None):
         """Initialize executor."""
-        self.registry = registry
+        self.registry = registry if registry is not None else StrategyRegistry()
         self.signals: Dict[str, StrategySignal] = {}
         self.errors: Dict[str, str] = {}
 
@@ -612,3 +616,45 @@ class StrategyExecutor:
     def get_errors(self) -> Dict[str, str]:
         """Get execution errors."""
         return self.errors
+
+    def execute_strategy(
+        self,
+        strategy: 'BaseStrategy',
+        prices: pd.DataFrame,
+        context: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> StrategySignal:
+        """
+        Execute a single strategy.
+
+        Args:
+            strategy: Strategy to execute
+            prices: Price data
+            context: Optional context dictionary
+            **kwargs: Additional arguments
+
+        Returns:
+            StrategySignal
+        """
+        try:
+            signal = strategy.generate_signal(prices, context, **kwargs)
+
+            # Validate signal
+            if strategy.validate_signal(signal):
+                self.signals[strategy.strategy_id] = signal
+                return signal
+            else:
+                self.errors[strategy.strategy_id] = "Signal validation failed"
+                strategy.record_error()
+                return signal
+
+        except Exception as e:
+            logger.error(f"Strategy {strategy.name} execution failed: {e}")
+            self.errors[strategy.strategy_id] = str(e)
+            strategy.record_error()
+            # Return empty signal on error
+            return StrategySignal(
+                strategy_id=strategy.strategy_id,
+                strategy_name=strategy.name,
+                timestamp=datetime.now(),
+            )
