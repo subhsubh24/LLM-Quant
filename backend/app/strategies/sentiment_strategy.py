@@ -93,6 +93,7 @@ class SentimentAnalysisStrategy(BaseStrategy):
         )
 
         if not context:
+            signal.confidence = 0.0
             return signal
 
         try:
@@ -205,7 +206,7 @@ class MultiSourceSentimentStrategy(BaseStrategy):
             name="Sentiment Consensus",
             description="Multi-source consensus sentiment trading",
         )
-        self.strategy_id = "multi_source_sentiment_v1"
+        self.strategy_id = "sentiment_consensus_v1"
         self.engine = CompositeSentimentEngine()
         self.min_agreement_score = min_agreement_score
         self.require_all_sources = require_all_sources
@@ -231,6 +232,7 @@ class MultiSourceSentimentStrategy(BaseStrategy):
         )
 
         if not context:
+            signal.confidence = 0.0
             return signal
 
         try:
@@ -257,9 +259,11 @@ class MultiSourceSentimentStrategy(BaseStrategy):
             # Check if we have enough sources
             if self.require_all_sources:
                 if composite.source_count < 3:
+                    signal.confidence = 0.0
                     return signal
             else:
                 if composite.source_count < 2:
+                    signal.confidence = 0.0
                     return signal
 
             # Check source agreement
@@ -268,6 +272,7 @@ class MultiSourceSentimentStrategy(BaseStrategy):
             valid_scores = [s for s in scores if s != 0]
 
             if not valid_scores:
+                signal.confidence = 0.0
                 return signal
 
             # Compute agreement: Do sources agree on direction?

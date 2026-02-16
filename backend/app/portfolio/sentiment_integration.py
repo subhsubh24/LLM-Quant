@@ -442,6 +442,32 @@ class SocialSentimentAnalyzer:
             },
         )
 
+    def get_sentiment_trend(self, symbol: str) -> str:
+        """Determine if social sentiment is strengthening/weakening.
+
+        Returns: 'strengthening', 'weakening', or 'stable'
+        """
+        history = self.sentiment_history.get(symbol, [])
+        if len(history) < 2:
+            return 'stable'
+
+        recent = [score for _, score in history[-5:]]
+        older = [score for _, score in history[-10:-5]] if len(history) >= 10 else recent[:1]
+
+        if not older:
+            return 'stable'
+
+        recent_avg = float(np.mean(recent))
+        older_avg = float(np.mean(older))
+        diff = recent_avg - older_avg
+
+        if abs(diff) < 0.3:
+            return 'stable'
+        elif diff > 0:
+            return 'strengthening'
+        else:
+            return 'weakening'
+
 
 class CompositeSentimentEngine:
     """Master sentiment aggregation from all sources."""
