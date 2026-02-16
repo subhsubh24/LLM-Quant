@@ -279,7 +279,7 @@ class TestComparison:
 
         # Both should have strategy signals
         assert signal_atr.strategy_id == "mean_reversion_atr_v2"
-        assert signal_bb.strategy_id == "mean_reversion_atr_v2"
+        assert signal_bb.strategy_id == "mean_reversion_bb_v2"
 
     def test_atr_adapts_to_volatility_changes(self):
         """Test ATR bands adapt faster than Bollinger to vol changes."""

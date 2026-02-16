@@ -97,10 +97,12 @@ class LightGBMEnhanced:
 
             self.feature_importance = self.model.feature_importance()
             logger.info("✓ LightGBM trained")
+            return {'status': 'success'}
 
         except ImportError:
             logger.warning("LightGBM not available, skipping")
             self.model = None
+            return {'status': 'failed'}
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using LightGBM.
@@ -198,10 +200,12 @@ class XGBoostEnhanced:
 
             self.feature_importance = self.model.get_score()
             logger.info("✓ XGBoost trained")
+            return {'status': 'success'}
 
         except ImportError:
             logger.warning("XGBoost not available, skipping")
             self.model = None
+            return {'status': 'failed'}
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using XGBoost.
@@ -288,10 +292,12 @@ class RandomForestEnhanced:
             self.model.fit(X, y)
             self.feature_importance = self.model.feature_importances_
             logger.info("✓ Random Forest trained")
+            return {'status': 'success'}
 
         except ImportError:
             logger.warning("sklearn not available, skipping")
             self.model = None
+            return {'status': 'failed'}
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using Random Forest.
@@ -336,6 +342,7 @@ class LSTMEnhanced:
         """
         self.seq_length = seq_length
         self.hidden_size = hidden_size
+        self.dropout = 0.3
         self.model = None
 
     def train(self, X: np.ndarray, y: np.ndarray, epochs: int = 50):
@@ -375,10 +382,12 @@ class LSTMEnhanced:
             )
 
             logger.info("✓ LSTM trained")
+            return {'status': 'success'}
 
         except ImportError:
             logger.warning("TensorFlow not available, skipping")
             self.model = None
+            return {'status': 'failed'}
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using LSTM.
@@ -462,10 +471,12 @@ class ExtraTreesEnhanced:
             self.model.fit(X, y)
             self.feature_importance = self.model.feature_importances_
             logger.info("✓ Extra Trees trained")
+            return {'status': 'success'}
 
         except ImportError:
             logger.warning("sklearn not available, skipping")
             self.model = None
+            return {'status': 'failed'}
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict using Extra Trees.
@@ -501,15 +512,16 @@ class ExtraTreesEnhanced:
 class NeuralNetMetaLearner:
     """Neural network meta-learner (replaces logistic regression)"""
 
-    def __init__(self, input_size: int = 5, hidden_size: int = 32):
+    def __init__(self, input_size: int = 5, hidden_size: int = 32, hidden_dim: Optional[int] = None):
         """Initialize meta-learner.
 
         Args:
             input_size: Number of base model predictions
             hidden_size: Hidden layer size
+            hidden_dim: Alias for hidden_size (for compatibility)
         """
         self.input_size = input_size
-        self.hidden_size = hidden_size
+        self.hidden_size = hidden_dim if hidden_dim is not None else hidden_size
         self.model = None
 
     def train(self, base_predictions: np.ndarray, y: np.ndarray, epochs: int = 50):
@@ -549,10 +561,12 @@ class NeuralNetMetaLearner:
             )
 
             logger.info("✓ Neural Net Meta-learner trained")
+            return {'status': 'success'}
 
         except ImportError:
             logger.warning("TensorFlow not available, skipping")
             self.model = None
+            return {'status': 'failed'}
 
     def predict(self, base_predictions: np.ndarray) -> np.ndarray:
         """Predict using meta-learner.
@@ -580,6 +594,9 @@ class EnhancedMLEnsemble:
         self.lstm = LSTMEnhanced()
         self.rf = RandomForestEnhanced()
         self.extra = ExtraTreesEnhanced()  # Extra Trees for diversity
+
+        # Store base models in list for easy access
+        self.base_models = [self.lightgbm, self.xgboost, self.lstm, self.rf, self.extra]
 
         self.meta_learner = NeuralNetMetaLearner(input_size=5)
 
@@ -635,6 +652,7 @@ class EnhancedMLEnsemble:
         self.meta_learner.train(base_preds, y)
 
         logger.info("✓ Enhanced ML Ensemble trained (5 models + meta)")
+        return {'status': 'success'}
 
     def _get_base_predictions(self, X: np.ndarray, X_seq: Optional[np.ndarray] = None) -> np.ndarray:
         """Get predictions from all 5 base models.

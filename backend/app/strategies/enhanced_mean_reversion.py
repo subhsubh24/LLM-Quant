@@ -129,7 +129,7 @@ class EnhancedMeanReversionStrategy(BaseStrategy):
             name="Mean Reversion (ATR-Enhanced)",
             description="Mean reversion with dynamic ATR-based bands",
         )
-        self.strategy_id = "enhanced_mean_reversion_v1"
+        self.strategy_id = "mean_reversion_atr_v2" if use_atr else "mean_reversion_bb_v2"
         self.period = period
         self.atr_period = atr_period
         self.atr_multiplier = atr_multiplier
@@ -279,7 +279,7 @@ class AdaptiveVolatilityMeanReversionStrategy(BaseStrategy):
             name="Mean Reversion (Adaptive Vol)",
             description="Mean reversion with volatility-adaptive bands",
         )
-        self.strategy_id = "adaptive_volatility_mean_reversion_v1"
+        self.strategy_id = "mean_reversion_adaptive_v3"
         self.period = period
         self.atr_period = atr_period
         self.lookback_volatility = lookback_volatility
