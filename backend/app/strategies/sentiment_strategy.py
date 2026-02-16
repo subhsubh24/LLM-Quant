@@ -63,6 +63,7 @@ class SentimentAnalysisStrategy(BaseStrategy):
             name="Sentiment Analysis",
             description="Multi-source sentiment trading",
         )
+        self.strategy_id = "sentiment_analysis_v1"
         self.engine = CompositeSentimentEngine()
         self.confidence_threshold = confidence_threshold
         self.source_count_required = source_count_required
@@ -204,6 +205,7 @@ class MultiSourceSentimentStrategy(BaseStrategy):
             name="Sentiment Consensus",
             description="Multi-source consensus sentiment trading",
         )
+        self.strategy_id = "multi_source_sentiment_v1"
         self.engine = CompositeSentimentEngine()
         self.min_agreement_score = min_agreement_score
         self.require_all_sources = require_all_sources

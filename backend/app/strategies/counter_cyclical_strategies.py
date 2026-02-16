@@ -79,6 +79,7 @@ class LongVolatilityStrategy(BaseStrategy):
             name="Long Volatility (Hedge)",
             description="Portfolio protection via long volatility positioning",
         )
+        self.strategy_id = "long_volatility_v1"
         self.vix_low_threshold = vix_low_threshold
         self.vix_neutral_high = vix_neutral_high
         self.vix_high_threshold = vix_high_threshold
@@ -159,6 +160,7 @@ class IntradayMeanReversionStrategy(BaseStrategy):
             name="Intraday Mean Reversion",
             description="Short-term (1-5 day) mean reversion trading",
         )
+        self.strategy_id = "intraday_mean_reversion_v1"
         self.lookback_short = lookback_short
         self.lookback_long = lookback_long
         self.std_dev_threshold = std_dev_threshold
@@ -253,6 +255,7 @@ class EnhancedFactorRotationStrategy(BaseStrategy):
             name="Factor Rotation (Blended)",
             description="Dynamic factor blending based on recent performance",
         )
+        self.strategy_id = "enhanced_factor_rotation_v1"
         self.rebalance_period = rebalance_period
         self.lookback_performance = lookback_performance
         self.last_rebalance_date = None
@@ -359,6 +362,7 @@ class KalmanFilterStatArbStrategy(BaseStrategy):
             name="Kalman Filter Stat Arb",
             description="Market-neutral pairs trading with Kalman filter hedge ratio",
         )
+        self.strategy_id = "kalman_filter_stat_arb_v1"
         self.process_noise = process_noise
         self.measurement_noise = measurement_noise
         self.lookback_days = lookback_days

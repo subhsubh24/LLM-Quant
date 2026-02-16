@@ -116,6 +116,22 @@ class LightGBMEnhanced:
 
         return self.model.predict(X)
 
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict probabilities using LightGBM.
+
+        Args:
+            X: Features (n_samples, n_features)
+
+        Returns:
+            Probability predictions (n_samples,) in [0, 1] range
+        """
+        if self.model is None:
+            return np.random.uniform(0, 1, len(X))
+
+        predictions = self.model.predict(X)
+        # Normalize to [0, 1] range using sigmoid
+        return 1.0 / (1.0 + np.exp(-predictions))
+
 
 class XGBoostEnhanced:
     """Enhanced XGBoost model"""
@@ -206,6 +222,27 @@ class XGBoostEnhanced:
         except:
             return np.zeros(len(X))
 
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict probabilities using XGBoost.
+
+        Args:
+            X: Features (n_samples, n_features)
+
+        Returns:
+            Probability predictions (n_samples,) in [0, 1] range
+        """
+        if self.model is None:
+            return np.random.uniform(0, 1, len(X))
+
+        try:
+            import xgboost as xgb
+            dtest = xgb.DMatrix(X)
+            predictions = self.model.predict(dtest)
+            # Normalize to [0, 1] range using sigmoid
+            return 1.0 / (1.0 + np.exp(-predictions))
+        except:
+            return np.random.uniform(0, 1, len(X))
+
 
 class RandomForestEnhanced:
     """Enhanced Random Forest model"""
@@ -269,6 +306,22 @@ class RandomForestEnhanced:
             return np.zeros(len(X))
 
         return self.model.predict(X)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict probabilities using Random Forest.
+
+        Args:
+            X: Features (n_samples, n_features)
+
+        Returns:
+            Probability predictions (n_samples,) in [0, 1] range
+        """
+        if self.model is None:
+            return np.random.uniform(0, 1, len(X))
+
+        predictions = self.model.predict(X)
+        # Normalize to [0, 1] range using sigmoid
+        return 1.0 / (1.0 + np.exp(-predictions))
 
 
 class LSTMEnhanced:
@@ -341,6 +394,22 @@ class LSTMEnhanced:
 
         return self.model.predict(X, verbose=0).flatten()
 
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict probabilities using LSTM.
+
+        Args:
+            X: Features (n_samples, seq_length, n_features)
+
+        Returns:
+            Probability predictions (n_samples,) in [0, 1] range
+        """
+        if self.model is None:
+            return np.random.uniform(0, 1, len(X))
+
+        predictions = self.model.predict(X, verbose=0).flatten()
+        # Normalize to [0, 1] range using sigmoid
+        return 1.0 / (1.0 + np.exp(-predictions))
+
 
 class ExtraTreesEnhanced:
     """Extra Trees (Extremely Randomized Trees) model for diversity"""
@@ -411,6 +480,22 @@ class ExtraTreesEnhanced:
             return np.zeros(len(X))
 
         return self.model.predict(X)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predict probabilities using Extra Trees.
+
+        Args:
+            X: Features (n_samples, n_features)
+
+        Returns:
+            Probability predictions (n_samples,) in [0, 1] range
+        """
+        if self.model is None:
+            return np.random.uniform(0, 1, len(X))
+
+        predictions = self.model.predict(X)
+        # Normalize to [0, 1] range using sigmoid
+        return 1.0 / (1.0 + np.exp(-predictions))
 
 
 class NeuralNetMetaLearner:

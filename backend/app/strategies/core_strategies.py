@@ -94,21 +94,24 @@ class TrendFollowingStrategy(BaseStrategy):
             current_volume = volume[-1]
             volume_ratio = current_volume / (avg_volume + 1e-10)
 
+            # Compute trend strength
+            trend_strength = abs(fast_ma - slow_ma) / (slow_ma + 1e-10)
+
             # Generate signal
-            if fast_ma > slow_ma and volume_ratio > self.min_volume_ratio:
+            if fast_ma > slow_ma:
                 # Trend up - go long
                 signal.symbols['TREND'] = 1.0
                 signal.target_weights['TREND'] = 0.8
-                signal.confidence = 0.7 + 0.2 * min(volume_ratio / 2, 0.3)
+                signal.confidence = 0.6 + 0.3 * min(trend_strength / 0.02, 1.0) + 0.1 * min(volume_ratio / 2, 0.5)
 
-            elif fast_ma < slow_ma and volume_ratio > self.min_volume_ratio:
+            elif fast_ma < slow_ma:
                 # Trend down - go short
                 signal.symbols['TREND'] = -1.0
                 signal.target_weights['TREND'] = 0.8
-                signal.confidence = 0.7 + 0.2 * min(volume_ratio / 2, 0.3)
+                signal.confidence = 0.6 + 0.3 * min(trend_strength / 0.02, 1.0) + 0.1 * min(volume_ratio / 2, 0.5)
 
             else:
-                # No clear trend or low volume
+                # No clear trend
                 signal.confidence = 0.3
 
             self.last_signal = signal
