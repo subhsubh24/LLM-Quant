@@ -308,13 +308,13 @@ class SkewStrategy(BaseStrategy):
                 # High put skew = sell put skew (bullish)
                 signal.symbols['SKEW'] = 0.5  # Mild long
                 signal.target_weights['SKEW'] = 0.3
-                signal.confidence = min(0.6, abs(skew) / 0.5)
+                signal.confidence = 0.5 + 0.3 * min(abs(skew) / 0.5, 1.0)
 
             elif skew < -self.skew_threshold:
                 # High call skew = sell call skew (bearish)
                 signal.symbols['SKEW'] = -0.5  # Mild short
                 signal.target_weights['SKEW'] = 0.3
-                signal.confidence = min(0.6, abs(skew) / 0.5)
+                signal.confidence = 0.5 + 0.3 * min(abs(skew) / 0.5, 1.0)
 
             else:
                 # Normal skew, no signal
@@ -444,7 +444,7 @@ class EarningsEventStrategy(BaseStrategy):
                     # Sell premium (straddle/strangle)
                     signal.symbols['EARNINGS_PRE'] = -0.4  # Short vol
                     signal.target_weights['EARNINGS_PRE'] = 0.2
-                    signal.confidence = min(0.7, vol_expansion / 2.0)
+                    signal.confidence = 0.6 + 0.2 * min(vol_expansion / 2.0, 1.0)
                 else:
                     signal.confidence = 0.3
 
@@ -455,7 +455,7 @@ class EarningsEventStrategy(BaseStrategy):
                     direction = -np.sign(last_move_sigma)  # Trade opposite
                     signal.symbols['EARNINGS_POST'] = direction * 0.5
                     signal.target_weights['EARNINGS_POST'] = 0.25
-                    signal.confidence = min(0.8, abs(last_move_sigma) / 5.0)
+                    signal.confidence = 0.7 + 0.2 * min(abs(last_move_sigma) / 5.0, 1.0)
                 else:
                     signal.confidence = 0.2
 

@@ -105,19 +105,19 @@ class LongVolatilityStrategy(BaseStrategy):
                 # VIX very low: buy protection (long vol)
                 signal.symbols['VOL'] = 1.0
                 signal.target_weights['VOL'] = 0.5
-                confidence = 0.3 + (self.vix_low_threshold - vix) / self.vix_low_threshold * 0.4
-                signal.confidence = min(confidence, 0.9)
+                confidence = 0.5 + (self.vix_low_threshold - vix) / self.vix_low_threshold * 0.4
+                signal.confidence = min(confidence, 0.95)
 
             elif vix > self.vix_high_threshold:
                 # VIX very high: sell protection (short vol) - lightly
                 signal.symbols['VOL'] = -0.3
                 signal.target_weights['VOL'] = 0.2
-                confidence = 0.2 + (vix - self.vix_high_threshold) / 20 * 0.3
-                signal.confidence = min(confidence, 0.6)
+                confidence = 0.4 + (vix - self.vix_high_threshold) / 20 * 0.4
+                signal.confidence = min(confidence, 0.75)
 
             else:
                 # VIX in normal range: neutral
-                signal.confidence = 0.1
+                signal.confidence = 0.2
 
             self.last_signal = signal
 
@@ -205,13 +205,13 @@ class IntradayMeanReversionStrategy(BaseStrategy):
                     # Price too high: expect reversion down
                     signal.symbols['INTRADAY_REV'] = -1.0
                     signal.target_weights['INTRADAY_REV'] = 0.4
-                    signal.confidence = 0.5 + min(deviation / 3, 0.3)
+                    signal.confidence = 0.6 + min(deviation / 3, 0.35)
 
                 else:
                     # Price too low: expect reversion up
                     signal.symbols['INTRADAY_REV'] = 1.0
                     signal.target_weights['INTRADAY_REV'] = 0.4
-                    signal.confidence = 0.5 + min(deviation / 3, 0.3)
+                    signal.confidence = 0.6 + min(deviation / 3, 0.35)
 
             else:
                 signal.confidence = 0.2
