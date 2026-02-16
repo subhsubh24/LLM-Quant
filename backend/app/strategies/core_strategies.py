@@ -223,7 +223,7 @@ class VolatilityTradingStrategy(BaseStrategy):
             name="Volatility Trading (VIX-based)",
             description="Volatility trading based on VIX levels",
         )
-        self.strategy_id = "volatility_trading_v1"
+        self.strategy_id = "volatility_v1"
         self.vix_low_threshold = vix_low_threshold
         self.vix_high_threshold = vix_high_threshold
         self.lookback = lookback
