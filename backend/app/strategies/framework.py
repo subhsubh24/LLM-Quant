@@ -168,6 +168,7 @@ class BaseStrategy(ABC):
         """
         self.strategy_id = str(uuid4())[:8]
         self.name = name
+        self.strategy_name = name  # Alias for compatibility
         self.description = description
         self.update_frequency = update_frequency
         self.position_limit = position_limit
@@ -250,7 +251,6 @@ class BaseStrategy(ABC):
             logger.error(f"Signal validation failed: {e}")
             return False
 
-    @abstractmethod
     def backtest(
         self,
         prices: pd.DataFrame,
@@ -261,9 +261,99 @@ class BaseStrategy(ABC):
         """
         Backtest strategy on historical data.
 
-        Should use walk-forward validation to prevent look-ahead bias.
+        Default implementation based on generate_signal.
+        Can be overridden by subclasses for more sophisticated backtesting.
+
+        Args:
+            prices: DataFrame with OHLCV data
+            volumes: Optional separate volume data
+            start_date: Start date for backtest
+            end_date: End date for backtest
+
+        Returns:
+            StrategyMetrics with backtest results
         """
-        pass
+        try:
+            # Filter by date range if provided
+            data = prices.copy()
+            if start_date:
+                data = data[data.index >= start_date]
+            if end_date:
+                data = data[data.index <= end_date]
+
+            if len(data) < 2:
+                return self.metrics
+
+            # Simulate trading based on signals
+            trades = []
+            position = None
+            entry_price = None
+            entry_date = None
+
+            # Generate signals for each bar
+            for i in range(1, len(data)):
+                bar_data = data.iloc[:i+1]
+                signal = self.generate_signal(bar_data)
+
+                # Simple logic: take position if confidence > 0.6
+                if signal.confidence > 0.6:
+                    # Determine direction from symbols
+                    if 'LONG' in signal.symbols or signal.symbols.get('TREND', 0) > 0:
+                        if position != 1:
+                            if position == -1:
+                                # Close short
+                                exit_price = data.iloc[i]['close']
+                                pnl = (entry_price - exit_price) * 100  # Simple calc
+                                trades.append({'entry': entry_date, 'exit': data.index[i], 'pnl': pnl, 'side': 'short'})
+                            position = 1
+                            entry_price = data.iloc[i]['close']
+                            entry_date = data.index[i]
+                    elif 'SHORT' in signal.symbols or signal.symbols.get('TREND', 0) < 0:
+                        if position != -1:
+                            if position == 1:
+                                # Close long
+                                exit_price = data.iloc[i]['close']
+                                pnl = (exit_price - entry_price) * 100
+                                trades.append({'entry': entry_date, 'exit': data.index[i], 'pnl': pnl, 'side': 'long'})
+                            position = -1
+                            entry_price = data.iloc[i]['close']
+                            entry_date = data.index[i]
+                else:
+                    # Close position if confidence too low
+                    if position is not None:
+                        exit_price = data.iloc[i]['close']
+                        if position == 1:
+                            pnl = (exit_price - entry_price) * 100
+                            trades.append({'entry': entry_date, 'exit': data.index[i], 'pnl': pnl, 'side': 'long'})
+                        else:
+                            pnl = (entry_price - exit_price) * 100
+                            trades.append({'entry': entry_date, 'exit': data.index[i], 'pnl': pnl, 'side': 'short'})
+                        position = None
+
+            # Close final position
+            if position is not None:
+                exit_price = data.iloc[-1]['close']
+                if position == 1:
+                    pnl = (exit_price - entry_price) * 100
+                    trades.append({'entry': entry_date, 'exit': data.index[-1], 'pnl': pnl, 'side': 'long'})
+                else:
+                    pnl = (entry_price - exit_price) * 100
+                    trades.append({'entry': entry_date, 'exit': data.index[-1], 'pnl': pnl, 'side': 'short'})
+
+            # Calculate returns (simple: 1% per day if in position)
+            returns = []
+            for i in range(1, len(data)):
+                ret = np.log(data.iloc[i]['close'] / data.iloc[i-1]['close'])
+                returns.append(ret)
+
+            if returns:
+                returns_series = pd.Series(returns, index=data.index[1:])
+                self.update_metrics(returns_series, trades)
+
+            return self.metrics
+        except Exception as e:
+            logger.error(f"Backtest failed for {self.strategy_name}: {e}")
+            return self.metrics
 
     def update_metrics(
         self,

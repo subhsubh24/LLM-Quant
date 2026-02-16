@@ -51,6 +51,7 @@ class RegimeAwareStrategy(BaseStrategy):
             name="Regime Aware Meta",
             description="Routes capital by market regime",
         )
+        self.strategy_id = "regime_aware_v1"
         self.regime_history = []
         self.correlation_history = []
         self.vol_history = []
@@ -161,6 +162,7 @@ class RegimeAwareStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         if context is None:
@@ -220,6 +222,7 @@ class SkewStrategy(BaseStrategy):
             name="Implied Vol Skew",
             description="Trades volatility smile anomalies",
         )
+        self.strategy_id = "skew_v1"
         self.skew_threshold = skew_threshold
         self.skew_history = []
 
@@ -261,6 +264,7 @@ class SkewStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         if context is None:
@@ -333,6 +337,7 @@ class EarningsEventStrategy(BaseStrategy):
             name="Earnings Event",
             description="Pre/post earnings volatility trades",
         )
+        self.strategy_id = "earnings_event_v1"
         self.vol_expansion_threshold = vol_expansion_threshold
         self.mean_reversion_threshold = mean_reversion_threshold
         self.earnings_dates = {}  # symbol -> list of dates
@@ -393,6 +398,7 @@ class EarningsEventStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         if context is None:

@@ -51,6 +51,7 @@ class TrendFollowingStrategy(BaseStrategy):
             name="Trend Following (Dual MA)",
             description="Trend following using dual moving average crossover",
         )
+        self.strategy_id = "trend_following_v1"
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.min_volume_ratio = min_volume_ratio
@@ -74,6 +75,7 @@ class TrendFollowingStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,  # Default to no confidence
         )
 
         if len(data) < self.slow_period:
@@ -138,6 +140,7 @@ class MeanReversionStrategy(BaseStrategy):
             name="Mean Reversion (Bollinger Bands)",
             description="Mean reversion using Bollinger Bands with volume confirmation",
         )
+        self.strategy_id = "mean_reversion_v1"
         self.period = period
         self.std_dev = std_dev
         self.min_band_squeeze = min_band_squeeze
@@ -152,6 +155,7 @@ class MeanReversionStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         if len(data) < self.period:
@@ -216,6 +220,7 @@ class VolatilityTradingStrategy(BaseStrategy):
             name="Volatility Trading (VIX-based)",
             description="Volatility trading based on VIX levels",
         )
+        self.strategy_id = "volatility_trading_v1"
         self.vix_low_threshold = vix_low_threshold
         self.vix_high_threshold = vix_high_threshold
         self.lookback = lookback
@@ -230,6 +235,7 @@ class VolatilityTradingStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         if len(data) < self.lookback:
@@ -288,6 +294,7 @@ class SectorRotationStrategy(BaseStrategy):
             name="Sector Rotation (Relative Strength)",
             description="Sector rotation based on relative performance",
         )
+        self.strategy_id = "sector_rotation_v1"
         self.lookback = lookback
         self.top_n_sectors = top_n_sectors
 
@@ -301,6 +308,7 @@ class SectorRotationStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         try:
@@ -336,6 +344,7 @@ class CarryTradingStrategy(BaseStrategy):
             name="Carry Trading (Risk-On/Off)",
             description="Carry trading with dynamic risk regime switching",
         )
+        self.strategy_id = "carry_v1"
         self.risk_on_threshold = risk_on_threshold
 
     def generate_signal(
@@ -348,6 +357,7 @@ class CarryTradingStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         try:
@@ -394,6 +404,7 @@ class TechnicalPatternsStrategy(BaseStrategy):
             name="Technical Patterns (RSI + MACD)",
             description="Technical analysis using RSI and MACD",
         )
+        self.strategy_id = "technical_v1"
         self.rsi_period = rsi_period
         self.rsi_overbought = rsi_overbought
         self.rsi_oversold = rsi_oversold
@@ -408,6 +419,7 @@ class TechnicalPatternsStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         if len(data) < self.rsi_period:
@@ -469,6 +481,7 @@ class SentimentAnalysisStrategy(BaseStrategy):
             name="Sentiment Analysis (Alt Data)",
             description="Trading based on alternative data sentiment signals",
         )
+        self.strategy_id = "sentiment_v1"
         self.sentiment_threshold = sentiment_threshold
 
     def generate_signal(
@@ -481,6 +494,7 @@ class SentimentAnalysisStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         try:
@@ -526,6 +540,7 @@ class FactorRotationStrategy(BaseStrategy):
             name="Factor Rotation (Value/Growth/Momentum)",
             description="Dynamic rotation between equity factors",
         )
+        self.strategy_id = "factor_rotation_v1"
         self.rotation_period = rotation_period
 
     def generate_signal(
@@ -538,6 +553,7 @@ class FactorRotationStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             strategy_name=self.strategy_name,
             timestamp=datetime.now(),
+            confidence=0.0,
         )
 
         try:
