@@ -262,6 +262,11 @@ class YFinanceProvider(DataProvider):
         """Fetch multiple tickers using yfinance batch download."""
         import yfinance as yf
 
+        # BUG FIX #9: Add empty tickers validation
+        if not tickers:
+            logger.warning("Empty tickers list provided to fetch_multiple")
+            return {}
+
         try:
             # yfinance supports batch downloads
             data = yf.download(

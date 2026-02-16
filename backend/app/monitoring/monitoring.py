@@ -336,7 +336,8 @@ class PerformanceTracker:
         else:
             drawdown = 0
 
-        sharpe = cumulative_return / (volatility + 1e-10) if volatility > 0 else 0
+        # BUG FIX #3: Check BEFORE division to prevent inflated Sharpe ratios
+        sharpe = cumulative_return / (volatility + 1e-10) if volatility > 1e-10 else 0
         var_95 = np.percentile(self.daily_pnls.values, 5) if len(self.daily_pnls) > 1 else 0
 
         metrics = DailyMetrics(
@@ -404,7 +405,8 @@ class PerformanceTracker:
 
         return {
             "period_days": len(recent),
-            "period_return_pct": (recent[-1].cumulative_return_pct - recent[0].daily_return_pct) * 100,
+            # BUG FIX #4: Subtract cumulative returns, not daily from cumulative (wrong formula)
+            "period_return_pct": (recent[-1].cumulative_return_pct - recent[0].cumulative_return_pct) * 100,
             "period_volatility_pct": returns.std() * np.sqrt(252) * 100,
             "period_sharpe": recent[-1].sharpe_ratio,
             "total_trades": sum(m.total_trades for m in recent),

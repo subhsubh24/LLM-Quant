@@ -3349,6 +3349,13 @@ async def submit_live_stock_order(request: LiveOrderRequest):
             order_type=request.order_type.lower(),
         )
 
+        # BUG FIX #8: Fix boolean operator precedence error
+        # Check if alpaca is connected and in credentials before accessing is_paper
+        is_live = False
+        if (manager.alpaca and manager.alpaca._connected and
+            BrokerType.ALPACA in manager.credentials):
+            is_live = not manager.credentials[BrokerType.ALPACA].is_paper
+
         return {
             "status": "order_submitted",
             "order_id": order.id,
@@ -3357,7 +3364,7 @@ async def submit_live_stock_order(request: LiveOrderRequest):
             "quantity": order.quantity,
             "order_type": order.order_type,
             "order_status": order.status,
-            "is_live": not manager.credentials[manager.alpaca._connected and BrokerType.ALPACA].is_paper if BrokerType.ALPACA in manager.credentials else False,
+            "is_live": is_live,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Order failed: {str(e)}")

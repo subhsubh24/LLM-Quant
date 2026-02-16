@@ -156,11 +156,16 @@ class CointegrationTester:
         X = np.column_stack([np.ones(len(a_norm)), b_norm])
         try:
             beta = np.linalg.lstsq(X, a_norm, rcond=None)[0]
-            hedge_ratio = beta[1]
-            # CRITICAL FIX: Validate hedge ratio is finite (protect against singular matrices)
-            if not np.isfinite(hedge_ratio):
-                logger.warning(f"Invalid hedge ratio (non-finite): {hedge_ratio}, using 1.0")
+            # BUG FIX #11: Validate beta has at least 2 coefficients before accessing beta[1]
+            if len(beta) < 2:
+                logger.warning(f"OLS regression returned insufficient coefficients: {len(beta)}, using 1.0")
                 hedge_ratio = 1.0
+            else:
+                hedge_ratio = beta[1]
+                # CRITICAL FIX: Validate hedge ratio is finite (protect against singular matrices)
+                if not np.isfinite(hedge_ratio):
+                    logger.warning(f"Invalid hedge ratio (non-finite): {hedge_ratio}, using 1.0")
+                    hedge_ratio = 1.0
         except Exception as e:
             # BUG FIX #2: Use specific exception handling instead of bare except
             logger.warning(f"OLS regression failed for hedge ratio calculation: {e}")

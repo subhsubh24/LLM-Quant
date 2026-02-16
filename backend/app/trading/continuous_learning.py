@@ -170,7 +170,9 @@ class ContinuousLearner:
             positions = np.arange(n_samples)
             # Exponential weighting: earlier samples lower weight
             weights = np.exp((positions - (n_samples - 1)) * np.log(recent_weight) / n_samples)
-            weights = weights / np.mean(weights)  # Normalize
+            # BUG FIX #2: Add epsilon guard to prevent division by zero in weight normalization
+            weight_mean = np.maximum(np.mean(weights), 1e-8)
+            weights = weights / weight_mean  # Normalize
 
             # Apply weights (optional: use for weighted training)
             # Most frameworks don't support sample weights, so just use recent data
