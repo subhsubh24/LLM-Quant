@@ -720,7 +720,7 @@ class OptionsQuantBot:
                     prices = bot.analytics.price_history[price_key]
                     if len(prices) >= 20:
                         # Calculate actual historical volatility
-                        returns = np.diff(prices) / prices[:-1]
+                        returns = np.diff(prices) / np.maximum(prices[:-1], 1e-8)
                         hv_20d = float(np.std(returns[-20:]) * np.sqrt(252))  # 20-day HV annualized
                         hv_60d = float(np.std(returns[-60:]) * np.sqrt(252)) if len(returns) >= 60 else hv_20d
 

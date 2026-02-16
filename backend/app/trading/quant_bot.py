@@ -2285,7 +2285,7 @@ class QuantBot:
 
         # Momentum quality (consistency)
         if len(prices) >= 10:
-            returns = np.diff(prices) / np.array(prices[:-1])
+            returns = np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8)
             mom_quality = QuantMath.momentum_quality(list(returns[-10:]))
         else:
             mom_quality = 0
@@ -2309,7 +2309,7 @@ class QuantBot:
 
         # Volatility regime
         if len(prices) >= 20:
-            returns = list(np.diff(prices) / np.array(prices[:-1]))
+            returns = list(np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8))
             vol_regime = QuantMath.volatility_regime(returns)
         else:
             vol_regime = "NORMAL"
@@ -2944,7 +2944,7 @@ class QuantBot:
         # Get symbol volatility from price history
         prices = list(self.price_history.get(symbol, [price]))
         if len(prices) >= 10:
-            returns = np.diff(prices) / np.array(prices[:-1])
+            returns = np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8)
             symbol_vol = np.std(returns) * np.sqrt(252) if len(returns) > 0 else 0.5
         else:
             symbol_vol = 0.5  # Default to 50% vol for unknown

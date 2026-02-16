@@ -126,8 +126,7 @@ class EnhancedMeanReversionStrategy(BaseStrategy):
     ):
         """Initialize enhanced mean reversion strategy."""
         super().__init__(
-            strategy_id="mean_reversion_atr_v2",
-            strategy_name="Mean Reversion (ATR-Enhanced)",
+            name="Mean Reversion (ATR-Enhanced)",
             description="Mean reversion with dynamic ATR-based bands",
         )
         self.period = period
@@ -276,8 +275,7 @@ class AdaptiveVolatilityMeanReversionStrategy(BaseStrategy):
     ):
         """Initialize adaptive volatility mean reversion."""
         super().__init__(
-            strategy_id="mean_reversion_adaptive_v3",
-            strategy_name="Mean Reversion (Adaptive Vol)",
+            name="Mean Reversion (Adaptive Vol)",
             description="Mean reversion with volatility-adaptive bands",
         )
         self.period = period

@@ -114,10 +114,10 @@ class PerformanceBasedOptimizer:
 
         # Normalize
         total_score = sum(scores.values())
-        if total_score == 0:
+        if total_score <= 1e-8:  # Use epsilon comparison for float
             return {sid: 1.0 / len(scores) for sid in scores.keys()}
 
-        weights = {sid: score / total_score for sid, score in scores.items()}
+        weights = {sid: score / max(total_score, 1e-8) for sid, score in scores.items()}
 
         # Apply minimum allocation (don't completely abandon strategies)
         min_weight = 0.05
@@ -156,10 +156,10 @@ class RiskParityOptimizer:
 
         # Normalize
         total = sum(weights.values())
-        if total == 0:
+        if total <= 1e-8:  # Use epsilon comparison for float
             return {sid: 1.0 / len(weights) for sid in weights.keys()}
 
-        weights = {sid: w / total for sid, w in weights.items()}
+        weights = {sid: w / max(total, 1e-8) for sid, w in weights.items()}
         return weights
 
 
@@ -236,7 +236,10 @@ class RegimeBasedOptimizer:
 
         # Normalize
         total = sum(weights.values())
-        weights = {sid: w / total for sid, w in weights.items()}
+        if total <= 1e-8:  # Ensure weights are valid
+            return {sid: 1.0 / len(weights) for sid in weights.keys()}
+
+        weights = {sid: w / max(total, 1e-8) for sid, w in weights.items()}
 
         return weights
 

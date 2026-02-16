@@ -61,6 +61,7 @@ class StrategySignal:
     # Metadata
     reason: str = ""
     update_frequency: str = "daily"  # How often this signal updates
+    extra_data: Dict[str, Any] = field(default_factory=dict)  # Additional strategy-specific data
 
     def to_dict(self) -> Dict:
         """Convert to dictionary."""

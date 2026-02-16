@@ -60,8 +60,7 @@ class SentimentAnalysisStrategy(BaseStrategy):
             trend_boost: Additional signal boost if trend is strengthening
         """
         super().__init__(
-            strategy_id="sentiment_analysis_v1",
-            strategy_name="Sentiment Analysis",
+            name="Sentiment Analysis",
             description="Multi-source sentiment trading",
         )
         self.engine = CompositeSentimentEngine()
@@ -202,8 +201,7 @@ class MultiSourceSentimentStrategy(BaseStrategy):
             require_all_sources: If True, require news + options + social
         """
         super().__init__(
-            strategy_id="sentiment_consensus_v1",
-            strategy_name="Sentiment Consensus",
+            name="Sentiment Consensus",
             description="Multi-source consensus sentiment trading",
         )
         self.engine = CompositeSentimentEngine()

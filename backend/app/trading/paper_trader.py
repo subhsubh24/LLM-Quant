@@ -354,7 +354,7 @@ class PaperTrader:
         for ticker, weight in target_weights.items():
             if ticker in prices:
                 target_value = self.portfolio_value * weight
-                target_qty = target_value / prices[ticker]
+                target_qty = target_value / max(prices[ticker], 1e-8)
                 target_quantities[ticker] = target_qty
 
         # Generate trades

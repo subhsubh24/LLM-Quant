@@ -255,19 +255,21 @@ class LSTMModelBase:
             return {'train_sharpe': 0.9, 'val_sharpe': 0.8}
 
         try:
-            # Mock training since actual PyTorch training requires full setup
-            logger.info(f"LSTM training on {len(X_train)} samples")
+            # LSTM training placeholder - requires PyTorch implementation
+            # For now, return reasonable defaults instead of misleading metrics
+            logger.warning(f"LSTM training stub called on {len(X_train)} samples - implement real PyTorch training")
 
             return {
-                'train_sharpe': 0.9,
-                'val_sharpe': 0.8,
+                'train_sharpe': 0.5,  # Placeholder - no actual training
+                'val_sharpe': 0.5,    # Placeholder - no actual training
                 'train_samples': len(X_train),
                 'val_samples': len(X_val) if X_val is not None else 0,
+                'note': 'stub_implementation'
             }
 
         except Exception as e:
             logger.error(f"LSTM training failed: {e}")
-            return {'train_sharpe': 0.5, 'val_sharpe': 0.5}
+            return {'train_sharpe': 0.5, 'val_sharpe': 0.5, 'note': 'error'}
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Predict probability."""
@@ -275,8 +277,9 @@ class LSTMModelBase:
             if self.model is None:
                 return np.full(len(X), 0.5)
 
-            # Mock prediction
-            return np.clip(np.random.normal(0.5, 0.1, len(X)), 0, 1)
+            # Return actual model predictions (or fallback to 0.5 if unavailable)
+            # Note: Full PyTorch inference would be implemented here
+            return np.full(len(X), 0.5)
 
         except Exception as e:
             logger.error(f"LSTM prediction failed: {e}")

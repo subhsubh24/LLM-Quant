@@ -76,8 +76,7 @@ class LongVolatilityStrategy(BaseStrategy):
     ):
         """Initialize long volatility strategy."""
         super().__init__(
-            strategy_id="long_volatility_v1",
-            strategy_name="Long Volatility (Hedge)",
+            name="Long Volatility (Hedge)",
             description="Portfolio protection via long volatility positioning",
         )
         self.vix_low_threshold = vix_low_threshold
@@ -157,8 +156,7 @@ class IntradayMeanReversionStrategy(BaseStrategy):
     ):
         """Initialize intraday mean reversion strategy."""
         super().__init__(
-            strategy_id="intraday_reversion_v1",
-            strategy_name="Intraday Mean Reversion",
+            name="Intraday Mean Reversion",
             description="Short-term (1-5 day) mean reversion trading",
         )
         self.lookback_short = lookback_short
@@ -252,8 +250,7 @@ class EnhancedFactorRotationStrategy(BaseStrategy):
     ):
         """Initialize enhanced factor rotation."""
         super().__init__(
-            strategy_id="factor_rotation_enhanced_v1",
-            strategy_name="Factor Rotation (Blended)",
+            name="Factor Rotation (Blended)",
             description="Dynamic factor blending based on recent performance",
         )
         self.rebalance_period = rebalance_period
@@ -359,8 +356,7 @@ class KalmanFilterStatArbStrategy(BaseStrategy):
     ):
         """Initialize Kalman filter stat arb."""
         super().__init__(
-            strategy_id="kalman_stat_arb_v1",
-            strategy_name="Kalman Filter Stat Arb",
+            name="Kalman Filter Stat Arb",
             description="Market-neutral pairs trading with Kalman filter hedge ratio",
         )
         self.process_noise = process_noise
