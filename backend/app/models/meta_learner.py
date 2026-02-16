@@ -293,8 +293,8 @@ class StackingEnsemble:
             from sklearn.base import clone
 
             return clone(model)
-        except Exception:  # FIX #11: Use Exception instead of bare except
-            # Fall back to deep copy
+        except (TypeError, AttributeError):  # BUG FIX #30: Catch specific exceptions only
+            # Fall back to deep copy if sklearn clone fails
             return copy.deepcopy(model)
 
 

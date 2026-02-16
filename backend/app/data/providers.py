@@ -305,7 +305,8 @@ class YFinanceProvider(DataProvider):
 
         except Exception as e:
             logger.error(f"Batch download failed: {e}")
-            # Fallback to sequential
+            # BUG FIX #29: Log fallback to sequential for visibility
+            logger.info("Falling back to sequential download...")
             return {
                 t: df for t in tickers
                 if (df := self.fetch_ohlcv(t, start_date, end_date)) is not None

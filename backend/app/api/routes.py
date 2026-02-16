@@ -3251,6 +3251,8 @@ async def get_broker_accounts():
                 "status": alpaca_account.get("status"),
             }
         except Exception as e:
+            # BUG FIX #28: Add logging for debugging account fetch failures
+            logger.warning(f"Alpaca account fetch error: {e}")
             accounts["alpaca"] = {"error": str(e)}
 
     if manager.binance and manager.binance._connected:
