@@ -3795,6 +3795,10 @@ class ModelPreTrainer:
             except Exception as e:
                 logger.warning(f"⚠️ Failed to delete old checkpoint: {e}")
 
+        # CRITICAL FIX: Reset epsilon to start fresh exploration (not from decayed checkpoint value)
+        self.dqn.epsilon = self.dqn.epsilon_start
+        logger.info(f"🔄 Reset DQN epsilon to {self.dqn.epsilon} for fresh training")
+
         if len(features) == 0:
             logger.error("No training data provided")
             return self.training_metrics
@@ -3895,6 +3899,7 @@ class ModelPreTrainer:
             self._last_epoch = 0
             self._best_val_accuracy = 0
             self._patience_counter = 0
+            self.dqn.epsilon = self.dqn.epsilon_start  # CRITICAL FIX: Reset epsilon for fresh exploration
             start_epoch = 0
         else:
             start_epoch = getattr(self, '_last_epoch', 0)
@@ -4706,7 +4711,9 @@ class ModelPreTrainer:
             # Restore DQN
             self.dqn.q_network.set_weights(checkpoint["dqn_weights"]["q_network"])
             self.dqn.target_network.set_weights(checkpoint["dqn_weights"]["target_network"])
-            self.dqn.epsilon = checkpoint["dqn_weights"]["epsilon"]
+            # CRITICAL FIX: Reset epsilon to start fresh exploration, not restore from checkpoint
+            # This allows models to explore properly even after being partially trained
+            self.dqn.epsilon = self.dqn.epsilon_start  # Reset from checkpoint's decayed value to 1.0
 
             # Restore PPO
             self.ppo.policy_network.set_weights(checkpoint["ppo_weights"]["policy"])
