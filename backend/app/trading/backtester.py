@@ -3850,9 +3850,14 @@ class ModelPreTrainer:
             except Exception as e:
                 logger.warning(f"⚠️ Failed to delete old checkpoint: {e}")
 
-        # CRITICAL FIX: Reset epsilon to start fresh exploration (not from decayed checkpoint value)
+        # CRITICAL FIX: Reset training state to start fresh (epoch counter persists in memory)
+        # Even if checkpoint was deleted, _last_epoch, _best_val_accuracy, _patience_counter
+        # are still in memory from previous run. Reset them to ensure epoch starts at 0.
+        self._last_epoch = 0
+        self._best_val_accuracy = 0
+        self._patience_counter = 0
         self.dqn.epsilon = self.dqn.epsilon_start
-        logger.info(f"🔄 Reset DQN epsilon to {self.dqn.epsilon} for fresh training")
+        logger.info(f"🔄 Reset training state: epoch counter=0, epsilon={self.dqn.epsilon} for fresh training")
 
         if len(features) == 0:
             logger.error("No training data provided")
