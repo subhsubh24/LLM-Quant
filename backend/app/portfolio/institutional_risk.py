@@ -130,8 +130,8 @@ class DynamicPositionLimiter:
             # Default limit for unlisted symbols
             return PositionLimit(
                 symbol=symbol,
-                max_position_pct=0.02,  # 2% default
-                max_position_usd=portfolio_value * 0.02,
+                max_position_pct=0.15,  # 15% default (standard for institutional traders)
+                max_position_usd=portfolio_value * 0.15,
             )
 
         base = self.base_limits[symbol]
