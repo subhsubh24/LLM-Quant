@@ -848,6 +848,10 @@ class WalkForwardBacktester:
         self.step_days = step_days
         self.initial_capital = initial_capital
 
+        # Timeframe configuration (set from config during run_backtest, defaults to 1h)
+        self._annualization_factor = 365 * 24  # Default: hourly crypto (8760 candles/year)
+        self._candles_per_day = 24             # Default: 1h candles
+
         self.results: List[BacktestResult] = []
         self.equity_curve: List[Tuple[datetime, float]] = []
         self.all_trades: List[Dict] = []
@@ -893,11 +897,11 @@ class WalkForwardBacktester:
 
             # Volatility
             log_returns = np.diff(np.log(window_close + 1e-8))
-            realized_vol = np.std(log_returns) * np.sqrt(252 * 24)  # Annualized hourly
+            realized_vol = np.std(log_returns) * np.sqrt(self._annualization_factor)  # Annualized
 
             # Parkinson volatility (high-low based)
             hl_ratio = np.log(window_high / (window_low + 1e-8))
-            parkinson_vol = np.sqrt(np.mean(hl_ratio ** 2) / (4 * np.log(2))) * np.sqrt(252 * 24)
+            parkinson_vol = np.sqrt(np.mean(hl_ratio ** 2) / (4 * np.log(2))) * np.sqrt(self._annualization_factor)
 
             # RSI
             gains = np.maximum(np.diff(window_close), 0)
@@ -1154,7 +1158,9 @@ class WalkForwardBacktester:
             ema = (price - ema) * multiplier + ema
         return ema
 
-    def detect_market_regime(self, candles: List[OHLCV], window: int = 50, prev_regime: str = 'sideways', switch_threshold: float = 1.0) -> str:
+    def detect_market_regime(self, candles: List[OHLCV], window: int = 50, prev_regime: str = 'sideways',
+                            switch_threshold: float = 1.0, base_threshold: float = 0.02,
+                            vol_threshold: float = 0.01) -> str:
         """
         Detect current market regime (bull, bear, or sideways) with hysteresis to prevent whipsaw.
 
@@ -1165,6 +1171,11 @@ class WalkForwardBacktester:
             switch_threshold: Multiplier for trend needed to switch regime (>1.0 = hysteresis)
                              1.0 = no hysteresis (original behavior)
                              1.3 = require 30% larger trend change to switch
+            base_threshold: Minimum trend strength (SMA divergence) to detect a regime (default: 2%)
+                           Lower = more sensitive to regime changes (catches more but more whipsaw)
+                           Higher = less sensitive (misses some but more stable)
+            vol_threshold: Minimum volatility to confirm a regime change (default: 1%)
+                          Prevents false regime detection in flat/quiet markets
 
         Returns:
             'bull', 'bear', or 'sideways'
@@ -1186,22 +1197,15 @@ class WalkForwardBacktester:
         returns = np.diff(closes) / (closes[:-1] + 1e-8)
         volatility = np.std(returns)
 
-        # BUG FIX #11: Add hysteresis to regime detection
-        # Require higher threshold to switch regime, prevents whipsaw from noise
-        base_threshold = 0.02
-        vol_threshold = 0.01
-
-        # If already in a regime, require stronger signal to leave it
+        # If already in a regime, require stronger signal to leave it (hysteresis)
         if prev_regime == 'bull':
-            # In bull: require trend to drop to -0.02*1.3=-0.026 to switch to bear (harder to leave)
             if trend < -base_threshold * switch_threshold and volatility > vol_threshold:
                 return 'bear'
             elif trend > base_threshold and volatility > vol_threshold:
                 return 'bull'  # Stay in bull if still positive
             else:
-                return 'sideways'  # Or go to sideways if uncertain
+                return 'sideways'
         elif prev_regime == 'bear':
-            # In bear: require trend to rise to 0.02*1.3=0.026 to switch to bull
             if trend > base_threshold * switch_threshold and volatility > vol_threshold:
                 return 'bull'
             elif trend < -base_threshold and volatility > vol_threshold:
@@ -1209,7 +1213,6 @@ class WalkForwardBacktester:
             else:
                 return 'sideways'
         else:  # prev_regime == 'sideways'
-            # Not in strong regime: normal thresholds apply
             if trend > base_threshold * switch_threshold and volatility > vol_threshold:
                 return 'bull'
             elif trend < -base_threshold * switch_threshold and volatility > vol_threshold:
@@ -1561,9 +1564,22 @@ class WalkForwardBacktester:
             # Microstructure (Order Book) Parameters
             "order_book_cache_interval_sec": 300,   # Fetch order books every 5 minutes (300s) to avoid rate limiting
 
-            # BUG #13 FIX: Timeframe Configuration (default: 1-hour candles)
-            "candle_interval_minutes": 60,          # Candle interval in minutes (60=1h, 240=4h, 1440=1d)
-            "annualization_factor": 252 * 24,       # Hours per year for hourly data (252 trading days * 24)
+            # Timeframe Configuration (default: 1-hour candles)
+            # Change candle_interval_minutes to switch timeframes (5m, 15m, 1h, 4h, 1d)
+            "candle_interval_minutes": 60,          # Candle interval in minutes (5=5m, 15=15m, 60=1h, 240=4h, 1440=1d)
+            "candle_interval_str": "1h",            # String for API calls (e.g., "5m", "15m", "1h", "4h", "1d")
+            "candles_per_day": 24,                  # Derived: 1440 / candle_interval_minutes (24 for 1h, 6 for 4h, 1 for 1d)
+            "annualization_factor": 365 * 24,       # Candles per year for crypto (365*24=8760 for 1h, 365*6=2190 for 4h)
+
+            # Regime Detection Thresholds (configurable for different market conditions)
+            "regime_base_threshold": 0.02,          # Base trend threshold (2% SMA divergence)
+            "regime_vol_threshold": 0.01,           # Minimum volatility to confirm regime (1%)
+
+            # Position Flip-Flop Cooldown (reduces churn from rapid direction changes)
+            "flip_cooldown_multiplier": 3,          # Direction flip cooldown = standard cooldown * this (3x = 15 candles)
+            "flip_confidence_penalty": 0.10,        # Extra confidence required for direction flips (+10%)
+            "max_flips_per_symbol": 3,              # Max direction flips before blocking symbol temporarily
+            "flip_block_candles": 50,               # Block symbol for N candles after max flips exceeded
         }
 
         # BUG #16 FIX: Validate all required configuration keys exist and have valid types/ranges
@@ -1583,7 +1599,12 @@ class WalkForwardBacktester:
         if config.get("significance_confidence", 0) < 0 or config.get("significance_confidence", 2) > 1:
             logger.warning("⚠️ significance_confidence outside valid range [0,1]")
 
+        # Apply timeframe configuration to instance for use in prepare_features
+        self._annualization_factor = config["annualization_factor"]
+        self._candles_per_day = config["candles_per_day"]
+
         logger.info("📋 Backtest Configuration (centralized):")
+        logger.info(f"  Timeframe: {config['candle_interval_str']} ({config['candle_interval_minutes']}min, {config['candles_per_day']} candles/day)")
         for key, val in list(config.items())[:5]:
             logger.debug(f"  {key}: {val}")
         logger.debug(f"  ... and {len(config) - 5} more parameters (see config dict)")
@@ -1721,10 +1742,15 @@ class WalkForwardBacktester:
         # SAFEGUARD: Per-symbol trading cooldown (prevent thrashing)
         last_exit_time = {}  # symbol -> timestamp of last exit
         min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 5 candles before re-entering same symbol
-        # BUG FIX #2: Enhanced flip-flop cooldown - apply longer cooldown for direction changes
-        min_flip_cooldown_candles = min_cooldown_candles * 2  # 2x longer cooldown for direction flips (10 vs 5 candles)
+        # Enhanced flip-flop cooldown - apply longer cooldown for direction changes
+        flip_cooldown_mult = config["flip_cooldown_multiplier"]  # 3x longer cooldown for direction flips
+        min_flip_cooldown_candles = min_cooldown_candles * flip_cooldown_mult  # e.g., 5 * 3 = 15 candles
+        flip_confidence_penalty = config["flip_confidence_penalty"]  # Extra confidence required for direction flips
+        max_flips_per_symbol = config["max_flips_per_symbol"]  # Max flips before temp block
+        flip_block_candles = config["flip_block_candles"]  # Block duration after max flips
         trade_churn = {}  # symbol -> count of direction flips (long->short or short->long)
         trade_directions = {}  # symbol -> last direction (for detecting flips)
+        flip_block_until = {}  # symbol -> candle count when block expires
 
         # ============================================================
         # PRE-TRADING SANITY CHECKS (ensure we'll actually trade)
@@ -1734,7 +1760,7 @@ class WalkForwardBacktester:
         logger.info(f"  Initial capital: ${capital:,.2f}")
         logger.info(f"  Minimum position size: $100")
         logger.info(f"  Symbols to trade: {len(data)} symbols")
-        logger.info(f"  Training window: {self.train_window} candles (~{self.train_window/24:.0f} days)")
+        logger.info(f"  Training window: {self.train_window} candles (~{self.train_window/config['candles_per_day']:.0f} days)")
         logger.info(f"  Data available: {len(all_candles):,} candles")
         logger.info(f"  Filter thresholds (LOOSENED for diagnostics):")
         logger.info(f"    - Min confidence: 0.50-0.70 (by model agreement)")
@@ -2036,8 +2062,9 @@ class WalkForwardBacktester:
 
             # Keep only recent data (memory efficiency)
             max_window = self.train_window + self.test_window + 50
-            if len(window_data[symbol]) > max_window * 24:  # hourly data
-                window_data[symbol] = window_data[symbol][-max_window * 24:]
+            candles_per_day = config["candles_per_day"]
+            if len(window_data[symbol]) > max_window * candles_per_day:
+                window_data[symbol] = window_data[symbol][-max_window * candles_per_day:]
 
             # PHASE A: Microstructure data - Live order book fetching
             # Fetch order book data from Binance API periodically to avoid rate limiting
@@ -2129,21 +2156,25 @@ class WalkForwardBacktester:
 
                 # HORIZON-AWARE STOPS: Widen stops as position ages (longer-term trends need room)
                 hours_held = (timestamp - pos["entry_time"]).total_seconds() / 3600
+                # Convert to candle-equivalent periods for timeframe-independent thresholds
+                candle_minutes = config["candle_interval_minutes"]
+                candles_held = hours_held * 60 / candle_minutes  # Convert hours to candle count
 
-                # Determine effective horizon based on holding period
-                if hours_held < 48:
-                    horizon_mult = 1.0  # 24h-48h trades: tight stops
+                # Determine effective horizon based on candles held (timeframe-independent)
+                # Thresholds in candles: 48 candles, 200 candles, 500 candles
+                if candles_held < 48:
+                    horizon_mult = 1.0  # Short-term trades: tight stops
                     base_stop = 0.02
                     base_target = 0.05
-                elif hours_held < 200:
-                    horizon_mult = 1.5  # 100h trades: medium stops
+                elif candles_held < 200:
+                    horizon_mult = 1.5  # Medium-term trades: medium stops
                     base_stop = 0.05
                     base_target = 0.12
-                elif hours_held < 500:
-                    horizon_mult = 2.0  # 200h-400h trades: wider stops
+                elif candles_held < 500:
+                    horizon_mult = 2.0  # Longer-term trades: wider stops
                     base_stop = 0.12
                     base_target = 0.30
-                else:  # 800h+ trades
+                else:  # 500+ candles
                     horizon_mult = 3.0  # Macro trends: very wide stops
                     base_stop = 0.20
                     base_target = 0.50
@@ -2160,7 +2191,9 @@ class WalkForwardBacktester:
                         window_data[symbol][-feature_window_size:],
                         window=50,
                         prev_regime=prev_regime,
-                        switch_threshold=1.0
+                        switch_threshold=1.0,
+                        base_threshold=config["regime_base_threshold"],
+                        vol_threshold=config["regime_vol_threshold"]
                     )
                 else:
                     regime = symbol_regime.get(symbol, ('sideways', 0))[0] if symbol in symbol_regime else 'sideways'
@@ -2330,8 +2363,13 @@ class WalkForwardBacktester:
                                 if symbol not in trade_churn:
                                     trade_churn[symbol] = 0
                                 trade_churn[symbol] += 1
-                                if trade_churn[symbol] > config["churn_alert_threshold"]:  # Alert if too many flips
-                                    logger.warning(f"⚠️ HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips (long↔short). Possible thrashing.")
+                                if trade_churn[symbol] > config["churn_alert_threshold"]:
+                                    logger.warning(f"⚠️ HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips (long<->short). Possible thrashing.")
+                                # Block symbol temporarily if too many flips
+                                if trade_churn[symbol] >= max_flips_per_symbol:
+                                    flip_block_until[symbol] = candles_processed + flip_block_candles
+                                    logger.warning(f"🚫 BLOCKING {symbol} for {flip_block_candles} candles ({trade_churn[symbol]} flips exceeded limit of {max_flips_per_symbol})")
+                                    trade_churn[symbol] = 0  # Reset counter after block
 
                         trade_directions[symbol] = current_direction
                         del positions[symbol]
@@ -2581,7 +2619,9 @@ class WalkForwardBacktester:
                     regime = self.detect_market_regime(
                         window_data[symbol][-feature_window_size:],
                         prev_regime=prev_regime,
-                        switch_threshold=regime_switch_threshold
+                        switch_threshold=regime_switch_threshold,
+                        base_threshold=config["regime_base_threshold"],
+                        vol_threshold=config["regime_vol_threshold"]
                     )
                     # Update regime tracker
                     # BUG FIX #28: Validate regime state before unpacking (prevents ValueError from corrupted data)
@@ -2836,20 +2876,34 @@ class WalkForwardBacktester:
                                 logger.debug(f"   (Note: {action_name} is counter-trend to {regime} regime, required higher confidence)")
 
                     # SAFEGUARD: Check for per-symbol trading cooldown (prevent thrashing)
-                    # BUG FIX #2: Enhanced flip-flop cooldown - apply longer cooldown for direction changes
+                    # Enhanced flip-flop cooldown with configurable multiplier and blocking
                     in_cooldown = False
-                    if symbol in last_exit_time:
+                    new_direction = "long" if prediction["action"] == 2 else "short"
+                    is_direction_flip = symbol in trade_directions and trade_directions[symbol] != new_direction
+
+                    # Check if symbol is blocked due to excessive flipping
+                    if symbol in flip_block_until and candles_processed < flip_block_until[symbol]:
+                        in_cooldown = True
+                        remaining = flip_block_until[symbol] - candles_processed
+                        if signals_generated <= 100 or np.random.random() < 0.001:
+                            logger.debug(f"🚫 {symbol} BLOCKED for {remaining} more candles (exceeded {max_flips_per_symbol} direction flips)")
+                    elif symbol in last_exit_time:
                         candles_since_exit = candles_processed - last_exit_time[symbol]
-                        # Determine required cooldown based on direction change
-                        new_direction = "long" if prediction["action"] == 2 else "short"
-                        is_direction_flip = symbol in trade_directions and trade_directions[symbol] != new_direction
                         required_cooldown = min_flip_cooldown_candles if is_direction_flip else min_cooldown_candles
 
                         if candles_since_exit < required_cooldown:
                             in_cooldown = True
                             cooldown_type = "flip-flop" if is_direction_flip else "standard"
-                            if signals_generated <= 100 or np.random.random() < 0.001:  # Log first 100 + 0.1% sample
+                            if signals_generated <= 100 or np.random.random() < 0.001:
                                 logger.debug(f"⏳ {symbol} in {cooldown_type} cooldown ({candles_since_exit}/{required_cooldown} candles since exit)")
+                        elif is_direction_flip:
+                            # Flip-flop confidence penalty: require higher confidence for direction changes
+                            effective_confidence = prediction.get("confidence", 0)
+                            penalty_threshold = effective_confidence - flip_confidence_penalty
+                            if penalty_threshold < config.get("confidence_fallback", 0.45):
+                                in_cooldown = True
+                                if signals_generated <= 100 or np.random.random() < 0.001:
+                                    logger.debug(f"⏳ {symbol} flip confidence too low ({effective_confidence:.2f} - {flip_confidence_penalty:.2f} penalty < threshold)")
                     else:
                         filter_stage_counters["not_in_cooldown"] += 1
 
@@ -3384,12 +3438,12 @@ class WalkForwardBacktester:
         equity_values = [e[1] for e in equity_curve]
         returns = np.diff(equity_values) / (np.array(equity_values[:-1]) + 1e-8)
 
-        # Sharpe Ratio (annualized, assuming hourly data)
-        # BUG FIX #1: Use sqrt(365*24) for crypto (24/7 trading), not sqrt(252*24) (stock market)
-        # CRITICAL FIX: Use epsilon comparison instead of float equality (> 1e-8 instead of > 0)
+        # Sharpe Ratio (annualized using configurable annualization factor)
+        # Uses annualization_factor from config (e.g., 8760 for 1h crypto, 2190 for 4h)
+        annualization = getattr(self, '_annualization_factor', 365 * 24)
         returns_std = np.std(returns)
         if len(returns) > 1 and returns_std > 1e-8:
-            sharpe = np.mean(returns) / returns_std * np.sqrt(365 * 24)  # 8760 hours/year for hourly data annualization
+            sharpe = np.mean(returns) / returns_std * np.sqrt(annualization)
         else:
             sharpe = 0
 
@@ -3400,7 +3454,7 @@ class WalkForwardBacktester:
         downside_returns = returns[returns < 0]
         # BUG FIX #3: Use epsilon comparison instead of exact > 0 for float reliability
         if len(downside_returns) > 0 and np.std(downside_returns) > 1e-8:
-            sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(365 * 24)  # 365 days for crypto
+            sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(annualization)
         else:
             # BUG FIX #4: Don't default to Sharpe when no downside
             # If all returns are positive, Sortino is undefined (infinite)
@@ -3611,10 +3665,11 @@ class ModelPreTrainer:
         all_rewards = []
 
         for symbol, candles in historical_data.items():
-            # Minimum: 900 candles = 37.5 days ≈ 0.56 complete 1600h cycles
-            # Allows training on newer symbols with limited history
-            if len(candles) < 900:
-                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >=900 for 1600h, ~{len(candles)/1600:.1f} cycles)")
+            # Minimum candles required for meaningful training
+            # 900 candles at 1h = 37.5 days, at 4h = 150 days, at 5m = 3.1 days
+            min_training_candles = 900
+            if len(candles) < min_training_candles:
+                logger.info(f"Skipping {symbol}: only {len(candles)} candles (need >={min_training_candles})")
                 continue
 
             features = backtester.prepare_features(candles)
@@ -5355,8 +5410,8 @@ async def run_full_training_pipeline(
 
     logger.info(f"Loaded data for {len(historical_data)} symbols")
 
-    # PRE-FILTER: Remove symbols with insufficient data (0 candles)
-    min_candles_required = 900  # ~37 days at 1h resolution
+    # PRE-FILTER: Remove symbols with insufficient data
+    min_candles_required = 900  # Minimum candles for meaningful training
     symbols_before = len(historical_data)
     historical_data = {
         sym: candles for sym, candles in historical_data.items()
