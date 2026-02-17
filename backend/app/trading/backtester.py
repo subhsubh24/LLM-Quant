@@ -3742,7 +3742,8 @@ class ModelPreTrainer:
         rewards: np.ndarray,
         epochs: int = 999999,  # Effectively unlimited: early stopping (patience=2) controls actual length
         batch_size: int = 256,
-        validation_split: float = 0.2
+        validation_split: float = 0.2,
+        force_restart: bool = False  # If True, resets epoch counter to start fresh training
     ) -> TrainingMetrics:
         """
         Train all models on historical data.
@@ -3754,9 +3755,17 @@ class ModelPreTrainer:
         Multi-horizon training fixes the critical prediction mismatch where models trained
         for 5h predictions but held trades for 48h+. Now ensemble learns across all timescales.
 
+        Args:
+            force_restart: If True, resets epoch counter to 0 and clears training state
+                          to start fresh training instead of resuming. Useful after deleting
+                          checkpoints when you want a completely fresh start.
+
         NOTE: Early stopping with patience=2 will typically stop training before reaching the
         epochs limit. The epoch parameter (default 100) sets an upper bound, but the actual
         number of epochs trained is controlled by validation accuracy improvement.
+
+        NOTE: Checkpoints are automatically deleted at the start of training to prevent
+        resuming on stale weights. Use force_restart=True if epoch counter persists.
         """
         # CRITICAL FIX: Delete old checkpoints before training to prevent resuming on stale models
         checkpoint_file = CHECKPOINT_DIR / "model_checkpoint.pkl"
@@ -3861,7 +3870,15 @@ class ModelPreTrainer:
         wf_fold_accuracies = []
 
         # Early stopping setup - check for resume state (must be before wf_fold calculation)
-        start_epoch = getattr(self, '_last_epoch', 0)
+        if force_restart:
+            # FORCE RESTART: Reset epoch counter for fresh training
+            logger.info("🔄 FORCE RESTART: Resetting epoch counter to 0 and clearing training state")
+            self._last_epoch = 0
+            self._best_val_accuracy = 0
+            self._patience_counter = 0
+            start_epoch = 0
+        else:
+            start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
         global_best_accuracy = best_val_accuracy  # Track GLOBAL best across all folds
         patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting on expanding window)
@@ -4705,6 +4722,35 @@ class ModelPreTrainer:
         except Exception as e:
             logger.error(f"Error loading checkpoint: {e}")
             return False
+
+    def reset_training_state(self, delete_checkpoint: bool = False) -> None:
+        """
+        Reset training state to allow fresh training.
+
+        Args:
+            delete_checkpoint: If True, also deletes the checkpoint file from disk.
+                             This ensures models start untrained on next run.
+        """
+        # Reset epoch tracking
+        self._last_epoch = 0
+        self._best_val_accuracy = 0
+        self._patience_counter = 0
+        self.is_trained = False
+        self.training_metrics = TrainingMetrics(epochs_completed=0, total_samples=0)
+
+        logger.info("✅ Training state reset to 0")
+
+        # Optionally delete the checkpoint file
+        if delete_checkpoint:
+            checkpoint_path = CHECKPOINT_DIR / "model_checkpoint.pkl"
+            try:
+                if checkpoint_path.exists():
+                    checkpoint_path.unlink()
+                    logger.info(f"🗑️  Deleted checkpoint file: {checkpoint_path}")
+                else:
+                    logger.warning(f"Checkpoint file not found: {checkpoint_path}")
+            except Exception as e:
+                logger.error(f"Failed to delete checkpoint: {e}")
 
     def meets_training_requirements(self) -> Tuple[bool, str]:
         """Check if models meet minimum training requirements."""
