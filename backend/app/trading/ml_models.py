@@ -727,6 +727,7 @@ class DQN:
         self.gamma = gamma
         self.tau = tau
         self.epsilon = epsilon_start
+        self.epsilon_start = epsilon_start  # CRITICAL: Store start value for resets
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
         self.base_lr = lr
