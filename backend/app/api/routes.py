@@ -3587,6 +3587,14 @@ async def get_training_status():
 
     checkpoint_exists = (CHECKPOINT_DIR / "model_checkpoint.pkl").exists()
 
+    # CRITICAL FIX: If models are untrained, reset epsilon to 1.0
+    # This ensures the dashboard always shows correct state
+    if not bot.models_trained:
+        pretrainer.dqn.epsilon = pretrainer.dqn.epsilon_start
+        dqn_epsilon = round(pretrainer.dqn.epsilon, 4)
+    else:
+        dqn_epsilon = round(pretrainer.dqn.epsilon, 4)
+
     return {
         "models_trained": bot.models_trained,
         "meets_requirements": meets_req,
@@ -3599,7 +3607,7 @@ async def get_training_status():
         },
         "checkpoint_exists": checkpoint_exists,
         "checkpoint_path": str(CHECKPOINT_DIR / "model_checkpoint.pkl"),
-        "dqn_epsilon": round(pretrainer.dqn.epsilon, 4),
+        "dqn_epsilon": dqn_epsilon,
         "is_pretrained_loaded": pretrainer.is_trained,
     }
 
