@@ -115,7 +115,7 @@ class TestPerformanceTracker:
         )
 
         assert metrics.daily_pnl == 1_000
-        assert metrics.daily_return_pct == 0.01
+        assert abs(metrics.daily_return_pct - 0.01) < 1e-6  # Floating point tolerance
         assert len(tracker.daily_metrics) == 1
 
     def test_multiple_days_tracking(self):

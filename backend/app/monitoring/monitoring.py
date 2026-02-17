@@ -472,8 +472,10 @@ class DashboardData:
         if self.performance_tracker.equity_curve.empty:
             return {"dates": [], "values": []}
 
+        # Convert index to DatetimeIndex if needed
+        index = pd.to_datetime(self.performance_tracker.equity_curve.index)
         return {
-            "dates": self.performance_tracker.equity_curve.index.strftime("%Y-%m-%d").tolist(),
+            "dates": index.strftime("%Y-%m-%d").tolist(),
             "values": self.performance_tracker.equity_curve.values.tolist(),
         }
 

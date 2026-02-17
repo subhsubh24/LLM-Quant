@@ -309,6 +309,11 @@ class PaperTrader:
             k: min(v, self.config.max_position_pct) for k, v in weights.items()
         }
 
+        # Renormalize after position limit (to ensure sum = 1.0)
+        total = sum(weights.values())
+        if total > 0:
+            weights = {k: v / total for k, v in weights.items()}
+
         return weights
 
     def _check_risk_controls(
