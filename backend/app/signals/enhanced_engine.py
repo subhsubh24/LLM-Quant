@@ -345,9 +345,16 @@ class SectorRotationManager:
         Returns:
             Adjusted weights respecting sector limits
         """
+        # Normalize input weights first
+        total_weight = sum(weights.values())
+        if total_weight <= 0:
+            return weights
+
+        normalized = {k: v / total_weight for k, v in weights.items()}
+
         # Calculate sector exposures
         sector_weights = {}
-        for ticker, weight in weights.items():
+        for ticker, weight in normalized.items():
             sector = sector_map.get(ticker, "other")
             sector_weights[sector] = sector_weights.get(sector, 0) + weight
 
@@ -358,22 +365,50 @@ class SectorRotationManager:
         }
 
         if not overweight_sectors:
-            return weights
+            return normalized
 
         # Scale down positions in overweight sectors
-        adjusted = weights.copy()
+        adjusted = normalized.copy()
         for ticker in adjusted:
             sector = sector_map.get(ticker, "other")
             if sector in overweight_sectors:
                 scale = self.sector_max_pct / sector_weights[sector]
                 adjusted[ticker] *= scale
 
-        # Renormalize
+        # After scaling, renormalize but preserve the constraint
+        # by capping each sector at the maximum
         total = sum(adjusted.values())
         if total > 0:
-            adjusted = {k: v / total for k, v in adjusted.items()}
+            # First pass: normalize
+            normalized_again = {k: v / total for k, v in adjusted.items()}
 
-        return adjusted
+            # Second pass: cap each sector and redistribute
+            final = {}
+            sector_totals = {}
+            excess = 0
+
+            for ticker, weight in normalized_again.items():
+                sector = sector_map.get(ticker, "other")
+                sector_totals[sector] = sector_totals.get(sector, 0) + weight
+
+            # Find overweight sectors after first normalization
+            for ticker, weight in normalized_again.items():
+                sector = sector_map.get(ticker, "other")
+                if sector_totals.get(sector, 0) > self.sector_max_pct:
+                    # Trim excess from this sector
+                    scale = self.sector_max_pct / sector_totals[sector]
+                    final[ticker] = weight * scale
+                else:
+                    final[ticker] = weight
+
+            # Final renormalization
+            final_total = sum(final.values())
+            if final_total > 0:
+                final = {k: v / final_total for k, v in final.items()}
+
+            return final
+
+        return normalized
 
     def get_sector_momentum(
         self,

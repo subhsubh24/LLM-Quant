@@ -301,7 +301,7 @@ class PortfolioRiskModeManager:
             if abs(daily_loss_pct) > 2.0 or vol_ratio > 2.0:
                 return PortfolioMode.CRISIS
 
-        if abs(weekly_loss_pct) > 10.0:
+        if abs(weekly_loss_pct) >= 10.0:
             return PortfolioMode.CRISIS
 
         # Caution triggers

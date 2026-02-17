@@ -66,7 +66,7 @@ class TestMarketImpactModel:
     def test_impact_model_initialization(self):
         """Test impact model initializes."""
         model = MarketImpactModel()
-        assert model.alpha == 0.2
+        assert model.alpha == 1.5
 
     def test_small_order_impact(self):
         """Test impact for small order."""

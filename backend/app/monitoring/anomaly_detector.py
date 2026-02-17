@@ -78,7 +78,7 @@ class StatisticalAnomalyDetector:
 
         Args:
             metric_name: Name of metric (non-empty string)
-            value: Metric value (must be numeric)
+            value: Metric value (must be numeric, not NaN or inf)
             timestamp: Observation timestamp
 
         Raises:
@@ -91,6 +91,9 @@ class StatisticalAnomalyDetector:
         if not isinstance(value, (int, float)):
             logger.error(f"Invalid value type for {metric_name}: {type(value)}, expected numeric")
             raise ValueError(f"value must be numeric, got {type(value)}")
+        if not np.isfinite(value):
+            logger.error(f"Invalid value for {metric_name}: {value}, must be finite (not NaN or inf)")
+            raise ValueError(f"value must be finite, got {value}")
 
         if metric_name not in self.metric_history:
             self.metric_history[metric_name] = deque(maxlen=self.lookback_window)
@@ -125,6 +128,36 @@ class StatisticalAnomalyDetector:
             return None
 
         history = list(self.metric_history[metric_name])
+
+        # Detect extreme values early (before min_history)
+        # Sharpe > 5.0 is extremely anomalous
+        # Drawdown < -0.30 is extremely anomalous
+        if metric_name == 'sharpe_ratio' and value > 5.0:
+            event = AnomalyEvent(
+                timestamp=datetime.now(),
+                metric_name=metric_name,
+                value=value,
+                threshold_upper=5.0,
+                threshold_lower=-5.0,
+                severity=min((value - 5.0) / 5.0, 1.0),
+                description=f"{metric_name} abnormally high: {value:.2f} (threshold: 5.00)",
+            )
+            logger.warning(f"ANOMALY DETECTED: {metric_name}={value:.2f} (EXTREME HIGH)")
+            return event
+
+        if metric_name == 'drawdown' and value < -0.30:
+            event = AnomalyEvent(
+                timestamp=datetime.now(),
+                metric_name=metric_name,
+                value=value,
+                threshold_upper=0.0,
+                threshold_lower=-0.30,
+                severity=min(abs(value - (-0.30)) / 0.30, 1.0),
+                description=f"{metric_name} abnormally low: {value:.2f} (threshold: -0.30)",
+            )
+            logger.warning(f"ANOMALY DETECTED: {metric_name}={value:.2f} (EXTREME LOW)")
+            return event
+
         if len(history) < self.min_history:
             logger.debug(f"Insufficient history for {metric_name}: {len(history)}/{self.min_history}")
             return None

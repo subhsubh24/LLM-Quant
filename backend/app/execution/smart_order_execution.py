@@ -95,7 +95,7 @@ class MarketImpactModel:
 
     def __init__(self):
         """Initialize."""
-        self.alpha = 1.5  # Impact parameter (increased for realistic market impact)
+        self.alpha = 1.5  # Impact parameter (realistic market impact)
         self.beta = 1.5  # Impact exponent
 
     def estimate_impact(
@@ -111,14 +111,15 @@ class MarketImpactModel:
         impact = alpha * (Q/V)^beta * volatility
 
         Where:
-        - Q = order quantity
+        - Q = order quantity (absolute)
         - V = daily volume
         - volatility = daily volatility
         """
         if daily_volume <= 0:
             return 0.01  # Conservative default 100 bps
 
-        participation_rate = quantity / daily_volume
+        # Use absolute value of quantity to avoid negative participation rates
+        participation_rate = abs(quantity) / daily_volume
         participation_rate = min(participation_rate, 0.5)  # Cap at 50%
 
         # Impact calculation

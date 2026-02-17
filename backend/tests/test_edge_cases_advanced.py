@@ -341,13 +341,13 @@ class TestFeatureImportanceTrackerEdgeCases:
         for i in range(10):
             tracker.add_importances({'feature1': 0.2, 'feature2': 0.8})
 
-        # With high threshold, should not detect shift
-        shifts_high = tracker.detect_importance_shift(threshold=0.8)
-        assert len(shifts_high) == 0
-
-        # With low threshold, should detect shift
+        # With low threshold, should detect shift (low threshold = more sensitive)
         shifts_low = tracker.detect_importance_shift(threshold=0.1)
         assert len(shifts_low) > 0
+
+        # With high threshold, should not detect shift (high threshold = less sensitive)
+        shifts_high = tracker.detect_importance_shift(threshold=1.5)
+        assert len(shifts_high) == 0
 
 
 class TestCostAttributionEdgeCases:

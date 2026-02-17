@@ -169,15 +169,18 @@ class RegimeBasedOptimizer:
     def __init__(self):
         """Initialize."""
         self.regime_strategy_map = {
-            "high_volatility": ["volatility_trading", "mean_reversion"],
-            "trending": ["trend_following", "carry_trading"],
-            "mean_reverting": ["mean_reversion", "technical_patterns"],
+            "high_volatility": ["volatility_trading", "mean_reversion", "volatility", "mean_rev"],
+            "trending": ["trend_following", "carry_trading", "trend"],
+            "mean_reverting": ["mean_reversion", "technical_patterns", "mean_rev"],
             "risk_off": ["sector_rotation", "carry_trading"],
             "normal": [
                 "trend_following",
                 "mean_reversion",
                 "volatility_trading",
                 "sector_rotation",
+                "trend",
+                "mean_rev",
+                "volatility",
             ],
         }
 

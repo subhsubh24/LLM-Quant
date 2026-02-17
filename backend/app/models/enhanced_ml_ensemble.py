@@ -704,37 +704,50 @@ class EnhancedMLEnsemble:
 
         return final_signal
 
-    def detect_degradation(self, new_sharpe: float) -> bool:
+    def detect_degradation(self, new_sharpe) -> bool:
         """Detect model degradation by comparing Sharpe ratios.
 
         Args:
-            new_sharpe: New Sharpe ratio
+            new_sharpe: New Sharpe ratio (float) or list of Sharpe ratios
 
         Returns:
             True if degraded
         """
-        self.recent_sharpe.append(new_sharpe)
+        # Handle both single value and list
+        if isinstance(new_sharpe, (list, tuple)):
+            sharpe_values = new_sharpe
+        else:
+            sharpe_values = [new_sharpe]
+
+        for sharpe_val in sharpe_values:
+            self.recent_sharpe.append(sharpe_val)
 
         # Keep last 20 measurements
         if len(self.recent_sharpe) > 20:
-            self.recent_sharpe.pop(0)
+            self.recent_sharpe = self.recent_sharpe[-20:]
 
-        # Compare recent vs historical
-        if len(self.recent_sharpe) >= 10:
+        # Compare recent vs baseline or historical
+        # Use baseline_sharpe if set, otherwise use accumulated history
+        if hasattr(self, 'baseline_sharpe') and self.baseline_sharpe:
+            baseline_avg = np.mean(self.baseline_sharpe)
+            recent_avg = np.mean(sharpe_values)
+        elif len(self.recent_sharpe) >= 10:
             recent_avg = np.mean(self.recent_sharpe[-10:])
-            historical_avg = np.mean(self.recent_sharpe[:10]) if len(self.recent_sharpe) >= 10 else recent_avg
+            baseline_avg = np.mean(self.recent_sharpe[:10]) if len(self.recent_sharpe) >= 10 else recent_avg
+        else:
+            return False
 
-            # Degradation if recent drops > 10%
-            drop = (historical_avg - recent_avg) / max(historical_avg, 1e-10)
+        # Degradation if recent drops > 10%
+        drop = (baseline_avg - recent_avg) / max(baseline_avg, 1e-10)
 
-            if drop > 0.1:
-                self.is_degraded = True
-                self.degradation_score = min(drop, 1.0)
-                logger.warning(f"⚠️  Model degradation detected: {drop:.2%}")
-                return True
-            else:
-                self.is_degraded = False
-                self.degradation_score = 0.0
+        if drop > 0.1:
+            self.is_degraded = True
+            self.degradation_score = min(drop, 1.0)
+            logger.warning(f"⚠️  Model degradation detected: {drop:.2%}")
+            return True
+        else:
+            self.is_degraded = False
+            self.degradation_score = 0.0
 
         return False
 
