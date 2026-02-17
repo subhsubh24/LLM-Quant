@@ -202,12 +202,12 @@ class AutoTrader:
                 position.current_price = current_prices[symbol]
                 position.market_value = position.quantity * position.current_price
                 position.unrealized_pnl = position.market_value - (position.quantity * position.avg_cost)
-                # BUG FIX #25: Validate avg_cost before calculation (prevents massive % from dividing by epsilon)
-                if position.avg_cost > 1e-8:
+                # BUG FIX #25: Validate avg_cost AND quantity before calculation (prevents division by zero)
+                if position.avg_cost > 1e-8 and position.quantity > 1e-8:
                     position_cost = position.quantity * position.avg_cost
-                    position.unrealized_pnl_pct = position.unrealized_pnl / position_cost
+                    position.unrealized_pnl_pct = position.unrealized_pnl / max(position_cost, 1e-8)
                 else:
-                    position.unrealized_pnl_pct = 0  # Invalid cost, can't calculate percentage
+                    position.unrealized_pnl_pct = 0  # Invalid cost or zero quantity, can't calculate percentage
                 total_position_value += position.market_value
 
         # Update portfolio totals

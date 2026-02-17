@@ -151,8 +151,8 @@ class ContinuousLearner:
         """
         # FIX #12: Thread-safe buffer read
         with self._buffer_lock:
-            if len(self.feature_buffer) < 100:
-                return None  # Need minimum data
+            if len(self.feature_buffer) < 2:
+                return None  # Need at least 2 samples for weighting
 
             # Create sliding window with recency weighting
             n_samples = len(self.feature_buffer)

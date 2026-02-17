@@ -17,6 +17,15 @@ from unittest.mock import Mock, patch, MagicMock
 # Test imports - paths configured in conftest.py
 
 
+def _has_yfinance() -> bool:
+    """Check if yfinance is available."""
+    try:
+        import yfinance  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 # ============================================================================
 # CRITICAL BUG TESTS (8 bugs)
 # ============================================================================
@@ -430,6 +439,7 @@ class TestHIGH_BUG9_EmptyTickersValidation:
 
         assert result == {}
 
+    @pytest.mark.skipif(not _has_yfinance(), reason="yfinance not installed")
     def test_single_ticker_list(self):
         """Test that single ticker in list doesn't crash."""
         from app.data.providers import YFinanceProvider

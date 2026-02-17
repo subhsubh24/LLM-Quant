@@ -260,12 +260,12 @@ class YFinanceProvider(DataProvider):
         end_date: date
     ) -> Dict[str, pd.DataFrame]:
         """Fetch multiple tickers using yfinance batch download."""
-        import yfinance as yf
-
-        # BUG FIX #9: Add empty tickers validation
+        # BUG FIX #9: Add empty tickers validation (check before import)
         if not tickers:
             logger.warning("Empty tickers list provided to fetch_multiple")
             return {}
+
+        import yfinance as yf
 
         try:
             # yfinance supports batch downloads

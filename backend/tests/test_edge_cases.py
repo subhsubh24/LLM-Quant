@@ -92,7 +92,8 @@ class TestInfinitiesAndOverflow:
         # Filter infinities
         valid_returns = log_returns[np.isfinite(log_returns)]
 
-        assert len(valid_returns) == 2
+        # Only first return is valid; second and third are -inf and inf
+        assert len(valid_returns) == 1
 
     def test_division_by_zero(self):
         """Test division by zero handling."""
@@ -291,7 +292,7 @@ class TestEmptyAndMissingData:
         })
 
         # Should handle sparse data
-        data_filled = data.fillna(method='ffill').fillna(method='bfill')
+        data_filled = data.ffill().bfill()
 
         assert not data_filled.isna().any().any()
 
