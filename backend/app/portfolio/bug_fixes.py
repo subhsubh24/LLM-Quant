@@ -58,13 +58,15 @@ def safe_compute_adjusted_limit(
         pass
     else:
         # Check unwind capability
-        daily_volume_usd = daily_volume * 100
-        unwind_ratio = daily_volume_usd / max(position_size, 1e-10)
+        # position_size_ratio = position_size / daily_volume
+        # If position is > liquidity_requirement * daily_volume, reduce it
+        if daily_volume > 0:
+            position_size_ratio = position_size / max(daily_volume, 1e-10)
 
-        if unwind_ratio < liquidity_requirement:
-            # Can't unwind in 1 day: reduce position
-            adjustment = max(0.1, unwind_ratio / liquidity_requirement)
-            max_pct *= adjustment
+            if position_size_ratio > liquidity_requirement:
+                # Position too large relative to daily volume: reduce position
+                adjustment = max(0.1, liquidity_requirement / position_size_ratio)
+                max_pct *= adjustment
 
     # Ensure result is valid
     max_pct = max(0.0001, min(max_pct, 0.5))  # Between 0.01% and 50%

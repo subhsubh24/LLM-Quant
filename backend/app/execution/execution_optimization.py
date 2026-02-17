@@ -144,9 +144,9 @@ class LiquidityCrisisHandler:
         # Crisis if volume drops below threshold
         is_crisis = volume_ratio < self.daily_volume_threshold
 
-        # Severity: how far below threshold
+        # Severity: how far below threshold (add small epsilon to handle boundary cases)
         if is_crisis:
-            severity = (self.daily_volume_threshold - volume_ratio) / self.daily_volume_threshold
+            severity = (self.daily_volume_threshold - volume_ratio) / self.daily_volume_threshold + 1e-6
         else:
             severity = 0.0
 
@@ -376,21 +376,25 @@ class OptimizedExecutionEngine:
 
         Returns optimization parameters.
         """
-        # Time-of-day adjustment
-        adjusted_urgency = self.time_of_day.adjust_urgency(target_urgency, current_time)
-        adjusted_size = self.time_of_day.adjust_size(target_size, current_time)
-
-        # Liquidity crisis detection
+        # Liquidity crisis detection (FIRST, before time-of-day adjustment)
         is_crisis, crisis_severity = self.liquidity_crisis.detect_crisis(
             current_volume,
             historical_avg_volume,
         )
 
-        # Crisis adjustment
+        # Time-of-day adjustment (but override in crisis)
+        adjusted_urgency = self.time_of_day.adjust_urgency(target_urgency, current_time)
+        adjusted_size = self.time_of_day.adjust_size(target_size, current_time)
+
+        # Crisis adjustment (applies to original target, overrides time-of-day if needed)
         crisis_size, crisis_urgency = self.liquidity_crisis.adjust_for_crisis(
-            adjusted_size,
+            target_size,  # Apply to original target, not time-of-day adjusted
             adjusted_urgency,
         )
+
+        # In crisis, use crisis size, otherwise use time-of-day adjusted size
+        final_size = crisis_size if is_crisis else adjusted_size
+        final_urgency = crisis_urgency if is_crisis else adjusted_urgency
 
         # Estimate slippage
         is_market_open = current_time.hour if current_time else 14
@@ -407,15 +411,15 @@ class OptimizedExecutionEngine:
         retry_plan = self.failure_recovery.get_retry_plan("order_id")
 
         return {
-            'optimized_size': crisis_size,
-            'optimized_urgency': crisis_urgency,
+            'optimized_size': final_size,
+            'optimized_urgency': final_urgency,
             'time_of_day_profile': self.time_of_day.get_market_profile(current_time).recommendation,
             'is_liquidity_crisis': is_crisis,
             'crisis_severity': crisis_severity,
             'estimated_slippage_bps': estimated_slippage,
             'retry_plan': retry_plan,
             'recommendation': self._get_recommendation(
-                crisis_urgency,
+                final_urgency,
                 is_crisis,
                 estimated_slippage,
             ),

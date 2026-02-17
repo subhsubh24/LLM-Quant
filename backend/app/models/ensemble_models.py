@@ -244,7 +244,7 @@ class LightGBMModel(BaseModel):
         X_scaled = self.scaler.fit_transform(X.fillna(0))
 
         # Create dataset
-        train_data = lgb.Dataset(X_scaled, label=y.values, feature_names=self.feature_names)
+        train_data = lgb.Dataset(X_scaled, label=y.values)
 
         # Parameters
         params = {
@@ -577,8 +577,7 @@ class LSTMModel(BaseModel):
                 X_batch = X_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
 
-                lstm_out, _ = self.model[0](X_batch)
-                predictions = self.model[1](lstm_out[:, -1, :])
+                predictions = self.model(X_batch)
                 loss = loss_fn(predictions, y_batch)
 
                 optimizer.zero_grad()

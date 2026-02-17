@@ -358,7 +358,7 @@ class WeightedEnsemble:
 
             except Exception as e:
                 logger.warning(f"Error training {model_name}: {e}")
-                scores[model_name] = 0
+                scores[model_name] = 0.0
 
         # Convert scores to weights (softmax)
         scores_array = np.array(list(scores.values()))
@@ -385,7 +385,9 @@ class WeightedEnsemble:
             try:
                 pred = model.predict(X)
                 weight = self.model_weights.get(model_name, 0)
-                predictions.append(pred.values * weight)
+                # Handle both Series and numpy array returns
+                pred_values = pred.values if hasattr(pred, 'values') else pred
+                predictions.append(pred_values * weight)
             except Exception as e:
                 logger.warning(f"Error predicting with {model_name}: {e}")
 

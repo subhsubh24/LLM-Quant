@@ -522,6 +522,7 @@ class NeuralNetMetaLearner:
         """
         self.input_size = input_size
         self.hidden_size = hidden_dim if hidden_dim is not None else hidden_size
+        self.hidden_dim = self.hidden_size  # For compatibility with tests
         self.model = None
 
     def train(self, base_predictions: np.ndarray, y: np.ndarray, epochs: int = 50):
@@ -698,6 +699,9 @@ class EnhancedMLEnsemble:
         if self.is_degraded:
             final_signal *= (1.0 - self.degradation_score * 0.5)
 
+        # Store last confidence (average of final signal)
+        self.last_confidence = float(np.mean(final_signal)) if len(final_signal) > 0 else 0.5
+
         return final_signal
 
     def detect_degradation(self, new_sharpe: float) -> bool:
@@ -749,3 +753,23 @@ class EnhancedMLEnsemble:
             importance['rf'] = float(np.mean(self.rf.feature_importance))
 
         return importance
+
+    def get_base_predictions(self, X: np.ndarray, X_seq: Optional[np.ndarray] = None) -> np.ndarray:
+        """Get predictions from all 5 base models (public wrapper).
+
+        Args:
+            X: Features for tree models
+            X_seq: Sequence data for LSTM
+
+        Returns:
+            Base predictions (n_samples, 5)
+        """
+        return self._get_base_predictions(X, X_seq)
+
+    def get_last_confidence(self) -> float:
+        """Get the last confidence score from signal generation.
+
+        Returns:
+            Confidence score [0, 1]
+        """
+        return getattr(self, 'last_confidence', 0.5)
