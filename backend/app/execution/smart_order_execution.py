@@ -95,7 +95,7 @@ class MarketImpactModel:
 
     def __init__(self):
         """Initialize."""
-        self.alpha = 0.2  # Impact parameter
+        self.alpha = 1.5  # Impact parameter (increased for realistic market impact)
         self.beta = 1.5  # Impact exponent
 
     def estimate_impact(

@@ -611,8 +611,7 @@ class LSTMModel(BaseModel):
 
         self.model.eval()
         with torch.no_grad():
-            lstm_out, _ = self.model[0](X_tensor)
-            prediction = self.model[1](lstm_out[:, -1, :]).cpu().numpy()
+            prediction = self.model(X_tensor).cpu().numpy()
 
         return pd.Series([prediction[0, 0]], index=X.index[-1:])
 
