@@ -263,8 +263,8 @@ class RealisticCostModel:
             adverse_selection = 2.0   # Very aggressive
 
         # 4. VIX premium
-        # At VIX=20, no premium. At VIX=40, 100% premium
-        vix_premium = max(0, (vix - 20) / 20 * 100) * 0.01  # Convert to bps
+        # At VIX=20, no premium. At VIX=40, 100 bps premium
+        vix_premium = max(0, (vix - 20) / 20 * 100)  # Expressed in basis points
 
         # 5. Volatility adjustment
         # High vol = more slippage
@@ -557,13 +557,7 @@ class OptimizedAdaptiveExecutor:
             recommendation = "EXECUTE"
 
         return {
-            'adaptive_profile': {
-                'hour': hour,
-                'base_recommendation': profile.base_profile.recommendation,
-                'final_volume_factor': profile.final_volume_factor,
-                'final_spread_factor': profile.final_spread_factor,
-                'final_impact_factor': profile.final_impact_factor,
-            },
+            'adaptive_profile': profile,  # Return the actual profile object for compatibility
             'cost_breakdown': cost_breakdown,
             'recommendation': recommendation,
             'rebalance_needed': should_rebal,

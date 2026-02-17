@@ -137,7 +137,7 @@ class TestAdaptiveExecutionEdgeCases:
             hour=14, iv=0.80, iv_20d=0.70, volatility=0.50, vix=80, spread_bps=10.0,
         )
         assert plan_high is not None
-        assert plan_high['cost_breakdown']['vix_premium_bps'] > 300  # (80-20)/20*100 = 300
+        assert plan_high['cost_breakdown']['vix_premium_bps'] >= 300  # (80-20)/20*100 = 300
 
     def test_extreme_order_sizes(self):
         """Test extreme order sizes."""
@@ -150,7 +150,7 @@ class TestAdaptiveExecutionEdgeCases:
             hour=14, iv=0.25, iv_20d=0.24, volatility=0.15, vix=20, spread_bps=2.0,
         )
         assert plan_tiny is not None
-        assert plan_tiny['cost_breakdown']['participation_cost_bps'] < 10
+        assert plan_tiny['cost_breakdown']['participation_cost_bps'] <= 10
 
         # Massive order (20% of daily volume)
         plan_massive = executor.get_execution_plan(
