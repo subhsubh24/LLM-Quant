@@ -30,7 +30,7 @@ from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
 logger = logging.getLogger(__name__)
 
 
-def _run_async_in_thread(coro):
+def _run_async_in_thread(coro_func):
     """
     Run async coroutine from sync context or running event loop.
 
@@ -39,15 +39,34 @@ def _run_async_in_thread(coro):
     - If no event loop: Uses asyncio.run()
 
     This avoids "asyncio.run() cannot be called from a running event loop" error.
+
+    Args:
+        coro_func: Either a coroutine object or a callable that returns a coroutine
     """
     try:
         asyncio.get_running_loop()
         # We're inside a running event loop, need to run async code in thread pool
+        def run_in_new_loop():
+            # Create fresh event loop in thread, avoiding the original loop
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                # If coro_func is already a coroutine, use it; otherwise call it
+                if asyncio.iscoroutine(coro_func):
+                    return new_loop.run_until_complete(coro_func)
+                else:
+                    return new_loop.run_until_complete(coro_func())
+            finally:
+                new_loop.close()
+
         with ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(asyncio.run, coro).result()
+            return executor.submit(run_in_new_loop).result()
     except RuntimeError:
         # No running event loop, safe to use asyncio.run()
-        return asyncio.run(coro)
+        if asyncio.iscoroutine(coro_func):
+            return asyncio.run(coro_func)
+        else:
+            return asyncio.run(coro_func())
 
 # Model checkpoint directory
 CHECKPOINT_DIR = Path(__file__).parent / "checkpoints"
@@ -2032,7 +2051,7 @@ class WalkForwardBacktester:
                     # BUG FIX #26: Use thread-safe async handler to avoid event loop conflicts
                     # Handles both sync and async contexts (web frameworks, etc.)
                     try:
-                        order_book = _run_async_in_thread(ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
+                        order_book = _run_async_in_thread(lambda: ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
                     except Exception as e:
                         logger.warning(f"Order book fetch failed for {symbol}: {e} - using cached data")
                         order_book = None  # Fall back to cached data
