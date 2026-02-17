@@ -1141,8 +1141,11 @@ class MasterQuantBot:
             self.models_trained = meets_req
             if meets_req:
                 logger.info("✅ Pre-trained models loaded successfully!")
-                # Sync DQN epsilon from loaded checkpoint
-                self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon
+                # CRITICAL FIX: DON'T copy stale epsilon from checkpoint
+                # Epsilon should always start at 1.0 when models are loaded for live trading
+                # (it will decay during live trading as DQN explores)
+                # self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon  # REMOVED
+                self.analytics.dqn.epsilon = 1.0  # Fresh exploration for live trading
             else:
                 logger.warning(f"⚠️ Models loaded but: {reason}")
         else:
