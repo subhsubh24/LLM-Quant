@@ -359,7 +359,7 @@ class VolatilityAdaptiveRebalancing:
     def __init__(self):
         """Initialize rebalancing"""
         self.vol_history = []
-        self.last_rebalance = datetime.now()
+        self.last_rebalance = None  # None means first call will return True
 
     def should_rebalance(self, current_vol: float) -> bool:
         """Check if rebalancing is needed.
@@ -393,6 +393,12 @@ class VolatilityAdaptiveRebalancing:
         logger.debug(f"Volatility {current_vol:.2%}: rebalance every {freq_days} days")
 
         # Check if enough time has passed
+        if self.last_rebalance is None:
+            # First call - always rebalance
+            self.last_rebalance = datetime.now()
+            logger.info(f"First rebalance check triggered (vol={current_vol:.2%})")
+            return True
+
         time_since_rebalance = (datetime.now() - self.last_rebalance).days
 
         should_rebal = time_since_rebalance >= freq_days

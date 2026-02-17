@@ -31,14 +31,20 @@ class TestCointegrationTester:
 
     @pytest.fixture
     def cointegrated_series(self):
-        """Create cointegrated price series."""
+        """Create properly cointegrated price series."""
         np.random.seed(42)
         n = 252
 
-        # Create cointegrated pair
-        common_shock = np.random.randn(n)
-        price_a = 100 + np.cumsum(common_shock + np.random.randn(n) * 0.1)
-        price_b = 50 + np.cumsum(common_shock * 0.8 + np.random.randn(n) * 0.15)
+        # Create cointegrated pair: spread should be stationary
+        # Common trend (random walk)
+        common_trend = np.cumsum(np.random.randn(n))
+        # Stationary spread
+        spread = np.random.randn(n) * 0.5  # Mean-reverting around 0
+
+        # price_a and price_b are cointegrated with this relationship:
+        # spread = price_a - 1.2 * price_b
+        price_b = 50 + common_trend
+        price_a = 60 + 1.2 * common_trend + spread
 
         return pd.Series(price_a), pd.Series(price_b)
 
