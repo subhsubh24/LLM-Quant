@@ -289,13 +289,13 @@ class SkewStrategy(BaseStrategy):
 
     def generate_signal(
         self,
-        data: pd.DataFrame,
+        data: Union[pd.DataFrame, Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> StrategySignal:
         """Generate skew-based signal.
 
         Args:
-            data: OHLCV data (not directly used)
+            data: OHLCV data or dict with market data
             context: Dict with iv_otm_put, iv_otm_call
 
         Returns:
@@ -308,41 +308,56 @@ class SkewStrategy(BaseStrategy):
             confidence=0.0,
         )
 
+        # Handle both dict and DataFrame inputs, and context fallback
+        if isinstance(data, dict) and context is None:
+            context = data
+
         if context is None:
             return signal
 
         try:
-            # Compute skew
+            # Compute skew (handle both naming conventions)
+            iv_put_otm = context.get('iv_put_otm') or context.get('iv_otm_put', 0.20)
+            iv_call_otm = context.get('iv_call_otm') or context.get('iv_otm_call', 0.18)
+
             skew = self.compute_skew(
-                iv_otm_put=context.get('iv_otm_put', 0.20),
-                iv_otm_call=context.get('iv_otm_call', 0.18),
+                iv_otm_put=iv_put_otm,
+                iv_otm_call=iv_call_otm,
             )
 
             self.skew_history.append(skew)
             self.skew_history = self.skew_history[-20:]
 
             # Generate signal based on extreme skew
+            direction = 0
             if skew > self.skew_threshold:
                 # High put skew = sell put skew (bullish)
                 signal.symbols['SKEW'] = 0.5  # Mild long
                 signal.target_weights['SKEW'] = 0.3
                 signal.confidence = 0.5 + 0.3 * min(abs(skew) / 0.5, 1.0)
+                direction = 1
 
             elif skew < -self.skew_threshold:
                 # High call skew = sell call skew (bearish)
                 signal.symbols['SKEW'] = -0.5  # Mild short
                 signal.target_weights['SKEW'] = 0.3
                 signal.confidence = 0.5 + 0.3 * min(abs(skew) / 0.5, 1.0)
+                direction = -1
 
             else:
                 # Normal skew, no signal
                 signal.confidence = 0.2
+                direction = 0
+
+            # Add direction attribute for test compatibility
+            signal.direction = direction
 
             # Add extra data
             signal.extra_data = {
                 'skew': float(skew),
                 'skew_trend': float(np.mean(self.skew_history[-5:])) if len(self.skew_history) > 0 else 0.0,
                 'threshold': self.skew_threshold,
+                'direction': direction,
             }
 
             self.last_signal = signal
@@ -423,13 +438,13 @@ class EarningsEventStrategy(BaseStrategy):
 
     def generate_signal(
         self,
-        data: pd.DataFrame,
+        data: Union[pd.DataFrame, Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> StrategySignal:
         """Generate earnings-based signal.
 
         Args:
-            data: OHLCV data
+            data: OHLCV data or dict with market data
             context: Dict with symbol, iv, iv_normal, last_move_sigma, etc.
 
         Returns:
@@ -442,19 +457,30 @@ class EarningsEventStrategy(BaseStrategy):
             confidence=0.0,
         )
 
+        # Handle both dict and DataFrame inputs, and context fallback
+        if isinstance(data, dict) and context is None:
+            context = data
+
         if context is None:
             return signal
 
         try:
             symbol = context.get('symbol', 'UNKNOWN')
             current_date = context.get('date', datetime.now())
-            iv = context.get('iv', 0.20)
-            iv_normal = context.get('iv_normal', 0.15)
-            last_move_sigma = context.get('last_move_sigma', 0.0)
+            # Handle both naming conventions
+            iv = context.get('iv') or context.get('iv_current', 0.20)
+            iv_normal = context.get('iv_normal') or context.get('iv_baseline', 0.15)
+            # Handle both naming conventions for move in stdevs
+            last_move_sigma = context.get('last_move_sigma') or context.get('move_in_stdevs', 0.0)
 
-            days_to_earn = self.days_to_earnings(symbol, current_date)
+            # If days_to_earnings provided directly, use it; otherwise calculate
+            if 'days_to_earnings' in context:
+                days_to_earn = context.get('days_to_earnings', -1)
+            else:
+                days_to_earn = self.days_to_earnings(symbol, current_date)
 
             # Pre-earnings: 1-7 days before
+            direction = 0
             if 1 <= days_to_earn <= 7:
                 vol_expansion = iv / max(iv_normal, 1e-10)
 
@@ -463,11 +489,13 @@ class EarningsEventStrategy(BaseStrategy):
                     signal.symbols['EARNINGS_PRE'] = -0.4  # Short vol
                     signal.target_weights['EARNINGS_PRE'] = 0.2
                     signal.confidence = 0.6 + 0.2 * min(vol_expansion / 2.0, 1.0)
+                    direction = -1
                 else:
                     signal.confidence = 0.3
+                    direction = 0
 
-            # Post-earnings: 0-3 days after (large move likely reverting)
-            elif days_to_earn == -1 or days_to_earn == 0:
+            # Post-earnings: -7 to -1 days after (large move likely reverting)
+            elif -7 <= days_to_earn <= -1 or days_to_earn == 0:
                 if abs(last_move_sigma) > self.mean_reversion_threshold:
                     # Mean reversion trade
                     direction = -np.sign(last_move_sigma)  # Trade opposite
@@ -476,9 +504,14 @@ class EarningsEventStrategy(BaseStrategy):
                     signal.confidence = 0.7 + 0.2 * min(abs(last_move_sigma) / 5.0, 1.0)
                 else:
                     signal.confidence = 0.2
+                    direction = 0
 
             else:
                 signal.confidence = 0
+                direction = 0
+
+            # Add direction attribute for test compatibility
+            signal.direction = direction
 
             # Add extra data
             signal.extra_data = {
@@ -488,6 +521,7 @@ class EarningsEventStrategy(BaseStrategy):
                 'iv_normal': float(iv_normal),
                 'vol_expansion': float(iv / max(iv_normal, 1e-10)),
                 'last_move_sigma': float(last_move_sigma),
+                'direction': direction,
             }
 
             self.last_signal = signal
