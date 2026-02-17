@@ -103,7 +103,7 @@ def test_bug4_ssl_certificate_verification():
     assert "ssl.create_default_context()" in content
 
     # Verify by running the function
-    from backend.app.data.crypto_ws import _create_ssl_context
+    from app.data.crypto_ws import _create_ssl_context
     ssl_ctx = _create_ssl_context()
 
     assert ssl_ctx.verify_mode == ssl.CERT_REQUIRED
@@ -235,7 +235,7 @@ def test_bug10_advanced_strategies_init_params():
 def test_can_import_core_strategies():
     """Verify core strategy classes can be imported (init params fixed)"""
     # The critical bug fix #9 ensures super().__init__() uses correct params
-    from backend.app.strategies.core_strategies import (
+    from app.strategies.core_strategies import (
         TrendFollowingStrategy, MeanReversionStrategy, VolatilityTradingStrategy,
         SectorRotationStrategy, CarryTradingStrategy
     )
@@ -249,7 +249,7 @@ def test_can_import_core_strategies():
 def test_can_import_advanced_strategies():
     """Verify advanced strategy classes can be imported (init params fixed)"""
     # The critical bug fix #10 ensures super().__init__() uses correct params
-    from backend.app.strategies.advanced_strategies import (
+    from app.strategies.advanced_strategies import (
         RegimeAwareStrategy, SkewStrategy, EarningsEventStrategy
     )
 
@@ -262,7 +262,7 @@ def test_can_import_advanced_strategies():
 
 def test_ssl_context_is_secure():
     """Verify SSL context has proper security settings"""
-    from backend.app.data.crypto_ws import _create_ssl_context
+    from app.data.crypto_ws import _create_ssl_context
 
     ssl_context = _create_ssl_context()
 
@@ -332,7 +332,7 @@ class TestPortfolioRiskDivisionByZero:
 
     def test_portfolio_risk_zero_capital(self):
         """FIX #1-5: heat_pct should not crash with zero capital."""
-        from backend.app.trading.portfolio_risk import PortfolioRiskManager
+        from app.trading.portfolio_risk import PortfolioRiskManager
 
         prm = PortfolioRiskManager()
 
@@ -349,7 +349,7 @@ class TestPortfolioRiskDivisionByZero:
 
     def test_portfolio_risk_zero_volume(self):
         """FIX #4: daily_volume_pct should not crash with zero volume."""
-        from backend.app.trading.portfolio_risk import PortfolioRiskManager
+        from app.trading.portfolio_risk import PortfolioRiskManager
 
         prm = PortfolioRiskManager()
 
@@ -368,7 +368,7 @@ class TestContinuousLearningDeque:
 
     def test_buffers_are_deques(self):
         """FIX #12: Buffers should use deque instead of list."""
-        from backend.app.trading.continuous_learning import ContinuousLearner
+        from app.trading.continuous_learning import ContinuousLearner
 
         learner = ContinuousLearner(window_size=100)
 
@@ -379,7 +379,7 @@ class TestContinuousLearningDeque:
 
     def test_thread_safety_lock(self):
         """FIX #12: Should have lock for thread safety."""
-        from backend.app.trading.continuous_learning import ContinuousLearner
+        from app.trading.continuous_learning import ContinuousLearner
 
         learner = ContinuousLearner()
 
@@ -389,7 +389,7 @@ class TestContinuousLearningDeque:
 
     def test_buffer_maxlen_enforced(self):
         """FIX #12: Deque maxlen should prevent buffer overflow."""
-        from backend.app.trading.continuous_learning import ContinuousLearner
+        from app.trading.continuous_learning import ContinuousLearner
 
         learner = ContinuousLearner(window_size=100)
 
@@ -457,7 +457,7 @@ class TestLSTMReturnType:
 
     def test_lstm_returns_tuple(self):
         """FIX #3: LSTM.forward() returns (probs, hidden_state) tuple."""
-        from backend.app.trading.ml_models import LSTMClassifier
+        from app.trading.ml_models import LSTMClassifier
 
         lstm = LSTMClassifier(input_dim=32, hidden_dim=64, output_dim=3)
         seq = np.random.randn(20, 10, 32)

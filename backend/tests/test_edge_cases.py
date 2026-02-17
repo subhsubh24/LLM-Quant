@@ -225,17 +225,19 @@ class TestBoundaryConditions:
 
     def test_sharpe_extreme_values(self):
         """Test Sharpe ratio at extremes."""
+        np.random.seed(42)
+
         # Very high Sharpe
         returns_high = np.random.normal(0.01, 0.001, 100)
         sharpe_high = returns_high.mean() / returns_high.std() * np.sqrt(252)
 
         assert sharpe_high > 5.0
 
-        # Very low Sharpe
+        # Very low Sharpe (expected: mean/std * sqrt(252) = -0.1 * 15.87 ≈ -1.59)
         returns_low = np.random.normal(-0.01, 0.1, 100)
         sharpe_low = returns_low.mean() / returns_low.std() * np.sqrt(252)
 
-        assert sharpe_low < -2.0
+        assert sharpe_low < 0.0  # Negative Sharpe for negative mean returns
 
 
 class TestEmptyAndMissingData:
