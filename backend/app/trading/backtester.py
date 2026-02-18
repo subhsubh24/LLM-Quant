@@ -1756,7 +1756,8 @@ class WalkForwardBacktester:
             # Model Agreement & Consensus
             # STRATEGIC OVERHAUL: Require 3/4 model agreement minimum.
             # 2/4 agreement = coin flip. 3/4+ = real consensus.
-            "min_model_agreement": 3,                # Minimum 3/4 models required (was 2)
+            "min_model_agreement": 3,                # Minimum 3/4 models for LONGS (was 2)
+            "min_model_agreement_short": 4,          # Require 4/4 models for SHORTS (shorting is harder, needs more conviction)
             "weighted_agreement_threshold": 0.65,    # 65% weighted agreement (was 50%)
 
             # Liquidity & Volume
@@ -1797,6 +1798,8 @@ class WalkForwardBacktester:
 
             # Model Degradation Detection
             "degradation_threshold": 0.35,           # Alert if win rate < 35%
+            "degradation_halt_threshold": 0.20,      # HALT all trading if win rate < 20% (models are anti-predictive)
+            "degradation_invert_threshold": 0.30,    # Invert signals if win rate < 30% (anti-predictive = flip for edge)
             "rolling_window_size": 20,               # Keep last 20 trades
 
             # Continuous Learning (disabled during backtest for speed — set to very high interval)
@@ -1843,6 +1846,16 @@ class WalkForwardBacktester:
             # Regime Detection Thresholds (configurable for different market conditions)
             "regime_base_threshold": 0.02,          # Base trend threshold (2% SMA divergence)
             "regime_vol_threshold": 0.01,           # Minimum volatility to confirm regime (1%)
+
+            # TREND-FOLLOWING FILTER (Aristotle-inspired)
+            # Only trade in the direction of the higher-timeframe trend.
+            # Aristotle: "I wait for dips in uptrends" — never fights the trend.
+            # EMA(50) > EMA(200) = uptrend → only longs allowed
+            # EMA(50) < EMA(200) = downtrend → shorts allowed (but rare)
+            # This is THE most important filter. Crypto/stocks go up long-term.
+            "trend_filter_enabled": True,            # Master switch for trend filter
+            "trend_ema_fast": 50,                    # Fast EMA period
+            "trend_ema_slow": 200,                   # Slow EMA period (golden cross / death cross)
 
             # Position Flip-Flop Cooldown (reduces churn from rapid direction changes)
             "flip_cooldown_multiplier": 3,          # Direction flip cooldown = standard cooldown * this (3x = 15 candles)
@@ -2728,11 +2741,22 @@ class WalkForwardBacktester:
                     # BUG FIX #13: Robust rolling window calculation (use neutral default, not 0)
                     rolling_win_rate = np.mean(recent_trades_window) if len(recent_trades_window) > 0 else 0.5
                     if len(recent_trades_window) >= 10 and rolling_win_rate < degradation_threshold:
-                        logger.warning(
-                            f"⚠️ Model degradation detected! Rolling win rate: {rolling_win_rate*100:.1f}% "
-                            f"(below {degradation_threshold*100:.0f}% threshold). "
-                            f"Consider retraining models."
-                        )
+                        if rolling_win_rate < config["degradation_halt_threshold"]:
+                            logger.warning(
+                                f"🛑 CRITICAL DEGRADATION: Win rate {rolling_win_rate*100:.1f}% — "
+                                f"auto-halting all trading (threshold: {config['degradation_halt_threshold']*100:.0f}%)"
+                            )
+                        elif rolling_win_rate < config["degradation_invert_threshold"]:
+                            logger.warning(
+                                f"🔄 ANTI-PREDICTIVE: Win rate {rolling_win_rate*100:.1f}% — "
+                                f"inverting signals (threshold: {config['degradation_invert_threshold']*100:.0f}%)"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Model degradation detected! Rolling win rate: {rolling_win_rate*100:.1f}% "
+                                f"(below {degradation_threshold*100:.0f}% threshold). "
+                                f"Consider retraining models."
+                            )
 
                     # Track individual model accuracy and P&L (PHASE C)
                     trade_was_profitable = realized_pnl > 0
@@ -2921,6 +2945,63 @@ class WalkForwardBacktester:
                         logger.warning(f"⚠️ Model prediction failed for {symbol} - using HOLD fallback")
                         continue  # Skip this signal, models not working
 
+                    # ============================================================
+                    # DEGRADATION AUTO-HALT & SIGNAL INVERSION
+                    # ============================================================
+                    # If models are anti-predictive (< 30% win rate), INVERT their signals.
+                    # A model that's wrong 70%+ of the time is actually useful — just do the opposite.
+                    # If models are catastrophically bad (< 20%), halt trading entirely.
+                    if len(recent_trades_window) >= 15:
+                        current_rolling_wr = np.mean(recent_trades_window)
+                        if current_rolling_wr < config["degradation_halt_threshold"]:
+                            # Models are useless — stop trading until they improve
+                            if not portfolio_trading_paused:
+                                logger.warning(f"🛑 AUTO-HALT: Win rate {current_rolling_wr*100:.1f}% < {config['degradation_halt_threshold']*100:.0f}% threshold. Pausing ALL trading.")
+                            portfolio_trading_paused = True
+                            continue
+                        elif current_rolling_wr < config["degradation_invert_threshold"]:
+                            # Models are anti-predictive — invert signals
+                            original_action = prediction["action"]
+                            if prediction["action"] == 0:
+                                prediction["action"] = 2  # SHORT → LONG
+                            elif prediction["action"] == 2:
+                                prediction["action"] = 0  # LONG → SHORT
+                            # HOLD stays HOLD
+                            if original_action != prediction["action"]:
+                                inverted_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
+                                if np.random.random() < 0.01:
+                                    logger.info(f"🔄 SIGNAL INVERTED: {symbol} (win rate {current_rolling_wr*100:.1f}% < {config['degradation_invert_threshold']*100:.0f}%) → {inverted_name}")
+
+                    # ============================================================
+                    # TREND-FOLLOWING FILTER (Aristotle's #1 Rule)
+                    # ============================================================
+                    # "Never fight the trend." — Only go long in uptrends, short in downtrends.
+                    # EMA(50) > EMA(200) = uptrend = longs only
+                    # EMA(50) < EMA(200) = downtrend = shorts allowed
+                    # This single filter prevents the #1 killer: shorting bull markets.
+                    trend_allows_trade = True
+                    if config["trend_filter_enabled"] and symbol in window_data and len(window_data[symbol]) >= config["trend_ema_slow"]:
+                        trend_closes = np.array([c.close for c in window_data[symbol][-config["trend_ema_slow"]:]])
+                        # Calculate EMAs
+                        ema_fast_period = config["trend_ema_fast"]
+                        ema_slow_period = config["trend_ema_slow"]
+                        # Simple approximation: use last N closes for EMA
+                        ema_fast = np.mean(trend_closes[-ema_fast_period:])
+                        ema_slow = np.mean(trend_closes)
+                        trend_direction = "up" if ema_fast > ema_slow else "down"
+
+                        if prediction["action"] == 0 and trend_direction == "up":
+                            # Trying to SHORT in an uptrend — BLOCK
+                            trend_allows_trade = False
+                            filter_stage_counters["trend_filtered"] = filter_stage_counters.get("trend_filtered", 0) + 1
+                        elif prediction["action"] == 2 and trend_direction == "down":
+                            # Trying to go LONG in a downtrend — BLOCK
+                            trend_allows_trade = False
+                            filter_stage_counters["trend_filtered"] = filter_stage_counters.get("trend_filtered", 0) + 1
+
+                    if not trend_allows_trade:
+                        continue  # Skip this signal — fighting the trend
+
                     # CONTINUOUS LEARNING: Collect feature-prediction pairs for retraining
                     # Store current price so we can look ahead from this point in time
                     if len(retraining_buffer["features"]) < config["continuous_learning_window"]:
@@ -3056,9 +3137,9 @@ class WalkForwardBacktester:
                     weighted_agreement_pct = weighted_agreement / total_model_weight if total_model_weight > 0 else 0
 
                     # Require strong consensus - both weighted AND simple agreement (BUG FIX #7)
-                    # Using OR would allow weak signals (e.g., 2 good models + 2 bad models agree)
-                    # Using AND ensures both consensus metrics agree on the signal quality
-                    min_agreement = config["min_model_agreement"]  # Require at least 2 out of 4 models
+                    # LONG BIAS: Shorts require 4/4 agreement (harder to profit from shorting)
+                    # Longs require 3/4 agreement (structural upward drift in crypto/stocks)
+                    min_agreement = config["min_model_agreement_short"] if is_short else config["min_model_agreement"]
                     model_agreement = sum(1 for p in individual_preds if p == final_action)
 
                     # STRICT: Require BOTH weighted consensus AND minimum simple agreement
@@ -3374,27 +3455,28 @@ class WalkForwardBacktester:
 
                         position_size *= confidence_multiplier
 
-                        # TIER 3B: REGIME-AWARE POSITION SIZING (KEPT - minimal impact)
-                        # Adjust position sizes based on market regime alignment
+                        # REGIME-AWARE POSITION SIZING + TREND STRENGTH BONUS
+                        # With trend filter active, counter-trend trades are already blocked.
+                        # Give a bigger bonus for strong trend alignment.
                         is_long = prediction["action"] == 2
                         is_short = prediction["action"] == 0
                         if regime == 'bull' and is_long:
-                            # Long in bull: optimal, increase size by 15%
-                            position_size *= 1.15
-                            logger.debug(f"Regime alignment bonus (bull long): +15% size")
-                        elif regime == 'bull' and is_short:
-                            # Short in bull: poor fit, reduce by 20%
-                            position_size *= 0.80
-                            logger.debug(f"Regime penalty (bull short): -20% size")
+                            # Long in confirmed bull: STRONG alignment → 30% bonus (was 15%)
+                            position_size *= 1.30
+                            logger.debug(f"Regime alignment bonus (bull long): +30% size")
                         elif regime == 'bear' and is_short:
-                            # Short in bear: optimal, increase size by 15%
-                            position_size *= 1.15
-                            logger.debug(f"Regime alignment bonus (bear short): +15% size")
+                            # Short in confirmed bear: STRONG alignment → 30% bonus (was 15%)
+                            position_size *= 1.30
+                            logger.debug(f"Regime alignment bonus (bear short): +30% size")
+                        elif regime == 'bull' and is_short:
+                            # Short in bull: shouldn't reach here (trend filter blocks it), but safety
+                            position_size *= 0.50
+                            logger.debug(f"Regime penalty (bull short): -50% size")
                         elif regime == 'bear' and is_long:
-                            # Long in bear: poor fit, reduce by 20%
-                            position_size *= 0.80
-                            logger.debug(f"Regime penalty (bear long): -20% size")
-                        # Neutral: no adjustment
+                            # Long in bear: shouldn't reach here (trend filter blocks it), but safety
+                            position_size *= 0.50
+                            logger.debug(f"Regime penalty (bear long): -50% size")
+                        # Sideways: no adjustment (trend filter allows both directions)
 
                         # Cap maximum position size at 1.5x Kelly for safety
                         # With confidence 2.0x * regime 1.15x = 2.3x Kelly, cap at 1.5x
