@@ -1737,13 +1737,19 @@ class WalkForwardBacktester:
             "confidence_very_low_mult": 0.4,         # <45% confidence: 0.4x position size
 
             # Confidence Thresholds
-            # STRATEGIC OVERHAUL: Only take HIGH-CONVICTION trades.
-            # Previous: 0.30-0.40 thresholds let 68% of signals through (44k of 65k).
-            # New: 0.60-0.70 thresholds should let ~5-10% through = 30-60 trades/year.
-            # Fewer trades but each one has real conviction behind it.
-            "confidence_4x4_models": 0.60,           # 4/4 models agree: require 0.60+ (was 0.40)
-            "confidence_3x4_models": 0.55,           # 3/4 models agree: require 0.55+ (was 0.35)
-            "confidence_fallback": 0.50,             # 2/4 or fewer: require 0.50+ (was 0.30)
+            # The PRIMARY filter is now min_model_agreement = 3 (very selective).
+            # Confidence thresholds are SECONDARY — prevent the weakest consensus trades.
+            #
+            # Confidence = agreement_ratio × avg_model_confidence
+            # 3/4 agree at 55% avg → 0.75 × 0.55 = 0.41
+            # 4/4 agree at 55% avg → 1.00 × 0.55 = 0.55
+            # 3/4 agree at 65% avg → 0.75 × 0.65 = 0.49
+            #
+            # Thresholds set below typical 3/4 agreement levels to avoid zero trades,
+            # but above noise floor. Combined with agreement=3 filter, gets ~30-80 trades.
+            "confidence_4x4_models": 0.50,           # 4/4 agree: 0.50+ (need 50% avg conf)
+            "confidence_3x4_models": 0.40,           # 3/4 agree: 0.40+ (need 53% avg conf)
+            "confidence_fallback": 0.35,             # 2/4: won't fire (min_agreement=3)
             "regime_bull_confidence_mult": 1.10,     # Bull: +10% confidence required for counter-trend
             "regime_bear_confidence_mult": 1.10,     # Bear: +10% confidence required for counter-trend
 
@@ -4257,8 +4263,11 @@ class ModelPreTrainer:
                 return None
             logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
             logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
-            # Use 200h (mid-range) as primary for compatibility with existing code
-            primary_labels = labels.get(200, list(labels.values())[0])
+            # Use 800h (~33 days) as primary to match swing/long-term holding periods.
+            # Was 200h (8 days) which mismatched the 30-166 day holding periods,
+            # causing models to lose predictive power after the first week.
+            # 800h aligns with the target 1 exit window (30-60 day swing trades).
+            primary_labels = labels.get(800, labels.get(400, labels.get(200, list(labels.values())[0])))
         else:
             logger.info("Single-horizon training mode")
             primary_labels = labels
