@@ -4858,6 +4858,11 @@ class ModelPreTrainer:
 
         # CRITICAL: Load the best checkpoint before testing (not the final epoch)
         self.load_checkpoints()
+        # BUG FIX: Restore is_trained flag after checkpoint load.
+        # save_checkpoints() at line 4792 saves is_trained=False (called before line 4804 sets it True).
+        # load_checkpoints() overwrites the True back to False. Fix: re-set and persist.
+        self.is_trained = True
+        self.save_checkpoints()
         logger.info(f"✅ Loaded best checkpoint (val accuracy: {global_best_accuracy:.2%})")
 
         # FIXED: Use final fold's validation data (properly aligned, not globally split)
