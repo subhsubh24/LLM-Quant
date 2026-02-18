@@ -1807,7 +1807,8 @@ class WalkForwardBacktester:
             "continuous_learning_threshold": 0.45,  # Alert if win rate < 45%
 
             # Trading Safeguards
-            "per_symbol_cooldown_candles": 5,       # 5-candle minimum between entries
+            "per_symbol_cooldown_candles": 48,      # 48-candle (2-day) minimum between entries on same symbol (was 5 — allowed 8 consecutive TSLA shorts)
+            "max_trades_per_symbol": 3,              # Max total trades per symbol in entire backtest (prevents concentration)
             "churn_alert_threshold": 3,             # Alert if >3 direction flips
 
             # Feature Extraction
@@ -2009,7 +2010,9 @@ class WalkForwardBacktester:
 
         # SAFEGUARD: Per-symbol trading cooldown (prevent thrashing)
         last_exit_time = {}  # symbol -> timestamp of last exit
-        min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 5 candles before re-entering same symbol
+        min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 48 candles before re-entering same symbol
+        symbol_trade_count = {}  # Track total trades per symbol to prevent concentration
+        max_trades_per_symbol = config["max_trades_per_symbol"]  # Max 3 trades per symbol total
         # Enhanced flip-flop cooldown - apply longer cooldown for direction changes
         flip_cooldown_mult = config["flip_cooldown_multiplier"]  # 3x longer cooldown for direction flips
         min_flip_cooldown_candles = min_cooldown_candles * flip_cooldown_mult  # e.g., 5 * 3 = 15 candles
@@ -2050,6 +2053,7 @@ class WalkForwardBacktester:
             "no_conflict": 0,         # position conflict passed
             "not_already_open": 0,    # position not already open
             "good_microstructure": 0, # microstructure filter passed
+            "mean_reversion_ok": 0,  # mean-reversion entry filter passed
             "positions_opened": 0,    # actually opened
         }
 
@@ -2107,7 +2111,7 @@ class WalkForwardBacktester:
                         f"  Filter funnel: predictions={fc['total_predictions']} → "
                         f"not_hold={fc['not_hold']} → conf={fc['meets_confidence']} → "
                         f"liquid={fc['is_liquid']} → consensus={fc['strong_consensus']} → "
-                        f"sig={fc['stat_significant']} → opened={fc['positions_opened']}"
+                        f"sig={fc['stat_significant']} → mr={fc.get('mean_reversion_ok', 0)} → opened={fc['positions_opened']}"
                     )
                 last_log_time = current_time
                 last_log_index = candles_processed
@@ -3190,12 +3194,55 @@ class WalkForwardBacktester:
                     if symbol not in positions:
                         filter_stage_counters["not_already_open"] += 1
 
+                    # SYMBOL CONCENTRATION LIMIT: Prevent piling into same symbol
+                    # (was allowing 8 consecutive TSLA shorts — disastrous)
+                    symbol_at_max_trades = symbol_trade_count.get(symbol, 0) >= max_trades_per_symbol
+
+                    # ============================================================
+                    # MEAN-REVERSION ENTRY FILTER (Aristotle-inspired)
+                    # ============================================================
+                    # "Wait for market drops before entering" — only buy near support,
+                    # only short near resistance. Prevents buying tops / shorting bottoms.
+                    #
+                    # For LONGS: RSI < 40 (oversold) OR price below 50-SMA (dip)
+                    # For SHORTS: RSI > 60 (overbought) OR price above 50-SMA (extended)
+                    # HOLD signals bypass this filter (they won't pass action != 1 anyway)
+                    mean_reversion_ok = True
+                    if prediction["action"] != 1 and symbol in window_data and len(window_data[symbol]) >= 50:
+                        mr_closes = np.array([c.close for c in window_data[symbol][-50:]])
+                        # RSI-14
+                        mr_gains = np.maximum(np.diff(mr_closes), 0)
+                        mr_losses = np.maximum(-np.diff(mr_closes), 0)
+                        mr_avg_gain = np.mean(mr_gains[-14:]) if len(mr_gains) >= 14 else np.mean(mr_gains)
+                        mr_avg_loss = np.mean(mr_losses[-14:]) if len(mr_losses) >= 14 else np.mean(mr_losses)
+                        mr_rsi = 100 - (100 / (1 + mr_avg_gain / (mr_avg_loss + 1e-8)))
+                        # 50-period SMA
+                        mr_sma50 = np.mean(mr_closes)
+                        mr_current_price = mr_closes[-1]
+                        mr_price_vs_sma = (mr_current_price - mr_sma50) / (mr_sma50 + 1e-8)
+
+                        if prediction["action"] == 2:  # LONG
+                            # Buy the dip: price near/below support
+                            rsi_ok = mr_rsi < 40        # Oversold
+                            sma_ok = mr_price_vs_sma < 0.02  # Within 2% above SMA or below it
+                            mean_reversion_ok = rsi_ok or sma_ok
+                        elif prediction["action"] == 0:  # SHORT
+                            # Short the rip: price near/above resistance
+                            rsi_ok = mr_rsi > 60        # Overbought
+                            sma_ok = mr_price_vs_sma > -0.02  # Within 2% below SMA or above it
+                            mean_reversion_ok = rsi_ok or sma_ok
+
+                    if mean_reversion_ok:
+                        filter_stage_counters["mean_reversion_ok"] = filter_stage_counters.get("mean_reversion_ok", 0) + 1
+
                     if (prediction["action"] != 1 and
                         meets_confidence and
                         # NOTE: conflicting_trade is NOT a hard ban - it's handled by increased confidence requirement above
                         is_liquid and
                         strong_consensus and
                         is_statistically_significant and
+                        mean_reversion_ok and
+                        not symbol_at_max_trades and
                         not in_cooldown and
                         not position_conflict and
                         symbol not in positions):  # Don't open if already have position
@@ -3483,6 +3530,9 @@ class WalkForwardBacktester:
                             )
 
                             capital -= position_size
+
+                            # Track trades per symbol (for concentration limit)
+                            symbol_trade_count[symbol] = symbol_trade_count.get(symbol, 0) + 1
                     else:
                         # PHASE D: Track why signal was rejected
                         if prediction["action"] == 1:  # Hold signal
