@@ -754,24 +754,35 @@ def get_hybrid_signal_engine(
     """
     Get or create the singleton HybridSignalEngine.
 
-    Both ``ml_ensemble`` and ``rules_strategy`` must be provided on first
-    call.  Subsequent calls return the cached instance (arguments are
-    ignored after initial creation).
+    On first call, if ``ml_ensemble`` and/or ``rules_strategy`` are not
+    supplied, the factory will create default instances automatically:
+    - SimplifiedMLEnsemble() for ml_ensemble
+    - AristotleRulesStrategy() for rules_strategy
 
-    Returns None if the required dependencies are not supplied on the first
-    call.
+    Subsequent calls return the cached instance.
     """
     global _hybrid_engine
 
     if _hybrid_engine is not None:
         return _hybrid_engine
 
-    if ml_ensemble is None or rules_strategy is None:
-        logger.warning(
-            "Cannot create HybridSignalEngine without both ml_ensemble "
-            "and rules_strategy."
-        )
-        return None
+    # Auto-create dependencies if not supplied
+    if ml_ensemble is None:
+        try:
+            ml_ensemble = SimplifiedMLEnsemble()
+            logger.info("HybridSignalEngine: auto-created SimplifiedMLEnsemble")
+        except Exception as e:
+            logger.warning(f"Failed to create SimplifiedMLEnsemble: {e}")
+            return None
+
+    if rules_strategy is None:
+        try:
+            from ..strategies.rules_based_strategy import AristotleRulesStrategy
+            rules_strategy = AristotleRulesStrategy()
+            logger.info("HybridSignalEngine: auto-created AristotleRulesStrategy")
+        except Exception as e:
+            logger.warning(f"Failed to create AristotleRulesStrategy: {e}")
+            return None
 
     _hybrid_engine = HybridSignalEngine(
         ml_ensemble=ml_ensemble,

@@ -202,9 +202,12 @@ class AutoTrader:
     def generate_hybrid_signals(self, prices: pd.DataFrame, features: Optional[pd.DataFrame] = None) -> PortfolioSignals:
         """Generate signals using hybrid ML+Rules engine if available, else fallback to standard."""
         hybrid = get_hybrid_signal_engine()
-        if hybrid is not None and features is not None:
-            self.last_signals = hybrid.generate_hybrid_signals(prices, features=features)
-            return self.last_signals
+        if hybrid is not None:
+            try:
+                self.last_signals = hybrid.generate_hybrid_signals(prices, features=features)
+                return self.last_signals
+            except Exception as e:
+                logger.warning(f"Hybrid signal generation failed, falling back to standard: {e}")
         # Fallback to standard signal engine
         return self.generate_signals(prices)
 

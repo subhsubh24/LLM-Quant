@@ -1049,9 +1049,9 @@ async def trigger_rebalance(
         logger.error(f"Market service error in rebalance: {e}")
         raise HTTPException(status_code=503, detail=f"Market service unavailable: {str(e)}")
 
-    # Generate signals and rebalance
+    # Generate signals and rebalance (uses hybrid ML+Rules engine when available)
     trader = get_auto_trader()
-    signals = trader.generate_signals(prices)
+    signals = trader.generate_hybrid_signals(prices)
     trader.update_prices(current_prices)
     orders = trader.rebalance(signals, current_prices)
 
