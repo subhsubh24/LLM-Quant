@@ -2764,9 +2764,10 @@ class WalkForwardBacktester:
 
                     # PHASE D: Aggressive Signal Filtering
                     # Only trade on ULTRA-STRONG signals
-                    # Define is_short and is_long before use (CRITICAL FIX: moved from line 2753-2754)
+                    # Define is_short, is_long, is_hold before use
                     is_short = prediction["action"] == 0
                     is_long = prediction["action"] == 2
+                    is_hold = prediction["action"] == 1
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
                     # DIAGNOSTIC: Track filter stages
