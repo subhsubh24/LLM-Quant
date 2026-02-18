@@ -922,23 +922,23 @@ async def analyze_portfolio(session=Depends(get_session_dependency)):
 
 class MarketOrderRequest(BaseModel):
     """Validated market order request."""
-    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
-    side: str = Field(..., regex="^(buy|sell)$")
+    symbol: str = Field(..., min_length=1, max_length=20, pattern="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., pattern="^(buy|sell)$")
     quantity: float = Field(..., gt=0, lt=1e8)
 
 
 class LimitOrderRequest(BaseModel):
     """Validated limit order request."""
-    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
-    side: str = Field(..., regex="^(buy|sell)$")
+    symbol: str = Field(..., min_length=1, max_length=20, pattern="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., pattern="^(buy|sell)$")
     quantity: float = Field(..., gt=0, lt=1e8)
     limit_price: float = Field(..., gt=0, lt=1e8)
 
 
 class StopOrderRequest(BaseModel):
     """Validated stop order request."""
-    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
-    side: str = Field(..., regex="^(buy|sell)$")
+    symbol: str = Field(..., min_length=1, max_length=20, pattern="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., pattern="^(buy|sell)$")
     quantity: float = Field(..., gt=0, lt=1e8)
     stop_price: float = Field(..., gt=0, lt=1e8)
 
