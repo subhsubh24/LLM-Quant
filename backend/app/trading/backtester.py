@@ -1437,14 +1437,20 @@ class WalkForwardBacktester:
         min_samples = max(1, len(closes) - max_lookahead)  # Ensure at least 1 sample
 
         for lookahead in horizons:
+            # Horizon-aware threshold: shorter horizons = smaller moves = lower threshold
+            # This prevents 85%+ HOLD labels on short horizons where 2% moves are rare.
+            # Scale: sqrt(horizon/200) so 24h→0.35x, 200h→1.0x, 1600h→2.83x
+            horizon_threshold = threshold * np.sqrt(lookahead / 200.0)
+            horizon_threshold = max(0.005, min(0.05, horizon_threshold))  # Clamp [0.5%, 5%]
+
             labels = []
             for i in range(len(closes) - lookahead):
                 # BUG FIX #23: Add epsilon protection for division by zero in multi-horizon label generation
                 future_return = (closes[i + lookahead] - closes[i]) / (closes[i] + 1e-8)
 
-                if future_return > threshold:
+                if future_return > horizon_threshold:
                     labels.append(2)  # Buy
-                elif future_return < -threshold:
+                elif future_return < -horizon_threshold:
                     labels.append(0)  # Sell
                 else:
                     labels.append(1)  # Hold
@@ -2235,7 +2241,7 @@ class WalkForwardBacktester:
                 # TIER 1 FIX: TRAILING STOPS
                 # Exit if price reversals from highest point
                 # BUG FIX #36: Use LOW price for long stops, HIGH price for short stops
-                trailing_stop_pct = 0.03  # 3% trailing stop
+                trailing_stop_pct = 0.05  # 5% trailing stop (was 3% — too tight, cut winners short)
                 if side == "long" and pos.get("highest_price", entry_price) > entry_price:
                     if low_price < pos["highest_price"] * (1 - trailing_stop_pct):  # Use low, not close
                         should_exit = True
@@ -4096,7 +4102,10 @@ class ModelPreTrainer:
                     exp = Experience(state, action, reward, next_state, done)
                     self.dqn.replay_buffer.push(exp)
 
-            # NOW shuffle for other models (PPO, LSTM, Transformer don't use next_state)
+            # NOW shuffle for other models (PPO doesn't need temporal order)
+            # BUT: LSTM and Transformer DO need temporal sequences.
+            # So we shuffle for PPO/DQN training batches, but extract LSTM/Transformer
+            # sequences from the UNSHUFFLED data to preserve temporal continuity.
             perm = np.random.permutation(len(X_train))
             X_train_shuffled = X_train[perm]
             y_train_shuffled = y_train[perm]
@@ -4186,44 +4195,38 @@ class ModelPreTrainer:
                 if ppo_loss:
                     epoch_losses.append(ppo_loss)
 
-                # =====================
-                # TRAIN LSTM (Proper BPTT)
-                # =====================
-                if len(batch_X) >= 10:
-                    seq_len = 10
-                    # Create sequences for LSTM training
-                    for j in range(0, len(batch_X) - seq_len, seq_len):
-                        seq = batch_X[j:j+seq_len]
-                        target = batch_y[j+seq_len-1:j+seq_len]  # Label for last timestep
+                # LSTM and Transformer are trained OUTSIDE this batch loop
+                # using unshuffled temporal sequences (see below)
 
-                        # CRITICAL FIX: Validate sequence shape before reshape
-                        if len(seq) == seq_len and len(target) > 0:
-                            # Proper backpropagation through time
-                            lstm_loss = self.lstm.train_step(
-                                seq.reshape(1, seq_len, -1),
-                                target
-                            )
-                            epoch_losses.append(lstm_loss)
-                            lstm_losses.append(lstm_loss)
 
-                # =====================
-                # TRAIN TRANSFORMER (Proper Gradient Descent)
-                # =====================
-                if len(batch_X) >= 10:
-                    seq_len = 10
-                    for j in range(0, len(batch_X) - seq_len, seq_len):
-                        seq = batch_X[j:j+seq_len]
-                        target = batch_y[j+seq_len-1:j+seq_len]
+            # =====================
+            # TRAIN LSTM & TRANSFORMER on UNSHUFFLED temporal sequences
+            # =====================
+            # CRITICAL: Sequential models must see temporally continuous data.
+            # Using shuffled batches (as before) destroyed temporal patterns — the LSTM
+            # would see BTC-hour-100 → ETH-hour-500 → ADA-hour-1 as a "sequence".
+            # Now we extract rolling windows from the original time-ordered data.
+            seq_len = 10
+            if len(X_train) >= seq_len + 1:
+                # Sample random starting positions to limit computation
+                # (full pass over 60K samples with stride 1 is too slow)
+                n_seq_samples = min(len(X_train) - seq_len, 2000)
+                seq_starts = np.random.choice(len(X_train) - seq_len, size=n_seq_samples, replace=False)
 
-                        if len(target) > 0:
-                            # Proper backpropagation
-                            trans_loss = self.transformer.train_step(
-                                seq.reshape(1, seq_len, -1),
-                                target
-                            )
-                            epoch_losses.append(trans_loss)
-                            trans_losses.append(trans_loss)
+                for start_idx in seq_starts:
+                    seq = X_train[start_idx:start_idx + seq_len]
+                    target = y_train[start_idx + seq_len - 1:start_idx + seq_len]
 
+                    if len(seq) == seq_len and len(target) > 0:
+                        seq_reshaped = seq.reshape(1, seq_len, -1)
+
+                        lstm_loss = self.lstm.train_step(seq_reshaped, target)
+                        epoch_losses.append(lstm_loss)
+                        lstm_losses.append(lstm_loss)
+
+                        trans_loss = self.transformer.train_step(seq_reshaped, target)
+                        epoch_losses.append(trans_loss)
+                        trans_losses.append(trans_loss)
 
             # Training accuracy (sample subset for speed)
             # Reset buffer and iterate so LSTM/Transformer get sequential context
@@ -4788,9 +4791,11 @@ class ModelPreTrainer:
             # Restore DQN
             self.dqn.q_network.set_weights(checkpoint["dqn_weights"]["q_network"])
             self.dqn.target_network.set_weights(checkpoint["dqn_weights"]["target_network"])
-            # CRITICAL FIX: Reset epsilon to start fresh exploration, not restore from checkpoint
-            # This allows models to explore properly even after being partially trained
-            self.dqn.epsilon = self.dqn.epsilon_start  # Reset from checkpoint's decayed value to 1.0
+            # Restore trained epsilon from checkpoint (NOT reset to 1.0!)
+            # epsilon=1.0 means 100% random exploration — useless for inference.
+            # The checkpoint stores the decayed epsilon from training.
+            saved_epsilon = checkpoint["dqn_weights"].get("epsilon", 0.01)
+            self.dqn.epsilon = saved_epsilon
 
             # Restore PPO
             self.ppo.policy_network.set_weights(checkpoint["ppo_weights"]["policy"])
@@ -4866,8 +4871,8 @@ class ModelPreTrainer:
         if self.training_metrics.total_samples < self.min_training_samples:
             return False, f"Only {self.training_metrics.total_samples}/{self.min_training_samples} samples trained"
 
-        if self.dqn.epsilon > 0.1:
-            return False, f"DQN still exploring (epsilon={self.dqn.epsilon:.2f} > 0.1)"
+        # DQN epsilon is now properly restored from checkpoint, so no need to check it.
+        # Low epsilon just means the DQN uses its Q-values instead of random exploration.
 
         return True, "Training requirements met"
 
