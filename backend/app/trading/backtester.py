@@ -2642,13 +2642,20 @@ class WalkForwardBacktester:
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 
+                    # CRITICAL: Cast numpy scalars to Python types to prevent
+                    # "truth value of array is ambiguous" in downstream and/or/if checks
+                    prediction["action"] = int(prediction["action"])
+                    prediction["confidence"] = float(prediction["confidence"])
+                    if "predictions" in prediction:
+                        prediction["predictions"] = [int(p) for p in prediction["predictions"]]
+
                     # BUG FIX #38: Detect model prediction failures (NaN/inf confidence, missing fields)
                     # Check for corrupted predictions before using them
                     if (not isinstance(prediction, dict) or
                         "confidence" not in prediction or
                         "action" not in prediction or
-                        not np.isfinite(prediction.get("confidence", 0.0)) or
-                        np.isnan(prediction.get("confidence", 0.0))):
+                        not np.isfinite(prediction["confidence"]) or
+                        np.isnan(prediction["confidence"])):
                         logger.warning(f"⚠️ Invalid model prediction for {symbol} - confidence={prediction.get('confidence', 'MISSING')}")
                         continue  # Skip this signal, models not working
 
@@ -4587,7 +4594,8 @@ class ModelPreTrainer:
             Prediction dict with action, confidence, etc.
         """
         # FIX #13: Validate regime parameter to prevent crashes
-        valid_regimes = {'bull', 'bear', 'neutral'}
+        # 'sideways' from detect_market_regime maps to 'neutral' for prediction
+        valid_regimes = {'bull', 'bear', 'neutral', 'sideways'}
         if regime not in valid_regimes:
             logger.warning(f"Invalid regime: {regime}, using 'neutral'")
             regime = 'neutral'
@@ -4631,15 +4639,18 @@ class ModelPreTrainer:
             confidences.append(ppo_probs[ppo_action])
 
             # LSTM prediction (full sequence)
-            # FIX #3: LSTM.forward() returns (probs, hidden_state) tuple
-            lstm_probs, _ = self.lstm.forward(seq)  # Unpack probs and discard hidden state
+            # FIX: LSTM.forward() returns (probs, hidden_state) tuple with batch dim
+            # Must squeeze batch dim to get (output_dim,) before indexing
+            lstm_probs_batch, _ = self.lstm.forward(seq)
+            lstm_probs = lstm_probs_batch.flatten()  # (1, 3) → (3,)
             lstm_action = np.argmax(lstm_probs)
             predictions.append(lstm_action)
             confidences.append(lstm_probs[lstm_action])
 
             # Transformer prediction (full sequence)
+            # FIX: Same batch dim issue — flatten before indexing
             trans_out = self.transformer.forward(seq)
-            trans_probs = self._softmax(trans_out[-1])
+            trans_probs = self._softmax(trans_out.flatten())  # (1, 3) → (3,)
             trans_action = np.argmax(trans_probs)
             predictions.append(trans_action)
             confidences.append(trans_probs[trans_action])
