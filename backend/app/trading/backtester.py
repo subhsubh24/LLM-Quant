@@ -1791,8 +1791,8 @@ class WalkForwardBacktester:
         logger.info(f"  Symbols to trade: {len(data)} symbols")
         logger.info(f"  Training window: {self.train_window} candles (~{self.train_window/config['candles_per_day']:.0f} days)")
         logger.info(f"  Data available: {len(all_candles):,} candles")
-        logger.info(f"  Filter thresholds (LOOSENED for diagnostics):")
-        logger.info(f"    - Min confidence: 0.50-0.70 (by model agreement)")
+        logger.info(f"  Filter thresholds:")
+        logger.info(f"    - Min confidence: {config['confidence_fallback']:.2f}-{config['confidence_4x4_models']:.2f} (by model agreement)")
         logger.info(f"    - Min model agreement: 2/4 models (weighted >50%)")
         logger.info(f"    - Per-symbol cooldown: {min_cooldown_candles} candles")
         logger.info(f"    - Max position size: 2% of capital (Kelly-based)")
@@ -4597,18 +4597,17 @@ class ModelPreTrainer:
             logger.error("DQN not initialized - cannot generate regime-aware predictions")
             return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
 
-        # CRITICAL FIX: Apply feature normalization (same as used in training)
-        # Must use same normalization for predictions to match training distribution
-        if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
-            state = (state - self.feature_mean) / (self.feature_std + 1e-8)
-
         # Get baseline prediction from neutral ensemble (same models)
-        # Ensure state is correct shape
+        # Ensure state is correct shape (MUST pad BEFORE normalization)
         if len(state.shape) == 1:
             if len(state) < self.state_dim:
                 state = np.pad(state, (0, self.state_dim - len(state)))
             elif len(state) > self.state_dim:
                 state = state[:self.state_dim]
+
+        # CRITICAL FIX: Apply feature normalization AFTER padding to match training dim
+        if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
+            state = (state - self.feature_mean) / (self.feature_std + 1e-8)
 
         # Build sequence for sequential models
         seq = self._get_sequence(state)
