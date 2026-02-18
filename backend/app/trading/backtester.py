@@ -565,6 +565,17 @@ class HistoricalDataDownloader:
     # Remove duplicates while preserving order
     STOCK_SYMBOLS = list(dict.fromkeys(STOCK_SYMBOLS))
 
+    # ==========================================================================
+    # FAST BACKTEST SYMBOLS (top liquidity only — runs in minutes, not days)
+    # ==========================================================================
+    BACKTEST_CRYPTO_SYMBOLS = [
+        "BTC", "ETH", "BNB", "XRP", "SOL", "ADA", "DOGE", "AVAX", "LINK", "DOT",
+        "MATIC", "UNI", "ATOM", "NEAR", "APT", "ARB", "OP", "INJ", "FIL", "LTC",
+    ]
+    BACKTEST_STOCK_SYMBOLS = [
+        "SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "JPM",
+    ]
+
     def __init__(self):
         self.data_cache: Dict[str, List[OHLCV]] = {}
 
@@ -732,10 +743,25 @@ class HistoricalDataDownloader:
             logger.error(f"Unexpected error downloading {symbol}: {type(e).__name__}: {e}")
             return []
 
-    async def download_all(self, days: int = 365, max_concurrent: int = 10) -> Dict[str, List[OHLCV]]:
-        """Download all historical data for training with parallel downloads."""
-        total_crypto = len(self.CRYPTO_SYMBOLS)
-        total_stocks = len(self.STOCK_SYMBOLS)
+    async def download_all(self, days: int = 365, max_concurrent: int = 10, fast_backtest: bool = True) -> Dict[str, List[OHLCV]]:
+        """Download historical data for training with parallel downloads.
+
+        Args:
+            days: Number of days of history to download
+            max_concurrent: Max parallel downloads
+            fast_backtest: If True, use top-30 liquid symbols only (runs in minutes).
+                          If False, use full 1300+ symbol universe (runs in hours/days).
+        """
+        if fast_backtest:
+            crypto_symbols = self.BACKTEST_CRYPTO_SYMBOLS
+            stock_symbols = self.BACKTEST_STOCK_SYMBOLS
+            logger.info(f"⚡ FAST BACKTEST MODE: Using {len(crypto_symbols)} crypto + {len(stock_symbols)} stock symbols")
+        else:
+            crypto_symbols = self.CRYPTO_SYMBOLS
+            stock_symbols = self.STOCK_SYMBOLS
+
+        total_crypto = len(crypto_symbols)
+        total_stocks = len(stock_symbols)
         total_symbols = total_crypto + total_stocks
 
         logger.info(f"Downloading {days} days of data for {total_symbols} symbols...")
@@ -765,9 +791,9 @@ class HistoricalDataDownloader:
 
         # Create download tasks
         tasks = []
-        for symbol in self.CRYPTO_SYMBOLS:
+        for symbol in crypto_symbols:
             tasks.append(download_with_limit(symbol, is_crypto=True))
-        for symbol in self.STOCK_SYMBOLS:
+        for symbol in stock_symbols:
             tasks.append(download_with_limit(symbol, is_crypto=False))
 
         # Execute all downloads with concurrency limit
@@ -1484,13 +1510,14 @@ class WalkForwardBacktester:
             "confidence_low_mult": 0.6,              # 45-50% confidence: 0.6x position size
             "confidence_very_low_mult": 0.3,         # <45% confidence: 0.3x position size (skip if forced to minimum)
 
-            # Confidence Thresholds (AGGRESSIVELY LOWERED: 0.30/0.20/0.10 to fix 80% filter rate)
-            # CRITICAL FIX: Increased thresholds to filter marginal signals
-            # Previous: 0.30/0.20/0.10 (allowed trades with only 2% safety margin)
-            # Now: 0.65/0.55/0.45 (require minimum 10-20% safety margin, better quality)
-            "confidence_4x4_models": 0.65,           # 4/4 models agree - highest quality signals
-            "confidence_3x4_models": 0.55,           # 3/4 models agree - good quality signals
-            "confidence_fallback": 0.45,             # 2/4 or fewer models - lower quality, higher risk
+            # Confidence Thresholds
+            # Calibrated to model accuracy (~47%): thresholds must be BELOW model output range
+            # to allow trades. Previous 0.65/0.55/0.45 blocked 99%+ of signals.
+            # These thresholds filter the bottom of the confidence distribution while
+            # still allowing the model's stronger signals through.
+            "confidence_4x4_models": 0.40,           # 4/4 models agree - high consensus, moderate bar
+            "confidence_3x4_models": 0.35,           # 3/4 models agree - good consensus
+            "confidence_fallback": 0.30,             # 2/4 or fewer models - require some minimum confidence
             "regime_bull_confidence_mult": 1.10,     # Bull: require HIGHER confidence for shorts (counter-trend) (was 1.15)
             "regime_bear_confidence_mult": 1.10,     # Bear: require HIGHER confidence for longs (counter-trend) (was 1.15)
 
@@ -1533,8 +1560,10 @@ class WalkForwardBacktester:
             "degradation_threshold": 0.35,           # Alert if win rate < 35%
             "rolling_window_size": 20,               # Keep last 20 trades
 
-            # Continuous Learning
-            "continuous_learning_interval": 5000,   # Retrain every 5000 candles (~1 week)
+            # Continuous Learning (disabled during backtest for speed — set to very high interval)
+            # Retraining all 4 models every 5000 candles adds ~100 hours to a 3M candle backtest.
+            # Set to 999999999 to effectively disable. For live trading, use 5000.
+            "continuous_learning_interval": 999999999,  # Disabled for backtest speed (was 5000)
             "continuous_learning_window": 10000,    # Keep last 10000 samples for retraining
             "continuous_learning_threshold": 0.45,  # Alert if win rate < 45%
 
@@ -1793,21 +1822,15 @@ class WalkForwardBacktester:
         )
         adaptive_weighter = AdaptiveEnsembleWeighter(model_names=model_names, lookback=50)
 
-        # PHASE A: Microstructure - Order Book Integration
-        # Initialize order book fetcher and microstructure extractors
-        ob_fetcher = OrderBookFetcher(exchange="binance_us")
-        microstructure_extractors = {symbol: MicrostructureExtractor(lookback=20) for symbol in symbols}
-        order_book_cache = {}  # Cache for recent order books to avoid excessive API calls
-        ob_fetch_interval = config["order_book_cache_interval_sec"]  # Fetch interval from config
-        last_ob_fetch_times = {symbol: 0 for symbol in symbols}
+        # PHASE A: Microstructure - DISABLED during backtest
+        # Live order book API calls are pointless for historical candles.
+        # Microstructure features are only meaningful for live trading.
+        order_book_cache = {}
+        microstructure_extractors = {}
+        logger.info(f"📊 PHASE A: Microstructure SKIPPED (historical backtest — no live order books)")
 
-        logger.info(f"📊 PHASE A: Microstructure Order Book Integration initialized")
-        logger.info(f"  Order Book Fetcher: Binance US API (depth=20)")
-        logger.info(f"  Microstructure Extractors: {len(symbols)} symbols")
-        logger.info(f"  Fetch Interval: {ob_fetch_interval}s to avoid rate limiting")
-
-        logger.info(f"📊 PHASE B: Continuous Learning initialized")
-        logger.info(f"  Continuous Learner: Retrain every 100 candles")
+        logger.info(f"📊 PHASE B: Continuous Learning DISABLED for backtest speed")
+        logger.info(f"  Retraining interval: {config['continuous_learning_interval']} candles (effectively off)")
         logger.info(f"  Adaptive Ensemble: Reweight models by recent performance")
 
         previous_symbol = None  # Track symbol changes to reset state buffer
@@ -1838,6 +1861,15 @@ class WalkForwardBacktester:
                     f"Capital: ${capital:,.2f} | "
                     f"Rate: {rate:.0f} candles/sec | ETA: {est_remaining:.0f}s"
                 )
+                # Log filter funnel every 60 seconds to diagnose zero-trade issues
+                if filter_stage_counters["total_predictions"] > 0:
+                    fc = filter_stage_counters
+                    logger.info(
+                        f"  Filter funnel: predictions={fc['total_predictions']} → "
+                        f"not_hold={fc['not_hold']} → conf={fc['meets_confidence']} → "
+                        f"liquid={fc['is_liquid']} → consensus={fc['strong_consensus']} → "
+                        f"sig={fc['stat_significant']} → opened={fc['positions_opened']}"
+                    )
                 last_log_time = current_time
                 last_log_index = candles_processed
 
@@ -2066,36 +2098,10 @@ class WalkForwardBacktester:
             if len(window_data[symbol]) > max_window * candles_per_day:
                 window_data[symbol] = window_data[symbol][-max_window * candles_per_day:]
 
-            # PHASE A: Microstructure data - Live order book fetching
-            # Fetch order book data from Binance API periodically to avoid rate limiting
-            # Real order book data only - no synthetic data
-            try:
-                current_time_unix = timestamp.timestamp() if hasattr(timestamp, 'timestamp') else time.time()
-                time_since_last_fetch = current_time_unix - last_ob_fetch_times.get(symbol, 0)
-
-                if time_since_last_fetch >= ob_fetch_interval:
-                    # Fetch fresh order book from Binance API
-                    # BUG FIX #26: Use thread-safe async handler to avoid event loop conflicts
-                    # Handles both sync and async contexts (web frameworks, etc.)
-                    try:
-                        order_book = _run_async_in_thread(lambda: ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
-                    except Exception as e:
-                        logger.warning(f"Order book fetch failed for {symbol}: {e} - using cached data")
-                        order_book = None  # Fall back to cached data
-
-                    if order_book is not None:
-                        # Store in cache and update last fetch time
-                        order_book_cache[symbol] = order_book
-                        last_ob_fetch_times[symbol] = current_time_unix
-
-                        # Update microstructure extractor with real order book data
-                        if symbol in microstructure_extractors:
-                            microstructure_extractors[symbol].add_order_book(order_book)
-                            logger.debug(f"✓ Order book fetched for {symbol}: {len(order_book.bids)} bids, {len(order_book.asks)} asks")
-                    else:
-                        logger.debug(f"⚠ Order book fetch failed for {symbol}, using cached data")
-            except Exception as e:
-                logger.debug(f"Order book fetch error for {symbol}: {e}")
+            # PHASE A: Microstructure - SKIPPED during backtest
+            # Live order book API calls are meaningless for historical data.
+            # The microstructure_filters_pass flag defaults to True (set below),
+            # so this doesn't block trades.
 
             # Update existing positions
             if symbol in positions:
