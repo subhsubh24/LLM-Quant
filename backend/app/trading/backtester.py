@@ -2381,30 +2381,24 @@ class WalkForwardBacktester:
                 else:
                     volatility = 0.02  # Default 2% volatility
 
-                # HORIZON-AWARE STOPS: Widen stops as position ages (longer-term trends need room)
-                hours_held = (timestamp - pos["entry_time"]).total_seconds() / 3600
-                # Convert to candle-equivalent periods for timeframe-independent thresholds
-                candle_minutes = config["candle_interval_minutes"]
-                candles_held = hours_held * 60 / candle_minutes  # Convert hours to candle count
+                # STOP LOSS: ATR-based, set at entry, does NOT widen with time
+                # Previous bug: stops widened from 2% to 5% to 12% to 20% as holding
+                # time increased. This inverted risk/reward — avg loss ($4.99) was 2.2x
+                # avg win ($2.27). The fix: use ATR at entry to set a stop that is
+                # ALWAYS tighter than the first pyramid target.
+                #
+                # Use the entry ATR stored in position, or compute from recent data
+                entry_atr_pct = pos.get("entry_atr_pct", 0.02)  # Default 2%
 
-                # Determine effective horizon based on candles held (timeframe-independent)
-                # Thresholds in candles: 48 candles, 200 candles, 500 candles
-                if candles_held < 48:
-                    horizon_mult = 1.0  # Short-term trades: tight stops
-                    base_stop = 0.02
-                    base_target = 0.05
-                elif candles_held < 200:
-                    horizon_mult = 1.5  # Medium-term trades: medium stops
-                    base_stop = 0.05
-                    base_target = 0.12
-                elif candles_held < 500:
-                    horizon_mult = 2.0  # Longer-term trades: wider stops
-                    base_stop = 0.12
-                    base_target = 0.30
-                else:  # 500+ candles
-                    horizon_mult = 3.0  # Macro trends: very wide stops
-                    base_stop = 0.20
-                    base_target = 0.50
+                # Stop = 1.5x ATR, clamped to [1.5%, 4%]
+                # This is deliberately tighter than target 1 (3x ATR, [3%, 10%])
+                # so that risk < reward on every single trade.
+                base_stop = np.clip(1.5 * entry_atr_pct, 0.015, 0.04)
+
+                # After pyramid 1 is hit, move stop to breakeven (entry price)
+                # This protects the remaining 60% from giving back all profits
+                if pos.get("pyramided_1", False):
+                    base_stop = 0.002  # 0.2% = essentially breakeven (covers slippage)
 
                 # TIER 2 FIX: LEARN OPTIMAL STOP DISTANCE FROM HISTORICAL DATA
                 # Choose stop distance based on what's worked best in recent trades
@@ -2439,9 +2433,9 @@ class WalkForwardBacktester:
                         base_stop *= 1.15  # Against trend: +15% stop (wider)
                 # Neutral: no adjustment
 
-                # Apply volatility adjustment on top of horizon-based stops
-                stop_loss_pct = base_stop + (volatility * horizon_mult)
-                take_profit_pct = base_target + (volatility * horizon_mult * 2)
+                # Apply volatility adjustment (small, since ATR already captures vol)
+                stop_loss_pct = base_stop + (volatility * 0.5)
+                take_profit_pct = pos.get("pyramid_target_2", 0.15)  # Use entry-time target
 
                 # Reasonable bounds
                 stop_loss_pct = max(config["stop_loss_min"], min(config["stop_loss_max"], stop_loss_pct))      # 2% min, 30% max
@@ -3410,12 +3404,17 @@ class WalkForwardBacktester:
                                     atr_sum += tr
                                 entry_atr = atr_sum / (len(recent_candles) - 1)
                                 atr_pct = entry_atr / (candle.close + 1e-8)
-                                # Target 1: 2x ATR (typical profit-take), clamped to [2%, 8%]
-                                pyramid_target_1 = np.clip(2.0 * atr_pct, 0.02, 0.08)
-                                # Target 2: 5x ATR (let big winners run), clamped to [6%, 25%]
-                                pyramid_target_2 = np.clip(5.0 * atr_pct, 0.06, 0.25)
+                                # CRITICAL: Target 1 must be WIDER than stop (1.5x ATR)
+                                # so that avg win > avg loss. Previous targets (2x ATR) were
+                                # often narrower than the stop — causing $2.27 avg win vs $4.99 avg loss.
+                                #
+                                # Stop:     1.5x ATR, [1.5%, 4%]
+                                # Target 1: 3x ATR,   [3%, 10%]  → always > stop
+                                # Target 2: 7x ATR,   [8%, 30%]  → let big winners run
+                                pyramid_target_1 = np.clip(3.0 * atr_pct, 0.03, 0.10)
+                                pyramid_target_2 = np.clip(7.0 * atr_pct, 0.08, 0.30)
                             else:
-                                # Fallback to config defaults
+                                atr_pct = 0.02  # Default ATR estimate
                                 pyramid_target_1 = config["pyramid_target_1_pct"]
                                 pyramid_target_2 = config["pyramid_target_2_pct"]
 
@@ -3436,10 +3435,11 @@ class WalkForwardBacktester:
                                 "highest_price": entry_price,  # TIER 1 FIX: Track for trailing stops
                                 "lowest_price": entry_price,   # Also track for shorts
                                 "stop_distance": effective_stop_distance,  # TIER 2 FIX: Track which stop was used
-                                "pyramid_target_1": pyramid_target_1,  # TIER 1 FIX: Fixed pyramid targets at entry
-                                "pyramid_target_2": pyramid_target_2,  # TIER 1 FIX: Fixed final target
+                                "pyramid_target_1": pyramid_target_1,  # ATR-based profit target 1
+                                "pyramid_target_2": pyramid_target_2,  # ATR-based profit target 2
+                                "entry_atr_pct": atr_pct,              # ATR at entry for stop calculation
                                 "pyramided_1": False,  # Track if first level was hit
-                                "pyramided_2": False,  # Track if second level was hit (CRITICAL FIX: ensure this exists)
+                                "pyramided_2": False,  # Track if second level was hit
                             }
 
                             # Log position opening (PHASE D: include model agreement)
