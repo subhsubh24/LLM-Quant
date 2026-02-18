@@ -61,8 +61,8 @@ class TestCircuitBreakerManager:
             action="pause",
         )
 
-        # Create returns that exceed loss limit
-        returns = pd.Series([-0.06, 0.01, -0.02])
+        # Create returns that exceed loss limit (last day must exceed -5%)
+        returns = pd.Series([0.01, 0.02, -0.06])
 
         triggered = manager.check_circuit_breakers(returns, 100_000)
 
@@ -215,7 +215,7 @@ class TestExecutionModel:
         )
 
         # Executed price should be higher (cost of buying)
-        assert executed_price > reference_price
+        assert executed_price > 150
         assert cost.total_cost_bps > 0
 
     def test_execute_order_sell(self):
@@ -232,7 +232,7 @@ class TestExecutionModel:
         )
 
         # Executed price should be lower (cost of selling)
-        assert executed_price < reference_price
+        assert executed_price < 150
         assert cost.total_cost_bps > 0
 
 

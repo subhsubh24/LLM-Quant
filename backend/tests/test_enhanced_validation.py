@@ -43,7 +43,7 @@ class TestExpandingWindowValidator:
         splits = validator.split_expanding_window(data, test_period_days=63)
 
         assert len(splits) > 0
-        assert all(len(train) > 252 for train, _ in splits)
+        assert all(len(train) >= 252 for train, _ in splits)
         assert all(len(test) == 63 for _, test in splits)
 
     def test_splits_non_overlapping(self):

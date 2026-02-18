@@ -2019,7 +2019,9 @@ class MasterQuantBot:
             logger.debug(f"Skipping {symbol} - no live price available")
             return None
 
-        iv = 0.65 + np.random.uniform(-0.1, 0.2)
+        # Use a fixed assumed IV for crypto options (no real-time IV source available)
+        # Crypto IV typically ranges 55-85%; 0.65 is a reasonable central estimate.
+        iv = 0.65
 
         if iv > 0.70:
             strategy = f"Sell {base_asset} {option_type.title()}"
@@ -2034,7 +2036,7 @@ class MasterQuantBot:
             probability = 0.40
             max_profit = price * 0.20
             max_loss = price * 0.03
-            rationale = f"Lower crypto IV ({iv*100:.0f}%) - directional"
+            rationale = f"Crypto IV ({iv*100:.0f}%) - directional"
 
         risk_reward = max_profit / max_loss if max_loss > 0 else 0
 

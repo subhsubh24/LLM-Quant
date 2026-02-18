@@ -342,11 +342,11 @@ class NeuralNetworkModel(BaseModel):
         self.early_stopping_patience = early_stopping_patience
         self.device = device
 
-        self.model: Optional[nn.Module] = None
+        self.model = None  # nn.Module when built
         self.scaler = StandardScaler()
         self.feature_names: List[str] = []
 
-    def _build_network(self, input_dim: int) -> nn.Module:
+    def _build_network(self, input_dim: int):
         """Build neural network architecture."""
         layers = []
 
@@ -474,25 +474,26 @@ class NeuralNetworkModel(BaseModel):
         return dict(zip(self.feature_names, importance))
 
 
-class _LSTMModule(nn.Module):
-    """CRITICAL FIX: Custom LSTM module that properly handles LSTM tuple output."""
-    def __init__(self, input_dim: int, hidden_dim: int, num_layers: int, dropout_rate: float):
-        super().__init__()
-        self.lstm = nn.LSTM(
-            input_size=input_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            dropout=dropout_rate,
-            batch_first=True,
-        )
-        self.linear = nn.Linear(hidden_dim, 1)
+if HAS_TORCH:
+    class _LSTMModule(nn.Module):
+        """CRITICAL FIX: Custom LSTM module that properly handles LSTM tuple output."""
+        def __init__(self, input_dim: int, hidden_dim: int, num_layers: int, dropout_rate: float):
+            super().__init__()
+            self.lstm = nn.LSTM(
+                input_size=input_dim,
+                hidden_size=hidden_dim,
+                num_layers=num_layers,
+                dropout=dropout_rate,
+                batch_first=True,
+            )
+            self.linear = nn.Linear(hidden_dim, 1)
 
-    def forward(self, x):
-        # LSTM returns (output, (h_n, c_n)) - we only want the output
-        lstm_out, _ = self.lstm(x)
-        # Take the last timestep output
-        last_out = lstm_out[:, -1, :]
-        return self.linear(last_out)
+        def forward(self, x):
+            # LSTM returns (output, (h_n, c_n)) - we only want the output
+            lstm_out, _ = self.lstm(x)
+            # Take the last timestep output
+            last_out = lstm_out[:, -1, :]
+            return self.linear(last_out)
 
 
 class LSTMModel(BaseModel):
@@ -529,11 +530,11 @@ class LSTMModel(BaseModel):
         self.batch_size = batch_size
         self.device = device
 
-        self.model: Optional[nn.Module] = None
+        self.model = None  # nn.Module when built
         self.scaler = StandardScaler()
         self.feature_names: List[str] = []
 
-    def _build_lstm(self, input_dim: int) -> nn.Module:
+    def _build_lstm(self, input_dim: int):
         """Build LSTM architecture (CRITICAL FIX: Use custom _LSTMModule instead of nn.Sequential)."""
         return _LSTMModule(input_dim, self.hidden_dim, self.num_layers, self.dropout_rate)
 

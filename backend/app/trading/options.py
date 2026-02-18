@@ -449,57 +449,6 @@ class OptionsManager:
         self.contracts[contract_id] = contract
         return contract
 
-    def generate_options_chain(
-        self,
-        symbol: str,
-        underlying_price: float,
-        expiration: date,
-        volatility: float = 0.30,
-        num_strikes: int = 11,
-        strike_interval: Optional[float] = None,
-    ) -> Dict[str, List[OptionContract]]:
-        """Generate a full options chain."""
-        if strike_interval is None:
-            # Auto-calculate strike interval
-            strike_interval = underlying_price * 0.025  # 2.5% intervals
-            # Round to nice numbers
-            if strike_interval >= 10:
-                strike_interval = round(strike_interval / 5) * 5
-            elif strike_interval >= 1:
-                strike_interval = round(strike_interval)
-            else:
-                strike_interval = round(strike_interval, 1)
-
-        # Generate strikes around ATM
-        atm_strike = round(underlying_price / strike_interval) * strike_interval
-        half_range = (num_strikes // 2) * strike_interval
-
-        strikes = np.arange(
-            atm_strike - half_range,
-            atm_strike + half_range + strike_interval,
-            strike_interval
-        )
-
-        calls = []
-        puts = []
-
-        for strike in strikes:
-            call = self.price_option(
-                symbol, underlying_price, strike, expiration, volatility, OptionType.CALL
-            )
-            put = self.price_option(
-                symbol, underlying_price, strike, expiration, volatility, OptionType.PUT
-            )
-            calls.append(call)
-            puts.append(put)
-
-        return {
-            "calls": calls,
-            "puts": puts,
-            "underlying_price": underlying_price,
-            "expiration": expiration.isoformat(),
-        }
-
     # ================== Real Market Data ==================
 
     def generate_real_options_chain(

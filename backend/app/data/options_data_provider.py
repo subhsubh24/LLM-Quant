@@ -4,7 +4,7 @@ Real Options Data Provider
 Fetches live options chain data from Yahoo Finance via yfinance.
 Provides real bid/ask, implied volatility, open interest, and volume.
 
-Falls back to synthetic Black-Scholes pricing when real data unavailable.
+Returns None when real data is unavailable -- no synthetic fallback.
 """
 
 import yfinance as yf
