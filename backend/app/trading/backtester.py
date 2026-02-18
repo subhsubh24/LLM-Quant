@@ -1714,37 +1714,44 @@ class WalkForwardBacktester:
         # ============================================================
         config = {
             # Risk Management
-            "max_portfolio_drawdown": 0.10,          # 10% max DD before pausing (was 15% — too much drawdown)
-            "portfolio_dd_resume_pct": 0.50,         # Resume trading at 50% of DD limit (5% DD recovery)
+            "max_portfolio_drawdown": 0.15,          # 15% max DD before pausing (widened from 10% — need room for swing trades)
+            "portfolio_dd_resume_pct": 0.50,         # Resume trading at 50% of DD limit
 
             # Position Sizing & Kelly Criterion
-            "kelly_cap_pct": 0.03,                   # Cap position at 3% of capital (was 4% — too concentrated)
-            "recovery_scale_min": 0.70,              # Reduce sizing to 70% during recovery (was 50% — too extreme)
+            # STRATEGIC OVERHAUL: Aristotle-inspired concentrated positions.
+            # Old: 3% Kelly cap = $120 positions on $10k = meaningless.
+            # New: 8% Kelly cap = $800 positions on $10k = real conviction bets.
+            # With max 8 positions at 8% = 64% capital deployed (36% cash reserve).
+            "kelly_cap_pct": 0.08,                   # 8% of capital per trade (was 3% — too small to matter)
+            "recovery_scale_min": 0.70,              # Reduce sizing to 70% during recovery
 
             # Confidence-Based Position Sizing
-            # Tightened from 2.0x max → 1.3x max to avoid overleveraging on
-            # potentially overfit confidence estimates
-            "confidence_ultra_high_mult": 1.3,       # >=80% confidence: 1.3x position size (was 2.0x — too aggressive)
-            "confidence_high_mult": 1.2,             # 70-80% confidence: 1.2x position size (was 1.5x)
-            "confidence_medium_high_mult": 1.1,      # 60-70% confidence: 1.1x position size (was 1.2x)
+            # STRATEGIC OVERHAUL: High conviction = BIG bet (Aristotle approach).
+            # When all 4 models agree with 80%+ confidence, go 2x. This is the
+            # whole edge: bet big when you're most likely right.
+            "confidence_ultra_high_mult": 2.0,       # >=80% confidence: 2.0x position size (was 1.3x)
+            "confidence_high_mult": 1.5,             # 70-80% confidence: 1.5x position size (was 1.2x)
+            "confidence_medium_high_mult": 1.2,      # 60-70% confidence: 1.2x position size (was 1.1x)
             "confidence_medium_mult": 1.0,           # 50-60% confidence: 1.0x position size (baseline)
-            "confidence_low_mult": 0.7,              # 45-50% confidence: 0.7x position size (was 0.6x)
-            "confidence_very_low_mult": 0.4,         # <45% confidence: 0.4x position size (was 0.3x)
+            "confidence_low_mult": 0.7,              # 45-50% confidence: 0.7x position size
+            "confidence_very_low_mult": 0.4,         # <45% confidence: 0.4x position size
 
             # Confidence Thresholds
-            # Calibrated to model accuracy (~47%): thresholds must be BELOW model output range
-            # to allow trades. Previous 0.65/0.55/0.45 blocked 99%+ of signals.
-            # These thresholds filter the bottom of the confidence distribution while
-            # still allowing the model's stronger signals through.
-            "confidence_4x4_models": 0.40,           # 4/4 models agree - high consensus, moderate bar
-            "confidence_3x4_models": 0.35,           # 3/4 models agree - good consensus
-            "confidence_fallback": 0.30,             # 2/4 or fewer models - require some minimum confidence
-            "regime_bull_confidence_mult": 1.10,     # Bull: require HIGHER confidence for shorts (counter-trend) (was 1.15)
-            "regime_bear_confidence_mult": 1.10,     # Bear: require HIGHER confidence for longs (counter-trend) (was 1.15)
+            # STRATEGIC OVERHAUL: Only take HIGH-CONVICTION trades.
+            # Previous: 0.30-0.40 thresholds let 68% of signals through (44k of 65k).
+            # New: 0.60-0.70 thresholds should let ~5-10% through = 30-60 trades/year.
+            # Fewer trades but each one has real conviction behind it.
+            "confidence_4x4_models": 0.60,           # 4/4 models agree: require 0.60+ (was 0.40)
+            "confidence_3x4_models": 0.55,           # 3/4 models agree: require 0.55+ (was 0.35)
+            "confidence_fallback": 0.50,             # 2/4 or fewer: require 0.50+ (was 0.30)
+            "regime_bull_confidence_mult": 1.10,     # Bull: +10% confidence required for counter-trend
+            "regime_bear_confidence_mult": 1.10,     # Bear: +10% confidence required for counter-trend
 
             # Model Agreement & Consensus
-            "min_model_agreement": 2,                # Minimum 2/4 models required
-            "weighted_agreement_threshold": 0.50,    # 50% weighted agreement
+            # STRATEGIC OVERHAUL: Require 3/4 model agreement minimum.
+            # 2/4 agreement = coin flip. 3/4+ = real consensus.
+            "min_model_agreement": 3,                # Minimum 3/4 models required (was 2)
+            "weighted_agreement_threshold": 0.65,    # 65% weighted agreement (was 50%)
 
             # Liquidity & Volume
             "min_volume_threshold": 1000,            # Minimum acceptable volume (in quote currency units, e.g., USDT)
@@ -1759,17 +1766,22 @@ class WalkForwardBacktester:
             "take_profit_min": 0.05,                 # 5% minimum take profit
             "take_profit_max": 0.60,                 # 60% maximum take profit
 
-            # Profit Pyramiding (BUG FIX #6: Now configurable!)
-            # Exit strategy: take profits gradually at different profit levels
-            "pyramid_target_1_pct": 0.05,            # Exit 30% at +5% profit
-            "pyramid_target_2_pct": 0.15,            # Exit remaining at +15% profit
-            "pyramid_exit_1_size": 0.40,             # Exit 40% at target 1 (was 30% — lock in more profit early)
+            # Profit Pyramiding
+            # STRATEGIC OVERHAUL: Let winners run much longer (Aristotle approach).
+            # Old: 5% / 15% targets → tiny $5 avg win on $120 position.
+            # New: 10% / 30% targets → $80+ avg win on $800 position.
+            # Take only 25% at target 1 to keep majority of position running.
+            "pyramid_target_1_pct": 0.10,            # Exit 25% at +10% profit (was 5%)
+            "pyramid_target_2_pct": 0.30,            # Exit remaining at +30% profit (was 15%)
+            "pyramid_exit_1_size": 0.25,             # Exit only 25% at target 1 (was 40% — keep position running)
             "pyramid_exit_2_size": 1.0,              # Exit remaining 100% at target 2
 
-            # Holding Periods (hours)
-            "max_hold_hours_default": 1600,          # Default: 66+ days
-            "max_hold_hours_winner": 2000,           # Winners: 83+ days
-            "max_hold_hours_loser": 1200,            # Losers: 50 days
+            # Holding Periods (hours) — SWING/LONG-TERM FOCUS
+            # Aristotle: "Long term is forever & never sell"
+            # Allow positions to breathe. Multi-week to multi-month holds.
+            "max_hold_hours_default": 2400,          # Default: 100 days (was 66 days)
+            "max_hold_hours_winner": 4000,           # Winners: 166 days (was 83 — let them run!)
+            "max_hold_hours_loser": 720,             # Losers: 30 days (was 50 — cut losers faster)
 
             # Macro Regime Detection
             "baseline_portfolio_vol": 0.008,         # 0.8% daily baseline
@@ -2367,11 +2379,13 @@ class WalkForwardBacktester:
 
                 unrealized_pnl = pos["size"] * pnl_pct
 
-                # TIER 1 FIX: Update highest/lowest prices for trailing stops
+                # Update highest/lowest prices for trailing stops
                 if side == "long":
                     pos["highest_price"] = max(pos.get("highest_price", entry_price), current_price)
+                    pos["lowest_price_ever"] = min(pos.get("lowest_price_ever", entry_price), low_price)
                 else:
                     pos["lowest_price"] = min(pos.get("lowest_price", entry_price), current_price)
+                    pos["highest_price_ever"] = max(pos.get("highest_price_ever", entry_price), high_price)
 
                 # Calculate volatility for adaptive stops (last 20 candles)
                 recent_closes = [c.close for c in window_data[symbol][-20:]] if len(window_data[symbol]) >= 20 else [entry_price]
@@ -2613,6 +2627,14 @@ class WalkForwardBacktester:
                             pos["lowest_price"] = current_price   # Reset trough for remaining position
                         logger.debug(f"📊 Partial exit {symbol}: reset trailing stop baseline, size now ${pos['size']:.0f}")
 
+                    # Track MFE/MAE for excursion analysis
+                    if side == "long":
+                        mfe = (pos.get("highest_price", entry_price) - entry_price) / entry_price
+                        mae = (entry_price - pos.get("lowest_price_ever", entry_price)) / entry_price
+                    else:
+                        mfe = (entry_price - pos.get("lowest_price", entry_price)) / entry_price
+                        mae = (pos.get("highest_price_ever", entry_price) - entry_price) / entry_price
+
                     trade = {
                         "symbol": symbol,
                         "side": side,
@@ -2622,9 +2644,12 @@ class WalkForwardBacktester:
                         "exit_time": timestamp.isoformat(),
                         "pnl": realized_pnl,
                         "pnl_pct": pnl_pct * 100,
-                        "exit_size_pct": partial_exit_pct * 100,  # Track what % was exited
+                        "size": exit_value,  # Track actual position size for analysis
+                        "exit_size_pct": partial_exit_pct * 100,
                         "exit_reason": exit_reason,
                         "trade_costs": pos.get("entry_cost", 0) + exit_cost,
+                        "max_favorable_excursion": mfe,
+                        "max_adverse_excursion": mae,
                     }
                     trades.append(trade)
 
@@ -3186,29 +3211,28 @@ class WalkForwardBacktester:
                         # If we want to track new positions THIS candle, we'd need to track them separately
                         available_capital = capital
 
-                        # Simple Kelly: 2-3% per position (with 10 positions = 20-30% risk, 70-80% cash)
-                        # This is more aggressive than before but allows actual trading
-                        # BUG FIX #43: Make Kelly fraction adaptive based on recent win rate (CRITICAL: was always fixed 3%)
-                        # True Kelly = (win_rate * avg_win - loss_rate * avg_loss) / avg_win
-                        # Simplified: kelly_fraction should adjust based on win rate
-                        # - 40% win rate: kelly_fraction = 0.5% (very conservative)
-                        # - 50% win rate: kelly_fraction = 1.0% (neutral)
-                        # - 55% win rate: kelly_fraction = 1.5% (moderate)
-                        # - 60% win rate: kelly_fraction = 2.0% (aggressive)
-                        # Calculate adaptive Kelly based on recent win rate
+                        # STRATEGIC OVERHAUL: Concentrated positions (Aristotle approach).
+                        # Old: 0.5-3% Kelly = $50-300 trades = meaningless gains.
+                        # New: 3-8% Kelly = $300-800 trades = real money at stake.
+                        # With max 8 positions at 8% = 64% deployed, 36% cash buffer.
+                        #
+                        # Adaptive based on recent win rate:
+                        # - Below 45%: reduce to 3% (capital preservation)
+                        # - 45-55%: 5% (moderate conviction)
+                        # - Above 55%: 8% (high conviction, proven edge)
                         current_win_rate = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
                         if current_win_rate <= 0.40:
-                            kelly_fraction = 0.005  # 0.5% for losing period
+                            kelly_fraction = 0.03  # 3% for losing period (was 0.5%)
                         elif current_win_rate <= 0.45:
-                            kelly_fraction = 0.010  # 1.0% for break-even period
+                            kelly_fraction = 0.04  # 4% for break-even (was 1.0%)
                         elif current_win_rate <= 0.50:
-                            kelly_fraction = 0.015  # 1.5% for neutral
+                            kelly_fraction = 0.05  # 5% for neutral (was 1.5%)
                         elif current_win_rate <= 0.55:
-                            kelly_fraction = 0.020  # 2.0% for good
+                            kelly_fraction = 0.06  # 6% for good (was 2.0%)
                         elif current_win_rate <= 0.60:
-                            kelly_fraction = 0.025  # 2.5% for very good
+                            kelly_fraction = 0.07  # 7% for very good (was 2.5%)
                         else:
-                            kelly_fraction = 0.030  # 3.0% for excellent
+                            kelly_fraction = 0.08  # 8% for excellent (was 3.0%)
 
                         # Use available_capital instead of total capital (CRITICAL FIX)
                         # BUG FIX #34: CRITICAL - Apply recovery_scale to prevent oversizing during drawdown recovery
@@ -3270,33 +3294,24 @@ class WalkForwardBacktester:
                         # Portfolio vol targeting is sufficient safeguard against systemic risk
                         # (higher correlations automatically reduce positions via vol calculation)
 
-                        # TIER 3A: CONFIDENCE-BASED POSITION SIZING (NEW!)
-                        # Higher confidence = bigger position = bigger returns
-                        # This allows the system to allocate MORE capital on its highest-conviction trades
+                        # CONFIDENCE-BASED POSITION SIZING
+                        # Higher confidence = bigger position = bigger returns.
+                        # With 8% base Kelly and 2.0x max multiplier, ultra-high confidence
+                        # trades get 16% of capital = $1,600 on $10k. This is Aristotle-level
+                        # conviction: bet big on your best ideas.
                         confidence = prediction["confidence"]
                         confidence_multiplier = 1.0
 
                         if confidence >= 0.80:
-                            # Very high confidence: 2.0x size (double bet on best ideas)
-                            confidence_multiplier = 2.0
-                            logger.debug(f"🚀 Ultra-high confidence (>80%): +100% position size")
+                            confidence_multiplier = config["confidence_ultra_high_mult"]  # 2.0x
                         elif confidence >= 0.70:
-                            # High confidence: 1.5x size
-                            confidence_multiplier = 1.5
-                            logger.debug(f"📈 High confidence (70-80%): +50% position size")
+                            confidence_multiplier = config["confidence_high_mult"]  # 1.5x
                         elif confidence >= 0.60:
-                            # Medium-high confidence: 1.2x size
-                            confidence_multiplier = 1.2
-                            logger.debug(f"➡️ Medium-high confidence (60-70%): +20% position size")
+                            confidence_multiplier = config["confidence_medium_high_mult"]  # 1.2x
                         elif confidence >= 0.50:
-                            # Medium confidence: 1.0x size (baseline)
-                            confidence_multiplier = 1.0
+                            confidence_multiplier = config["confidence_medium_mult"]  # 1.0x
                         elif confidence >= 0.45:
-                            # Low confidence: 0.75x size (minimal penalty for minimum-acceptable signals)
-                            # BUG FIX #44: Changed from 0.6x to 0.75x (CRITICAL: 0.45 is minimum threshold, shouldn't penalize 25% reduction)
-                            # A signal that barely meets minimum confidence should still get reasonable sizing
-                            confidence_multiplier = 0.75
-                            logger.debug(f"⚠️ Low confidence (45-50%): -25% position size")
+                            confidence_multiplier = config["confidence_low_mult"]  # 0.7x
                         else:
                             # Very low confidence: 0.75x size (should never reach here with BUG FIX #39 threshold change)
                             # But if it does (due to edge cases), don't penalize too severely
@@ -3328,10 +3343,10 @@ class WalkForwardBacktester:
                             logger.debug(f"Regime penalty (bear long): -20% size")
                         # Neutral: no adjustment
 
-                        # BUG FIX #4: Cap maximum position size at 1.5x Kelly for safety
-                        # Without this cap, (confidence 2.0x * regime 1.15x) = 2.3x Kelly = too risky
-                        # Kelly Criterion safety margin requires position_size <= 1.5 * kelly_base_size
-                        max_kelly_position = available_capital * 0.03 * 1.5  # 1.5x of base 3% Kelly
+                        # Cap maximum position size at 1.5x Kelly for safety
+                        # With confidence 2.0x * regime 1.15x = 2.3x Kelly, cap at 1.5x
+                        # At 8% Kelly cap: max = 10000 * 0.08 * 1.5 = $1,200 per position
+                        max_kelly_position = available_capital * config["kelly_cap_pct"] * 1.5  # 1.5x of Kelly cap
                         # BUG FIX #27: Guard against zero max_kelly_position (prevents division by zero crash)
                         if position_size > max_kelly_position and max_kelly_position > 1e-8:
                             kelly_excess = position_size / max_kelly_position
@@ -3366,7 +3381,7 @@ class WalkForwardBacktester:
                         # New logic: ONLY check that remaining capital after position >= margin requirement
                         min_capital_to_trade = 100  # Need at least $100 per position
                         num_existing_positions = len(positions)
-                        max_concurrent_positions = 12  # Hard cap on concurrent positions
+                        max_concurrent_positions = 8  # Fewer but larger positions (was 12)
                         if num_existing_positions >= max_concurrent_positions:
                             continue  # Skip — too many open positions
                         total_margin_required = (num_existing_positions + 1) * min_capital_to_trade  # +1 for new position
@@ -3409,13 +3424,17 @@ class WalkForwardBacktester:
                                     atr_sum += tr
                                 entry_atr = atr_sum / (len(recent_candles) - 1)
                                 atr_pct = entry_atr / (candle.close + 1e-8)
-                                # Stop must be TIGHTER than target 1 for positive risk/reward.
+                                # STRATEGIC OVERHAUL: Wide targets for swing/long-term trades.
+                                # Stop must be MUCH TIGHTER than target for big risk/reward ratio.
                                 #
-                                # Stop:     1.2x ATR, [1.2%, 3.5%]
-                                # Target 1: 3x ATR,   [3%, 10%]  → always 2.5x stop
-                                # Target 2: 7x ATR,   [8%, 30%]  → let big winners run
-                                pyramid_target_1 = np.clip(3.0 * atr_pct, 0.03, 0.10)
-                                pyramid_target_2 = np.clip(7.0 * atr_pct, 0.08, 0.30)
+                                # Stop:     1.2x ATR, [1.2%, 3.5%]   → small loss if wrong
+                                # Target 1: 5x ATR,   [5%, 15%]     → 4:1 reward:risk at first take
+                                # Target 2: 15x ATR,  [15%, 50%]    → 12:1 reward:risk for runners
+                                #
+                                # On a 2% ATR stock: stop at 2.4%, target 1 at 10%, target 2 at 30%
+                                # $800 position: risk $19, target 1 = $80, target 2 = $240
+                                pyramid_target_1 = np.clip(5.0 * atr_pct, 0.05, 0.15)
+                                pyramid_target_2 = np.clip(15.0 * atr_pct, 0.15, 0.50)
                             else:
                                 atr_pct = 0.02  # Default ATR estimate
                                 pyramid_target_1 = config["pyramid_target_1_pct"]
@@ -3809,7 +3828,100 @@ class WalkForwardBacktester:
         logger.info(f"Avg Win: ${result.avg_win:,.2f}")
         logger.info(f"Avg Loss: ${result.avg_loss:,.2f}")
         logger.info(f"Avg Holding Period: {result.avg_holding_period:.2f} hours")
+        logger.info(f"Win/Loss Ratio: {(avg_win / avg_loss if avg_loss > 0 else 0):.2f}")
+        logger.info(f"Expected Value/Trade: ${(win_rate * avg_win - (1 - win_rate) * avg_loss):,.2f}")
         logger.info("=" * 80)
+
+        # ====================================================================
+        # DIAGNOSTIC METRICS: Understand WHY we win or lose
+        # ====================================================================
+        if trades:
+            logger.info("")
+            logger.info("📊 EXIT REASON BREAKDOWN:")
+            exit_reasons = {}
+            for t in trades:
+                reason = t.get("exit_reason", "unknown")
+                if reason not in exit_reasons:
+                    exit_reasons[reason] = {"count": 0, "total_pnl": 0, "wins": 0}
+                exit_reasons[reason]["count"] += 1
+                exit_reasons[reason]["total_pnl"] += t["pnl"]
+                if t["pnl"] > 0:
+                    exit_reasons[reason]["wins"] += 1
+            for reason, stats in sorted(exit_reasons.items(), key=lambda x: x[1]["count"], reverse=True):
+                wr = stats["wins"] / stats["count"] * 100 if stats["count"] > 0 else 0
+                avg = stats["total_pnl"] / stats["count"] if stats["count"] > 0 else 0
+                pct = stats["count"] / len(trades) * 100
+                logger.info(f"  {reason:20s}: {stats['count']:4d} trades ({pct:5.1f}%) | WR: {wr:5.1f}% | Avg P&L: ${avg:+7.2f} | Total: ${stats['total_pnl']:+9.2f}")
+
+            logger.info("")
+            logger.info("📊 POSITION SIZE ANALYSIS:")
+            sizes = [t.get("size", 0) for t in trades if t.get("size", 0) > 0]
+            if sizes:
+                logger.info(f"  Avg Position Size: ${np.mean(sizes):,.2f}")
+                logger.info(f"  Median Position:   ${np.median(sizes):,.2f}")
+                logger.info(f"  Min Position:      ${np.min(sizes):,.2f}")
+                logger.info(f"  Max Position:      ${np.max(sizes):,.2f}")
+                logger.info(f"  Avg % of Capital:  {np.mean(sizes) / initial * 100:.1f}%")
+
+            logger.info("")
+            logger.info("📊 PER-SYMBOL P&L (top 10 by absolute P&L):")
+            symbol_pnl = {}
+            for t in trades:
+                sym = t.get("symbol", "unknown")
+                if sym not in symbol_pnl:
+                    symbol_pnl[sym] = {"pnl": 0, "trades": 0, "wins": 0}
+                symbol_pnl[sym]["pnl"] += t["pnl"]
+                symbol_pnl[sym]["trades"] += 1
+                if t["pnl"] > 0:
+                    symbol_pnl[sym]["wins"] += 1
+            sorted_symbols = sorted(symbol_pnl.items(), key=lambda x: abs(x[1]["pnl"]), reverse=True)[:10]
+            for sym, stats in sorted_symbols:
+                wr = stats["wins"] / stats["trades"] * 100 if stats["trades"] > 0 else 0
+                logger.info(f"  {sym:10s}: ${stats['pnl']:+9.2f} | {stats['trades']:3d} trades | WR: {wr:5.1f}%")
+
+            logger.info("")
+            logger.info("📊 HOLDING PERIOD ANALYSIS:")
+            win_holds = []
+            loss_holds = []
+            for t in trades:
+                entry = datetime.fromisoformat(t["entry_time"])
+                exit_t = datetime.fromisoformat(t["exit_time"])
+                hours = (exit_t - entry).total_seconds() / 3600
+                if t["pnl"] > 0:
+                    win_holds.append(hours)
+                else:
+                    loss_holds.append(hours)
+            if win_holds:
+                logger.info(f"  Winners avg hold:  {np.mean(win_holds):,.0f} hours ({np.mean(win_holds)/24:.1f} days)")
+            if loss_holds:
+                logger.info(f"  Losers avg hold:   {np.mean(loss_holds):,.0f} hours ({np.mean(loss_holds)/24:.1f} days)")
+
+            logger.info("")
+            logger.info("📊 WIN/LOSS DISTRIBUTION:")
+            if winning_trades:
+                win_pnls = sorted([t["pnl"] for t in winning_trades], reverse=True)
+                logger.info(f"  Biggest win:       ${win_pnls[0]:+,.2f}")
+                logger.info(f"  Top 5 wins:        ${sum(win_pnls[:5]):+,.2f}")
+                logger.info(f"  Median win:        ${np.median(win_pnls):+,.2f}")
+            if losing_trades:
+                loss_pnls = sorted([t["pnl"] for t in losing_trades])
+                logger.info(f"  Biggest loss:      ${loss_pnls[0]:+,.2f}")
+                logger.info(f"  Top 5 losses:      ${sum(loss_pnls[:5]):+,.2f}")
+                logger.info(f"  Median loss:       ${np.median(loss_pnls):+,.2f}")
+
+            # Max Favorable/Adverse Excursion (if tracked)
+            mfe_values = [t.get("max_favorable_excursion", None) for t in trades]
+            mae_values = [t.get("max_adverse_excursion", None) for t in trades]
+            if any(v is not None for v in mfe_values):
+                mfe_vals = [v for v in mfe_values if v is not None]
+                mae_vals = [v for v in mae_values if v is not None]
+                logger.info("")
+                logger.info("📊 EXCURSION ANALYSIS (MFE/MAE):")
+                if mfe_vals:
+                    logger.info(f"  Avg MFE (max favorable): {np.mean(mfe_vals)*100:.2f}%")
+                    logger.info(f"  Avg MAE (max adverse):   {np.mean(mae_vals)*100:.2f}%")
+
+            logger.info("")
 
         return result
 
