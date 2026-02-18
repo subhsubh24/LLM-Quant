@@ -2447,26 +2447,31 @@ class WalkForwardBacktester:
                 partial_exit_pct = 0.0  # Fraction of position to exit
                 effective_stop_distance = base_stop  # Track which stop was used
 
-                # TIER 1 FIX: TRAILING STOPS
-                # Exit if price reversals from highest point
-                # BUG FIX #36: Use LOW price for long stops, HIGH price for short stops
-                trailing_stop_pct = 0.05  # 5% trailing stop (was 3% — too tight, cut winners short)
-                if side == "long" and pos.get("highest_price", entry_price) > entry_price:
-                    if low_price < pos["highest_price"] * (1 - trailing_stop_pct):  # Use low, not close
-                        should_exit = True
-                        exit_reason = "trailing_stop"
-                        partial_exit_pct = 1.0
-                        current_price = low_price  # Exit at the triggered price
-                        # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
-                        pnl_pct = (current_price - entry_price) / entry_price
-                elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
-                    if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):  # Use high, not close
-                        should_exit = True
-                        exit_reason = "trailing_stop"
-                        partial_exit_pct = 1.0
-                        current_price = high_price  # Exit at the triggered price
-                        # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
-                        pnl_pct = (entry_price - current_price) / entry_price
+                # TRAILING STOP: Only activates AFTER target 1 is hit
+                # Before target 1: the tight ATR-based stop protects downside.
+                # After target 1: breakeven stop protects capital, trailing stop
+                # with wider band (8%) gives room to reach target 2.
+                #
+                # Previously this was Priority 1 firing on ANY trade above entry.
+                # That caused 4%+ losses on trades that barely went positive
+                # (worse than the regular 3% ATR stop). Now it only fires on
+                # confirmed winners, protecting profits without cutting them short.
+                trailing_stop_pct = 0.08  # 8% trailing (was 5% — too tight for target 2)
+                if pos.get("pyramided_1", False):  # Only after first profit taken
+                    if side == "long" and pos.get("highest_price", entry_price) > entry_price:
+                        if low_price < pos["highest_price"] * (1 - trailing_stop_pct):
+                            should_exit = True
+                            exit_reason = "trailing_stop"
+                            partial_exit_pct = 1.0
+                            current_price = low_price
+                            pnl_pct = (current_price - entry_price) / entry_price
+                    elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
+                        if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):
+                            should_exit = True
+                            exit_reason = "trailing_stop"
+                            partial_exit_pct = 1.0
+                            current_price = high_price
+                            pnl_pct = (entry_price - current_price) / entry_price
 
                 # TIER 1 FIX: PROFIT PYRAMIDING (CRITICAL FIX BUG #3: Use fixed targets set at entry)
                 # Take profits gradually instead of holding to full target
