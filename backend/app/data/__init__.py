@@ -5,6 +5,9 @@ from .universe import UniverseManager, DEFAULT_UNIVERSE
 from .cache import DataCache
 from .live import LiveMarketService, get_live_market_service, Quote
 from .crypto import CryptoMarketService, get_crypto_service, CryptoQuote
+from .options_data_provider import (
+    OptionsDataProvider, RealOptionsChain, get_options_data_provider
+)
 
 __all__ = [
     "DataProvider",
@@ -20,4 +23,7 @@ __all__ = [
     "CryptoMarketService",
     "get_crypto_service",
     "CryptoQuote",
+    "OptionsDataProvider",
+    "RealOptionsChain",
+    "get_options_data_provider",
 ]

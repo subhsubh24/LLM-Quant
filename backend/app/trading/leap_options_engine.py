@@ -945,3 +945,7 @@ def get_leap_manager(config: Optional[LEAPConfig] = None) -> LEAPPortfolioManage
     if _leap_manager is None:
         _leap_manager = LEAPPortfolioManager(config)
     return _leap_manager
+
+
+# Alias for consistent naming with other singleton accessors
+get_leap_portfolio_manager = get_leap_manager

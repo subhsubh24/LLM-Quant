@@ -500,6 +500,112 @@ class OptionsManager:
             "expiration": expiration.isoformat(),
         }
 
+    # ================== Real Market Data ==================
+
+    def generate_real_options_chain(
+        self,
+        symbol: str,
+        expiration: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate options chain using REAL market data from yfinance.
+        Falls back to synthetic if real data unavailable.
+        """
+        from ..data.options_data_provider import get_options_data_provider
+
+        provider = get_options_data_provider()
+        real_chain = provider.get_options_chain(symbol, expiration)
+
+        if real_chain is None:
+            # Fallback to synthetic
+            logger.info(f"Real options data unavailable for {symbol}, using synthetic")
+            return self.generate_options_chain(
+                symbol=symbol,
+                underlying_price=0,  # Would need price from elsewhere
+                expiration=date.today() + timedelta(days=30),
+            )
+
+        # Convert real data to our OptionContract format
+        calls = []
+        puts = []
+
+        # Determine expiration date from the chain
+        if expiration:
+            exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+        elif real_chain.expiration_dates:
+            exp_date = real_chain.expiration_dates[0]
+        else:
+            exp_date = date.today()
+
+        for _, row in real_chain.calls.iterrows():
+            contract = self._real_row_to_contract(
+                symbol, row, real_chain.underlying_price,
+                OptionType.CALL, exp_date
+            )
+            if contract:
+                calls.append(contract)
+
+        for _, row in real_chain.puts.iterrows():
+            contract = self._real_row_to_contract(
+                symbol, row, real_chain.underlying_price,
+                OptionType.PUT, exp_date
+            )
+            if contract:
+                puts.append(contract)
+
+        return {
+            "calls": calls,
+            "puts": puts,
+            "underlying_price": real_chain.underlying_price,
+            "data_source": "yfinance_real",
+            "fetch_time": real_chain.fetch_time.isoformat(),
+        }
+
+    def _real_row_to_contract(self, symbol, row, underlying_price, option_type, expiration):
+        """Convert a yfinance options row to our OptionContract."""
+        try:
+            strike = float(row.get('strike', 0))
+            if strike <= 0:
+                return None
+
+            T = max(0, (expiration - date.today()).days) / 365.0
+            iv = float(row.get('impliedVolatility', 0.3) or 0.3)
+
+            # Use real market prices
+            bid = float(row.get('bid', 0) or 0)
+            ask = float(row.get('ask', 0) or 0)
+            last = float(row.get('lastPrice', 0) or 0)
+            premium = last if last > 0 else (bid + ask) / 2
+
+            # Calculate Greeks using real IV
+            greeks = BlackScholes.greeks(
+                underlying_price, strike, T, self.DEFAULT_RISK_FREE_RATE, iv, option_type
+            )
+
+            contract_id = f"{symbol}_{option_type.value}_{strike}_{expiration}_real"
+            contract = OptionContract(
+                id=contract_id,
+                symbol=symbol,
+                option_type=option_type,
+                strike=strike,
+                expiration=expiration,
+                underlying_price=underlying_price,
+                premium=premium,
+                bid=bid,
+                ask=ask,
+                last_price=last,
+                implied_volatility=iv,
+                greeks=greeks,
+                open_interest=int(row.get('openInterest', 0) or 0),
+                volume=int(row.get('volume', 0) or 0),
+            )
+
+            self.contracts[contract_id] = contract
+            return contract
+        except Exception as e:
+            logger.debug(f"Failed to convert options row: {e}")
+            return None
+
     # ================== Common Strategies ==================
 
     def create_covered_call(

@@ -13,6 +13,7 @@ from .momentum import MomentumStrategy
 from .options_premium import OptionsPremiumStrategy
 from .perpetual import PerpetualStrategy
 from .funding_rate_arb import FundingRateArbStrategy
+from .aristotle_rules import AristotleRulesPipelineStrategy
 
 __all__ = [
     "BaseStrategy",
@@ -21,4 +22,5 @@ __all__ = [
     "OptionsPremiumStrategy",
     "PerpetualStrategy",
     "FundingRateArbStrategy",
+    "AristotleRulesPipelineStrategy",
 ]

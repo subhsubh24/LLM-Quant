@@ -1289,20 +1289,54 @@ async def get_options_chain(
     expiration_days: int = 30,
     volatility: float = 0.30,
     num_strikes: int = 11,
+    use_real_data: bool = True,
+    expiration_date: Optional[str] = None,
 ):
-    """Get options chain for a symbol."""
+    """
+    Get options chain for a symbol.
+
+    Args:
+        symbol: Ticker symbol (e.g., "AAPL")
+        expiration_days: Days until expiration (used for synthetic chain)
+        volatility: Implied volatility assumption (used for synthetic chain)
+        num_strikes: Number of strikes to generate (used for synthetic chain)
+        use_real_data: If True, fetch real market data from yfinance. Falls back to synthetic on failure.
+        expiration_date: Specific expiration date "YYYY-MM-DD" (used with real data). If None, uses nearest.
+    """
     from ..trading import get_options_manager
+
+    manager = get_options_manager()
+
+    if use_real_data:
+        # Try real market data first
+        try:
+            chain = manager.generate_real_options_chain(
+                symbol=symbol.upper(),
+                expiration=expiration_date,
+            )
+
+            # Check if we got real data (not fallback)
+            if chain.get("data_source") == "yfinance_real":
+                return {
+                    "symbol": symbol.upper(),
+                    "underlying_price": chain["underlying_price"],
+                    "data_source": chain["data_source"],
+                    "fetch_time": chain["fetch_time"],
+                    "calls": [c.to_dict() for c in chain["calls"]],
+                    "puts": [p.to_dict() for p in chain["puts"]],
+                }
+        except Exception as e:
+            logger.warning(f"Real options data failed for {symbol}, falling back to synthetic: {e}")
+
+    # Fallback: use synthetic chain with live quote for underlying price
     from ..data.live import get_live_market_service
 
-    # Get current price
     market_service = get_live_market_service()
     quote = await market_service.get_quote(symbol.upper())
 
     if not quote:
         raise HTTPException(status_code=404, detail=f"Quote not found for {symbol}")
 
-    # Generate chain
-    manager = get_options_manager()
     expiration = date.today() + timedelta(days=expiration_days)
 
     chain = manager.generate_options_chain(
@@ -1318,6 +1352,7 @@ async def get_options_chain(
         "underlying_price": quote.price,
         "expiration": expiration.isoformat(),
         "volatility": volatility,
+        "data_source": "synthetic_black_scholes",
         "calls": [c.to_dict() for c in chain["calls"]],
         "puts": [p.to_dict() for p in chain["puts"]],
     }
