@@ -3738,18 +3738,15 @@ class ModelPreTrainer:
             for horizon, labels in multi_labels.items():
                 all_multi_labels[horizon].append(labels[:min_label_len])
 
-            # CRITICAL FIX: Calculate rewards with proper time alignment
+            # Calculate rewards with proper time alignment
             # features[i] corresponds to candles[400+i] (after alignment fix)
-            # So future_return should use closes[400+i], not closes[i]
-            # This balances between short-term tactical and long-term strategic
             closes = np.array([c.close for c in candles])
-            rewards = []
+            raw_rewards = []
             feature_lookback = 400
             for i in range(len(features)):
-                candle_idx = feature_lookback + i  # Index in closes array
+                candle_idx = feature_lookback + i
                 if candle_idx + 200 < len(closes):
                     future_return = (closes[candle_idx + 200] - closes[candle_idx]) / closes[candle_idx]
-                    # Get majority vote across horizons
                     horizon_votes = []
                     for horizon, labels in multi_labels.items():
                         if i < len(labels):
@@ -3757,20 +3754,32 @@ class ModelPreTrainer:
 
                     if horizon_votes:
                         majority_label = np.median(horizon_votes)
-                        # Reward alignment: +1 for correct direction, -1 for wrong
                         if majority_label >= 1.5:  # Consensus buy
-                            reward = future_return * 10
+                            raw_rewards.append(future_return)
                         elif majority_label <= 0.5:  # Consensus sell
-                            reward = -future_return * 10
+                            raw_rewards.append(-future_return)
                         else:  # Hold
-                            reward = 0
-                        rewards.append(np.clip(reward, -1.0, 1.0))
+                            raw_rewards.append(0)
                     else:
-                        rewards.append(0)
+                        raw_rewards.append(0)
                 else:
-                    rewards.append(0)
+                    raw_rewards.append(0)
 
-            all_rewards.append(np.array(rewards))
+            # Percentile-based normalization: scale rewards to [-1, 1] using
+            # the actual distribution. This preserves relative differences instead
+            # of hard-clipping (which compressed 40%+ of rewards to near-zero).
+            raw_arr = np.array(raw_rewards)
+            nonzero_mask = raw_arr != 0
+            if nonzero_mask.sum() > 10:
+                p5 = np.percentile(raw_arr[nonzero_mask], 5)
+                p95 = np.percentile(raw_arr[nonzero_mask], 95)
+                spread = max(abs(p95), abs(p5), 1e-8)
+                # Scale so p5/p95 map to roughly -1/+1
+                rewards = np.clip(raw_arr / spread, -1.0, 1.0)
+            else:
+                rewards = raw_arr
+
+            all_rewards.append(rewards)
 
         if not all_features:
             logger.error("❌ CRITICAL: No training data prepared - cannot train models")
@@ -3936,24 +3945,9 @@ class ModelPreTrainer:
 
         logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
-        # ============================================================
-        # CRITICAL FIX: NORMALIZE FEATURES FOR NEURAL NETWORK TRAINING
-        # ============================================================
-        # Features MUST be normalized (mean=0, std=1) for neural networks
-        # Without normalization: large-scale features dominate, gradients become unstable
-        # This fix can improve accuracy by 30-50%!
-        logger.info("Normalizing features (mean=0, std=1)...")
-        feature_mean = np.mean(features, axis=0, keepdims=True)
-        feature_std = np.std(features, axis=0, keepdims=True) + 1e-8  # Avoid division by zero
-        features_normalized = (features - feature_mean) / feature_std
-
-        # Store normalization params for later use in predictions
-        self.feature_mean = feature_mean[0]  # Remove batch dimension
-        self.feature_std = feature_std[0]
-        logger.info(f"Feature normalization: mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f}")
-
-        # Use normalized features for training
-        features = features_normalized
+        # Feature normalization is done PER-FOLD inside the training loop below,
+        # using only training data statistics (no look-ahead bias).
+        # The feature_mean/feature_std are stored for inference after training.
 
         # ============================================================
         # WALK-FORWARD VALIDATION (expanding window)
@@ -4006,10 +4000,19 @@ class ModelPreTrainer:
 
         # Initialize current fold (expanding window)
         train_start, train_end, val_end = wf_boundaries[wf_fold]
-        X_train = features[train_start:train_end]
+
+        # Per-fold normalization: compute stats from TRAINING data only (no look-ahead bias)
+        fold_mean = np.mean(features[train_start:train_end], axis=0, keepdims=True)
+        fold_std = np.std(features[train_start:train_end], axis=0, keepdims=True) + 1e-8
+        features_normalized = (features - fold_mean) / fold_std  # Normalize ALL using train stats
+        self.feature_mean = fold_mean[0]
+        self.feature_std = fold_std[0]
+        logger.info(f"Feature normalization (fold {wf_fold+1}): mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f}")
+
+        X_train = features_normalized[train_start:train_end]
         y_train = primary_labels[train_start:train_end]
         r_train = rewards[train_start:train_end]
-        X_val = features[train_end:val_end]
+        X_val = features_normalized[train_end:val_end]
         y_val = primary_labels[train_end:val_end]
         r_val = rewards[train_end:val_end]
 
@@ -4049,10 +4052,19 @@ class ModelPreTrainer:
                 wf_fold_accuracies.append(best_val_accuracy)
                 wf_fold = target_fold
                 train_start, train_end, val_end = wf_boundaries[wf_fold]
-                X_train = features[:train_end]
+
+                # Re-normalize using new fold's training data only (no look-ahead bias)
+                fold_mean = np.mean(features[:train_end], axis=0, keepdims=True)
+                fold_std = np.std(features[:train_end], axis=0, keepdims=True) + 1e-8
+                features_normalized = (features - fold_mean) / fold_std
+                self.feature_mean = fold_mean[0]
+                self.feature_std = fold_std[0]
+                logger.info(f"Feature normalization (fold {wf_fold+1}): mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f}")
+
+                X_train = features_normalized[:train_end]
                 y_train = primary_labels[:train_end]
                 r_train = rewards[:train_end]
-                X_val = features[train_end:val_end]
+                X_val = features_normalized[train_end:val_end]
                 y_val = primary_labels[train_end:val_end]
                 r_val = rewards[train_end:val_end]
 
@@ -4513,7 +4525,9 @@ class ModelPreTrainer:
         # LSTM prediction (full sequence)
         try:
             lstm_out, _ = self.lstm.forward(seq)
-            lstm_probs = self._softmax(lstm_out[-1])
+            # lstm.forward() already returns softmax probs — do NOT apply softmax again!
+            # Double softmax compresses [0.1, 0.7, 0.2] → [0.29, 0.43, 0.28] (signal destroyed)
+            lstm_probs = lstm_out[-1] if lstm_out.ndim > 1 else lstm_out
             if np.any(np.isnan(lstm_probs)) or np.any(np.isinf(lstm_probs)):
                 logger.warning(f"LSTM returned NaN/inf probs, skipping")
             else:
@@ -4526,7 +4540,8 @@ class ModelPreTrainer:
         # Transformer prediction (full sequence)
         try:
             trans_out = self.transformer.forward(seq)
-            trans_probs = self._softmax(trans_out[-1])
+            # transformer.forward() already returns softmax probs — do NOT apply softmax again!
+            trans_probs = trans_out[-1] if trans_out.ndim > 1 else trans_out
             if np.any(np.isnan(trans_probs)) or np.any(np.isinf(trans_probs)):
                 logger.warning(f"Transformer returned NaN/inf probs, skipping")
             else:
@@ -4652,9 +4667,9 @@ class ModelPreTrainer:
             confidences.append(lstm_probs[lstm_action])
 
             # Transformer prediction (full sequence)
-            # FIX: Same batch dim issue — flatten before indexing
+            # transformer.forward() already returns softmax probs — just flatten batch dim
             trans_out = self.transformer.forward(seq)
-            trans_probs = self._softmax(trans_out.flatten())  # (1, 3) → (3,)
+            trans_probs = trans_out.flatten()  # (1, 3) → (3,)
             trans_action = np.argmax(trans_probs)
             predictions.append(trans_action)
             confidences.append(trans_probs[trans_action])
