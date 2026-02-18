@@ -37,6 +37,10 @@ from .advanced_strategies import (
     SkewStrategy,
     EarningsEventStrategy,
 )
+from .rules_based_strategy import (
+    AristotleRulesStrategy,
+    FibonacciLevelCalculator,
+)
 
 __all__ = [
     # Framework
@@ -70,4 +74,7 @@ __all__ = [
     "RegimeAwareStrategy",
     "SkewStrategy",
     "EarningsEventStrategy",
+    # Rules-Based Strategy
+    "AristotleRulesStrategy",
+    "FibonacciLevelCalculator",
 ]

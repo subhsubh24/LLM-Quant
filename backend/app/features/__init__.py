@@ -7,6 +7,7 @@ from .core import (
     compute_volatility,
     compute_volume_features,
     compute_risk_features,
+    compute_enhanced_technical_features,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "compute_volatility",
     "compute_volume_features",
     "compute_risk_features",
+    "compute_enhanced_technical_features",
 ]
