@@ -27,6 +27,7 @@ from .core import (
     compute_volume_features,
     compute_risk_features,
     compute_technical_features,
+    compute_enhanced_technical_features,
     standardize_features,
 )
 
@@ -56,6 +57,7 @@ class FeatureConfig:
 
     # Technical features
     include_technical: bool = True
+    include_enhanced_technical: bool = True
 
     # Standardization
     standardize_method: str = "cross_sectional"  # cross_sectional, time_series, or none
@@ -64,7 +66,7 @@ class FeatureConfig:
     # Feature selection
     enabled_features: List[str] = field(default_factory=lambda: [
         "returns", "momentum", "volatility", "drawdown",
-        "volume", "risk", "technical"
+        "volume", "risk", "technical", "enhanced_technical"
     ])
 
     def to_dict(self) -> dict:
@@ -80,6 +82,7 @@ class FeatureConfig:
             "risk_windows": self.risk_windows,
             "market_proxy_ticker": self.market_proxy_ticker,
             "include_technical": self.include_technical,
+            "include_enhanced_technical": self.include_enhanced_technical,
             "standardize_method": self.standardize_method,
             "clip_outliers": self.clip_outliers,
             "enabled_features": self.enabled_features,
@@ -202,6 +205,18 @@ class FeaturePipeline:
             tech_features = compute_technical_features(prices, highs, lows)
             all_features.append(tech_features)
 
+        # 8. Enhanced technical features (MACD, Stochastic, ADX, OBV, Fibonacci, BB, VWAP)
+        if "enhanced_technical" in self.config.enabled_features and self.config.include_enhanced_technical:
+            logger.debug("Computing enhanced technical features")
+            if highs is None:
+                highs = prices
+            if lows is None:
+                lows = prices
+            enhanced_tech_features = compute_enhanced_technical_features(
+                prices, highs, lows, volumes=volumes
+            )
+            all_features.append(enhanced_tech_features)
+
         # Combine all features
         if not all_features:
             raise ValueError("No features computed - check enabled_features config")
@@ -275,7 +290,14 @@ class FeaturePipeline:
             "volume": [],
             "risk": [],
             "technical": [],
+            "enhanced_technical": [],
         }
+
+        # Enhanced technical feature identifiers
+        _enhanced_tech_keys = (
+            "macd_", "stoch_", "adx", "plus_di", "minus_di",
+            "obv_", "fib_dist_", "bb_pct_b", "bb_bandwidth", "vwap_ratio",
+        )
 
         for name in self.feature_names:
             if "_ret_" in name:
@@ -290,6 +312,8 @@ class FeaturePipeline:
                 groups["volume"].append(name)
             elif "beta" in name or "corr" in name or "idio" in name:
                 groups["risk"].append(name)
+            elif any(key in name for key in _enhanced_tech_keys):
+                groups["enhanced_technical"].append(name)
             elif "rsi" in name or "atr" in name or "ma_" in name:
                 groups["technical"].append(name)
 
