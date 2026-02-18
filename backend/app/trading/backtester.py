@@ -1714,7 +1714,7 @@ class WalkForwardBacktester:
         # ============================================================
         config = {
             # Risk Management
-            "max_portfolio_drawdown": 0.15,          # 15% max DD before pausing (widened from 10% — need room for swing trades)
+            "max_portfolio_drawdown": 0.25,          # 25% max DD before pausing (was 15% — too tight with 8% Kelly positions, 2 bad trades froze entire system)
             "portfolio_dd_resume_pct": 0.50,         # Resume trading at 50% of DD limit
 
             # Position Sizing & Kelly Criterion
@@ -2034,7 +2034,7 @@ class WalkForwardBacktester:
         logger.info(f"    - Min confidence: {config['confidence_fallback']:.2f}-{config['confidence_4x4_models']:.2f} (by model agreement)")
         logger.info(f"    - Min model agreement: 2/4 models (weighted >50%)")
         logger.info(f"    - Per-symbol cooldown: {min_cooldown_candles} candles")
-        logger.info(f"    - Max position size: 2% of capital (Kelly-based)")
+        logger.info(f"    - Max position size: {config['kelly_cap_pct']*100:.0f}% of capital (Kelly-based, capped at 1.5x)")
         logger.info(f"  Expected: Should generate trades within first 100-500 candles")
 
         # DIAGNOSTIC: Track filter stages
@@ -2650,7 +2650,7 @@ class WalkForwardBacktester:
                         "exit_time": timestamp.isoformat(),
                         "pnl": realized_pnl,
                         "pnl_pct": pnl_pct * 100,
-                        "size": exit_value,  # Track actual position size for analysis
+                        "size": exit_size,  # Track actual position size for analysis
                         "exit_size_pct": partial_exit_pct * 100,
                         "exit_reason": exit_reason,
                         "trade_costs": pos.get("entry_cost", 0) + exit_cost,
@@ -2810,10 +2810,10 @@ class WalkForwardBacktester:
             current_dd = (rolling_max_equity - current_equity) / rolling_max_equity if rolling_max_equity > 0 else 0
 
             if current_dd > max_portfolio_dd:
-                portfolio_trading_paused = True
-                if not any(t.get("reason") == "DD_LIMIT_PAUSED" for t in trades[-10:]):  # Log once
+                if not portfolio_trading_paused:
                     logger.warning(f"⚠️ PORTFOLIO DD LIMIT HIT: {current_dd*100:.1f}% > {max_portfolio_dd*100:.0f}% | Pausing new trades")
-            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 70% of limit
+                portfolio_trading_paused = True
+            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 50% of limit
                 portfolio_trading_paused = False
 
             # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
