@@ -99,10 +99,10 @@ class RiskManager:
         else:
             beta = 1.0
 
-        # Drawdown
+        # Drawdown - FIX #2: Add epsilon guard to prevent division by zero
         cumulative = (1 + returns).cumprod()
         running_max = cumulative.expanding().max()
-        drawdown = (cumulative - running_max) / running_max
+        drawdown = (cumulative - running_max) / (running_max + 1e-8)
         max_dd = drawdown.min()
         current_dd = drawdown.iloc[-1]
 

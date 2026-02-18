@@ -1141,8 +1141,11 @@ class MasterQuantBot:
             self.models_trained = meets_req
             if meets_req:
                 logger.info("✅ Pre-trained models loaded successfully!")
-                # Sync DQN epsilon from loaded checkpoint
-                self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon
+                # CRITICAL FIX: DON'T copy stale epsilon from checkpoint
+                # Epsilon should always start at 1.0 when models are loaded for live trading
+                # (it will decay during live trading as DQN explores)
+                # self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon  # REMOVED
+                self.analytics.dqn.epsilon = 1.0  # Fresh exploration for live trading
             else:
                 logger.warning(f"⚠️ Models loaded but: {reason}")
         else:
@@ -3103,7 +3106,7 @@ def _create_pipeline_bot(
 
 async def run_training_pipeline(
     days_of_data: int = 180,
-    training_epochs: int = 40  # Optimized for ~1 hour training
+    training_epochs: int = 999999  # Effectively unlimited: early stopping (patience=2) controls actual length
 ) -> Dict:
     """
     Run the full ML training pipeline.
@@ -3132,7 +3135,8 @@ async def run_training_pipeline(
     # Update the master bot's training status
     global _master_bot
     if _master_bot is not None:
-        _master_bot.model_pretrainer.load_checkpoints()
+        # NOTE: DO NOT load_checkpoints() here - that would overwrite fresh training!
+        # The training pipeline just completed, use those models, don't load old ones
         meets_req, reason = _master_bot.model_pretrainer.meets_training_requirements()
         _master_bot.models_trained = meets_req
 

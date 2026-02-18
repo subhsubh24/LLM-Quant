@@ -243,8 +243,14 @@ class FeaturePipeline:
             if first_valid is not None:
                 # The first valid feature should be at least 1 day after
                 # the first valid price (due to our 1-day lag)
-                ticker = col.split("_")[0]
-                if ticker in prices.columns:
+                # BUG FIX #20: Robust ticker extraction with bounds check
+                parts = col.split("_")
+                if not parts or len(parts) == 0:
+                    continue
+                ticker = parts[0]
+
+                # Validate ticker is in price data before proceeding
+                if ticker and ticker in prices.columns:
                     first_price = prices[ticker].first_valid_index()
                     if first_valid is not None and first_price is not None:
                         if first_valid < first_price:
@@ -313,7 +319,15 @@ class FeaturePipeline:
 
         for ticker in prices.columns:
             # Forward return from t to t+horizon
-            fwd_ret = np.log(prices[ticker].shift(-horizon) / prices[ticker])
+            # BUG FIX #1: Add epsilon guard to prevent division by zero and log(0)
+            future_prices = prices[ticker].shift(-horizon)
+            current_prices = prices[ticker]
+
+            # BUG FIX #21: Use realistic minimum price threshold (1 cent) instead of epsilon
+            valid_mask = (current_prices > 0.01) & (future_prices > 0.01)
+            fwd_ret = pd.Series(np.nan, index=prices.index)
+            fwd_ret[valid_mask] = np.log(future_prices[valid_mask] / current_prices[valid_mask])
+
             targets[f"{ticker}_target"] = fwd_ret
 
         if target_type == "rank":

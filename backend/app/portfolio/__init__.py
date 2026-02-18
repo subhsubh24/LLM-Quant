@@ -1,21 +1,94 @@
-"""Portfolio optimization module."""
+"""Portfolio management subsystem."""
 
 from .optimizer import (
     PortfolioConfig,
-    PortfolioOptimizer,
     MeanVarianceOptimizer,
-    RiskParityOptimizer,
 )
-from .risk import RiskManager, RiskMetrics
-from .execution import ExecutionModel, TransactionCostModel
+
+from .risk import (
+    RiskManager,
+)
+
+from .institutional_risk import (
+    CircuitBreakerLevel,
+    CircuitBreakerThresholds,
+    PositionLimit,
+    DailyRiskMetrics,
+    RiskViolation,
+    DynamicPositionLimiter,
+    CircuitBreakerSystem,
+    CorrelationMonitor,
+    VaRCalculator,
+    PortfolioRiskManager,
+)
+from .strategy_weighting import (
+    WeightingMethod,
+    StrategyAllocation,
+    StrategyPerformance,
+    EqualWeightingOptimizer,
+    PerformanceBasedOptimizer,
+    RiskParityOptimizer,
+    RegimeBasedOptimizer,
+    CorrelationConstraint,
+    StrategyWeightingEngine,
+)
+from .sentiment_integration import (
+    SentimentLevel,
+    SentimentScore,
+    CompositeSentiment,
+    NewsSentimentAnalyzer,
+    OptionsSentimentAnalyzer,
+    SocialSentimentAnalyzer,
+    CompositeSentimentEngine,
+)
+from .predictive_risk import (
+    PortfolioRiskLevel,
+    WarningSignal,
+    RiskAdjustments,
+    PredictiveCircuitBreaker,
+    KellyCriterionSizing,
+    SmoothModeTransitions,
+)
 
 __all__ = [
+    # Optimizer
     "PortfolioConfig",
-    "PortfolioOptimizer",
     "MeanVarianceOptimizer",
-    "RiskParityOptimizer",
+    # Risk Management
     "RiskManager",
-    "RiskMetrics",
-    "ExecutionModel",
-    "TransactionCostModel",
+    "CircuitBreakerLevel",
+    "CircuitBreakerThresholds",
+    "PositionLimit",
+    "DailyRiskMetrics",
+    "RiskViolation",
+    "DynamicPositionLimiter",
+    "CircuitBreakerSystem",
+    "CorrelationMonitor",
+    "VaRCalculator",
+    "PortfolioRiskManager",
+    # Strategy Weighting
+    "WeightingMethod",
+    "StrategyAllocation",
+    "StrategyPerformance",
+    "EqualWeightingOptimizer",
+    "PerformanceBasedOptimizer",
+    "RiskParityOptimizer",
+    "RegimeBasedOptimizer",
+    "CorrelationConstraint",
+    "StrategyWeightingEngine",
+    # Sentiment Integration
+    "SentimentLevel",
+    "SentimentScore",
+    "CompositeSentiment",
+    "NewsSentimentAnalyzer",
+    "OptionsSentimentAnalyzer",
+    "SocialSentimentAnalyzer",
+    "CompositeSentimentEngine",
+    # Predictive Risk - Phase 12
+    "PortfolioRiskLevel",
+    "WarningSignal",
+    "RiskAdjustments",
+    "PredictiveCircuitBreaker",
+    "KellyCriterionSizing",
+    "SmoothModeTransitions",
 ]

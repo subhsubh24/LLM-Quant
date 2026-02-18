@@ -449,7 +449,7 @@ class AdaptiveLearningEngine:
             return MarketRegime.UNKNOWN
 
         # Calculate trend
-        returns = np.diff(prices) / np.array(prices[:-1])
+        returns = np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8)
         avg_return = np.mean(returns[-10:])
         trend_strength = abs(avg_return) * 100
 

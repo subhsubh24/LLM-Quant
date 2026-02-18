@@ -1,27 +1,51 @@
-"""ML models and validation framework."""
+"""Machine learning models subsystem."""
+
+from .simplified_ml_ensemble import (
+    ModelMetrics,
+    LightGBMModelBase,
+    LSTMModelBase,
+    SimpleStackingMeta,
+    SimplifiedMLEnsemble,
+)
+
+from .enhanced_ml_ensemble import (
+    LightGBMEnhanced,
+    XGBoostEnhanced,
+    LSTMEnhanced,
+    RandomForestEnhanced,
+    ExtraTreesEnhanced,
+    NeuralNetMetaLearner,
+    EnhancedMLEnsemble,
+)
 
 from .framework import (
     ModelConfig,
-    WalkForwardValidator,
-    TimeSeriesCV,
     ModelTrainer,
 )
+
 from .estimators import (
-    RidgeRanker,
-    ElasticNetRanker,
-    RandomForestRanker,
-    GradientBoostingRanker,
+    BaseRanker,
     EnsembleRanker,
 )
 
 __all__ = [
+    # Phase 1-9: Simplified ensemble
+    "ModelMetrics",
+    "LightGBMModelBase",
+    "LSTMModelBase",
+    "SimpleStackingMeta",
+    "SimplifiedMLEnsemble",
+    # Phase 10: Enhanced ensemble
+    "LightGBMEnhanced",
+    "XGBoostEnhanced",
+    "LSTMEnhanced",
+    "RandomForestEnhanced",
+    "ExtraTreesEnhanced",
+    "NeuralNetMetaLearner",
+    "EnhancedMLEnsemble",
+    # Framework and estimators
     "ModelConfig",
-    "WalkForwardValidator",
-    "TimeSeriesCV",
     "ModelTrainer",
-    "RidgeRanker",
-    "ElasticNetRanker",
-    "RandomForestRanker",
-    "GradientBoostingRanker",
+    "BaseRanker",
     "EnsembleRanker",
 ]

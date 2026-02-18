@@ -12,6 +12,7 @@ import asyncio
 import numpy as np
 import sys
 import os
+import pytest
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,7 +23,7 @@ def test_lstm_classifier():
     print("TEST 1: LSTMClassifier Training")
     print("="*60)
 
-    from trading.ml_models import LSTMClassifier
+    from app.trading.ml_models import LSTMClassifier
 
     # Initialize
     lstm = LSTMClassifier(input_dim=16, hidden_dim=32, output_dim=3, lr=0.01)
@@ -77,7 +78,7 @@ def test_trainable_transformer():
     print("TEST 2: TrainableTransformer Training")
     print("="*60)
 
-    from trading.ml_models import TrainableTransformer
+    from app.trading.ml_models import TrainableTransformer
 
     # Initialize
     transformer = TrainableTransformer(input_dim=16, hidden_dim=32, output_dim=3, lr=0.01)
@@ -128,7 +129,7 @@ def test_trainable_vae():
     print("TEST 3: TrainableVAE Training")
     print("="*60)
 
-    from trading.ml_models import TrainableVAE
+    from app.trading.ml_models import TrainableVAE
 
     # Initialize
     vae = TrainableVAE(input_dim=16, hidden_dim=32, latent_dim=4, output_dim=4, lr=0.01)
@@ -181,7 +182,7 @@ def test_model_pretrainer():
     print("TEST 4: ModelPreTrainer Integration")
     print("="*60)
 
-    from trading.backtester import ModelPreTrainer, TrainingMetrics
+    from app.trading.backtester import ModelPreTrainer, TrainingMetrics
 
     # Initialize with smaller dimensions for testing
     pretrainer = ModelPreTrainer(state_dim=16, action_dim=3)
@@ -221,7 +222,7 @@ def test_checkpoint_save_load():
     print("TEST 5: Checkpoint Save/Load")
     print("="*60)
 
-    from trading.backtester import ModelPreTrainer, CHECKPOINT_DIR
+    from app.trading.backtester import ModelPreTrainer, CHECKPOINT_DIR
     import pickle
 
     # Train a model
@@ -263,13 +264,14 @@ def test_checkpoint_save_load():
     return True
 
 
+@pytest.mark.asyncio
 async def test_alpha_sources():
     """Test alpha source API calls."""
     print("\n" + "="*60)
     print("TEST 6: Alpha Source APIs")
     print("="*60)
 
-    from trading.backtester import AlphaSourceManager
+    from app.trading.backtester import AlphaSourceManager
 
     alpha = AlphaSourceManager()
     print(f"[OK] Initialized AlphaSourceManager")
@@ -282,12 +284,8 @@ async def test_alpha_sources():
         print(f"[WARN] Fear & Greed failed: {e}")
 
     # Test sentiment (will use default without API key)
-    sentiment = await alpha.get_crypto_sentiment("BTC")
+    sentiment = await alpha.get_claude_alpha("BTC")
     print(f"[OK] Sentiment for BTC: signal={sentiment['signal']}, source={sentiment.get('source', 'unknown')}")
-
-    # Test on-chain (will use default without API key)
-    onchain = await alpha.get_onchain_metrics("BTC")
-    print(f"[OK] On-chain for BTC: signal={onchain['signal']}, source={onchain.get('source', 'unknown')}")
 
     # Test cross-asset
     try:

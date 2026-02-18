@@ -249,6 +249,8 @@ class GaussianHMM:
         # Initialize
         for j in range(self.n_states):
             alpha[0, j] = self.start_probs[j] * self._emission_prob(observations[0], j)
+        # CRITICAL FIX: Add epsilon guard for division by zero in HMM
+        scaling[0] = max(np.sum(alpha[0]), 1e-10)
         scaling[0] = max(np.sum(alpha[0]), 1e-300)
         alpha[0] /= scaling[0]
 
@@ -271,7 +273,8 @@ class GaussianHMM:
             for i in range(self.n_states):
                 for j in range(self.n_states):
                     beta[t, i] += self.transition_matrix[i, j] * self._emission_prob(observations[t + 1], j) * beta[t + 1, j]
-            beta[t] /= scaling[t + 1]
+            # CRITICAL FIX: Add epsilon guard for division by zero in backward algorithm
+            beta[t] /= max(scaling[t + 1], 1e-10)
 
         return beta
 
@@ -287,7 +290,8 @@ class GaussianHMM:
 
         # Gamma: P(state_t | observations)
         gamma = alpha * beta
-        gamma /= gamma.sum(axis=1, keepdims=True)
+        # HIGH FIX: Add epsilon guard for division by zero in gamma normalization
+        gamma = np.divide(gamma, np.maximum(gamma.sum(axis=1, keepdims=True), 1e-10))
 
         # Xi: P(state_t, state_{t+1} | observations)
         xi = np.zeros((n - 1, self.n_states, self.n_states))
@@ -296,7 +300,8 @@ class GaussianHMM:
                 for j in range(self.n_states):
                     xi[t, i, j] = (alpha[t, i] * self.transition_matrix[i, j] *
                                    self._emission_prob(observations[t + 1], j) * beta[t + 1, j])
-            xi[t] /= xi[t].sum()
+            # HIGH FIX: Add epsilon guard for division by zero in xi normalization
+            xi[t] = np.divide(xi[t], max(xi[t].sum(), 1e-10))
 
         return gamma, xi
 
@@ -559,6 +564,11 @@ class GARCH:
             else:
                 # EGARCH forecast (simplified)
                 persistence = self.beta[0]
+                # HIGH FIX: Guard against persistence >= 1 (unit root) causing division by zero
+                if persistence >= 0.999:
+                    persistence = 0.999
+                unconditional = np.exp(self.omega / (1 - persistence))
+                forecast_var[h] = unconditional + persistence ** h * (current_var - unconditional)
                 denom = 1 - persistence
                 if abs(denom) < 1e-8:
                     # Near unit-root: variance doesn't revert, use current

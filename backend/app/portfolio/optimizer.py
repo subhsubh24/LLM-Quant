@@ -263,8 +263,9 @@ class RiskParityOptimizer(PortfolioOptimizer):
             port_var = weights @ covariance.values @ weights
             port_vol = np.sqrt(port_var)
 
+            # BUG FIX #7: Add epsilon guard to prevent division by zero
             # Marginal risk contribution
-            mrc = (covariance.values @ weights) / port_vol
+            mrc = (covariance.values @ weights) / np.maximum(port_vol, 1e-8)
 
             # Risk contribution
             rc = weights * mrc

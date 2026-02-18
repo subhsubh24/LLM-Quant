@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 
 def _create_ssl_context():
-    """Create SSL context that bypasses certificate verification."""
+    """Create SSL context with proper certificate verification."""
+    # CRITICAL BUG FIX #4: Enable certificate verification for security
+    # Previously disabled verification, creating MITM attack vulnerability
     ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
+    # Use defaults: check_hostname=True, verify_mode=CERT_REQUIRED
     return ssl_context
 
 

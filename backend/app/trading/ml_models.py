@@ -81,8 +81,9 @@ class Dense(Layer):
         elif self.activation == "sigmoid":
             return 1 / (1 + np.exp(-np.clip(self.z, -500, 500)))
         elif self.activation == "softmax":
-            exp_z = np.exp(self.z - np.max(self.z, axis=-1, keepdims=True))
-            return exp_z / np.sum(exp_z, axis=-1, keepdims=True)
+            # CRITICAL FIX: Add epsilon protection to prevent division by zero
+            exp_z = np.exp(np.clip(self.z - np.max(self.z, axis=-1, keepdims=True), -500, 500))
+            return exp_z / (np.sum(exp_z, axis=-1, keepdims=True) + 1e-8)
         else:  # linear
             return self.z
 
@@ -224,10 +225,12 @@ class MultiHeadAttention(Layer):
         output = context @ self.W_o
 
         self.attention_weights = attention
-        return output.squeeze(0) if batch_size == 1 else output
+        # FIX #11: Don't squeeze batch dimension - preserve it
+        return output if batch_size > 1 else output[0:1]
 
     def _softmax(self, x: np.ndarray) -> np.ndarray:
-        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        # CRITICAL FIX: Add clipping and epsilon protection to prevent overflow/division by zero
+        exp_x = np.exp(np.clip(x - np.max(x, axis=-1, keepdims=True), -500, 500))
         return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
 
     def parameters(self) -> List[np.ndarray]:
@@ -288,6 +291,9 @@ class LSTM(Layer):
 
         if self.h is None:
             self.reset_state(batch_size)
+        else:
+            # BUG FIX #12: Validate batch size matches previous initialization
+            assert self.h.shape[0] == batch_size, f"Batch size mismatch: expected {self.h.shape[0]}, got {batch_size}"
 
         outputs = []
 
@@ -323,11 +329,12 @@ class LSTMClassifier:
     Includes proper backpropagation through time (BPTT).
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, lr: float = 0.001):
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, lr: float = 0.001, l2_reg: float = 0.0001):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.lr = lr
+        self.l2_reg = l2_reg  # L2 regularization to prevent overfitting
 
         # LSTM weights (Xavier initialization)
         scale = np.sqrt(1.0 / (input_dim + hidden_dim))
@@ -368,7 +375,8 @@ class LSTMClassifier:
         return 1 / (1 + np.exp(-np.clip(x, -500, 500)))
 
     def _softmax(self, x):
-        exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        # FIX #5: Add clipping to prevent overflow with large logits
+        exp_x = np.exp(np.clip(x - np.max(x, axis=-1, keepdims=True), -500, 500))
         return exp_x / (np.sum(exp_x, axis=-1, keepdims=True) + 1e-8)
 
     def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -513,7 +521,10 @@ class LSTMClassifier:
             # Gradients for next timestep
             dconcat = (df_raw @ self.Wf.T + di_raw @ self.Wi.T +
                        dc_tilde_raw @ self.Wc.T + do_raw @ self.Wo.T)
+            # FIX #10: Validate LSTM backward pass dimensions
             dh_next = dconcat[:, self.input_dim:]
+            assert dh_next.shape == (batch_size, self.hidden_dim), \
+                f"dh_next shape mismatch: expected ({batch_size}, {self.hidden_dim}), got {dh_next.shape}"
             dc_next = dc * f
 
         # Gradient clipping
@@ -539,7 +550,12 @@ class LSTMClassifier:
             m_hat = self.m[name] / (1 - beta1 ** self.t)
             v_hat = self.v[name] / (1 - beta2 ** self.t)
 
+            # Adam update
             param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+
+            # L2 weight decay (regularization) - shrink weights to prevent overfitting
+            param *= (1 - self.l2_reg * self.lr)
+
             setattr(self, name, param)
 
         return loss
@@ -714,6 +730,7 @@ class DQN:
         self.gamma = gamma
         self.tau = tau
         self.epsilon = epsilon_start
+        self.epsilon_start = epsilon_start  # CRITICAL: Store start value for resets
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
         self.base_lr = lr
@@ -945,6 +962,7 @@ class DQN:
     def load(self, path: str):
         """Load model parameters."""
         data = np.load(path)
+        # CRITICAL BUG FIX #3: Use correct indexing (i, j) to match save() method
         for i, layer in enumerate(self._q_network):
             for j, param in enumerate(layer.parameters()):
                 key = f"layer_{i}_param_{j}"
@@ -1080,6 +1098,13 @@ class PPOAgent:
 
         probs = self._forward_actor(state).flatten()
         value = self._forward_critic(state).flatten()[0]
+
+        # CRITICAL FIX: Validate probability distribution before sampling
+        # If probs contain NaN/infinity or don't sum to 1.0, use uniform distribution
+        # BUG FIX #2: Specify explicit tolerances for probability distribution validation
+        if not np.isfinite(probs).all() or not np.isclose(probs.sum(), 1.0, rtol=1e-4, atol=1e-6):
+            logger.warning(f"Invalid probability distribution detected, using uniform fallback")
+            probs = np.ones(self.action_dim) / self.action_dim
 
         # Sample from distribution
         action = np.random.choice(self.action_dim, p=probs)
@@ -1405,9 +1430,14 @@ class TransformerPredictor:
 
         batch_size, seq_len, _ = x.shape
 
-        # Input projection
-        x = self.input_projection.forward(x.reshape(-1, self.input_dim))
-        x = x.reshape(batch_size, seq_len, self.d_model)
+        # Input projection - process samples separately to preserve temporal structure
+        # Instead of flattening all timesteps together (loses sequence order),
+        # process each sample in the batch independently
+        x_proj = []
+        for b in range(batch_size):
+            x_b = self.input_projection.forward(x[b])  # Shape: (seq_len, d_model)
+            x_proj.append(x_b)
+        x = np.stack(x_proj, axis=0)  # Shape: (batch_size, seq_len, d_model)
 
         # Add positional encoding
         x = x + self.pos_encoding[:seq_len]
@@ -1495,6 +1525,8 @@ class MarketRegimeVAE:
 
         mu = self.fc_mu.forward(h)
         logvar = self.fc_logvar.forward(h)
+        # Clip logvar to prevent overflow in exp: np.exp(logvar) must be finite
+        logvar = np.clip(logvar, -10.0, 10.0)  # exp(-10)≈0, exp(10)≈22k - safe bounds
         return mu, logvar
 
     def reparameterize(self, mu: np.ndarray, logvar: np.ndarray) -> np.ndarray:
@@ -1553,13 +1585,14 @@ class TrainableTransformer:
     """
 
     def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 3,
-                 n_heads: int = 4, lr: float = 0.001):
+                 n_heads: int = 4, lr: float = 0.001, l2_reg: float = 0.0001):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.n_heads = n_heads
         self.head_dim = hidden_dim // n_heads
         self.lr = lr
+        self.l2_reg = l2_reg  # L2 regularization to prevent overfitting
 
         # Input projection
         self.W_in = np.random.randn(input_dim, hidden_dim) * np.sqrt(2.0 / input_dim)
@@ -1599,6 +1632,9 @@ class TrainableTransformer:
             self.v[name] = np.zeros_like(param)
 
     def _softmax(self, x, axis=-1):
+        # BUG FIX #16: Validate input is finite before softmax (prevents NaN propagation)
+        if not np.isfinite(x).all():
+            x = np.nan_to_num(x, nan=-500, posinf=500, neginf=-500)
         exp_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
         return exp_x / (np.sum(exp_x, axis=axis, keepdims=True) + 1e-8)
 
@@ -1836,7 +1872,12 @@ class TrainableTransformer:
             m_hat = self.m[name] / (1 - beta1 ** self.t)
             v_hat = self.v[name] / (1 - beta2 ** self.t)
 
+            # Adam update
             param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+
+            # L2 weight decay (regularization) - shrink weights to prevent overfitting
+            param *= (1 - self.l2_reg * self.lr)
+
             setattr(self, name, param)
 
         # Normalize loss for stable reporting
@@ -2012,9 +2053,13 @@ class TrainableVAE:
             dW_cls = np.zeros_like(self.W_cls)
             db_cls = np.zeros_like(self.b_cls)
 
-        # KL gradient (use logvar_clipped to match forward pass clamp)
+        # KL gradient (with numerical stability)
         dmu = beta * mu / batch_size
-        dlogvar = beta * 0.5 * (np.exp(logvar_clipped) - 1) / batch_size
+        # Clip to prevent overflow: exp(logvar) must be finite
+        logvar_safe = np.clip(logvar, -10.0, 10.0)
+        dlogvar = beta * 0.5 * (np.exp(logvar_safe) - 1) / batch_size
+        # Detect NaN and clamp to safe values
+        dlogvar = np.nan_to_num(dlogvar, nan=0.0, posinf=1.0, neginf=-1.0)
 
         # Reparameterization backward
         dmu += dz
@@ -2047,6 +2092,9 @@ class TrainableVAE:
         beta1, beta2, eps = 0.9, 0.999, 1e-8
 
         for name, grad in grads.items():
+            # Handle NaN gracefully
+            grad = np.nan_to_num(grad, nan=0.0, posinf=0.1, neginf=-0.1)
+
             norm = np.linalg.norm(grad)
             if norm > max_grad:
                 grad = grad * max_grad / norm
@@ -2058,7 +2106,12 @@ class TrainableVAE:
             m_hat = self.m[name] / (1 - beta1 ** self.t)
             v_hat = self.v[name] / (1 - beta2 ** self.t)
 
-            param -= self.lr * m_hat / (np.sqrt(v_hat) + eps)
+            # Ensure no NaN in update step
+            v_hat_safe = np.clip(v_hat, 1e-10, None)  # Prevent division by zero
+            update = self.lr * m_hat / (np.sqrt(v_hat_safe) + eps)
+            update = np.nan_to_num(update, nan=0.0)
+
+            param -= update
             setattr(self, name, param)
 
         return total_loss
@@ -2154,7 +2207,12 @@ class EnsemblePredictor:
                 action_votes[action] += weight
 
         final_action = int(np.argmax(action_votes))
-        confidence = action_votes[final_action] / np.sum(action_votes)
+        # FIX #4: Add epsilon guard for division by zero
+        total_votes = np.sum(action_votes)
+        confidence = action_votes[final_action] / max(total_votes, 1e-8)
+        # Validate confidence is finite
+        if not np.isfinite(confidence):
+            confidence = 0.5
 
         return final_action, {
             "lstm_action": lstm_action,

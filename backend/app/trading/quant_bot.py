@@ -74,7 +74,6 @@ from datetime import datetime, timedelta, time
 from enum import Enum
 from collections import deque
 import numpy as np
-import pandas as pd
 import logging
 import uuid
 import pytz
@@ -273,6 +272,8 @@ class QuantMath:
         if len(prices) < 20:
             return 0.5
 
+        # CRITICAL FIX: Validate prices before logarithm
+        prices = np.array([max(p, 1e-8) for p in prices])  # Replace non-positive with epsilon
         returns = np.diff(np.log(prices))
         n = len(returns)
 
@@ -2284,7 +2285,7 @@ class QuantBot:
 
         # Momentum quality (consistency)
         if len(prices) >= 10:
-            returns = np.diff(prices) / np.array(prices[:-1])
+            returns = np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8)
             mom_quality = QuantMath.momentum_quality(list(returns[-10:]))
         else:
             mom_quality = 0
@@ -2308,7 +2309,7 @@ class QuantBot:
 
         # Volatility regime
         if len(prices) >= 20:
-            returns = list(np.diff(prices) / np.array(prices[:-1]))
+            returns = list(np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8))
             vol_regime = QuantMath.volatility_regime(returns)
         else:
             vol_regime = "NORMAL"
@@ -2943,7 +2944,7 @@ class QuantBot:
         # Get symbol volatility from price history
         prices = list(self.price_history.get(symbol, [price]))
         if len(prices) >= 10:
-            returns = np.diff(prices) / np.array(prices[:-1])
+            returns = np.diff(prices) / np.maximum(np.array(prices[:-1]), 1e-8)
             symbol_vol = np.std(returns) * np.sqrt(252) if len(returns) > 0 else 0.5
         else:
             symbol_vol = 0.5  # Default to 50% vol for unknown
@@ -2972,6 +2973,11 @@ class QuantBot:
         position_value = self.total_value * confidence_adjusted_size
         position_value = max(position_value, self.min_trade_value)
         position_value = min(position_value, available)  # Cap at available
+
+        # CRITICAL FIX: Validate price before division
+        if price <= 0:
+            logger.error(f"Invalid price for {symbol}: {price}")
+            return False
 
         quantity = position_value / price
 

@@ -7,7 +7,10 @@ from datetime import datetime, date as dt_date
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 import json
+import logging
 from hashlib import sha256
+
+logger = logging.getLogger(__name__)
 
 
 class StockPrice(SQLModel, table=True):
@@ -73,7 +76,12 @@ class Feature(SQLModel, table=True):
 
     def get_features(self) -> dict:
         """Parse features from JSON."""
-        return json.loads(self.features_json)
+        # CRITICAL FIX: Handle corrupted JSON gracefully
+        try:
+            return json.loads(self.features_json) if self.features_json else {}
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning(f"Failed to parse features JSON: {e}")
+            return {}
 
     def set_features(self, features: dict):
         """Serialize features to JSON."""
@@ -148,10 +156,20 @@ class BacktestRun(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     def get_metrics(self) -> dict:
-        return json.loads(self.metrics_json)
+        # CRITICAL FIX: Handle corrupted JSON gracefully
+        try:
+            return json.loads(self.metrics_json) if self.metrics_json else {}
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning(f"Failed to parse metrics JSON: {e}")
+            return {}
 
     def get_equity_curve(self) -> dict:
-        return json.loads(self.equity_curve_json)
+        # CRITICAL FIX: Handle corrupted JSON gracefully
+        try:
+            return json.loads(self.equity_curve_json) if self.equity_curve_json else {}
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning(f"Failed to parse equity curve JSON: {e}")
+            return {}
 
 
 class PaperPortfolio(SQLModel, table=True):
@@ -291,8 +309,13 @@ class BotActivityLog(SQLModel, table=True):
 
     def get_details(self) -> dict:
         """Parse details from JSON."""
+        # CRITICAL FIX: Handle corrupted JSON gracefully
         if self.details_json:
-            return json.loads(self.details_json)
+            try:
+                return json.loads(self.details_json)
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                logger.warning(f"Failed to parse details JSON: {e}")
+                return {}
         return {}
 
     def set_details(self, details: dict):

@@ -2,7 +2,7 @@
 API routes for QuantLab.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import date, datetime, timedelta
@@ -81,10 +81,11 @@ class BacktestRequest(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     rebalance_frequency: str = "weekly"
-    initial_cash: float = 100000.0
-    transaction_cost_bps: float = 10.0
-    max_position_weight: float = 0.10
-    target_volatility: float = 0.15
+    # FIX #8: Add validators to prevent invalid input values
+    initial_cash: float = Field(default=100000.0, gt=0, description="Initial cash must be positive")
+    transaction_cost_bps: float = Field(default=10.0, ge=0, le=1000, description="Transaction cost in basis points")
+    max_position_weight: float = Field(default=0.10, gt=0, le=1.0, description="Max position weight 0-100%")
+    target_volatility: float = Field(default=0.15, gt=0, le=1.0, description="Target volatility 0-100%")
 
 
 class PaperTradeRequest(BaseModel):
@@ -215,10 +216,11 @@ async def get_prices(
         raise HTTPException(status_code=404, detail="No price data available")
 
     # Convert to dict for JSON serialization
+    # FIX #7: Don't mask missing data with fillna(0) - return NaN/null instead
     return {
         "dates": [str(d.date()) for d in prices.index],
         "tickers": prices.columns.tolist(),
-        "prices": prices.fillna(0).values.tolist(),
+        "prices": prices.where(pd.notna(prices), None).values.tolist(),  # Convert NaN to None for JSON
     }
 
 
@@ -521,6 +523,10 @@ async def get_recommendations(
     # In production, this would use the trained model
     returns_21d = prices.pct_change(21).iloc[-1].dropna()
     returns_63d = prices.pct_change(63).iloc[-1].dropna()
+
+    # CRITICAL FIX: Check if both have data before combining
+    if len(returns_21d) == 0 or len(returns_63d) == 0:
+        raise HTTPException(status_code=400, detail="Insufficient data for momentum calculations")
 
     # Combine momentum signals
     signal = (returns_21d.rank(pct=True) + returns_63d.rank(pct=True)) / 2
@@ -911,6 +917,32 @@ async def analyze_portfolio(session=Depends(get_session_dependency)):
     return analysis
 
 
+# ============ Order Validation Models ============
+# FIX #7: Add input validation using Pydantic
+
+class MarketOrderRequest(BaseModel):
+    """Validated market order request."""
+    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., regex="^(buy|sell)$")
+    quantity: float = Field(..., gt=0, lt=1e8)
+
+
+class LimitOrderRequest(BaseModel):
+    """Validated limit order request."""
+    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., regex="^(buy|sell)$")
+    quantity: float = Field(..., gt=0, lt=1e8)
+    limit_price: float = Field(..., gt=0, lt=1e8)
+
+
+class StopOrderRequest(BaseModel):
+    """Validated stop order request."""
+    symbol: str = Field(..., min_length=1, max_length=20, regex="^[A-Z0-9]{1,20}$")
+    side: str = Field(..., regex="^(buy|sell)$")
+    quantity: float = Field(..., gt=0, lt=1e8)
+    stop_price: float = Field(..., gt=0, lt=1e8)
+
+
 # ============ Automated Trading Endpoints ============
 
 @router.get("/signals/generate")
@@ -1001,9 +1033,21 @@ async def trigger_rebalance(
         raise HTTPException(status_code=404, detail="No price data available")
 
     # Get current prices
-    market_service = get_live_market_service()
-    quotes = await market_service.get_quotes_batch(universe.tickers)
-    current_prices = {q.symbol: q.price for q in quotes.values()}
+    # BUG FIX #13: Add error handling for async market service calls
+    try:
+        market_service = get_live_market_service()
+        quotes = await market_service.get_quotes_batch(universe.tickers)
+        # Validate quotes before accessing attributes
+        if not quotes:
+            raise HTTPException(status_code=503, detail="Failed to fetch market quotes")
+        current_prices = {q.symbol: q.price for q in quotes.values() if q and hasattr(q, 'symbol') and hasattr(q, 'price')}
+        if not current_prices:
+            raise HTTPException(status_code=503, detail="No valid quotes received")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Market service error in rebalance: {e}")
+        raise HTTPException(status_code=503, detail=f"Market service unavailable: {str(e)}")
 
     # Generate signals and rebalance
     trader = get_auto_trader()
@@ -1021,44 +1065,35 @@ async def trigger_rebalance(
 
 
 @router.post("/trading/order/market")
-async def create_market_order(
-    symbol: str,
-    side: str,  # buy, sell
-    quantity: float,
-):
-    """Create a market order."""
+async def create_market_order(request: MarketOrderRequest):
+    """Create a market order with validation."""
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
-    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+    order_side = OrderSide.BUY if request.side.lower() == "buy" else OrderSide.SELL
 
     order = manager.create_market_order(
-        symbol=symbol,
+        symbol=request.symbol,
         side=order_side,
-        quantity=quantity,
+        quantity=request.quantity,
     )
 
     return order.to_dict()
 
 
 @router.post("/trading/order/limit")
-async def create_limit_order(
-    symbol: str,
-    side: str,
-    quantity: float,
-    limit_price: float,
-):
-    """Create a limit order."""
+async def create_limit_order(request: LimitOrderRequest):
+    """Create a limit order with validation."""
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
-    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+    order_side = OrderSide.BUY if request.side.lower() == "buy" else OrderSide.SELL
 
     order = manager.create_limit_order(
-        symbol=symbol,
+        symbol=request.symbol,
         side=order_side,
-        quantity=quantity,
-        limit_price=limit_price,
+        quantity=request.quantity,
+        limit_price=request.limit_price,
     )
 
     return order.to_dict()
@@ -1092,25 +1127,23 @@ async def create_bracket_order(
 
 
 @router.post("/trading/order/stop")
-async def create_stop_order(
-    symbol: str,
-    side: str,
-    quantity: float,
-    stop_price: float,
-    limit_price: Optional[float] = None,
-):
-    """Create a stop or stop-limit order."""
+async def create_stop_order(request: StopOrderRequest):
+    """Create a stop or stop-limit order with validation.
+
+    CRITICAL FIX: Removed unused limit_price parameter - was never used.
+    If stop-limit orders needed, add limit_price to StopOrderRequest model.
+    """
     from ..trading import get_order_manager, OrderSide
 
     manager = get_order_manager()
-    order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+    order_side = OrderSide.BUY if request.side.lower() == "buy" else OrderSide.SELL
 
     order = manager.create_stop_order(
-        symbol=symbol,
+        symbol=request.symbol,
         side=order_side,
-        quantity=quantity,
-        stop_price=stop_price,
-        limit_price=limit_price,
+        quantity=request.quantity,
+        stop_price=request.stop_price,
+        limit_price=None,  # Stop-market order (not stop-limit)
     )
 
     return order.to_dict()
@@ -2489,7 +2522,8 @@ async def get_ml_metrics():
         "episodes": {
             "total": len(analytics.episode_rewards),
             "recent_rewards": [round(r, 2) for r in analytics.episode_rewards[-10:]] if analytics.episode_rewards else [],
-            "avg_reward": round(float(np.mean(analytics.episode_rewards[-50:])), 2) if analytics.episode_rewards else 0,
+            # CRITICAL FIX: Check if list is not empty before np.mean, otherwise returns NaN
+            "avg_reward": round(float(np.nanmean(analytics.episode_rewards[-50:]) if len(analytics.episode_rewards[-50:]) > 0 else 0.0), 2) if analytics.episode_rewards else 0,
         },
         "models_fitted": {
             "hmm": analytics.hmm_fitted,
@@ -3063,9 +3097,8 @@ async def get_strategy_presets():
 class BrokerCredentialsRequest(BaseModel):
     """Request model for setting broker credentials."""
     broker: str  # "alpaca" or "binance"
-    api_key: str
-    api_secret: str
     is_paper: bool = True  # Paper/testnet mode by default for safety
+    # FIX #15: Credentials now passed via Authorization header (not in request body)
 
 
 class LiveOrderRequest(BaseModel):
@@ -3078,7 +3111,10 @@ class LiveOrderRequest(BaseModel):
 
 
 @router.post("/broker/credentials")
-async def set_broker_credentials(request: BrokerCredentialsRequest):
+async def set_broker_credentials(
+    request: BrokerCredentialsRequest,
+    authorization: str = Header(None)
+):
     """
     Set API credentials for a broker (Alpaca or Binance).
 
@@ -3093,8 +3129,30 @@ async def set_broker_credentials(request: BrokerCredentialsRequest):
     - Get API keys at: https://www.binance.com/en/my/settings/api-management
     - Testnet available at: https://testnet.binancefuture.com
     - Set is_paper=false only when ready for live trading
+
+    **Authorization Header Format:**
+    Authorization: Bearer api_key:api_secret
     """
     from ..trading.live_brokers import get_broker_manager, BrokerType
+
+    # FIX #15: Extract credentials from Authorization header (not request body)
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header. Format: Bearer api_key:api_secret"
+        )
+
+    try:
+        # Extract credentials from "Bearer api_key:api_secret" format
+        credentials_str = authorization[7:]  # Remove "Bearer " prefix
+        if ":" not in credentials_str:
+            raise ValueError("Credentials must be in format: api_key:api_secret")
+        api_key, api_secret = credentials_str.split(":", 1)
+    except (ValueError, IndexError):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid credentials format. Use: api_key:api_secret"
+        )
 
     manager = get_broker_manager()
 
@@ -3107,8 +3165,8 @@ async def set_broker_credentials(request: BrokerCredentialsRequest):
 
     manager.set_credentials(
         broker=broker_type,
-        api_key=request.api_key,
-        api_secret=request.api_secret,
+        api_key=api_key,
+        api_secret=api_secret,
         is_paper=request.is_paper,
     )
 
@@ -3198,6 +3256,8 @@ async def get_broker_accounts():
                 "status": alpaca_account.get("status"),
             }
         except Exception as e:
+            # BUG FIX #28: Add logging for debugging account fetch failures
+            logger.warning(f"Alpaca account fetch error: {e}")
             accounts["alpaca"] = {"error": str(e)}
 
     if manager.binance and manager.binance._connected:
@@ -3215,7 +3275,8 @@ async def get_broker_accounts():
                 futures_account = await manager.binance.get_futures_account()
                 futures_balance = float(futures_account.get("totalWalletBalance", 0))
                 futures_unrealized = float(futures_account.get("totalUnrealizedProfit", 0))
-            except:
+            except Exception as e:  # FIX #10: Use Exception instead of bare except
+                logger.warning(f"Failed to fetch futures account: {e}")
                 futures_balance = 0
                 futures_unrealized = 0
 
@@ -3307,6 +3368,13 @@ async def submit_live_stock_order(request: LiveOrderRequest):
             order_type=request.order_type.lower(),
         )
 
+        # BUG FIX #8: Fix boolean operator precedence error
+        # Check if alpaca is connected and in credentials before accessing is_paper
+        is_live = False
+        if (manager.alpaca and manager.alpaca._connected and
+            BrokerType.ALPACA in manager.credentials):
+            is_live = not manager.credentials[BrokerType.ALPACA].is_paper
+
         return {
             "status": "order_submitted",
             "order_id": order.id,
@@ -3315,7 +3383,7 @@ async def submit_live_stock_order(request: LiveOrderRequest):
             "quantity": order.quantity,
             "order_type": order.order_type,
             "order_status": order.status,
-            "is_live": not manager.credentials[manager.alpaca._connected and BrokerType.ALPACA].is_paper if BrokerType.ALPACA in manager.credentials else False,
+            "is_live": is_live,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Order failed: {str(e)}")
@@ -3354,7 +3422,8 @@ async def submit_live_crypto_order(request: LiveOrderRequest, is_futures: bool =
             "order_type": order.order_type,
             "order_status": order.status,
             "is_futures": is_futures,
-            "is_live": not manager.credentials[BrokerType.BINANCE].is_paper if BrokerType.BINANCE in manager.credentials else False,
+            # BUG FIX #15: Use .get() for safe dict access (prevents KeyError)
+            "is_live": not manager.credentials.get(BrokerType.BINANCE, type('obj', (), {'is_paper': True})).is_paper,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Order failed: {str(e)}")
@@ -3518,6 +3587,14 @@ async def get_training_status():
 
     checkpoint_exists = (CHECKPOINT_DIR / "model_checkpoint.pkl").exists()
 
+    # CRITICAL FIX: If models are untrained, reset epsilon to 1.0
+    # This ensures the dashboard always shows correct state
+    if not bot.models_trained:
+        pretrainer.dqn.epsilon = pretrainer.dqn.epsilon_start
+        dqn_epsilon = round(pretrainer.dqn.epsilon, 4)
+    else:
+        dqn_epsilon = round(pretrainer.dqn.epsilon, 4)
+
     return {
         "models_trained": bot.models_trained,
         "meets_requirements": meets_req,
@@ -3530,7 +3607,7 @@ async def get_training_status():
         },
         "checkpoint_exists": checkpoint_exists,
         "checkpoint_path": str(CHECKPOINT_DIR / "model_checkpoint.pkl"),
-        "dqn_epsilon": round(pretrainer.dqn.epsilon, 4),
+        "dqn_epsilon": dqn_epsilon,
         "is_pretrained_loaded": pretrainer.is_trained,
     }
 

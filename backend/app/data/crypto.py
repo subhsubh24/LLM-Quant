@@ -797,14 +797,15 @@ class CryptoMarketService:
                 symbol=symbol,
                 name=name,
                 price=price,
-                change_24h=price * change_24h / 100,
-                change_percent_24h=change_24h,
+                change_24h=change_24h,  # FIX #1: Already in USD from API, don't recalculate
+                change_percent_24h=(change_24h / (price - change_24h + 1e-8) * 100) if (price > 0 and abs(price - change_24h) > 1e-8) else 0,  # CRITICAL FIX: Add epsilon guard
                 high_24h=price * 1.02,  # Estimate
                 low_24h=price * 0.98,   # Estimate
                 volume_24h=volume,
                 market_cap=market_cap,
                 market_cap_rank=rank,
-                circulating_supply=market_cap / price if price > 0 else 0,
+                # FIX #14: Add epsilon guard to supply division
+                circulating_supply=market_cap / max(price, 1e-8),
                 total_supply=None,
                 ath=price * 1.5,  # Estimate
                 ath_change_percent=-30,  # Estimate
@@ -838,7 +839,9 @@ class CryptoMarketService:
 
             # Calculate market stats
             total_mcap = sum(q.market_cap for q in quotes.values())
-            btc_dominance = (quotes.get("BTC").market_cap / total_mcap * 100) if quotes.get("BTC") and total_mcap > 0 else 0
+            # CRITICAL FIX: Check None before accessing .market_cap (prevent AttributeError)
+            btc_quote = quotes.get("BTC")
+            btc_dominance = (btc_quote.market_cap / total_mcap * 100) if btc_quote and total_mcap > 0 else 0
 
             # Gainers and losers
             gainers = sorted(quotes.values(), key=lambda x: x.change_percent_24h, reverse=True)[:5]

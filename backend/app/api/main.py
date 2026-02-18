@@ -83,7 +83,8 @@ app.add_middleware(
         "http://127.0.0.1:3002",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    # BUG FIX #43: Restrict to safe HTTP methods (not TRACE, CONNECT)
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -117,8 +118,8 @@ async def health():
             "alpaca": "connected" if status["alpaca"]["connected"] else ("configured" if status["alpaca"]["configured"] else "not_configured"),
             "binance": "connected" if status["binance"]["connected"] else ("configured" if status["binance"]["configured"] else "not_configured"),
         }
-    except:
-        pass
+    except Exception as e:  # FIX #10: Use Exception instead of bare except
+        logger.warning(f"Failed to get broker status: {e}")
 
     return {
         "status": "healthy",
