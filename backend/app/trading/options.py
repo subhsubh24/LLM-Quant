@@ -506,10 +506,13 @@ class OptionsManager:
         self,
         symbol: str,
         expiration: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Generate options chain using REAL market data from yfinance.
-        Falls back to synthetic if real data unavailable.
+
+        Returns None if real data is unavailable. Never falls back to synthetic
+        data -- callers should handle None explicitly rather than silently
+        consuming fabricated prices.
         """
         from ..data.options_data_provider import get_options_data_provider
 
@@ -517,13 +520,8 @@ class OptionsManager:
         real_chain = provider.get_options_chain(symbol, expiration)
 
         if real_chain is None:
-            # Fallback to synthetic
-            logger.info(f"Real options data unavailable for {symbol}, using synthetic")
-            return self.generate_options_chain(
-                symbol=symbol,
-                underlying_price=0,  # Would need price from elsewhere
-                expiration=date.today() + timedelta(days=30),
-            )
+            logger.warning(f"Real options data unavailable for {symbol} - no synthetic fallback")
+            return None
 
         # Convert real data to our OptionContract format
         calls = []
