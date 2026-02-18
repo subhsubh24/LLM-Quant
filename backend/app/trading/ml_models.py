@@ -1284,6 +1284,68 @@ class PPOAgent:
             "entropy": total_entropy / n_updates,
         }
 
+    def train_supervised(self, states: np.ndarray, labels: np.ndarray,
+                          batch_size: int = 32) -> float:
+        """
+        Train actor with cross-entropy loss on supervised labels.
+
+        This replaces the broken RL training (where labels were used as "actions"
+        but importance sampling ratios were meaningless). Pure cross-entropy is
+        mathematically cleaner and converges faster for supervised signals.
+
+        The actor network already has softmax output, so cross-entropy is the
+        natural loss function. No critic training (not needed for supervised).
+        """
+        if len(states) < batch_size:
+            return 0.0
+
+        total_loss = 0
+        n_updates = 0
+
+        indices = np.random.permutation(len(states))
+        for start in range(0, len(states), batch_size):
+            end = min(start + batch_size, len(states))
+            batch_idx = indices[start:end]
+
+            batch_states = states[batch_idx]
+            batch_labels = labels[batch_idx].astype(int)
+
+            # Forward pass through actor
+            probs = self._forward_actor(batch_states)
+
+            # Cross-entropy loss: -mean(log(prob[correct_class]))
+            selected_probs = probs[np.arange(len(batch_labels)), batch_labels]
+            ce_loss = -np.mean(np.log(selected_probs + 1e-10))
+
+            # Backward: gradient of CE w.r.t. softmax probs
+            d_probs = np.zeros_like(probs)
+            d_probs[np.arange(len(batch_labels)), batch_labels] = (
+                -1.0 / (selected_probs + 1e-10)
+            )
+            d_probs /= len(batch_labels)
+
+            # Softmax Jacobian (same as PPO backward — lines 1221-1223)
+            sum_dp = np.sum(probs * d_probs, axis=1, keepdims=True)
+            d_logits = probs * (d_probs - sum_dp)
+
+            # Backprop through actor layers
+            grad = d_logits
+            for layer in reversed(self.actor):
+                grad = layer.backward(grad)
+
+            # Collect and clip gradients
+            actor_grads = [g for layer in self.actor for g in layer.gradients()]
+            grad_norm = np.sqrt(sum(np.sum(g ** 2) for g in actor_grads) + 1e-8)
+            if grad_norm > self.max_grad_norm:
+                actor_grads = [g * self.max_grad_norm / grad_norm for g in actor_grads]
+
+            self.actor_optimizer.step(actor_grads)
+
+            total_loss += ce_loss
+            n_updates += 1
+
+        return total_loss / max(n_updates, 1)
+
     def train_step(self, next_value: float = 0) -> float:
         """
         Single training step (alias for train() for consistency with other models).

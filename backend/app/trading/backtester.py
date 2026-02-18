@@ -1106,43 +1106,257 @@ class WalkForwardBacktester:
             else:
                 closes_above_prev = 0
 
+            # =====================================================================
+            # NEW FEATURES: Fill 29 zero-padded dimensions with real signal
+            # These replace dead zero-padding that wasted 45% of model capacity.
+            # =====================================================================
+
+            # 16. Cross-timeframe momentum: 50-period vs 200-period MA convergence
+            sma_50_local = np.mean(window_close[-50:]) if len(window_close) >= 50 else np.mean(window_close)
+            sma_200_local = np.mean(window_close[-200:]) if len(window_close) >= 200 else np.mean(window_close)
+            ma_cross_50_200 = (sma_50_local - sma_200_local) / (sma_200_local + 1e-8)
+
+            # 17. MA cross momentum: 10-period vs 50-period (faster signal)
+            sma_10 = np.mean(window_close[-10:]) if len(window_close) >= 10 else closes[i]
+            ma_cross_10_50 = (sma_10 - sma_50_local) / (sma_50_local + 1e-8)
+
+            # 18. Accumulation/Distribution proxy (volume-price correlation)
+            if len(window_close) >= 20 and len(window_high) >= 20:
+                clv = np.zeros(20)
+                for k in range(20):
+                    hl = window_high[-20+k] - window_low[-20+k]
+                    if hl > 0:
+                        clv[k] = ((window_close[-20+k] - window_low[-20+k]) -
+                                  (window_high[-20+k] - window_close[-20+k])) / hl
+                ad_line = np.cumsum(clv * window_vol[-20:])
+                ad_momentum = (ad_line[-1] - ad_line[0]) / (np.abs(ad_line[0]) + 1e-8) if len(ad_line) > 0 else 0
+            else:
+                ad_momentum = 0
+
+            # 19. Wick ratio: rejection signal (long wicks = reversal)
+            body = abs(closes[i] - window_close[-2]) if len(window_close) >= 2 else 1e-8
+            upper_wick = highs[i] - max(closes[i], window_close[-2] if len(window_close) >= 2 else closes[i])
+            lower_wick = min(closes[i], window_close[-2] if len(window_close) >= 2 else closes[i]) - lows[i]
+            total_wick = upper_wick + lower_wick
+            wick_body_ratio = total_wick / (body + 1e-8)
+            wick_body_ratio = min(wick_body_ratio, 10.0)  # Cap at 10
+
+            # 20. Upper wick dominance (selling pressure)
+            wick_direction = (upper_wick - lower_wick) / (total_wick + 1e-8)
+
+            # 21. Returns 50-period (longer-term momentum)
+            returns_50 = (closes[i] - closes[i-50]) / (closes[i-50] + 1e-8) if i >= 50 else 0
+
+            # 22. Returns 100-period
+            returns_100 = (closes[i] - closes[i-100]) / (closes[i-100] + 1e-8) if i >= 100 else 0
+
+            # 23. Returns 200-period (match primary prediction horizon)
+            returns_200 = (closes[i] - closes[i-200]) / (closes[i-200] + 1e-8) if i >= 200 else 0
+
+            # 24. Volume-price divergence: price rising but volume falling = weak
+            if len(window_close) >= 20 and len(window_vol) >= 20:
+                price_chg_20 = (window_close[-1] - window_close[-20]) / (window_close[-20] + 1e-8)
+                vol_chg_20 = (np.mean(window_vol[-5:]) - np.mean(window_vol[-20:-5])) / (np.mean(window_vol[-20:-5]) + 1e-8)
+                # Divergence: same sign = confirming, different sign = diverging
+                vol_price_divergence = price_chg_20 * vol_chg_20  # Positive = confirming
+            else:
+                vol_price_divergence = 0
+
+            # 25. Return autocorrelation (lag-1): mean-reversion vs momentum regime
+            if len(log_returns) >= 20:
+                r1 = log_returns[-20:-1]
+                r2 = log_returns[-19:]
+                if np.std(r1) > 1e-8 and np.std(r2) > 1e-8:
+                    autocorr_1 = np.corrcoef(r1, r2)[0, 1]
+                    autocorr_1 = 0 if np.isnan(autocorr_1) else autocorr_1
+                else:
+                    autocorr_1 = 0
+            else:
+                autocorr_1 = 0
+
+            # 26. Return autocorrelation (lag-5): weekly pattern
+            if len(log_returns) >= 25:
+                r1 = log_returns[-25:-5]
+                r2 = log_returns[-20:]
+                if np.std(r1) > 1e-8 and np.std(r2) > 1e-8:
+                    autocorr_5 = np.corrcoef(r1, r2)[0, 1]
+                    autocorr_5 = 0 if np.isnan(autocorr_5) else autocorr_5
+                else:
+                    autocorr_5 = 0
+            else:
+                autocorr_5 = 0
+
+            # 27. Kurtosis of returns (tail heaviness = regime change)
+            if len(log_returns) >= 20:
+                centered = log_returns[-20:] - np.mean(log_returns[-20:])
+                std_r = np.std(log_returns[-20:])
+                return_kurtosis = np.mean(centered ** 4) / (std_r ** 4 + 1e-8) - 3  # Excess kurtosis
+            else:
+                return_kurtosis = 0
+
+            # 28. Distance from 52-candle high/low (support/resistance proxy)
+            if len(window_close) >= 52:
+                dist_from_high = (closes[i] - np.max(window_close[-52:])) / (np.max(window_close[-52:]) + 1e-8)
+                dist_from_low = (closes[i] - np.min(window_close[-52:])) / (np.min(window_close[-52:]) + 1e-8)
+            else:
+                dist_from_high = 0
+                dist_from_low = 0
+
+            # 29. Volatility of volume (unstable volume = institutional activity)
+            if len(window_vol) >= 20:
+                vol_of_vol = np.std(window_vol[-20:]) / (np.mean(window_vol[-20:]) + 1e-8)
+            else:
+                vol_of_vol = 0
+
+            # 30. Close Location Value: where price closed within range
+            hl = highs[i] - lows[i]
+            close_location_value = (2 * closes[i] - highs[i] - lows[i]) / (hl + 1e-8) if hl > 0 else 0
+
+            # 31. Consecutive up/down candles (streak detection)
+            streak = 0
+            for k in range(1, min(20, len(window_close))):
+                if window_close[-k] > window_close[-k-1]:
+                    if streak >= 0:
+                        streak += 1
+                    else:
+                        break
+                elif window_close[-k] < window_close[-k-1]:
+                    if streak <= 0:
+                        streak -= 1
+                    else:
+                        break
+                else:
+                    break
+            candle_streak = streak / 10.0  # Normalize
+
+            # 32. MACD histogram (signal line divergence)
+            ema_9_macd = self._ema(window_close, 9)
+            macd_value = ema_12 - ema_26
+            macd_signal = ema_9_macd - ema_26  # Approximate signal line
+            macd_histogram = (macd_value - macd_signal) / (closes[i] + 1e-8)
+
+            # 33. Garman-Klass volatility (more efficient than Parkinson)
+            if len(window_close) >= 2:
+                gk_terms = []
+                for k in range(max(1, len(window_close)-20), len(window_close)):
+                    hl = np.log(window_high[k] / (window_low[k] + 1e-8))
+                    co = np.log(window_close[k] / (window_close[k-1] + 1e-8))
+                    gk_terms.append(0.5 * hl**2 - (2*np.log(2) - 1) * co**2)
+                gk_vol = np.sqrt(max(0, np.mean(gk_terms))) * np.sqrt(self._annualization_factor)
+            else:
+                gk_vol = realized_vol
+
+            # 34. Relative volume spike (current bar vs 20-bar avg)
+            if len(window_vol) >= 20:
+                vol_spike = window_vol[-1] / (np.mean(window_vol[-20:]) + 1e-8) - 1
+                vol_spike = min(vol_spike, 5.0)  # Cap at 5x
+            else:
+                vol_spike = 0
+
+            # 35. Intrabar momentum (close vs open proxy using consecutive closes)
+            if len(window_close) >= 2:
+                intrabar_momentum = (closes[i] - window_close[-2]) / (atr_value + 1e-8)
+                intrabar_momentum = np.clip(intrabar_momentum, -3.0, 3.0)
+            else:
+                intrabar_momentum = 0
+
+            # 36-44. Rolling return percentiles (captures distribution shape)
+            if len(log_returns) >= 50:
+                ret_p10 = np.percentile(log_returns[-50:], 10)
+                ret_p90 = np.percentile(log_returns[-50:], 90)
+                ret_range = ret_p90 - ret_p10  # Distribution width
+            else:
+                ret_p10 = 0
+                ret_p90 = 0
+                ret_range = 0
+
+            # 45. EMA momentum divergence (price vs EMA acceleration)
+            ema_50 = self._ema(window_close, 50) if len(window_close) >= 50 else closes[i]
+            ema_divergence = (closes[i] - ema_50) / (atr_value + 1e-8)
+            ema_divergence = np.clip(ema_divergence, -5.0, 5.0)
+
+            # 46. High-Low range expansion (volatility breakout)
+            if len(window_high) >= 20:
+                recent_hl = np.mean(window_high[-5:] - window_low[-5:])
+                older_hl = np.mean(window_high[-20:-5] - window_low[-20:-5])
+                range_expansion = (recent_hl - older_hl) / (older_hl + 1e-8)
+            else:
+                range_expansion = 0
+
+            # 47. Price efficiency ratio (directional move vs total path)
+            if len(window_close) >= 20:
+                net_move = abs(window_close[-1] - window_close[-20])
+                total_path = np.sum(np.abs(np.diff(window_close[-20:])))
+                price_efficiency = net_move / (total_path + 1e-8)
+            else:
+                price_efficiency = 0
+
+            # 48. Volume-weighted RSI (RSI but weighted by volume)
+            if len(window_close) >= 15 and len(window_vol) >= 15:
+                price_changes = np.diff(window_close[-15:])
+                vol_weights = window_vol[-14:]
+                vol_gains = np.sum(np.maximum(price_changes, 0) * vol_weights)
+                vol_losses = np.sum(np.maximum(-price_changes, 0) * vol_weights)
+                vol_rsi = 100 - 100 / (1 + vol_gains / (vol_losses + 1e-8))
+                vol_rsi = vol_rsi / 100  # Normalize to 0-1
+            else:
+                vol_rsi = 0.5
+
+            # 49. Relative return rank (where is current return in recent history)
+            if len(log_returns) >= 50:
+                current_ret = log_returns[-1] if len(log_returns) > 0 else 0
+                rank = np.mean(log_returns[-50:] <= current_ret)  # Percentile rank
+                return_rank = rank * 2 - 1  # Scale to -1 to 1
+            else:
+                return_rank = 0
+
             feature_vector = [
-                returns_1, returns_5, returns_10, returns_20,
-                realized_vol, parkinson_vol,
-                rsi / 100,  # Normalize to 0-1
-                macd,
-                bb_position,
-                vol_ratio,
-                momentum,
-                trend_strength,
-                # Normalized price levels
-                (closes[i] - np.min(window_close)) / (np.max(window_close) - np.min(window_close) + 1e-8),
-                # High-low range
-                (window_high[-1] - window_low[-1]) / (closes[i] + 1e-8),
-                # PHASE E: Enhanced features
-                mean_reversion,
-                vol_momentum,
-                vol_regime,
-                accel,
-                return_vol,
-                # TIER 1 FIX: Microstructure features
-                vol_accel,
-                hl_spread,
-                order_imbalance,
-                price_to_vwap,
-                vol_concentration,
-                # NEW: Advanced features (10+ more for 30 total)
-                stoch,
-                atr_ratio,
-                mean_reversion_100,
-                mean_reversion_200,
-                vol_mean_reversion,
-                vol_trend,
-                price_range_ratio,
-                breakout_signal,
-                jump_ratio,
-                return_skew,
-                closes_above_prev,
+                # Original 35 features
+                returns_1, returns_5, returns_10, returns_20,       # 0-3: Momentum
+                realized_vol, parkinson_vol,                         # 4-5: Volatility
+                rsi / 100, macd, bb_position,                       # 6-8: Oscillators
+                vol_ratio, momentum, trend_strength,                 # 9-11: Volume & trend
+                (closes[i] - np.min(window_close)) / (np.max(window_close) - np.min(window_close) + 1e-8),  # 12: Price level
+                (window_high[-1] - window_low[-1]) / (closes[i] + 1e-8),  # 13: HL range
+                mean_reversion, vol_momentum, vol_regime,           # 14-16: Enhanced
+                accel, return_vol,                                   # 17-18: Dynamics
+                vol_accel, hl_spread, order_imbalance,              # 19-21: Microstructure
+                price_to_vwap, vol_concentration,                    # 22-23: Volume
+                stoch, atr_ratio,                                    # 24-25: Technical
+                mean_reversion_100, mean_reversion_200,             # 26-27: Multi-scale MR
+                vol_mean_reversion, vol_trend,                       # 28-29: Vol dynamics
+                price_range_ratio, breakout_signal,                  # 30-31: Range & breakout
+                jump_ratio, return_skew, closes_above_prev,         # 32-34: Tail & pattern
+                # NEW 29 features replacing zero-padding (35-63)
+                ma_cross_50_200,           # 35: Golden/death cross signal
+                ma_cross_10_50,            # 36: Fast MA cross
+                ad_momentum,               # 37: Accumulation/distribution momentum
+                wick_body_ratio,           # 38: Candle rejection signal
+                wick_direction,            # 39: Selling vs buying pressure from wicks
+                returns_50,                # 40: 50-period momentum
+                returns_100,               # 41: 100-period momentum
+                returns_200,               # 42: 200-period momentum (matches prediction horizon)
+                vol_price_divergence,      # 43: Volume confirms price? (key signal)
+                autocorr_1,                # 44: Mean-reversion vs momentum regime
+                autocorr_5,                # 45: Weekly autocorrelation pattern
+                return_kurtosis,           # 46: Tail risk (regime change indicator)
+                dist_from_high,            # 47: Distance from resistance
+                dist_from_low,             # 48: Distance from support
+                vol_of_vol,                # 49: Volume stability (institutional activity)
+                close_location_value,      # 50: Intra-bar buying/selling pressure
+                candle_streak,             # 51: Consecutive direction (trend strength)
+                macd_histogram,            # 52: MACD divergence signal
+                gk_vol,                    # 53: Garman-Klass vol (more efficient estimator)
+                vol_spike,                 # 54: Volume breakout detection
+                intrabar_momentum,         # 55: ATR-normalized momentum
+                ret_p10,                   # 56: Return distribution left tail
+                ret_p90,                   # 57: Return distribution right tail
+                ret_range,                 # 58: Return distribution width
+                ema_divergence,            # 59: EMA acceleration signal
+                range_expansion,           # 60: Volatility breakout
+                price_efficiency,          # 61: Trend efficiency (0=choppy, 1=clean)
+                vol_rsi,                   # 62: Volume-weighted RSI
+                return_rank,               # 63: Percentile rank of current return
             ]
 
             features.append(feature_vector)
@@ -1500,21 +1714,22 @@ class WalkForwardBacktester:
         # ============================================================
         config = {
             # Risk Management
-            "max_portfolio_drawdown": 0.15,          # 15% max DD before pausing trading
-            "portfolio_dd_resume_pct": 0.70,         # Resume trading at 70% of DD limit
+            "max_portfolio_drawdown": 0.10,          # 10% max DD before pausing (was 15% — too much drawdown)
+            "portfolio_dd_resume_pct": 0.50,         # Resume trading at 50% of DD limit (5% DD recovery)
 
             # Position Sizing & Kelly Criterion
-            "kelly_cap_pct": 0.04,                   # Cap position at 4% of capital (increased from 2% for more positions)
-            "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
+            "kelly_cap_pct": 0.03,                   # Cap position at 3% of capital (was 4% — too concentrated)
+            "recovery_scale_min": 0.70,              # Reduce sizing to 70% during recovery (was 50% — too extreme)
 
-            # Confidence-Based Position Sizing (NEW!)
-            # Higher confidence = bigger position = bigger returns
-            "confidence_ultra_high_mult": 2.0,       # >=80% confidence: 2.0x position size (double bet)
-            "confidence_high_mult": 1.5,             # 70-80% confidence: 1.5x position size
-            "confidence_medium_high_mult": 1.2,      # 60-70% confidence: 1.2x position size
+            # Confidence-Based Position Sizing
+            # Tightened from 2.0x max → 1.3x max to avoid overleveraging on
+            # potentially overfit confidence estimates
+            "confidence_ultra_high_mult": 1.3,       # >=80% confidence: 1.3x position size (was 2.0x — too aggressive)
+            "confidence_high_mult": 1.2,             # 70-80% confidence: 1.2x position size (was 1.5x)
+            "confidence_medium_high_mult": 1.1,      # 60-70% confidence: 1.1x position size (was 1.2x)
             "confidence_medium_mult": 1.0,           # 50-60% confidence: 1.0x position size (baseline)
-            "confidence_low_mult": 0.6,              # 45-50% confidence: 0.6x position size
-            "confidence_very_low_mult": 0.3,         # <45% confidence: 0.3x position size (skip if forced to minimum)
+            "confidence_low_mult": 0.7,              # 45-50% confidence: 0.7x position size (was 0.6x)
+            "confidence_very_low_mult": 0.4,         # <45% confidence: 0.4x position size (was 0.3x)
 
             # Confidence Thresholds
             # Calibrated to model accuracy (~47%): thresholds must be BELOW model output range
@@ -1548,7 +1763,7 @@ class WalkForwardBacktester:
             # Exit strategy: take profits gradually at different profit levels
             "pyramid_target_1_pct": 0.05,            # Exit 30% at +5% profit
             "pyramid_target_2_pct": 0.15,            # Exit remaining at +15% profit
-            "pyramid_exit_1_size": 0.30,             # Exit 30% of position at target 1
+            "pyramid_exit_1_size": 0.40,             # Exit 40% at target 1 (was 30% — lock in more profit early)
             "pyramid_exit_2_size": 1.0,              # Exit remaining 100% at target 2
 
             # Holding Periods (hours)
@@ -3152,6 +3367,9 @@ class WalkForwardBacktester:
                         # New logic: ONLY check that remaining capital after position >= margin requirement
                         min_capital_to_trade = 100  # Need at least $100 per position
                         num_existing_positions = len(positions)
+                        max_concurrent_positions = 12  # Hard cap on concurrent positions
+                        if num_existing_positions >= max_concurrent_positions:
+                            continue  # Skip — too many open positions
                         total_margin_required = (num_existing_positions + 1) * min_capital_to_trade  # +1 for new position
                         capital_after_position = capital - position_size
 
@@ -3176,11 +3394,30 @@ class WalkForwardBacktester:
                             # CRITICAL FIX BUG #3: Set pyramid targets at entry time, not recalculated each candle
                             # BUG FIX #6: Now uses config values (not hardcoded)
                             # This prevents time-dependent changes to exit levels
-                            # CRITICAL FIX: Both long and short use POSITIVE targets (exit at profit!)
-                            # For shorts: pnl_pct = (entry - price) / entry → positive when price falls = profit ✓
-                            # So shorts also want to exit when pnl_pct > 0.05 (profit), same as longs!
-                            pyramid_target_1 = config["pyramid_target_1_pct"]   # Exit 30% at configurable profit target
-                            pyramid_target_2 = config["pyramid_target_2_pct"]   # Exit rest at configurable profit target
+                            # DYNAMIC ATR-BASED PYRAMID TARGETS
+                            # Fixed targets (5%/15%) don't adapt to volatility. A 5% target
+                            # is too tight for volatile assets and too wide for stable ones.
+                            # Use ATR as a volatility proxy to set appropriate exit levels.
+                            if symbol in window_data and len(window_data[symbol]) >= 20:
+                                recent_candles = window_data[symbol][-20:]
+                                atr_sum = 0
+                                for k in range(1, len(recent_candles)):
+                                    tr = max(
+                                        recent_candles[k].high - recent_candles[k].low,
+                                        abs(recent_candles[k].high - recent_candles[k-1].close),
+                                        abs(recent_candles[k].low - recent_candles[k-1].close)
+                                    )
+                                    atr_sum += tr
+                                entry_atr = atr_sum / (len(recent_candles) - 1)
+                                atr_pct = entry_atr / (candle.close + 1e-8)
+                                # Target 1: 2x ATR (typical profit-take), clamped to [2%, 8%]
+                                pyramid_target_1 = np.clip(2.0 * atr_pct, 0.02, 0.08)
+                                # Target 2: 5x ATR (let big winners run), clamped to [6%, 25%]
+                                pyramid_target_2 = np.clip(5.0 * atr_pct, 0.06, 0.25)
+                            else:
+                                # Fallback to config defaults
+                                pyramid_target_1 = config["pyramid_target_1_pct"]
+                                pyramid_target_2 = config["pyramid_target_2_pct"]
 
                             # BUG FIX #9: Entry price sanity check (prevent extreme values that cause numerical instability)
                             entry_price = candle.close
@@ -4188,22 +4425,12 @@ class ModelPreTrainer:
                     dqn_losses.append(dqn_loss)
 
                 # =====================
-                # TRAIN PPO (Policy Gradient)
+                # TRAIN PPO (Supervised Cross-Entropy)
                 # =====================
-                for j in range(len(batch_X)):
-                    state = batch_X[j]
-                    action = int(batch_y[j])
-                    reward = batch_r[j]
-                    done = (j == len(batch_X) - 1)
-
-                    probs = self.ppo.get_action_probs(state)
-                    log_prob = np.log(probs[action] + 1e-8)
-                    value = self.ppo.get_value(state)
-
-                    # Signature: (state, action, reward, value, log_prob, done)
-                    self.ppo.store_transition(state, action, reward, value, log_prob, done)
-
-                ppo_loss = self.ppo.train_step()
+                # PPO is trained with direct cross-entropy on labels instead of
+                # broken importance-sampling RL (where labels pretended to be actions).
+                # This is mathematically cleaner and converges faster.
+                ppo_loss = self.ppo.train_supervised(batch_X, batch_y, batch_size=min(32, len(batch_X)))
                 if ppo_loss:
                     epoch_losses.append(ppo_loss)
 
