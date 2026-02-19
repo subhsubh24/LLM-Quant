@@ -87,6 +87,27 @@ class AltDataConfig:
     # Sentiment proxies
     sentiment_enabled: bool = True
 
+    # Calendar/seasonal effects (zero API cost - computed from dates)
+    calendar_enabled: bool = True
+
+    # Options-derived signals (VRP, skew, gamma from VIX/SPY)
+    options_signals_enabled: bool = True
+
+    # SEC EDGAR insider/institutional data
+    edgar_enabled: bool = True
+
+    # News sentiment (RSS feeds + NLP)
+    news_sentiment_enabled: bool = True
+
+    # Google Trends (requires pytrends, falls back to proxy)
+    google_trends_enabled: bool = True
+
+    # Weather/climate (NOAA, falls back to seasonal model)
+    weather_enabled: bool = True
+
+    # Short volume / dark pool signals
+    short_volume_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -100,6 +121,13 @@ class AltDataConfig:
             "cross_asset_enabled": self.cross_asset_enabled,
             "cross_asset_tickers": self.cross_asset_tickers,
             "sentiment_enabled": self.sentiment_enabled,
+            "calendar_enabled": self.calendar_enabled,
+            "options_signals_enabled": self.options_signals_enabled,
+            "edgar_enabled": self.edgar_enabled,
+            "news_sentiment_enabled": self.news_sentiment_enabled,
+            "google_trends_enabled": self.google_trends_enabled,
+            "weather_enabled": self.weather_enabled,
+            "short_volume_enabled": self.short_volume_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }

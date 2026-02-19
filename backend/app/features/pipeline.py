@@ -320,6 +320,7 @@ class FeaturePipeline:
         Returns dict mapping feature type -> list of feature names.
         """
         groups = {
+            # Traditional price/volume features
             "returns": [],
             "momentum": [],
             "volatility": [],
@@ -328,9 +329,17 @@ class FeaturePipeline:
             "risk": [],
             "technical": [],
             "enhanced_technical": [],
+            # Alternative data features
             "macro": [],
             "cross_asset": [],
             "sentiment": [],
+            "calendar": [],
+            "options": [],
+            "edgar": [],
+            "news": [],
+            "gtrends": [],
+            "weather": [],
+            "short_volume": [],
             "alt_interactions": [],
             "alt_regimes": [],
         }
@@ -349,6 +358,20 @@ class FeaturePipeline:
                 groups["cross_asset"].append(name)
             elif name.startswith("sent_"):
                 groups["sentiment"].append(name)
+            elif name.startswith("cal_"):
+                groups["calendar"].append(name)
+            elif name.startswith("opt_"):
+                groups["options"].append(name)
+            elif name.startswith("edgar_"):
+                groups["edgar"].append(name)
+            elif name.startswith("news_"):
+                groups["news"].append(name)
+            elif name.startswith("gtrends_"):
+                groups["gtrends"].append(name)
+            elif name.startswith("weather_"):
+                groups["weather"].append(name)
+            elif name.startswith("short_") or name.startswith("dark_"):
+                groups["short_volume"].append(name)
             elif name.startswith("interact_"):
                 groups["alt_interactions"].append(name)
             elif name.startswith("regime_"):

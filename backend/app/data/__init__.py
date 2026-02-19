@@ -14,6 +14,13 @@ from .alternative import (
     FREDProvider,
     CrossAssetProvider,
     SentimentProvider,
+    CalendarEffectsProvider,
+    OptionsSignalsProvider,
+    EDGARProvider,
+    NewsSentimentProvider,
+    GoogleTrendsProvider,
+    WeatherProvider,
+    ShortVolumeProvider,
 )
 
 __all__ = [
@@ -38,4 +45,11 @@ __all__ = [
     "FREDProvider",
     "CrossAssetProvider",
     "SentimentProvider",
+    "CalendarEffectsProvider",
+    "OptionsSignalsProvider",
+    "EDGARProvider",
+    "NewsSentimentProvider",
+    "GoogleTrendsProvider",
+    "WeatherProvider",
+    "ShortVolumeProvider",
 ]

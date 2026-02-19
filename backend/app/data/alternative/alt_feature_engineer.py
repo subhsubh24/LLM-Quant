@@ -36,6 +36,13 @@ from .base import AltDataConfig
 from .fred_provider import FREDProvider
 from .cross_asset_provider import CrossAssetProvider
 from .sentiment_provider import SentimentProvider
+from .calendar_provider import CalendarEffectsProvider
+from .options_signals_provider import OptionsSignalsProvider
+from .edgar_provider import EDGARProvider
+from .news_sentiment_provider import NewsSentimentProvider
+from .google_trends_provider import GoogleTrendsProvider
+from .weather_provider import WeatherProvider
+from .short_volume_provider import ShortVolumeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +53,7 @@ class AlternativeFeatureEngineer:
 
     This is the main interface for the feature pipeline to get
     alternative data features. It:
-    1. Fetches data from all configured providers
+    1. Fetches data from all 10 configured provider categories
     2. Engineers features (changes, z-scores, regimes)
     3. Computes interaction features
     4. Returns a properly lagged, standardized feature matrix
@@ -55,7 +62,7 @@ class AlternativeFeatureEngineer:
     def __init__(self, config: Optional[AltDataConfig] = None):
         self.config = config or AltDataConfig()
 
-        # Initialize providers
+        # Initialize providers (each can be independently enabled/disabled)
         self.providers = {}
         if self.config.fred_enabled:
             self.providers["fred"] = FREDProvider(self.config)
@@ -63,6 +70,20 @@ class AlternativeFeatureEngineer:
             self.providers["cross_asset"] = CrossAssetProvider(self.config)
         if self.config.sentiment_enabled:
             self.providers["sentiment"] = SentimentProvider(self.config)
+        if self.config.calendar_enabled:
+            self.providers["calendar"] = CalendarEffectsProvider(self.config)
+        if self.config.options_signals_enabled:
+            self.providers["options"] = OptionsSignalsProvider(self.config)
+        if self.config.edgar_enabled:
+            self.providers["edgar"] = EDGARProvider(self.config)
+        if self.config.news_sentiment_enabled:
+            self.providers["news"] = NewsSentimentProvider(self.config)
+        if self.config.google_trends_enabled:
+            self.providers["gtrends"] = GoogleTrendsProvider(self.config)
+        if self.config.weather_enabled:
+            self.providers["weather"] = WeatherProvider(self.config)
+        if self.config.short_volume_enabled:
+            self.providers["short_volume"] = ShortVolumeProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -316,27 +337,42 @@ class AlternativeFeatureEngineer:
             "fred_macro": [],
             "cross_asset": [],
             "sentiment": [],
+            "calendar": [],
+            "options": [],
+            "edgar": [],
+            "news": [],
+            "gtrends": [],
+            "weather": [],
+            "short_volume": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
         }
 
         for name in self.feature_names:
+            # Check for engineered suffixes first
+            is_engineered = "_roc_" in name or "_zscore_" in name or "_pctile_" in name
+
             if name.startswith("fred_"):
-                if "_roc_" in name or "_zscore_" in name or "_pctile_" in name:
-                    groups["engineered"].append(name)
-                else:
-                    groups["fred_macro"].append(name)
+                groups["engineered" if is_engineered else "fred_macro"].append(name)
             elif name.startswith("xasset_"):
-                if "_roc_" in name or "_zscore_" in name or "_pctile_" in name:
-                    groups["engineered"].append(name)
-                else:
-                    groups["cross_asset"].append(name)
+                groups["engineered" if is_engineered else "cross_asset"].append(name)
             elif name.startswith("sent_"):
-                if "_roc_" in name or "_zscore_" in name or "_pctile_" in name:
-                    groups["engineered"].append(name)
-                else:
-                    groups["sentiment"].append(name)
+                groups["engineered" if is_engineered else "sentiment"].append(name)
+            elif name.startswith("cal_"):
+                groups["calendar"].append(name)
+            elif name.startswith("opt_"):
+                groups["options"].append(name)
+            elif name.startswith("edgar_"):
+                groups["edgar"].append(name)
+            elif name.startswith("news_"):
+                groups["news"].append(name)
+            elif name.startswith("gtrends_"):
+                groups["gtrends"].append(name)
+            elif name.startswith("weather_"):
+                groups["weather"].append(name)
+            elif name.startswith("short_") or name.startswith("dark_"):
+                groups["short_volume"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):
