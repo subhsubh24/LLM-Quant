@@ -24,6 +24,8 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
+import pandas as pd
+
 from .microstructure import MicrostructureExtractor, OrderBookFetcher
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
 
@@ -1698,6 +1700,24 @@ class WalkForwardBacktester:
         """
         logger.info("Starting walk-forward backtest...")
 
+        # ============================================================
+        # HYBRID SIGNAL: Initialize Aristotle Rules-Based Strategy
+        # ============================================================
+        # The ML ensemble alone achieves 40-50% accuracy. The Aristotle
+        # rules-based strategy encodes proven technical signals (RSI,
+        # Fibonacci, MACD, MA alignment, Bollinger, volume, candlestick).
+        # Combining both via a hybrid approach gives better decisions:
+        # - Agreement bonus when both agree (higher confidence)
+        # - Disagreement dampening when they conflict (reduce size)
+        # - Rules act as a sanity check on noisy ML predictions
+        try:
+            from ..strategies.rules_based_strategy import AristotleRulesStrategy
+            aristotle_strategy = AristotleRulesStrategy(min_bars=200)
+            logger.info("✅ Aristotle Rules-Based Strategy initialized for hybrid signals")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize Aristotle strategy: {e} — falling back to ML-only")
+            aristotle_strategy = None
+
         # CRITICAL FIX: Load trained checkpoints before backtest
         # Training saves models to disk, but backtest is a separate code path.
         # model_trainer needs its models loaded before making predictions.
@@ -1862,6 +1882,16 @@ class WalkForwardBacktester:
             "flip_confidence_penalty": 0.10,        # Extra confidence required for direction flips (+10%)
             "max_flips_per_symbol": 3,              # Max direction flips before blocking symbol temporarily
             "flip_block_candles": 50,               # Block symbol for N candles after max flips exceeded
+
+            # HYBRID SIGNAL ENGINE (ML + Aristotle Rules)
+            # Combines ML ensemble predictions with rules-based technical signals.
+            # When both agree, confidence is boosted. When they disagree, position is dampened.
+            "hybrid_enabled": True,                  # Master switch for hybrid signals
+            "hybrid_ml_weight": 0.45,                # Weight for ML ensemble score
+            "hybrid_rules_weight": 0.45,             # Weight for Aristotle rules score
+            "hybrid_agreement_bonus": 0.10,          # Extra confidence when both sources agree
+            "hybrid_disagreement_dampen": 0.50,      # Reduce combined score by 50% on disagreement
+            "hybrid_min_rules_confidence": 0.25,     # Minimum rules confidence to use in hybrid
         }
 
         # BUG #16 FIX: Validate all required configuration keys exist and have valid types/ranges
@@ -2052,6 +2082,8 @@ class WalkForwardBacktester:
         logger.info(f"    - Per-symbol cooldown: {min_cooldown_candles} candles")
         logger.info(f"    - Max position size: {config['kelly_cap_pct']*100:.0f}% of capital (Kelly-based, capped at 1.5x)")
         logger.info(f"  Expected: Should generate trades within first 100-500 candles")
+        logger.info(f"  Hybrid signals: {'ENABLED' if config['hybrid_enabled'] and aristotle_strategy else 'DISABLED'} "
+                     f"(ML={config['hybrid_ml_weight']}, Rules={config['hybrid_rules_weight']}, Bonus={config['hybrid_agreement_bonus']})")
 
         # DIAGNOSTIC: Track filter stages
         filter_stage_counters = {
@@ -2068,6 +2100,12 @@ class WalkForwardBacktester:
             "good_microstructure": 0, # microstructure filter passed
             "mean_reversion_ok": 0,  # mean-reversion entry filter passed
             "positions_opened": 0,    # actually opened
+            "hybrid_signals": 0,      # hybrid ML+Rules signals generated
+            "hybrid_agree": 0,        # ML and rules agreed on direction
+            "hybrid_disagree": 0,     # ML and rules disagreed on direction
+            "hybrid_boosted": 0,      # signals boosted by agreement
+            "hybrid_dampened": 0,     # signals dampened by disagreement
+            "hybrid_overridden": 0,   # ML action overridden by rules
         }
 
         # PHASE B: Initialize continuous learning (real data only)
@@ -2126,6 +2164,13 @@ class WalkForwardBacktester:
                         f"liquid={fc['is_liquid']} → consensus={fc['strong_consensus']} → "
                         f"sig={fc['stat_significant']} → mr={fc.get('mean_reversion_ok', 0)} → opened={fc['positions_opened']}"
                     )
+                    if fc.get("hybrid_signals", 0) > 0:
+                        logger.info(
+                            f"  Hybrid signals: {fc['hybrid_signals']} total | "
+                            f"agree={fc['hybrid_agree']} boost={fc['hybrid_boosted']} | "
+                            f"disagree={fc['hybrid_disagree']} dampen={fc['hybrid_dampened']} | "
+                            f"overrides={fc['hybrid_overridden']}"
+                        )
                 last_log_time = current_time
                 last_log_index = candles_processed
 
@@ -2950,6 +2995,140 @@ class WalkForwardBacktester:
                         continue  # Skip this signal, models not working
 
                     # ============================================================
+                    # HYBRID SIGNAL: Combine ML prediction with Aristotle Rules
+                    # ============================================================
+                    # The ML ensemble gives ~40-50% accuracy alone. The Aristotle
+                    # rules-based strategy uses proven technical indicators (RSI,
+                    # MACD, Fibonacci, MA alignment, Bollinger, volume, candlestick).
+                    # Combining them:
+                    # - Both agree → boost confidence (agreement bonus)
+                    # - They disagree → dampen position (reduce risk)
+                    # - Rules can override ML on extreme conviction (>0.5 composite)
+                    rules_composite_score = 0.0
+                    rules_confidence = 0.0
+                    hybrid_applied = False
+
+                    if config["hybrid_enabled"] and aristotle_strategy is not None:
+                        try:
+                            # Build OHLCV DataFrame from window candles for Aristotle strategy
+                            # Need at least 200 bars (aristotle_strategy.min_bars)
+                            rules_candles = window_data[symbol][-max(200, feature_window_size):]
+                            if len(rules_candles) >= 200:
+                                rules_df = pd.DataFrame({
+                                    "open": [c.open for c in rules_candles],
+                                    "high": [c.high for c in rules_candles],
+                                    "low": [c.low for c in rules_candles],
+                                    "close": [c.close for c in rules_candles],
+                                    "volume": [c.volume for c in rules_candles],
+                                })
+
+                                rules_signal = aristotle_strategy.generate_signal(rules_df)
+                                rules_composite_score = rules_signal.extra_data.get("composite_score", 0.0)
+                                rules_confidence = rules_signal.confidence
+                                filter_stage_counters["hybrid_signals"] += 1
+
+                                # Only apply hybrid logic if rules have meaningful confidence
+                                if rules_confidence >= config["hybrid_min_rules_confidence"]:
+                                    hybrid_applied = True
+
+                                    # Determine direction of each source
+                                    ml_action = prediction["action"]  # 0=SHORT, 1=HOLD, 2=LONG
+                                    ml_direction = 1 if ml_action == 2 else (-1 if ml_action == 0 else 0)
+                                    rules_direction = 1 if rules_composite_score > 0.05 else (-1 if rules_composite_score < -0.05 else 0)
+
+                                    # ML confidence as a score: map action+confidence to [-1, +1]
+                                    ml_score = ml_direction * prediction["confidence"]
+
+                                    # Weighted combination
+                                    ml_w = config["hybrid_ml_weight"]
+                                    rules_w = config["hybrid_rules_weight"]
+                                    w_total = ml_w + rules_w
+                                    combined_score = (ml_w * ml_score + rules_w * rules_composite_score) / w_total
+
+                                    # Check agreement
+                                    sources_agree = (ml_direction != 0 and rules_direction != 0
+                                                     and ml_direction == rules_direction)
+                                    sources_disagree = (ml_direction != 0 and rules_direction != 0
+                                                        and ml_direction != rules_direction)
+
+                                    if sources_agree:
+                                        # AGREEMENT BONUS: Both point same way → boost confidence
+                                        bonus = config["hybrid_agreement_bonus"]
+                                        combined_confidence = min(
+                                            prediction["confidence"] + bonus + rules_confidence * 0.2,
+                                            1.0
+                                        )
+                                        filter_stage_counters["hybrid_agree"] += 1
+                                        filter_stage_counters["hybrid_boosted"] += 1
+
+                                        # Use the agreed-upon direction with boosted confidence
+                                        prediction["confidence"] = combined_confidence
+                                        # Action stays the same (both agree)
+
+                                    elif sources_disagree:
+                                        # DISAGREEMENT: Dampen the signal
+                                        dampen = config["hybrid_disagreement_dampen"]
+                                        combined_confidence = max(
+                                            prediction["confidence"] * dampen - 0.05,
+                                            0.0
+                                        )
+                                        filter_stage_counters["hybrid_disagree"] += 1
+                                        filter_stage_counters["hybrid_dampened"] += 1
+
+                                        # If rules have very strong conviction (>0.4) and ML is weak (<0.55),
+                                        # override ML action with rules direction
+                                        if (abs(rules_composite_score) > 0.4
+                                            and rules_confidence > 0.6
+                                            and prediction["confidence"] < 0.55):
+                                            old_action = prediction["action"]
+                                            if rules_direction == 1:
+                                                prediction["action"] = 2  # LONG
+                                            elif rules_direction == -1:
+                                                prediction["action"] = 0  # SHORT
+                                            prediction["confidence"] = rules_confidence * 0.8
+                                            filter_stage_counters["hybrid_overridden"] += 1
+                                            if signals_generated <= 100:
+                                                old_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(old_action, '?')
+                                                new_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
+                                                logger.info(f"🔄 HYBRID OVERRIDE: {symbol} ML={old_name} → Rules={new_name} "
+                                                            f"(rules_score={rules_composite_score:+.3f}, rules_conf={rules_confidence:.3f})")
+                                        else:
+                                            prediction["confidence"] = combined_confidence
+
+                                    else:
+                                        # One is neutral — use the non-neutral one with slight confidence boost
+                                        if ml_direction == 0 and rules_direction != 0:
+                                            # ML says HOLD but rules have a view → use rules
+                                            prediction["action"] = 2 if rules_direction == 1 else 0
+                                            prediction["confidence"] = rules_confidence * 0.7
+                                            filter_stage_counters["hybrid_overridden"] += 1
+                                        elif rules_direction == 0 and ml_direction != 0:
+                                            # Rules neutral, ML has a view → reduce ML confidence slightly
+                                            prediction["confidence"] = prediction["confidence"] * 0.9
+
+                                    # Log hybrid diagnostics for first 50 signals
+                                    if signals_generated <= 50:
+                                        ml_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(ml_action, '?')
+                                        rules_dir = 'LONG' if rules_direction == 1 else ('SHORT' if rules_direction == -1 else 'NEUTRAL')
+                                        final_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
+                                        agree_str = "AGREE" if sources_agree else ("DISAGREE" if sources_disagree else "PARTIAL")
+                                        logger.info(
+                                            f"[HYBRID {signals_generated}] {symbol}: ML={ml_name}({prediction['confidence']:.3f}) "
+                                            f"+ Rules={rules_dir}({rules_composite_score:+.3f}, conf={rules_confidence:.3f}) "
+                                            f"→ {agree_str} → Final={final_name}({prediction['confidence']:.3f})"
+                                        )
+
+                        except Exception as e:
+                            # Rules strategy failure should not block ML-only trading
+                            if signals_generated <= 10:
+                                logger.warning(f"⚠️ Aristotle rules signal failed for {symbol}: {e}")
+
+                    # Store rules score in prediction for downstream use
+                    prediction["rules_score"] = rules_composite_score
+                    prediction["rules_confidence"] = rules_confidence
+                    prediction["hybrid_applied"] = hybrid_applied
+
+                    # ============================================================
                     # DEGRADATION AUTO-HALT & SIGNAL INVERSION
                     # ============================================================
                     # If models are anti-predictive (< 30% win rate), INVERT their signals.
@@ -3722,6 +3901,18 @@ class WalkForwardBacktester:
         logger.info(f"  Stage 10 - Not already open: {filter_stage_counters['not_already_open']:,}")
         logger.info(f"  ✅ POSITIONS ACTUALLY OPENED: {filter_stage_counters['positions_opened']:,}")
         logger.info(f"\n  Filter funnel: {filter_stage_counters['total_predictions']:,} → {filter_stage_counters['positions_opened']:,} trades ({100*filter_stage_counters['positions_opened']/max(1,filter_stage_counters['total_predictions']):.2f}% conversion)")
+
+        # HYBRID SIGNAL ANALYSIS
+        if filter_stage_counters.get("hybrid_signals", 0) > 0:
+            hs = filter_stage_counters
+            total_hybrid = hs["hybrid_signals"]
+            logger.info(f"\n🔀 HYBRID SIGNAL ANALYSIS (ML + Aristotle Rules):")
+            logger.info(f"  Total hybrid evaluations: {total_hybrid:,}")
+            logger.info(f"  Agreement (ML + Rules same direction): {hs['hybrid_agree']:,} ({100*hs['hybrid_agree']/max(1,total_hybrid):.1f}%)")
+            logger.info(f"  Disagreement (ML vs Rules conflict): {hs['hybrid_disagree']:,} ({100*hs['hybrid_disagree']/max(1,total_hybrid):.1f}%)")
+            logger.info(f"  Signals boosted by agreement: {hs['hybrid_boosted']:,}")
+            logger.info(f"  Signals dampened by disagreement: {hs['hybrid_dampened']:,}")
+            logger.info(f"  ML actions overridden by rules: {hs['hybrid_overridden']:,}")
 
         # SAFEGUARD: Log trading quality metrics
         logger.info("\n🛡️ SAFEGUARDS - TRADING QUALITY METRICS:")
