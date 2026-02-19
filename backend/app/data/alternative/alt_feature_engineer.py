@@ -43,6 +43,7 @@ from .news_sentiment_provider import NewsSentimentProvider
 from .google_trends_provider import GoogleTrendsProvider
 from .weather_provider import WeatherProvider
 from .short_volume_provider import ShortVolumeProvider
+from .crypto_sentiment_provider import CryptoSentimentProvider
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,8 @@ class AlternativeFeatureEngineer:
             self.providers["weather"] = WeatherProvider(self.config)
         if self.config.short_volume_enabled:
             self.providers["short_volume"] = ShortVolumeProvider(self.config)
+        if self.config.crypto_sentiment_enabled:
+            self.providers["crypto"] = CryptoSentimentProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -124,8 +127,10 @@ class AlternativeFeatureEngineer:
             logger.warning("No alternative data features computed")
             return pd.DataFrame()
 
-        # 2. Combine all raw features
+        # 2. Combine all raw features (handle duplicate column names)
         features = pd.concat(all_features, axis=1)
+        # Remove duplicate columns (keep first occurrence)
+        features = features.loc[:, ~features.columns.duplicated()]
 
         # 3. Engineer derived features
         engineered = self._engineer_features(features)
@@ -159,18 +164,37 @@ class AlternativeFeatureEngineer:
 
         return features
 
+    # Prefixes for columns that are binary/categorical and should NOT
+    # have z-score/roc/percentile engineering applied (already informative as-is)
+    _SKIP_ENGINEERING_PREFIXES = (
+        "cal_",       # Calendar flags are binary (0/1)
+        "regime_",    # Regime indicators are binary (0/1)
+        "opt_vix_regime",  # Categorical regime label
+    )
+
     def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
         """
         Engineer features from raw alternative data.
 
         Computes rate-of-change, z-scores, and momentum for each
-        raw series across multiple lookback windows.
+        CONTINUOUS raw series. Skips binary/categorical columns
+        (calendar flags, regime indicators) since z-scoring 0/1
+        values is meaningless.
         """
         result = pd.DataFrame(index=raw.index)
 
         for col in raw.columns:
+            # Skip binary/categorical columns
+            if any(col.startswith(prefix) for prefix in self._SKIP_ENGINEERING_PREFIXES):
+                continue
+
             series = raw[col]
             if series.isna().all():
+                continue
+
+            # Skip columns that are already binary (only 0s and 1s)
+            unique_vals = series.dropna().unique()
+            if len(unique_vals) <= 2 and set(unique_vals).issubset({0.0, 1.0, 0, 1}):
                 continue
 
             for window in self.config.lookback_windows:
@@ -344,6 +368,7 @@ class AlternativeFeatureEngineer:
             "gtrends": [],
             "weather": [],
             "short_volume": [],
+            "crypto": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
@@ -373,6 +398,8 @@ class AlternativeFeatureEngineer:
                 groups["weather"].append(name)
             elif name.startswith("short_") or name.startswith("dark_"):
                 groups["short_volume"].append(name)
+            elif name.startswith("crypto_"):
+                groups["crypto"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):

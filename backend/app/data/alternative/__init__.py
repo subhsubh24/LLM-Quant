@@ -2,18 +2,19 @@
 Alternative data providers for non-price/volume signals.
 
 Quant firms use dozens of alternative data sources beyond market data.
-This module implements 10 provider categories:
+This module implements 11 provider categories:
 
-1. Macroeconomic data (FRED) - interest rates, inflation, employment
-2. Cross-asset signals - bonds, commodities, currencies, credit spreads
-3. Sentiment proxies - VIX term structure, market breadth, fund flows
-4. Calendar/seasonal effects - FOMC drift, turn of month, OpEx
-5. Options-derived signals - VRP, skew, gamma exposure
-6. SEC EDGAR - insider trading, institutional holdings
-7. News sentiment - RSS headlines + financial NLP
-8. Google Trends - search volume as attention/fear proxy
-9. Weather/climate - NOAA data, energy demand, SAD effect
+1.  Macroeconomic data (FRED) - interest rates, inflation, employment
+2.  Cross-asset signals - bonds, commodities, currencies, credit spreads
+3.  Sentiment proxies - VIX term structure, market breadth, fund flows
+4.  Calendar/seasonal effects - FOMC drift, turn of month, OpEx
+5.  Options-derived signals - VRP, skew, gamma exposure
+6.  SEC EDGAR - insider trading, institutional holdings
+7.  News sentiment - RSS headlines + financial NLP
+8.  Google Trends - search volume as attention/fear proxy
+9.  Weather/climate - NOAA data, energy demand, SAD effect
 10. Short volume - FINRA dark pool and short selling signals
+11. Crypto sentiment - BTC/ETH as risk appetite proxy
 """
 
 from .base import AlternativeDataProvider, AltDataConfig
@@ -27,6 +28,7 @@ from .news_sentiment_provider import NewsSentimentProvider
 from .google_trends_provider import GoogleTrendsProvider
 from .weather_provider import WeatherProvider
 from .short_volume_provider import ShortVolumeProvider
+from .crypto_sentiment_provider import CryptoSentimentProvider
 from .alt_feature_engineer import AlternativeFeatureEngineer
 
 __all__ = [
@@ -42,5 +44,6 @@ __all__ = [
     "GoogleTrendsProvider",
     "WeatherProvider",
     "ShortVolumeProvider",
+    "CryptoSentimentProvider",
     "AlternativeFeatureEngineer",
 ]

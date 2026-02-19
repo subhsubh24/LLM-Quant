@@ -108,6 +108,9 @@ class AltDataConfig:
     # Short volume / dark pool signals
     short_volume_enabled: bool = True
 
+    # Crypto as risk sentiment proxy (BTC/ETH)
+    crypto_sentiment_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -128,6 +131,7 @@ class AltDataConfig:
             "google_trends_enabled": self.google_trends_enabled,
             "weather_enabled": self.weather_enabled,
             "short_volume_enabled": self.short_volume_enabled,
+            "crypto_sentiment_enabled": self.crypto_sentiment_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }
