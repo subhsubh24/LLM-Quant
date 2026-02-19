@@ -43,3 +43,8 @@ pytest-cov>=4.0.0
 # Optional but useful
 yfinance>=0.2.30
 ta-lib>=0.4.24  # May require system dependencies
+
+# Alternative Data (all optional - providers fall back gracefully)
+pytrends>=4.9.0          # Google Trends data (free, no key)
+pandas-datareader>=0.10  # FRED data without API key
+feedparser>=6.0.0        # RSS news feed parsing
