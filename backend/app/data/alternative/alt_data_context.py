@@ -102,10 +102,8 @@ class AltDataContext:
                 self._is_prepared = False
                 return False
 
-            # Fill any remaining NaN with 0 (safe for model input)
-            features_df = features_df.fillna(0.0)
-
-            # Feature selection: remove noise before feeding to models
+            # Feature selection BEFORE fillna so correlation matrix
+            # isn't biased by leading zeros from lag shift (BUG #8 fix)
             n_before = len(features_df.columns)
             features_df = self._select_features(features_df)
             n_after = len(features_df.columns)
@@ -114,6 +112,9 @@ class AltDataContext:
                     f"Feature selection: {n_before} → {n_after} features "
                     f"(removed {n_before - n_after} noisy/redundant)"
                 )
+
+            # Fill remaining NaN with 0 AFTER selection (safe for model input)
+            features_df = features_df.fillna(0.0)
 
             # Store feature names
             self._feature_names = features_df.columns.tolist()

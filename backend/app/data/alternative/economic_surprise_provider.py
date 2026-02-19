@@ -39,8 +39,15 @@ import numpy as np
 import logging
 
 from .base import AlternativeDataProvider, AltDataConfig
+from .calendar_provider import FOMC_DATES_2023_2026
 
 logger = logging.getLogger(__name__)
+
+# Parse FOMC dates into a lookup by year for reuse
+_FOMC_BY_YEAR: dict = {}
+for _ds in FOMC_DATES_2023_2026:
+    _d = date.fromisoformat(_ds)
+    _FOMC_BY_YEAR.setdefault(_d.year, []).append((_d.month, _d.day))
 
 
 def _get_first_friday(year: int, month: int) -> date:
@@ -81,13 +88,8 @@ def _get_data_release_dates(year: int) -> dict:
             gdp_date -= timedelta(days=1)
         releases[gdp_date] = "gdp"
 
-    # FOMC meetings (approximate - 8 per year)
-    fomc_months = {
-        2024: [(1, 31), (3, 20), (5, 1), (6, 12), (7, 31), (9, 18), (11, 7), (12, 18)],
-        2025: [(1, 29), (3, 19), (5, 7), (6, 18), (7, 30), (9, 17), (11, 5), (12, 17)],
-        2026: [(1, 28), (3, 18), (5, 6), (6, 17), (7, 29), (9, 16), (11, 4), (12, 16)],
-    }
-    for m, d in fomc_months.get(year, []):
+    # FOMC meetings - use shared dates from calendar_provider (single source of truth)
+    for m, d in _FOMC_BY_YEAR.get(year, []):
         releases[date(year, m, d)] = "fomc"
 
     # ISM Manufacturing PMI: First business day of month
@@ -203,8 +205,24 @@ class EconomicSurpriseProvider(AlternativeDataProvider):
             result[col_name] = np.clip(nearest_vals, -10, 10) / 10.0
 
         # --- Vectorized: Release windows ---
+        # Use business day offset instead of calendar day to handle
+        # Fri→Mon and Mon→Fri correctly (BUG #20 fix)
+        def _next_bday(dt: date) -> date:
+            """Next business day after dt."""
+            nxt = dt + timedelta(days=1)
+            while nxt.weekday() >= 5:
+                nxt += timedelta(days=1)
+            return nxt
+
+        def _prev_bday(dt: date) -> date:
+            """Previous business day before dt."""
+            prev = dt - timedelta(days=1)
+            while prev.weekday() >= 5:
+                prev -= timedelta(days=1)
+            return prev
+
         result["econ_pre_release_24h"] = np.array([
-            1.0 if (dt + timedelta(days=1)) in all_release_set else 0.0
+            1.0 if _next_bday(dt) in all_release_set else 0.0
             for dt in date_objs
         ])
         result["econ_release_day"] = np.array([
@@ -212,7 +230,7 @@ class EconomicSurpriseProvider(AlternativeDataProvider):
             for dt in date_objs
         ])
         result["econ_post_release_24h"] = np.array([
-            1.0 if (dt - timedelta(days=1)) in all_release_set else 0.0
+            1.0 if _prev_bday(dt) in all_release_set else 0.0
             for dt in date_objs
         ])
 

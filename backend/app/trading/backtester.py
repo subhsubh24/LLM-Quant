@@ -3063,6 +3063,14 @@ class WalkForwardBacktester:
                         alt_vec = self.alt_data_context.get_features(candle_date)
                         state = np.concatenate([state, alt_vec])
 
+                    # Pad/truncate state to match model's expected state_dim
+                    # This prevents crashes when alt data availability differs
+                    # between training and inference
+                    if len(state) < self.state_dim:
+                        state = np.concatenate([state, np.zeros(self.state_dim - len(state))])
+                    elif len(state) > self.state_dim:
+                        state = state[:self.state_dim]
+
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 

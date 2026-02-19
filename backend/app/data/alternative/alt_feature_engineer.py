@@ -181,7 +181,10 @@ class AlternativeFeatureEngineer:
     _SKIP_ENGINEERING_PREFIXES = (
         "cal_",       # Calendar flags are binary (0/1)
         "regime_",    # Regime indicators are binary (0/1)
-        "opt_vix_regime",  # Categorical regime label
+        "opt_vix_regime",  # Categorical regime label (0-5)
+        "crypto_btc_corr_regime",  # Categorical regime label (0-3)
+        "sector_momentum_leader",  # Encoded sector index (categorical)
+        "sector_momentum_laggard",  # Encoded sector index (categorical)
         "pol_",       # Political/congressional flags are mostly binary
         "econ_pre_",  # Economic release windows are binary
         "econ_release_day",  # Binary flag
