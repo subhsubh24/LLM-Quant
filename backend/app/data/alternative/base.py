@@ -111,6 +111,12 @@ class AltDataConfig:
     # Crypto as risk sentiment proxy (BTC/ETH)
     crypto_sentiment_enabled: bool = True
 
+    # Congressional/political cycle signals (zero API cost - computed from dates)
+    congressional_enabled: bool = True
+
+    # Economic surprise and data release calendar (zero API cost - computed from dates)
+    economic_surprise_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -132,6 +138,8 @@ class AltDataConfig:
             "weather_enabled": self.weather_enabled,
             "short_volume_enabled": self.short_volume_enabled,
             "crypto_sentiment_enabled": self.crypto_sentiment_enabled,
+            "congressional_enabled": self.congressional_enabled,
+            "economic_surprise_enabled": self.economic_surprise_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }

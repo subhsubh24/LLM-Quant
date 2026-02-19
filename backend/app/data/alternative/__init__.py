@@ -2,7 +2,7 @@
 Alternative data providers for non-price/volume signals.
 
 Quant firms use dozens of alternative data sources beyond market data.
-This module implements 11 provider categories:
+This module implements 13 provider categories:
 
 1.  Macroeconomic data (FRED) - interest rates, inflation, employment
 2.  Cross-asset signals - bonds, commodities, currencies, credit spreads
@@ -15,6 +15,8 @@ This module implements 11 provider categories:
 9.  Weather/climate - NOAA data, energy demand, SAD effect
 10. Short volume - FINRA dark pool and short selling signals
 11. Crypto sentiment - BTC/ETH as risk appetite proxy
+12. Congressional/political - election cycles, policy uncertainty
+13. Economic surprise - data release calendar, surprise index proxy
 """
 
 from .base import AlternativeDataProvider, AltDataConfig
@@ -29,6 +31,8 @@ from .google_trends_provider import GoogleTrendsProvider
 from .weather_provider import WeatherProvider
 from .short_volume_provider import ShortVolumeProvider
 from .crypto_sentiment_provider import CryptoSentimentProvider
+from .congressional_provider import CongressionalProvider
+from .economic_surprise_provider import EconomicSurpriseProvider
 from .alt_feature_engineer import AlternativeFeatureEngineer
 
 __all__ = [
@@ -45,5 +49,7 @@ __all__ = [
     "WeatherProvider",
     "ShortVolumeProvider",
     "CryptoSentimentProvider",
+    "CongressionalProvider",
+    "EconomicSurpriseProvider",
     "AlternativeFeatureEngineer",
 ]

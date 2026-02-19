@@ -46,6 +46,8 @@ from backend.app.data.alternative import (
     GoogleTrendsProvider,
     ShortVolumeProvider,
     CryptoSentimentProvider,
+    CongressionalProvider,
+    EconomicSurpriseProvider,
 )
 from backend.app.data.alternative.alt_data_context import AltDataContext
 
@@ -89,6 +91,8 @@ def test_all_providers():
         (GoogleTrendsProvider(), "Google Trends"),
         (ShortVolumeProvider(), "Short Volume / Dark Pool"),
         (CryptoSentimentProvider(), "Crypto Sentiment"),
+        (CongressionalProvider(), "Congressional/Political"),
+        (EconomicSurpriseProvider(), "Economic Surprise"),
     ]
 
     total_ok = 0

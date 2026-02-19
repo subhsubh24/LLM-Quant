@@ -341,6 +341,8 @@ class FeaturePipeline:
             "weather": [],
             "short_volume": [],
             "crypto": [],
+            "congressional": [],
+            "econ_surprise": [],
             "alt_interactions": [],
             "alt_regimes": [],
         }
@@ -375,6 +377,10 @@ class FeaturePipeline:
                 groups["short_volume"].append(name)
             elif name.startswith("crypto_"):
                 groups["crypto"].append(name)
+            elif name.startswith("pol_"):
+                groups["congressional"].append(name)
+            elif name.startswith("econ_"):
+                groups["econ_surprise"].append(name)
             elif name.startswith("interact_"):
                 groups["alt_interactions"].append(name)
             elif name.startswith("regime_"):

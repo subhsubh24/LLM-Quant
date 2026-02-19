@@ -4447,11 +4447,13 @@ class ModelPreTrainer:
     Saves trained weights to disk for production use.
     """
 
-    def __init__(self, state_dim: int = 192, action_dim: int = 3):
-        # state_dim=192: 64 price/volume features + up to 128 alternative data features
-        # (macro, sentiment, calendar, cross-asset, options, crypto, weather, etc.)
-        # With all 11 providers active: ~168 features total, padded to 192 for alignment
-        # Old checkpoints with state_dim=64 will fail to load and trigger fresh training
+    def __init__(self, state_dim: int = 320, action_dim: int = 3):
+        # state_dim=320: 64 price/volume features + up to 256 alternative data features
+        # (13 providers: macro, sentiment, calendar, cross-asset, options, crypto,
+        #  weather, EDGAR, news, trends, short volume, congressional, economic surprise)
+        # With all 13 providers + feature engineering: ~250+ features total
+        # 320 = next multiple of 64 for GPU memory alignment efficiency
+        # Old checkpoints with state_dim=64 will fail to load → triggers fresh training
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
 

@@ -44,6 +44,8 @@ from .google_trends_provider import GoogleTrendsProvider
 from .weather_provider import WeatherProvider
 from .short_volume_provider import ShortVolumeProvider
 from .crypto_sentiment_provider import CryptoSentimentProvider
+from .congressional_provider import CongressionalProvider
+from .economic_surprise_provider import EconomicSurpriseProvider
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,10 @@ class AlternativeFeatureEngineer:
             self.providers["short_volume"] = ShortVolumeProvider(self.config)
         if self.config.crypto_sentiment_enabled:
             self.providers["crypto"] = CryptoSentimentProvider(self.config)
+        if self.config.congressional_enabled:
+            self.providers["congressional"] = CongressionalProvider(self.config)
+        if self.config.economic_surprise_enabled:
+            self.providers["econ_surprise"] = EconomicSurpriseProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -170,6 +176,13 @@ class AlternativeFeatureEngineer:
         "cal_",       # Calendar flags are binary (0/1)
         "regime_",    # Regime indicators are binary (0/1)
         "opt_vix_regime",  # Categorical regime label
+        "pol_",       # Political/congressional flags are mostly binary
+        "econ_pre_",  # Economic release windows are binary
+        "econ_release_day",  # Binary flag
+        "econ_post_", # Binary flag
+        "econ_q4_",   # Binary seasonal flags
+        "econ_tax_",  # Binary seasonal flags
+        "econ_summer_",  # Binary seasonal flags
     )
 
     def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -286,6 +299,59 @@ class AlternativeFeatureEngineer:
                     features[hy_z] * features[claims_z]
                 )
 
+        # --- Calendar x Weather interactions ---
+
+        # SAD effect + seasonal calendar: winter darkness + poor market seasonality
+        sad_col = self._find_col(features, "weather_sad_proxy")
+        jan_col = self._find_col(features, "cal_january")
+        if sad_col and jan_col:
+            # January effect amplified by SAD (short dark days in Jan)
+            result["interact_sad_x_january"] = (
+                features[sad_col] * features[jan_col]
+            )
+
+        # FOMC window + VIX: Pre-FOMC drift stronger when vol is high
+        fomc_col = self._find_col(features, "cal_fomc_window")
+        vix_z_col = self._find_col(features, "sent_vix_zscore_21d")
+        if fomc_col and vix_z_col:
+            result["interact_fomc_x_vix"] = (
+                features[fomc_col] * features[vix_z_col]
+            )
+
+        # --- Economic x Political interactions ---
+
+        # Election proximity + economic cycle: markets nervous when election + weak economy
+        election_col = self._find_col(features, "pol_election_window_90d")
+        cycle_col = self._find_col(features, "econ_cycle_phase")
+        if election_col and cycle_col:
+            result["interact_election_x_cycle"] = (
+                features[election_col] * features[cycle_col]
+            )
+
+        # Data release day + political uncertainty: releases matter more in uncertain times
+        release_col = self._find_col(features, "econ_release_day")
+        pol_uncertainty = self._find_col(features, "pol_fiscal_year_end")
+        if release_col and pol_uncertainty:
+            result["interact_release_x_fiscal"] = (
+                features[release_col] * features[pol_uncertainty]
+            )
+
+        # Presidential cycle + economic surprise: pre-election year + positive surprises
+        preelection_col = self._find_col(features, "pol_preelection_year")
+        surprise_col = self._find_col(features, "econ_surprise_proxy")
+        if preelection_col and surprise_col:
+            result["interact_preelection_x_surprise"] = (
+                features[preelection_col] * features[surprise_col]
+            )
+
+        # Energy demand + weather: extreme weather + energy demand = utility sector play
+        energy_col = self._find_col(features, "weather_energy_demand_proxy")
+        hdd_col = self._find_col(features, "weather_hdd")
+        if energy_col and hdd_col:
+            result["interact_energy_x_cold"] = (
+                features[energy_col] * features[hdd_col]
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -369,6 +435,8 @@ class AlternativeFeatureEngineer:
             "weather": [],
             "short_volume": [],
             "crypto": [],
+            "congressional": [],
+            "econ_surprise": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
@@ -400,6 +468,10 @@ class AlternativeFeatureEngineer:
                 groups["short_volume"].append(name)
             elif name.startswith("crypto_"):
                 groups["crypto"].append(name)
+            elif name.startswith("pol_"):
+                groups["congressional"].append(name)
+            elif name.startswith("econ_"):
+                groups["econ_surprise"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):
