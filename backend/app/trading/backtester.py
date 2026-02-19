@@ -4244,13 +4244,18 @@ class ModelPreTrainer:
 
             # Calculate rewards with proper time alignment
             # features[i] corresponds to candles[400+i] (after alignment fix)
+            # FIX: Use 800h lookahead to match primary label horizon (was 200h).
+            # DQN learns Q-values from rewards. If rewards use 200h returns but labels
+            # use 800h returns, DQN gets conflicting signals (e.g. label="buy" because
+            # 800h return is positive, but reward is negative because 200h return is negative).
             closes = np.array([c.close for c in candles])
             raw_rewards = []
             feature_lookback = 400
+            reward_horizon = 800  # Match primary label horizon
             for i in range(len(features)):
                 candle_idx = feature_lookback + i
-                if candle_idx + 200 < len(closes):
-                    future_return = (closes[candle_idx + 200] - closes[candle_idx]) / closes[candle_idx]
+                if candle_idx + reward_horizon < len(closes):
+                    future_return = (closes[candle_idx + reward_horizon] - closes[candle_idx]) / closes[candle_idx]
                     horizon_votes = []
                     for horizon, labels in multi_labels.items():
                         if i < len(labels):
@@ -4337,8 +4342,19 @@ class ModelPreTrainer:
         logger.info(f"✅ Prepared multi-horizon training data:")
         logger.info(f"   Features: {X.shape}")
         for h in [24, 48, 100, 200, 400, 800, 1600]:
-            logger.info(f"   Horizon {h}h labels: {y_multi[h].shape}")
+            if h in y_multi and len(y_multi[h]) > 0:
+                unique, counts = np.unique(y_multi[h], return_counts=True)
+                dist = {int(u): f"{100*c/len(y_multi[h]):.1f}%" for u, c in zip(unique, counts)}
+                logger.info(f"   Horizon {h}h labels: {y_multi[h].shape} | Distribution: {dist}")
+            else:
+                logger.info(f"   Horizon {h}h labels: empty")
         logger.info(f"   Rewards: {r.shape}")
+        # Warn if any horizon has >70% HOLD labels (models will learn to always predict HOLD)
+        for h in y_multi:
+            if len(y_multi[h]) > 0:
+                hold_pct = np.mean(y_multi[h] == 1)
+                if hold_pct > 0.70:
+                    logger.warning(f"⚠️ Horizon {h}h has {hold_pct:.0%} HOLD labels — models may learn trivial HOLD prediction")
 
         return X, y_multi, r
 
