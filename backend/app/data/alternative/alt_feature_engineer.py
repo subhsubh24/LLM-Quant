@@ -1,0 +1,345 @@
+"""
+Alternative data feature engineer.
+
+This is the CRITICAL piece that transforms raw alternative data into
+model-ready features. The key principles:
+
+1. LAG EVERYTHING - Alt data features must be lagged to prevent leakage.
+   Monthly data (CPI, jobs) is already lagged by publication delay.
+   Daily data (VIX, spreads) needs explicit 1-day lag.
+
+2. COMPUTE CHANGES, NOT LEVELS - The model needs to know if the yield
+   curve is steepening, not what the absolute spread is. Rate of change
+   and regime changes matter more than levels.
+
+3. STANDARDIZE APPROPRIATELY - Alt data has different scales (VIX is
+   10-80, credit spread is -0.01 to 0.01). Z-score or rank transform.
+
+4. CREATE INTERACTION FEATURES - The magic is in combinations:
+   - VIX rising + credit spreads widening = confirmed risk-off
+   - Dollar strengthening + EM underperforming = carry unwind
+   - Yield curve steepening + breadth improving = recovery signal
+
+5. REGIME FEATURES - Convert continuous signals to regime states.
+   Markets spend 80% of time in "normal" and 20% in "stress."
+   Your model needs to know which regime it's in.
+"""
+
+from dataclasses import dataclass
+from typing import Optional, List, Dict
+from datetime import date
+import pandas as pd
+import numpy as np
+import logging
+
+from .base import AltDataConfig
+from .fred_provider import FREDProvider
+from .cross_asset_provider import CrossAssetProvider
+from .sentiment_provider import SentimentProvider
+
+logger = logging.getLogger(__name__)
+
+
+class AlternativeFeatureEngineer:
+    """
+    Orchestrates alternative data collection and feature engineering.
+
+    This is the main interface for the feature pipeline to get
+    alternative data features. It:
+    1. Fetches data from all configured providers
+    2. Engineers features (changes, z-scores, regimes)
+    3. Computes interaction features
+    4. Returns a properly lagged, standardized feature matrix
+    """
+
+    def __init__(self, config: Optional[AltDataConfig] = None):
+        self.config = config or AltDataConfig()
+
+        # Initialize providers
+        self.providers = {}
+        if self.config.fred_enabled:
+            self.providers["fred"] = FREDProvider(self.config)
+        if self.config.cross_asset_enabled:
+            self.providers["cross_asset"] = CrossAssetProvider(self.config)
+        if self.config.sentiment_enabled:
+            self.providers["sentiment"] = SentimentProvider(self.config)
+
+        self.feature_names: List[str] = []
+
+    def compute_features(
+        self,
+        start_date: date,
+        end_date: date,
+        price_index: Optional[pd.DatetimeIndex] = None,
+    ) -> pd.DataFrame:
+        """
+        Fetch all alternative data and compute features.
+
+        Args:
+            start_date: Start of data range
+            end_date: End of data range
+            price_index: Optional DatetimeIndex to align features to
+                        (should match your stock price data index)
+
+        Returns:
+            DataFrame with alternative data features, properly lagged.
+            All features at time t use information available before t.
+        """
+        all_features = []
+
+        # 1. Fetch raw data from each provider
+        for name, provider in self.providers.items():
+            try:
+                raw_data = provider.fetch(start_date, end_date)
+                if not raw_data.empty:
+                    all_features.append(raw_data)
+                    logger.info(f"Provider '{name}': {len(raw_data.columns)} features")
+                else:
+                    logger.warning(f"Provider '{name}' returned empty data")
+            except Exception as e:
+                logger.error(f"Provider '{name}' failed: {e}")
+
+        if not all_features:
+            logger.warning("No alternative data features computed")
+            return pd.DataFrame()
+
+        # 2. Combine all raw features
+        features = pd.concat(all_features, axis=1)
+
+        # 3. Engineer derived features
+        engineered = self._engineer_features(features)
+        features = pd.concat([features, engineered], axis=1)
+
+        # 4. Compute interaction features
+        interactions = self._compute_interactions(features)
+        if not interactions.empty:
+            features = pd.concat([features, interactions], axis=1)
+
+        # 5. Compute regime features
+        regimes = self._compute_regime_features(features)
+        if not regimes.empty:
+            features = pd.concat([features, regimes], axis=1)
+
+        # 6. Apply lag to all features (prevent leakage)
+        features = features.shift(self.config.feature_lag_days)
+
+        # 7. Align to price index if provided
+        if price_index is not None:
+            features = features.reindex(price_index)
+            features = features.ffill()  # Forward-fill only
+
+        # 8. Store feature names
+        self.feature_names = features.columns.tolist()
+
+        logger.info(
+            f"Alternative features: {len(features.columns)} total features, "
+            f"{len(features)} rows"
+        )
+
+        return features
+
+    def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
+        """
+        Engineer features from raw alternative data.
+
+        Computes rate-of-change, z-scores, and momentum for each
+        raw series across multiple lookback windows.
+        """
+        result = pd.DataFrame(index=raw.index)
+
+        for col in raw.columns:
+            series = raw[col]
+            if series.isna().all():
+                continue
+
+            for window in self.config.lookback_windows:
+                # Rate of change
+                roc = series.diff(window) / (series.shift(window).abs() + 1e-8)
+                result[f"{col}_roc_{window}d"] = roc.clip(-5, 5)
+
+                # Rolling z-score
+                rolling_mean = series.rolling(window, min_periods=window // 2).mean()
+                rolling_std = series.rolling(window, min_periods=window // 2).std()
+                zscore = (series - rolling_mean) / (rolling_std + 1e-8)
+                result[f"{col}_zscore_{window}d"] = zscore.clip(-4, 4)
+
+            # Percentile rank (63-day)
+            result[f"{col}_pctile_63d"] = series.rolling(63, min_periods=21).apply(
+                lambda x: (x.iloc[-1] > x[:-1]).mean() if len(x) > 1 else np.nan,
+                raw=False,
+            )
+
+        return result
+
+    def _compute_interactions(self, features: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute interaction features between different data sources.
+
+        These capture the RELATIONSHIPS between signals, which is where
+        the real alpha lives. Single signals are easily arbitraged away;
+        multi-dimensional patterns are much harder to exploit.
+        """
+        result = pd.DataFrame(index=features.index)
+
+        # --- Macro x Sentiment interactions ---
+
+        # Yield curve + VIX: Both signaling stress = strong risk-off
+        yc_col = self._find_col(features, "xasset_yield_curve_slope")
+        vix_col = self._find_col(features, "sent_vix_zscore_21d")
+        if yc_col and vix_col:
+            # Both negative = confirmed stress
+            result["interact_yieldcurve_x_vix"] = (
+                features[yc_col] * features[vix_col]
+            )
+
+        # Credit spread + Breadth: Credit stress with poor breadth = danger
+        credit_col = self._find_col(features, "xasset_credit_spread")
+        breadth_col = self._find_col(features, "sent_breadth_mcclellan")
+        if credit_col and breadth_col:
+            result["interact_credit_x_breadth"] = (
+                features[credit_col] * features[breadth_col]
+            )
+
+        # Dollar + EM: Strong dollar + weak EM = carry unwind
+        dollar_col = self._find_col(features, "xasset_dollar_momentum_21d")
+        em_col = self._find_col(features, "xasset_em_vs_dm")
+        if dollar_col and em_col:
+            result["interact_dollar_x_em"] = (
+                features[dollar_col] * features[em_col]
+            )
+
+        # Gold + Risk-on/off: Gold rising in risk-on = inflation worry
+        gold_col = self._find_col(features, "xasset_gold_momentum_21d")
+        risk_col = self._find_col(features, "xasset_risk_on_off")
+        if gold_col and risk_col:
+            result["interact_gold_x_risk"] = (
+                features[gold_col] * features[risk_col]
+            )
+
+        # --- FRED Macro interactions ---
+
+        # Inflation expectations + Fed rate: Policy error risk
+        infl_col = self._find_col(features, "fred_t5yie")
+        rate_col = self._find_col(features, "fred_dff")
+        if infl_col and rate_col:
+            # Compute change in each over 21 days, multiply
+            infl_chg = self._find_col(features, "fred_t5yie_roc_21d")
+            rate_chg = self._find_col(features, "fred_dff_roc_21d")
+            if infl_chg and rate_chg:
+                result["interact_inflation_x_fedrate"] = (
+                    features[infl_chg] * features[rate_chg]
+                )
+
+        # Credit stress + Jobless claims: Real economy + credit stress
+        hy_col = self._find_col(features, "fred_bamlh0a0hym2")
+        claims_col = self._find_col(features, "fred_icsa")
+        if hy_col and claims_col:
+            hy_z = self._find_col(features, "fred_bamlh0a0hym2_zscore_21d")
+            claims_z = self._find_col(features, "fred_icsa_zscore_21d")
+            if hy_z and claims_z:
+                result["interact_credit_stress_x_employment"] = (
+                    features[hy_z] * features[claims_z]
+                )
+
+        return result
+
+    def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute market regime indicators.
+
+        Convert continuous signals into discrete regime states.
+        Markets exhibit different statistical properties in different
+        regimes, and your model needs to adapt accordingly.
+        """
+        result = pd.DataFrame(index=features.index)
+
+        # --- Volatility Regime (from VIX) ---
+        vix_col = self._find_col(features, "sent_vix_level")
+        if vix_col:
+            vix = features[vix_col]
+            # Low vol: VIX < 15, Normal: 15-25, High: 25-35, Crisis: >35
+            result["regime_vol_low"] = (vix < 15).astype(float)
+            result["regime_vol_high"] = (vix > 25).astype(float)
+            result["regime_vol_crisis"] = (vix > 35).astype(float)
+
+        # --- Credit Regime (from HY spread) ---
+        hy_col = self._find_col(features, "fred_bamlh0a0hym2")
+        if hy_col:
+            hy_spread = features[hy_col]
+            # Compute z-score relative to 1-year history
+            hy_mean = hy_spread.rolling(252, min_periods=63).mean()
+            hy_std = hy_spread.rolling(252, min_periods=63).std()
+            hy_z = (hy_spread - hy_mean) / (hy_std + 1e-8)
+
+            result["regime_credit_tight"] = (hy_z < -0.5).astype(float)
+            result["regime_credit_stress"] = (hy_z > 1.0).astype(float)
+            result["regime_credit_crisis"] = (hy_z > 2.0).astype(float)
+
+        # --- Trend Regime (from risk-on/off composite) ---
+        risk_col = self._find_col(features, "xasset_risk_on_off")
+        if risk_col:
+            risk = features[risk_col]
+            risk_smooth = risk.rolling(10, min_periods=5).mean()
+            result["regime_risk_on"] = (risk_smooth > 0.005).astype(float)
+            result["regime_risk_off"] = (risk_smooth < -0.005).astype(float)
+
+        # --- Macro Regime (from yield curve) ---
+        yc_col = self._find_col(features, "fred_t10y2y")
+        if yc_col:
+            yc = features[yc_col]
+            result["regime_yieldcurve_inverted"] = (yc < 0).astype(float)
+            result["regime_yieldcurve_steep"] = (yc > 1.0).astype(float)
+
+        # --- Combined Regime Score ---
+        # Sum of all regime indicators for a composite state
+        regime_cols = [c for c in result.columns if c.startswith("regime_")]
+        if regime_cols:
+            # Risk-off score: higher = more stress indicators firing
+            stress_cols = [c for c in regime_cols if any(
+                kw in c for kw in ["high", "crisis", "stress", "inverted", "risk_off"]
+            )]
+            if stress_cols:
+                result["regime_stress_score"] = result[stress_cols].sum(axis=1)
+
+        return result
+
+    def _find_col(self, df: pd.DataFrame, pattern: str) -> Optional[str]:
+        """Find column matching pattern (exact match first, then contains)."""
+        if pattern in df.columns:
+            return pattern
+        matches = [c for c in df.columns if pattern in c]
+        return matches[0] if matches else None
+
+    def get_feature_groups(self) -> Dict[str, List[str]]:
+        """Group features by source for analysis."""
+        groups = {
+            "fred_macro": [],
+            "cross_asset": [],
+            "sentiment": [],
+            "interactions": [],
+            "regimes": [],
+            "engineered": [],
+        }
+
+        for name in self.feature_names:
+            if name.startswith("fred_"):
+                if "_roc_" in name or "_zscore_" in name or "_pctile_" in name:
+                    groups["engineered"].append(name)
+                else:
+                    groups["fred_macro"].append(name)
+            elif name.startswith("xasset_"):
+                if "_roc_" in name or "_zscore_" in name or "_pctile_" in name:
+                    groups["engineered"].append(name)
+                else:
+                    groups["cross_asset"].append(name)
+            elif name.startswith("sent_"):
+                if "_roc_" in name or "_zscore_" in name or "_pctile_" in name:
+                    groups["engineered"].append(name)
+                else:
+                    groups["sentiment"].append(name)
+            elif name.startswith("interact_"):
+                groups["interactions"].append(name)
+            elif name.startswith("regime_"):
+                groups["regimes"].append(name)
+
+        return groups

@@ -9,6 +9,10 @@ from .core import (
     compute_risk_features,
     compute_enhanced_technical_features,
 )
+from ..data.alternative import (
+    AlternativeFeatureEngineer,
+    AltDataConfig,
+)
 
 __all__ = [
     "FeaturePipeline",
@@ -19,4 +23,6 @@ __all__ = [
     "compute_volume_features",
     "compute_risk_features",
     "compute_enhanced_technical_features",
+    "AlternativeFeatureEngineer",
+    "AltDataConfig",
 ]

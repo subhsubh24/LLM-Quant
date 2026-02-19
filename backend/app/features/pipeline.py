@@ -30,6 +30,7 @@ from .core import (
     compute_enhanced_technical_features,
     standardize_features,
 )
+from ..data.alternative import AlternativeFeatureEngineer, AltDataConfig
 
 
 @dataclass
@@ -69,6 +70,10 @@ class FeatureConfig:
         "volume", "risk", "technical", "enhanced_technical"
     ])
 
+    # Alternative data configuration
+    include_alternative_data: bool = True
+    alt_data_config: Optional["AltDataConfig"] = None
+
     def to_dict(self) -> dict:
         """Convert to dictionary for hashing/storage."""
         return {
@@ -86,6 +91,8 @@ class FeatureConfig:
             "standardize_method": self.standardize_method,
             "clip_outliers": self.clip_outliers,
             "enabled_features": self.enabled_features,
+            "include_alternative_data": self.include_alternative_data,
+            "alt_data_config": self.alt_data_config.to_dict() if self.alt_data_config else None,
         }
 
     def compute_hash(self) -> str:
@@ -109,6 +116,12 @@ class FeaturePipeline:
         self.config = config or FeatureConfig()
         self.feature_names: List[str] = []
         self._market_proxy_data: Optional[pd.Series] = None
+        self._alt_engineer: Optional[AlternativeFeatureEngineer] = None
+
+        # Initialize alternative data engineer if configured
+        if self.config.include_alternative_data:
+            alt_config = self.config.alt_data_config or AltDataConfig()
+            self._alt_engineer = AlternativeFeatureEngineer(alt_config)
 
     def compute_features(
         self,
@@ -217,6 +230,30 @@ class FeaturePipeline:
             )
             all_features.append(enhanced_tech_features)
 
+        # 9. Alternative data features (macro, cross-asset, sentiment)
+        if self.config.include_alternative_data and self._alt_engineer is not None:
+            logger.debug("Computing alternative data features")
+            try:
+                # Determine date range from price index
+                start_date = prices.index.min().date()
+                end_date = prices.index.max().date()
+
+                alt_features = self._alt_engineer.compute_features(
+                    start_date=start_date,
+                    end_date=end_date,
+                    price_index=prices.index,
+                )
+
+                if not alt_features.empty:
+                    all_features.append(alt_features)
+                    logger.info(
+                        f"Added {len(alt_features.columns)} alternative data features"
+                    )
+                else:
+                    logger.warning("Alternative data returned empty - continuing without it")
+            except Exception as e:
+                logger.warning(f"Alternative data failed (continuing without it): {e}")
+
         # Combine all features
         if not all_features:
             raise ValueError("No features computed - check enabled_features config")
@@ -291,6 +328,11 @@ class FeaturePipeline:
             "risk": [],
             "technical": [],
             "enhanced_technical": [],
+            "macro": [],
+            "cross_asset": [],
+            "sentiment": [],
+            "alt_interactions": [],
+            "alt_regimes": [],
         }
 
         # Enhanced technical feature identifiers
@@ -300,7 +342,19 @@ class FeaturePipeline:
         )
 
         for name in self.feature_names:
-            if "_ret_" in name:
+            # Alternative data features (check first - more specific prefixes)
+            if name.startswith("fred_"):
+                groups["macro"].append(name)
+            elif name.startswith("xasset_"):
+                groups["cross_asset"].append(name)
+            elif name.startswith("sent_"):
+                groups["sentiment"].append(name)
+            elif name.startswith("interact_"):
+                groups["alt_interactions"].append(name)
+            elif name.startswith("regime_"):
+                groups["alt_regimes"].append(name)
+            # Traditional price/volume features
+            elif "_ret_" in name:
                 groups["returns"].append(name)
             elif "_mom_" in name:
                 groups["momentum"].append(name)

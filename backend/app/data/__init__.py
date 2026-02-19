@@ -8,6 +8,13 @@ from .crypto import CryptoMarketService, get_crypto_service, CryptoQuote
 from .options_data_provider import (
     OptionsDataProvider, RealOptionsChain, get_options_data_provider
 )
+from .alternative import (
+    AlternativeFeatureEngineer,
+    AltDataConfig,
+    FREDProvider,
+    CrossAssetProvider,
+    SentimentProvider,
+)
 
 __all__ = [
     "DataProvider",
@@ -26,4 +33,9 @@ __all__ = [
     "OptionsDataProvider",
     "RealOptionsChain",
     "get_options_data_provider",
+    "AlternativeFeatureEngineer",
+    "AltDataConfig",
+    "FREDProvider",
+    "CrossAssetProvider",
+    "SentimentProvider",
 ]

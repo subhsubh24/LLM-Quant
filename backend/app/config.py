@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     # Auto-connect to brokers on startup
     auto_connect_brokers: bool = True
 
+    # ============ Alternative Data Settings ============
+    # FRED API key (free from https://fred.stlouisfed.org/docs/api/api_key.html)
+    fred_api_key: str = ""
+
+    # Enable/disable alternative data sources
+    alt_data_enabled: bool = True          # Master switch for all alt data
+    alt_data_fred_enabled: bool = True     # Macroeconomic data from FRED
+    alt_data_cross_asset_enabled: bool = True  # Cross-asset signals (bonds, commodities, FX)
+    alt_data_sentiment_enabled: bool = True    # Sentiment indicators (VIX, breadth)
+
     class Config:
         env_file = find_env_file()
         env_file_encoding = "utf-8"
@@ -111,6 +121,11 @@ class Settings(BaseSettings):
     def has_binance_keys(self) -> bool:
         """Check if Binance API keys are configured."""
         return bool(self.binance_api_key and self.binance_api_secret)
+
+    @property
+    def has_fred_key(self) -> bool:
+        """Check if FRED API key is configured."""
+        return bool(self.fred_api_key and len(self.fred_api_key) > 5)
 
 
 @lru_cache
