@@ -2465,17 +2465,19 @@ class WalkForwardBacktester:
                     regime = symbol_regime.get(symbol, ('sideways', 0))[0] if symbol in symbol_regime else 'sideways'
 
                 # TIER 3 FIX: REGIME-AWARE STOP ADJUSTMENTS
-                # Tighten stops for trades against regime, loosen for trades with regime
+                # With-trend trades get more room (trend supports the position).
+                # Counter-trend trades get tighter stops (cut fast if wrong — they're riskier).
+                # Previously counter-trend had WIDER stops (1.15x) which increased avg loss.
                 if regime == 'bull':
                     if side == "long":
-                        base_stop *= 0.85  # With trend: -15% stop (tighter)
+                        base_stop *= 1.15  # With trend: +15% room (trend supports)
                     else:
-                        base_stop *= 1.15  # Against trend: +15% stop (wider)
+                        base_stop *= 0.85  # Against trend: -15% (cut fast if wrong)
                 elif regime == 'bear':
                     if side == "short":
-                        base_stop *= 0.85  # With trend: -15% stop (tighter)
+                        base_stop *= 1.15  # With trend: +15% room (trend supports)
                     else:
-                        base_stop *= 1.15  # Against trend: +15% stop (wider)
+                        base_stop *= 0.85  # Against trend: -15% (cut fast if wrong)
                 # Neutral: no adjustment
 
                 # Apply volatility adjustment (small, since ATR already captures vol)
@@ -2492,25 +2494,27 @@ class WalkForwardBacktester:
                 partial_exit_pct = 0.0  # Fraction of position to exit
                 effective_stop_distance = base_stop  # Track which stop was used
 
-                # TRAILING STOP: Captures small winners before they reverse
-                # Fires on ANY trade above entry (longs) or below entry (shorts).
-                # With ~50% model accuracy, most winners are small (+1-4%).
-                # This is the primary mechanism that converts those into realized profits.
+                # TRAILING STOP: Protects profits on runners after pyramid 1 takes partial profit.
+                # Only activates AFTER pyramid 1 hits — before that, ATR-based stop handles risk.
+                # Previously fired on ANY winning position, which clipped winners before Target 1:
+                # e.g. entry $100, peak $104, trail exit at $98.80 = -1.2% loss on a +4% winner.
+                # The trailing stop can only profit when peak > entry * 1.053, but Target 1 is 5-15%.
                 trailing_stop_pct = 0.05  # 5% trailing from peak
-                if side == "long" and pos.get("highest_price", entry_price) > entry_price:
-                    if low_price < pos["highest_price"] * (1 - trailing_stop_pct):
-                        should_exit = True
-                        exit_reason = "trailing_stop"
-                        partial_exit_pct = 1.0
-                        current_price = low_price
-                        pnl_pct = (current_price - entry_price) / entry_price
-                elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
-                    if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):
-                        should_exit = True
-                        exit_reason = "trailing_stop"
-                        partial_exit_pct = 1.0
-                        current_price = high_price
-                        pnl_pct = (entry_price - current_price) / entry_price
+                if pos.get("pyramided_1", False):
+                    if side == "long" and pos.get("highest_price", entry_price) > entry_price:
+                        if low_price < pos["highest_price"] * (1 - trailing_stop_pct):
+                            should_exit = True
+                            exit_reason = "trailing_stop"
+                            partial_exit_pct = 1.0
+                            current_price = low_price
+                            pnl_pct = (current_price - entry_price) / entry_price
+                    elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
+                        if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):
+                            should_exit = True
+                            exit_reason = "trailing_stop"
+                            partial_exit_pct = 1.0
+                            current_price = high_price
+                            pnl_pct = (entry_price - current_price) / entry_price
 
                 # TIER 1 FIX: PROFIT PYRAMIDING (CRITICAL FIX BUG #3: Use fixed targets set at entry)
                 # Take profits gradually instead of holding to full target
@@ -3577,6 +3581,13 @@ class WalkForwardBacktester:
 
                             # Compute effective stop from the ATR we just calculated
                             effective_stop_distance = np.clip(1.2 * atr_pct, 0.012, 0.035)
+
+                            # R:R SAFETY NET: Reject trades where reward doesn't justify risk.
+                            # Normally ATR-based R:R is 4:1 (target=5x ATR, stop=1.2x ATR), but
+                            # clipping bounds can compress it (e.g. stop max 3.5%, target min 5% = 1.4:1).
+                            rr_ratio = pyramid_target_1 / (effective_stop_distance + 1e-8)
+                            if rr_ratio < 2.0:
+                                continue  # Skip — reward doesn't justify the risk
 
                             # BUG FIX #9: Entry price sanity check (prevent extreme values that cause numerical instability)
                             entry_price = candle.close
