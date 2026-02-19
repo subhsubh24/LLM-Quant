@@ -1734,15 +1734,15 @@ class WalkForwardBacktester:
         # ============================================================
         config = {
             # Risk Management
-            "max_portfolio_drawdown": 0.25,          # 25% max DD before pausing (was 15% — too tight with 8% Kelly positions, 2 bad trades froze entire system)
-            "portfolio_dd_resume_pct": 0.50,         # Resume trading at 50% of DD limit
+            "max_portfolio_drawdown": 0.30,          # 30% max DD before pausing (was 25% — rules-primary trades need room to breathe)
+            "portfolio_dd_resume_pct": 0.60,         # Resume trading at 60% of DD limit (was 50% — resume sooner to not miss recovery)
 
             # Position Sizing & Kelly Criterion
             # STRATEGIC OVERHAUL: Aristotle-inspired concentrated positions.
             # Old: 3% Kelly cap = $120 positions on $10k = meaningless.
             # New: 8% Kelly cap = $800 positions on $10k = real conviction bets.
             # With max 8 positions at 8% = 64% capital deployed (36% cash reserve).
-            "kelly_cap_pct": 0.08,                   # 8% of capital per trade (was 3% — too small to matter)
+            "kelly_cap_pct": 0.10,                   # 10% of capital per trade (was 8%)
             "recovery_scale_min": 0.70,              # Reduce sizing to 70% during recovery
 
             # Confidence-Based Position Sizing
@@ -1788,7 +1788,7 @@ class WalkForwardBacktester:
             "btc_eth_systemic_threshold": 0.80,      # High systemic risk at 80% corr
 
             # Stop Loss & Take Profit
-            "stop_loss_min": 0.02,                   # 2% minimum stop loss
+            "stop_loss_min": 0.03,                   # 3% minimum stop loss (was 2% — slightly wider to reduce stop-outs)
             "stop_loss_max": 0.30,                   # 30% maximum stop loss
             "take_profit_min": 0.05,                 # 5% minimum take profit
             "take_profit_max": 0.60,                 # 60% maximum take profit
@@ -1830,8 +1830,8 @@ class WalkForwardBacktester:
             "continuous_learning_threshold": 0.45,  # Alert if win rate < 45%
 
             # Trading Safeguards
-            "per_symbol_cooldown_candles": 48,      # 48-candle (2-day) minimum between entries on same symbol (was 5 — allowed 8 consecutive TSLA shorts)
-            "max_trades_per_symbol": 3,              # Max total trades per symbol in entire backtest (prevents concentration)
+            "per_symbol_cooldown_candles": 12,      # 12-candle (12h) minimum between entries on same symbol (was 48 — too restrictive, killed 75% of signals)
+            "max_trades_per_symbol": 50,             # Max trades per symbol in entire backtest (was 3 — caused trading to completely stop after 30 trades!)
             "churn_alert_threshold": 3,             # Alert if >3 direction flips
 
             # Feature Extraction
@@ -1878,10 +1878,10 @@ class WalkForwardBacktester:
             "trend_ema_slow": 200,                   # Slow EMA period (golden cross / death cross)
 
             # Position Flip-Flop Cooldown (reduces churn from rapid direction changes)
-            "flip_cooldown_multiplier": 3,          # Direction flip cooldown = standard cooldown * this (3x = 15 candles)
-            "flip_confidence_penalty": 0.10,        # Extra confidence required for direction flips (+10%)
-            "max_flips_per_symbol": 3,              # Max direction flips before blocking symbol temporarily
-            "flip_block_candles": 50,               # Block symbol for N candles after max flips exceeded
+            "flip_cooldown_multiplier": 2,          # Direction flip cooldown = standard cooldown * this (2x = 24 candles, was 3x)
+            "flip_confidence_penalty": 0.05,        # Extra confidence required for direction flips (+5%, was 10%)
+            "max_flips_per_symbol": 8,              # Max direction flips before blocking (was 3 — too strict)
+            "flip_block_candles": 24,               # Block symbol for 24 candles after max flips (was 50)
 
             # HYBRID SIGNAL ENGINE (ML + Aristotle Rules)
             # RULES-PRIMARY architecture: Backtest showed ML is ~99% LONG (directional
@@ -3526,11 +3526,27 @@ class WalkForwardBacktester:
                     if mean_reversion_ok:
                         filter_stage_counters["mean_reversion_ok"] = filter_stage_counters.get("mean_reversion_ok", 0) + 1
 
+                    # ============================================================
+                    # RULES-BYPASS: When Aristotle rules have strong conviction,
+                    # relax ML-dependent filters (consensus, stat significance,
+                    # mean-reversion). The rules already encode these concepts.
+                    # ============================================================
+                    rules_strong = (prediction.get("hybrid_applied", False)
+                                    and abs(prediction.get("rules_score", 0)) > 0.25
+                                    and prediction.get("rules_confidence", 0) > 0.6)
+                    if rules_strong:
+                        filter_stage_counters["rules_bypass"] = filter_stage_counters.get("rules_bypass", 0) + 1
+
+                    # Rules-bypass: strong rules conviction can skip ML consensus ONLY
+                    # Keep mean-reversion and stat significance — these prevent buying tops
+                    passes_ml_consensus = strong_consensus
+                    if rules_strong:
+                        passes_ml_consensus = True  # Rules already encode multi-indicator consensus
+
                     if (prediction["action"] != 1 and
                         meets_confidence and
-                        # NOTE: conflicting_trade is NOT a hard ban - it's handled by increased confidence requirement above
                         is_liquid and
-                        strong_consensus and
+                        passes_ml_consensus and
                         is_statistically_significant and
                         mean_reversion_ok and
                         not symbol_at_max_trades and
@@ -3578,10 +3594,16 @@ class WalkForwardBacktester:
                         else:
                             kelly_fraction = 0.08  # 8% for excellent (was 3.0%)
 
+                        # RULES CONVICTION BOOST: When Aristotle rules confirm the trade
+                        # with high confidence, modest position size increase
+                        if rules_strong and prediction.get("rules_confidence", 0) > 0.65:
+                            kelly_fraction = min(kelly_fraction * 1.25, 0.10)  # 25% boost, cap at 10%
+                            filter_stage_counters["rules_boosted_size"] = filter_stage_counters.get("rules_boosted_size", 0) + 1
+
                         # Use available_capital instead of total capital (CRITICAL FIX)
                         # BUG FIX #34: CRITICAL - Apply recovery_scale to prevent oversizing during drawdown recovery
                         # Without this, positions stay full-Kelly sized during recovery, risking account blow-up
-                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"]) * recovery_scale  # Cap at 4%, scaled by recovery
+                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"]) * recovery_scale  # Cap at kelly_cap_pct, scaled by recovery
 
                         # NEW: PORTFOLIO-LEVEL VOLATILITY TARGETING (Top Funds Approach)
                         # Size positions to maintain total portfolio volatility at 1.2-1.5% daily
