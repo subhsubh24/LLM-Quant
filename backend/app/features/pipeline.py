@@ -340,6 +340,7 @@ class FeaturePipeline:
             "gtrends": [],
             "weather": [],
             "short_volume": [],
+            "crypto": [],
             "alt_interactions": [],
             "alt_regimes": [],
         }
@@ -372,6 +373,8 @@ class FeaturePipeline:
                 groups["weather"].append(name)
             elif name.startswith("short_") or name.startswith("dark_"):
                 groups["short_volume"].append(name)
+            elif name.startswith("crypto_"):
+                groups["crypto"].append(name)
             elif name.startswith("interact_"):
                 groups["alt_interactions"].append(name)
             elif name.startswith("regime_"):

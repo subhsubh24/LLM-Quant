@@ -28,6 +28,7 @@ import pandas as pd
 
 from .microstructure import MicrostructureExtractor, OrderBookFetcher
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
+from ..data.alternative.alt_data_context import AltDataContext
 
 logger = logging.getLogger(__name__)
 
@@ -880,6 +881,9 @@ class WalkForwardBacktester:
         self._annualization_factor = 365 * 24  # Default: hourly crypto (8760 candles/year)
         self._candles_per_day = 24             # Default: 1h candles
 
+        # Alternative data context for augmenting features with macro/sentiment/calendar signals
+        self.alt_data_context: Optional[AltDataContext] = None
+
         self.results: List[BacktestResult] = []
         self.equity_curve: List[Tuple[datetime, float]] = []
         self.all_trades: List[Dict] = []
@@ -1399,6 +1403,87 @@ class WalkForwardBacktester:
         for price in data[1:]:
             ema = (price - ema) * multiplier + ema
         return ema
+
+    def prepare_alt_data(self, candles_dict: Dict[str, List['OHLCV']]) -> bool:
+        """
+        Initialize alternative data context from historical candle date range.
+
+        Computes macro, sentiment, calendar, and other alternative features
+        for the date range covered by the candles. These features are then
+        appended to each price-based feature vector during training and backtesting.
+
+        Returns True if alternative data was successfully prepared.
+        """
+        try:
+            # Find the overall date range from all candles
+            all_dates = []
+            for candles in candles_dict.values():
+                for c in candles:
+                    all_dates.append(c.timestamp.date() if hasattr(c.timestamp, 'date') else c.timestamp)
+
+            if not all_dates:
+                return False
+
+            start_date = min(all_dates)
+            end_date = max(all_dates)
+
+            self.alt_data_context = AltDataContext()
+            ok = self.alt_data_context.prepare(start_date, end_date)
+
+            if ok:
+                logger.info(
+                    f"✅ Alternative data prepared: {self.alt_data_context.n_features} features "
+                    f"for {len(self.alt_data_context._date_to_idx)} dates"
+                )
+            else:
+                logger.info("⚠️ Alternative data unavailable - proceeding with price features only")
+                self.alt_data_context = None
+
+            return ok
+
+        except Exception as e:
+            logger.warning(f"⚠️ Alternative data preparation failed: {e}")
+            self.alt_data_context = None
+            return False
+
+    def augment_features_with_alt_data(
+        self,
+        features: np.ndarray,
+        candles: List['OHLCV'],
+        lookback: int = 400,
+    ) -> np.ndarray:
+        """
+        Append alternative data features to price-based feature matrix.
+
+        For each row in features[i], look up the corresponding candle's date
+        and append the alternative data vector for that date.
+
+        Args:
+            features: Price-based features from prepare_features(), shape (N, 64)
+            candles: The candles that produced these features
+            lookback: The lookback used in prepare_features()
+
+        Returns:
+            Augmented features with alt data appended, shape (N, 64 + n_alt_features)
+        """
+        if self.alt_data_context is None or not self.alt_data_context.is_prepared:
+            return features
+
+        if len(features) == 0:
+            return features
+
+        n_alt = self.alt_data_context.n_features
+        alt_matrix = np.zeros((len(features), n_alt), dtype=np.float32)
+
+        for i in range(len(features)):
+            candle_idx = lookback + i
+            if candle_idx < len(candles):
+                candle_date = candles[candle_idx].timestamp.date() \
+                    if hasattr(candles[candle_idx].timestamp, 'date') \
+                    else candles[candle_idx].timestamp
+                alt_matrix[i] = self.alt_data_context.get_features(candle_date)
+
+        return np.hstack([features, alt_matrix])
 
     def detect_market_regime(self, candles: List[OHLCV], window: int = 50, prev_regime: str = 'sideways',
                             switch_threshold: float = 1.0, base_threshold: float = 0.02,
@@ -2313,11 +2398,10 @@ class WalkForwardBacktester:
                             logger.info(f"  ✅ Created {valid_count} valid forward-looking labels, retraining models...")
                             X_retrain = np.array(features_for_training)
 
-                            # BUG FIX #7: Validate feature dimensions before retraining
-                            # Features should be 35-dimensional from prepare_features() or state_dim if already padded
-                            expected_dim = 35  # Native feature dimension from prepare_features()
-                            if X_retrain.shape[1] not in [expected_dim, model_trainer.state_dim]:
-                                logger.error(f"❌ Feature dimension mismatch in retraining: got {X_retrain.shape[1]}, expected {expected_dim} or {model_trainer.state_dim}")
+                            # Validate feature dimensions before retraining
+                            # Features are state_dim (already padded when stored in buffer)
+                            if X_retrain.shape[1] != model_trainer.state_dim:
+                                logger.error(f"❌ Feature dimension mismatch in retraining: got {X_retrain.shape[1]}, expected {model_trainer.state_dim}")
                                 # Skip retraining with malformed features to prevent model corruption
                                 continue
 
@@ -2970,6 +3054,15 @@ class WalkForwardBacktester:
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
+
+                    # Augment state with alternative data (macro, sentiment, calendar, etc.)
+                    if self.alt_data_context and self.alt_data_context.is_prepared:
+                        candle_date = window_data[symbol][-1].timestamp.date() \
+                            if hasattr(window_data[symbol][-1].timestamp, 'date') \
+                            else window_data[symbol][-1].timestamp
+                        alt_vec = self.alt_data_context.get_features(candle_date)
+                        state = np.concatenate([state, alt_vec])
+
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
 
@@ -4354,10 +4447,11 @@ class ModelPreTrainer:
     Saves trained weights to disk for production use.
     """
 
-    def __init__(self, state_dim: int = 64, action_dim: int = 3):
-        # REVERTED: state_dim=64 for checkpoint compatibility
-        # (prepare_features generates 24-element vectors, padded to 64 for consistency)
-        # Previously changed to 24, but causes incompatibility with existing saved checkpoints
+    def __init__(self, state_dim: int = 192, action_dim: int = 3):
+        # state_dim=192: 64 price/volume features + up to 128 alternative data features
+        # (macro, sentiment, calendar, cross-asset, options, crypto, weather, etc.)
+        # With all 11 providers active: ~168 features total, padded to 192 for alignment
+        # Old checkpoints with state_dim=64 will fail to load and trigger fresh training
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
 
@@ -4439,6 +4533,9 @@ class ModelPreTrainer:
             features = backtester.prepare_features(candles)
             if len(features) == 0:
                 continue
+
+            # Augment with alternative data (macro, sentiment, calendar, etc.)
+            features = backtester.augment_features_with_alt_data(features, candles, lookback=400)
 
             # Generate labels for all horizons at once
             multi_labels = backtester.generate_multi_horizon_labels(candles)
@@ -4563,10 +4660,13 @@ class ModelPreTrainer:
         assert X.shape[0] == len(r), \
             f"Data alignment error: features={X.shape[0]}, rewards={len(r)}"
 
-        # BUG FIX #5: Validate feature dimension consistency before padding
-        # Features generated by prepare_features() should always be 35-dimensional
-        # If this changes, it indicates a bug in feature generation
-        expected_feature_dim = 35  # From prepare_features() feature_vector (lines 1019-1056)
+        # Feature dimension: 64 base features + optional alt data features
+        # Alt data adds variable features depending on which providers are active
+        base_feature_dim = 64  # From prepare_features() feature_vector
+        n_alt = backtester.alt_data_context.n_features if backtester.alt_data_context and backtester.alt_data_context.is_prepared else 0
+        expected_feature_dim = base_feature_dim + n_alt
+        if n_alt > 0:
+            logger.info(f"✅ Alternative data augmented features: {base_feature_dim} price + {n_alt} alt = {expected_feature_dim} total")
         if X.shape[1] != expected_feature_dim and X.shape[1] != self.state_dim:
             logger.warning(f"⚠️ Feature dimension mismatch: generated={X.shape[1]}, expected={expected_feature_dim}")
 
@@ -6222,6 +6322,10 @@ async def run_full_training_pipeline(
     if symbols_filtered > 0:
         logger.info(f"🔍 Filtered out {symbols_filtered} symbols with <{min_candles_required} candles")
         logger.info(f"   Remaining: {symbols_after} symbols with sufficient data")
+
+    # Step 1.5: Initialize alternative data (macro, sentiment, calendar, etc.)
+    logger.info("\n📊 Step 1.5: Preparing alternative data features...")
+    backtester.prepare_alt_data(historical_data)
 
     # Step 2: Prepare training data
     logger.info("\n🔧 Step 2: Preparing training data...")
