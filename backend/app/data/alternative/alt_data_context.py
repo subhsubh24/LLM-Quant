@@ -103,6 +103,16 @@ class AltDataContext:
             # Fill any remaining NaN with 0 (safe for model input)
             features_df = features_df.fillna(0.0)
 
+            # Feature selection: remove noise before feeding to models
+            n_before = len(features_df.columns)
+            features_df = self._select_features(features_df)
+            n_after = len(features_df.columns)
+            if n_before != n_after:
+                logger.info(
+                    f"Feature selection: {n_before} → {n_after} features "
+                    f"(removed {n_before - n_after} noisy/redundant)"
+                )
+
             # Store feature names
             self._feature_names = features_df.columns.tolist()
             self._n_features = len(self._feature_names)
@@ -166,6 +176,74 @@ class AltDataContext:
             return self._features[self._date_to_idx[best_date]]
 
         return np.zeros(self._n_features, dtype=np.float32)
+
+    def _select_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Feature selection to remove noise and redundancy.
+
+        Steps:
+        1. Drop constant features (zero variance - carry no information)
+        2. Drop near-constant features (>95% same value)
+        3. Drop highly correlated features (|corr| > 0.95 - redundant)
+
+        This reduces dimensionality without losing signal, which:
+        - Speeds up training
+        - Reduces overfitting risk
+        - Focuses model capacity on informative features
+        """
+        if df.empty or len(df.columns) < 2:
+            return df
+
+        cols_to_keep = list(df.columns)
+
+        # 1. Drop constant features (variance = 0)
+        variances = df.var()
+        constant_cols = variances[variances < 1e-10].index.tolist()
+        if constant_cols:
+            cols_to_keep = [c for c in cols_to_keep if c not in constant_cols]
+            logger.info(f"  Dropped {len(constant_cols)} constant features")
+
+        # 2. Drop near-constant features (>95% identical values)
+        near_constant = []
+        for col in cols_to_keep:
+            if col in df.columns:
+                mode_pct = df[col].value_counts(normalize=True).iloc[0] if len(df[col].value_counts()) > 0 else 1.0
+                if mode_pct > 0.95:
+                    # Exception: binary features by design (calendar flags, regimes)
+                    # These are meant to be mostly 0 with occasional 1s
+                    is_binary = set(df[col].unique()) <= {0.0, 1.0, 0, 1}
+                    if not is_binary:
+                        near_constant.append(col)
+        if near_constant:
+            cols_to_keep = [c for c in cols_to_keep if c not in near_constant]
+            logger.info(f"  Dropped {len(near_constant)} near-constant features")
+
+        # 3. Drop highly correlated features (keep the one with higher variance)
+        if len(cols_to_keep) > 5:
+            try:
+                corr_matrix = df[cols_to_keep].corr().abs()
+                # Create upper triangle mask
+                upper = corr_matrix.where(
+                    np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+                )
+                # Find pairs with correlation > 0.95
+                redundant = set()
+                for col in upper.columns:
+                    highly_corr = upper.index[upper[col] > 0.95].tolist()
+                    for hc in highly_corr:
+                        # Drop the one with lower variance
+                        if hc not in redundant:
+                            if variances.get(col, 0) >= variances.get(hc, 0):
+                                redundant.add(hc)
+                            else:
+                                redundant.add(col)
+                if redundant:
+                    cols_to_keep = [c for c in cols_to_keep if c not in redundant]
+                    logger.info(f"  Dropped {len(redundant)} redundant features (|corr| > 0.95)")
+            except Exception as e:
+                logger.debug(f"Correlation check skipped: {e}")
+
+        return df[cols_to_keep]
 
     def get_summary(self) -> Dict:
         """Get summary statistics about the prepared context."""

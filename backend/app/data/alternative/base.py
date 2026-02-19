@@ -117,6 +117,12 @@ class AltDataConfig:
     # Economic surprise and data release calendar (zero API cost - computed from dates)
     economic_surprise_enabled: bool = True
 
+    # Sector rotation momentum (uses yfinance - free with internet)
+    sector_rotation_enabled: bool = True
+
+    # Bond market stress and credit risk (uses yfinance - free with internet)
+    bond_stress_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -140,6 +146,8 @@ class AltDataConfig:
             "crypto_sentiment_enabled": self.crypto_sentiment_enabled,
             "congressional_enabled": self.congressional_enabled,
             "economic_surprise_enabled": self.economic_surprise_enabled,
+            "sector_rotation_enabled": self.sector_rotation_enabled,
+            "bond_stress_enabled": self.bond_stress_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }

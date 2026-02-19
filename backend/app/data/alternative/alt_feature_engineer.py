@@ -46,6 +46,8 @@ from .short_volume_provider import ShortVolumeProvider
 from .crypto_sentiment_provider import CryptoSentimentProvider
 from .congressional_provider import CongressionalProvider
 from .economic_surprise_provider import EconomicSurpriseProvider
+from .sector_rotation_provider import SectorRotationProvider
+from .bond_stress_provider import BondStressProvider
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,10 @@ class AlternativeFeatureEngineer:
             self.providers["congressional"] = CongressionalProvider(self.config)
         if self.config.economic_surprise_enabled:
             self.providers["econ_surprise"] = EconomicSurpriseProvider(self.config)
+        if self.config.sector_rotation_enabled:
+            self.providers["sector_rotation"] = SectorRotationProvider(self.config)
+        if self.config.bond_stress_enabled:
+            self.providers["bond_stress"] = BondStressProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -352,6 +358,32 @@ class AlternativeFeatureEngineer:
                 features[energy_col] * features[hdd_col]
             )
 
+        # --- Sector Rotation x Bond Stress interactions ---
+
+        # Sector rotation + bond stress: defensive rotation confirms credit stress
+        sec_risk = self._find_col(features, "sector_risk_appetite")
+        bond_stress = self._find_col(features, "bond_stress_score")
+        if sec_risk and bond_stress:
+            result["interact_sector_x_bondstress"] = (
+                features[sec_risk] * features[bond_stress]
+            )
+
+        # Sector breadth + bond-equity correlation: broad rally with negative corr = healthy
+        sec_breadth = self._find_col(features, "sector_breadth")
+        bond_eq_corr = self._find_col(features, "bond_equity_corr_21d")
+        if sec_breadth and bond_eq_corr:
+            result["interact_breadth_x_bondcorr"] = (
+                features[sec_breadth] * features[bond_eq_corr]
+            )
+
+        # HY momentum + sector rotation: credit improving + cyclical rotation = risk-on confirmed
+        hy_mom = self._find_col(features, "bond_hy_momentum")
+        cyc_def = self._find_col(features, "sector_cyclical_vs_defensive")
+        if hy_mom and cyc_def:
+            result["interact_hy_x_cyclical"] = (
+                features[hy_mom] * features[cyc_def]
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -401,6 +433,21 @@ class AlternativeFeatureEngineer:
             result["regime_yieldcurve_inverted"] = (yc < 0).astype(float)
             result["regime_yieldcurve_steep"] = (yc > 1.0).astype(float)
 
+        # --- Bond Stress Regime ---
+        bond_stress_col = self._find_col(features, "bond_stress_score")
+        if bond_stress_col:
+            bs = features[bond_stress_col]
+            result["regime_bond_calm"] = (bs < -0.3).astype(float)
+            result["regime_bond_stress"] = (bs > 0.3).astype(float)
+            result["regime_bond_crisis"] = (bs > 0.7).astype(float)
+
+        # --- Sector Rotation Regime ---
+        sec_risk_col = self._find_col(features, "sector_risk_appetite")
+        if sec_risk_col:
+            sr = features[sec_risk_col]
+            result["regime_sector_riskon"] = (sr > 0.2).astype(float)
+            result["regime_sector_riskoff"] = (sr < -0.2).astype(float)
+
         # --- Combined Regime Score ---
         # Sum of all regime indicators for a composite state
         regime_cols = [c for c in result.columns if c.startswith("regime_")]
@@ -437,6 +484,8 @@ class AlternativeFeatureEngineer:
             "crypto": [],
             "congressional": [],
             "econ_surprise": [],
+            "sector_rotation": [],
+            "bond_stress": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
@@ -472,6 +521,10 @@ class AlternativeFeatureEngineer:
                 groups["congressional"].append(name)
             elif name.startswith("econ_"):
                 groups["econ_surprise"].append(name)
+            elif name.startswith("sector_"):
+                groups["sector_rotation"].append(name)
+            elif name.startswith("bond_"):
+                groups["bond_stress"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):

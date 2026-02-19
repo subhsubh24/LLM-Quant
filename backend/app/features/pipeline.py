@@ -343,6 +343,8 @@ class FeaturePipeline:
             "crypto": [],
             "congressional": [],
             "econ_surprise": [],
+            "sector_rotation": [],
+            "bond_stress": [],
             "alt_interactions": [],
             "alt_regimes": [],
         }
@@ -381,6 +383,10 @@ class FeaturePipeline:
                 groups["congressional"].append(name)
             elif name.startswith("econ_"):
                 groups["econ_surprise"].append(name)
+            elif name.startswith("sector_"):
+                groups["sector_rotation"].append(name)
+            elif name.startswith("bond_"):
+                groups["bond_stress"].append(name)
             elif name.startswith("interact_"):
                 groups["alt_interactions"].append(name)
             elif name.startswith("regime_"):
