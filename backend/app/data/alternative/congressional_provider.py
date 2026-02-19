@@ -99,83 +99,94 @@ class CongressionalProvider(AlternativeDataProvider):
         start_date: date,
         end_date: date,
     ) -> pd.DataFrame:
-        """Generate political cycle features."""
+        """Generate political cycle features (vectorized)."""
         dates = pd.bdate_range(start=start_date, end=end_date)
         result = pd.DataFrame(index=dates)
 
         if len(dates) == 0:
             return result
 
-        for d in dates:
-            dt = d.date() if hasattr(d, 'date') else d
+        # Convert to python date array once
+        date_objs = np.array([d.date() for d in dates])
+        years = np.array([dt.year for dt in date_objs])
+        months = np.array([dt.month for dt in date_objs])
+        days = np.array([dt.day for dt in date_objs])
 
-            # Presidential cycle (using Jan 20 inauguration as anchor)
-            # 2025 = year 1, 2026 = year 2, 2027 = year 3, 2028 = year 4
-            year_in_cycle = ((dt.year - 2025) % 4) + 1
-            result.loc[d, "pol_presidential_year"] = year_in_cycle / 4.0  # Normalize to 0-1
+        # --- Presidential cycle (vectorized) ---
+        year_in_cycle = ((years - 2025) % 4) + 1
+        result["pol_presidential_year"] = year_in_cycle / 4.0
+        result["pol_preelection_year"] = (year_in_cycle == 3).astype(float)
+        result["pol_election_year"] = (year_in_cycle == 4).astype(float)
+        result["pol_postelection_year"] = (year_in_cycle == 1).astype(float)
 
-            result.loc[d, "pol_preelection_year"] = 1.0 if year_in_cycle == 3 else 0.0
-            result.loc[d, "pol_election_year"] = 1.0 if year_in_cycle == 4 else 0.0
-            result.loc[d, "pol_postelection_year"] = 1.0 if year_in_cycle == 1 else 0.0
+        # --- Days to next election (vectorized) ---
+        next_elections = [date(2024, 11, 5), date(2026, 11, 3), date(2028, 11, 3)]
+        dte = np.full(len(date_objs), 365.0)
+        win_30 = np.zeros(len(date_objs))
+        win_90 = np.zeros(len(date_objs))
+        post_30 = np.zeros(len(date_objs))
 
-            # Days to next election
-            next_elections = [
-                date(2024, 11, 5), date(2026, 11, 3), date(2028, 11, 3),
-            ]
-            days_to_election = min(
-                (e - dt).days for e in next_elections if e >= dt
-            ) if any(e >= dt for e in next_elections) else 365
-            result.loc[d, "pol_days_to_election"] = min(days_to_election, 730) / 730.0
-
-            # Election windows
-            for e in next_elections:
+        for e in next_elections:
+            for i, dt in enumerate(date_objs):
                 days_diff = (e - dt).days
+                if days_diff >= 0:
+                    dte[i] = min(dte[i], days_diff)
                 if 0 <= days_diff <= 30:
-                    result.loc[d, "pol_election_window_30d"] = 1.0
+                    win_30[i] = 1.0
                 if 0 <= days_diff <= 90:
-                    result.loc[d, "pol_election_window_90d"] = 1.0
+                    win_90[i] = 1.0
                 days_after = (dt - e).days
                 if 0 <= days_after <= 30:
-                    result.loc[d, "pol_post_election_30d"] = 1.0
+                    post_30[i] = 1.0
 
-            # Congressional session (approximate: recess in Aug, late Dec)
-            in_session = 1.0
-            if dt.month == 8:  # August recess
-                in_session = 0.0
-            elif dt.month == 12 and dt.day > 20:  # Holiday recess
-                in_session = 0.0
-            result.loc[d, "pol_congress_in_session"] = in_session
+        result["pol_days_to_election"] = np.minimum(dte, 730) / 730.0
+        result["pol_election_window_30d"] = win_30
+        result["pol_election_window_90d"] = win_90
+        result["pol_post_election_30d"] = post_30
 
-            # Lame duck session (Nov-Jan of election year)
-            is_lame_duck = (
-                (year_in_cycle == 4 and dt.month >= 11) or
-                (year_in_cycle == 1 and dt.month == 1 and dt.day < 20)
-            )
-            result.loc[d, "pol_lame_duck_session"] = 1.0 if is_lame_duck else 0.0
+        # --- Congressional session (vectorized) ---
+        in_session = np.ones(len(date_objs))
+        in_session[months == 8] = 0.0
+        in_session[(months == 12) & (days > 20)] = 0.0
+        result["pol_congress_in_session"] = in_session
 
-            # Fiscal year end (Sept 30 - shutdown risk)
-            days_to_fy = (date(dt.year, 9, 30) - dt).days
+        # --- Lame duck session (vectorized) ---
+        is_lame_duck = (
+            ((year_in_cycle == 4) & (months >= 11)) |
+            ((year_in_cycle == 1) & (months == 1) & (days < 20))
+        )
+        result["pol_lame_duck_session"] = is_lame_duck.astype(float)
+
+        # --- Fiscal year end (vectorized) ---
+        fiscal_end = np.zeros(len(date_objs))
+        for i, dt in enumerate(date_objs):
+            fy = date(dt.year, 9, 30)
+            days_to_fy = (fy - dt).days
             if days_to_fy < 0:
                 days_to_fy = (date(dt.year + 1, 9, 30) - dt).days
-            result.loc[d, "pol_fiscal_year_end"] = 1.0 if days_to_fy <= 14 else 0.0
+            if days_to_fy <= 14:
+                fiscal_end[i] = 1.0
+        result["pol_fiscal_year_end"] = fiscal_end
 
-            # Debt ceiling window
-            near_debt_event = any(
-                abs((evt - dt).days) <= 30
-                for evt, kind in _POLITICAL_EVENTS.items()
-                if kind in ("debt_ceiling_deal", "funding_deadline")
-            )
-            result.loc[d, "pol_debt_ceiling_window"] = 1.0 if near_debt_event else 0.0
+        # --- Debt ceiling window (vectorized) ---
+        debt_events = [
+            evt for evt, kind in _POLITICAL_EVENTS.items()
+            if kind in ("debt_ceiling_deal", "funding_deadline")
+        ]
+        debt_window = np.zeros(len(date_objs))
+        for evt in debt_events:
+            for i, dt in enumerate(date_objs):
+                if abs((evt - dt).days) <= 30:
+                    debt_window[i] = 1.0
+        result["pol_debt_ceiling_window"] = debt_window
 
-            # Sinusoidal encoding of 4-year presidential cycle
-            # Phase: 0 at inauguration (Jan 20), full cycle over 4 years
-            days_since_inauguration = (dt - date(2025, 1, 20)).days
-            cycle_phase = (days_since_inauguration % (4 * 365.25)) / (4 * 365.25) * 2 * np.pi
-            result.loc[d, "pol_cycle_sin"] = np.sin(cycle_phase)
-            result.loc[d, "pol_cycle_cos"] = np.cos(cycle_phase)
+        # --- Sinusoidal encoding (fully vectorized) ---
+        inauguration = date(2025, 1, 20)
+        days_since = np.array([(dt - inauguration).days for dt in date_objs], dtype=float)
+        cycle_phase = (days_since % (4 * 365.25)) / (4 * 365.25) * 2 * np.pi
+        result["pol_cycle_sin"] = np.sin(cycle_phase)
+        result["pol_cycle_cos"] = np.cos(cycle_phase)
 
-        # Fill any NaN with 0
         result = result.fillna(0.0)
-
         logger.info(f"Congressional/political: {len(result.columns)} features")
         return result

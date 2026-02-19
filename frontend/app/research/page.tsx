@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 // Algorithm configuration types
 interface AlgorithmConfig {
   // Strategy Mode
@@ -162,7 +164,7 @@ export default function ResearchPage() {
   useEffect(() => {
     const fetchBotStatus = async () => {
       try {
-        const response = await fetch("/api/bot/status");
+        const response = await fetch(`${API_BASE}/api/bot/status`);
         if (response.ok) {
           const data = await response.json();
           setBotStatus(data);
@@ -192,7 +194,7 @@ export default function ResearchPage() {
 
   const saveConfig = async () => {
     try {
-      const response = await fetch("/api/bot/config", {
+      const response = await fetch(`${API_BASE}/api/bot/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -216,7 +218,7 @@ export default function ResearchPage() {
     setTestResults(null);
 
     try {
-      const response = await fetch("/api/strategy/backtest", {
+      const response = await fetch(`${API_BASE}/api/strategy/backtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

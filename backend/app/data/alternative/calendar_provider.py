@@ -316,8 +316,13 @@ class CalendarEffectsProvider(AlternativeDataProvider):
         day_diff = pd.Series(dates, index=dates).diff().dt.days
         post_holiday = (day_diff > 1).astype(float)  # Gap > 1 day = holiday before
 
-        # Pre-holiday: the day before a gap
-        pre_holiday = post_holiday.shift(-1).fillna(0)
+        # Pre-holiday: computed from the gap AFTER each date
+        # (i.e., if the next trading date is >1 day away, today is pre-holiday)
+        # Use forward-looking gap detection on the known calendar (holidays are public)
+        pre_holiday = pd.Series(0.0, index=dates)
+        for i in range(len(dates) - 1):
+            if (dates[i + 1] - dates[i]).days > 1:
+                pre_holiday.iloc[i] = 1.0
 
         result["cal_pre_holiday"] = pre_holiday
         result["cal_post_holiday"] = post_holiday

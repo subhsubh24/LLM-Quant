@@ -212,15 +212,19 @@ class SectorRotationProvider(AlternativeDataProvider):
         # 6. Leader/Laggard (which sector is strongest/weakest)
         if sector_rets:
             ret_df = pd.DataFrame(sector_rets)
-            # Encode sector as normalized index
-            sector_names = list(sector_rets.keys())
-            for idx, d in enumerate(ret_df.index):
-                row = ret_df.loc[d]
-                if not row.isna().all():
-                    leader_idx = row.values.argmax() / (len(sector_names) - 1)
-                    laggard_idx = row.values.argmin() / (len(sector_names) - 1)
-                    result.loc[d, "sector_momentum_leader"] = leader_idx
-                    result.loc[d, "sector_momentum_laggard"] = laggard_idx
+            n_sectors = len(sector_rets)
+            # Vectorized: argmax/argmin across columns, normalized to [0, 1]
+            valid_mask = ~ret_df.isna().all(axis=1)
+            # Initialize defaults (neutral)
+            result["sector_momentum_leader"] = 0.5
+            result["sector_momentum_laggard"] = 0.5
+            if valid_mask.any() and n_sectors > 1:
+                result.loc[valid_mask, "sector_momentum_leader"] = (
+                    np.nanargmax(ret_df.loc[valid_mask].values, axis=1) / (n_sectors - 1)
+                )
+                result.loc[valid_mask, "sector_momentum_laggard"] = (
+                    np.nanargmin(ret_df.loc[valid_mask].values, axis=1) / (n_sectors - 1)
+                )
 
         # 7. Rotation speed: how much has leadership changed in 5 days?
         if "sector_momentum_leader" in result.columns:
@@ -241,7 +245,7 @@ class SectorRotationProvider(AlternativeDataProvider):
 
         # Filter to requested date range
         result = result.loc[str(start_date):str(end_date)]
-        result = result.fillna(method='ffill').fillna(0.0)
+        result = result.ffill().fillna(0.0)
 
         logger.info(f"Sector rotation: {len(result.columns)} features")
         return result

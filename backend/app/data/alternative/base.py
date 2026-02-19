@@ -187,6 +187,13 @@ class AlternativeDataProvider(ABC):
         """Native data frequency before resampling."""
         return "mixed"
 
+    @staticmethod
+    def _make_tz_naive(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        """Safely remove timezone from DatetimeIndex (handles already-naive)."""
+        if index.tz is not None:
+            return index.tz_localize(None)
+        return index
+
     def _resample_to_daily(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Resample mixed-frequency data to daily, forward-filling.
@@ -200,6 +207,9 @@ class AlternativeDataProvider(ABC):
         # Ensure datetime index
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index)
+
+        # Ensure tz-naive (some data sources return tz-aware)
+        df.index = self._make_tz_naive(df.index)
 
         # Resample to business days, forward-fill
         daily_idx = pd.bdate_range(start=df.index.min(), end=df.index.max())

@@ -430,6 +430,53 @@ body {
   }
 }
 
+/* Bloomberg Terminal Style Classes */
+.terminal-panel {
+  @apply bg-gray-900 border border-gray-700 rounded-lg p-4;
+  font-family: 'SF Mono', 'JetBrains Mono', 'Menlo', monospace;
+}
+
+.command-input {
+  @apply w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg;
+  @apply text-gray-100 font-mono text-sm;
+  @apply placeholder-gray-500;
+  @apply focus:outline-none focus:ring-2 focus:ring-orange-500/40 focus:border-orange-500;
+}
+
+.text-bloomberg-orange {
+  color: #FF9500;
+}
+
+.bg-bloomberg-orange {
+  background-color: #FF9500;
+}
+
+/* Bloomberg orange with opacity variants */
+.bg-bloomberg-orange\/10 {
+  background-color: rgba(255, 149, 0, 0.1);
+}
+
+.bg-bloomberg-orange\/20 {
+  background-color: rgba(255, 149, 0, 0.2);
+}
+
+/* Positive/Negative with opacity for Bloomberg-style pages */
+.bg-positive\/10 {
+  background-color: rgba(52, 199, 89, 0.1);
+}
+
+.bg-positive\/20 {
+  background-color: rgba(52, 199, 89, 0.2);
+}
+
+.bg-negative\/10 {
+  background-color: rgba(255, 59, 48, 0.1);
+}
+
+.bg-negative\/20 {
+  background-color: rgba(255, 59, 48, 0.2);
+}
+
 /* Print styles */
 @media print {
   .sidebar, .topbar {

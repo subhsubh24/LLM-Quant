@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 // Types for trade analysis
 interface Trade {
   id: string;
@@ -78,7 +80,7 @@ export default function LearnPage() {
     const fetchData = async () => {
       try {
         // Fetch recent trades
-        const tradesRes = await fetch("/api/bot/trades?limit=50");
+        const tradesRes = await fetch(`${API_BASE}/api/bot/trades?limit=50`);
         if (tradesRes.ok) {
           const data = await tradesRes.json();
           setTrades(data.trades || []);
@@ -86,7 +88,7 @@ export default function LearnPage() {
         }
 
         // Fetch bot commentary for stream
-        const commentaryRes = await fetch("/api/bot/commentary?limit=20");
+        const commentaryRes = await fetch(`${API_BASE}/api/bot/commentary?limit=20`);
         if (commentaryRes.ok) {
           const data = await commentaryRes.json();
           const botThoughts = (data.entries || []).map((entry: any, idx: number) => ({

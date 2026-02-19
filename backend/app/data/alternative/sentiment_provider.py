@@ -153,7 +153,7 @@ class SentimentProvider(AlternativeDataProvider):
 
             # VIX percentile over trailing 63 days (quarterly context)
             result["sent_vix_percentile_63d"] = vix_close.rolling(63).apply(
-                lambda x: (x.iloc[-1] > x).mean() if len(x) > 0 else np.nan,
+                lambda x: (x.iloc[-1] > x[:-1]).mean() if len(x) > 1 else np.nan,
                 raw=False,
             )
 

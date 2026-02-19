@@ -199,8 +199,11 @@ class AlternativeFeatureEngineer:
         CONTINUOUS raw series. Skips binary/categorical columns
         (calendar flags, regime indicators) since z-scoring 0/1
         values is meaningless.
+
+        Uses dict-of-Series approach to avoid DataFrame fragmentation
+        (PerformanceWarning from repeated column insertion).
         """
-        result = pd.DataFrame(index=raw.index)
+        engineered = {}
 
         for col in raw.columns:
             # Skip binary/categorical columns
@@ -219,21 +222,23 @@ class AlternativeFeatureEngineer:
             for window in self.config.lookback_windows:
                 # Rate of change
                 roc = series.diff(window) / (series.shift(window).abs() + 1e-8)
-                result[f"{col}_roc_{window}d"] = roc.clip(-5, 5)
+                engineered[f"{col}_roc_{window}d"] = roc.clip(-5, 5)
 
                 # Rolling z-score
                 rolling_mean = series.rolling(window, min_periods=window // 2).mean()
                 rolling_std = series.rolling(window, min_periods=window // 2).std()
                 zscore = (series - rolling_mean) / (rolling_std + 1e-8)
-                result[f"{col}_zscore_{window}d"] = zscore.clip(-4, 4)
+                engineered[f"{col}_zscore_{window}d"] = zscore.clip(-4, 4)
 
             # Percentile rank (63-day)
-            result[f"{col}_pctile_63d"] = series.rolling(63, min_periods=21).apply(
+            engineered[f"{col}_pctile_63d"] = series.rolling(63, min_periods=21).apply(
                 lambda x: (x.iloc[-1] > x[:-1]).mean() if len(x) > 1 else np.nan,
                 raw=False,
             )
 
-        return result
+        if engineered:
+            return pd.DataFrame(engineered, index=raw.index)
+        return pd.DataFrame(index=raw.index)
 
     def _compute_interactions(self, features: pd.DataFrame) -> pd.DataFrame:
         """
@@ -309,7 +314,7 @@ class AlternativeFeatureEngineer:
 
         # SAD effect + seasonal calendar: winter darkness + poor market seasonality
         sad_col = self._find_col(features, "weather_sad_proxy")
-        jan_col = self._find_col(features, "cal_january")
+        jan_col = self._find_col(features, "cal_month_jan")
         if sad_col and jan_col:
             # January effect amplified by SAD (short dark days in Jan)
             result["interact_sad_x_january"] = (

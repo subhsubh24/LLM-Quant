@@ -267,11 +267,12 @@ class OptionsSignalsProvider(AlternativeDataProvider):
         result["opt_vix_squared"] = (vix / 100) ** 2
 
         # Discrete regime
-        result["opt_vix_regime"] = pd.cut(
+        regime = pd.cut(
             vix,
             bins=[0, 12, 16, 20, 25, 30, 100],
             labels=[0, 1, 2, 3, 4, 5],
-        ).astype(float)
+        )
+        result["opt_vix_regime"] = pd.to_numeric(regime, errors='coerce').fillna(2.0)
 
         return result
 

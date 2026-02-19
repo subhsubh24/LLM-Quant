@@ -12,14 +12,21 @@ import {
   Settings,
   Zap,
   TrendingUp,
+  Bitcoin,
+  LineChart,
+  Lightbulb,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, description: "Market Overview" },
   { name: "Quant Bot", href: "/bot", icon: Bot, badge: "LIVE", badgeColor: "green", description: "Automated Trading" },
+  { name: "Trading", href: "/trading", icon: TrendingUp, description: "Auto Trader" },
+  { name: "Options", href: "/options", icon: LineChart, description: "Options Trading" },
+  { name: "Crypto", href: "/crypto", icon: Bitcoin, description: "Cryptocurrency" },
   { name: "Research", href: "/research", icon: FlaskConical, description: "Algorithm Config" },
   { name: "Analytics", href: "/performance", icon: BarChart3, description: "Market Health" },
+  { name: "Insights", href: "/insights", icon: Lightbulb, badge: "AI", badgeColor: "orange", description: "AI Analysis" },
   { name: "Learn", href: "/learn", icon: GraduationCap, badge: "AI", badgeColor: "purple", description: "Trade Coaching" },
 ];
 

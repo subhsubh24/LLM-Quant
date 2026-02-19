@@ -17,6 +17,8 @@ import {
   Minus,
 } from "lucide-react";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 // Market regime types
 type MarketRegime = "RISK_ON" | "RISK_OFF" | "NEUTRAL" | "HIGH_VOL";
 
@@ -57,21 +59,25 @@ export default function AnalyticsPage() {
   const [marketHealth, setMarketHealth] = useState<MarketHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [usingMockData, setUsingMockData] = useState(false);
 
   // Fetch market health data
   useEffect(() => {
     const fetchMarketHealth = async () => {
       try {
-        const response = await fetch("/api/market/health");
+        const response = await fetch(`${API_BASE}/api/market/health`);
         if (response.ok) {
           const data = await response.json();
           setMarketHealth(data);
+          setUsingMockData(false);
         } else {
           // Use intelligent defaults based on typical market conditions
           setMarketHealth(generateMarketHealth());
+          setUsingMockData(true);
         }
       } catch {
         setMarketHealth(generateMarketHealth());
+        setUsingMockData(true);
       } finally {
         setLoading(false);
         setLastUpdate(new Date());
@@ -134,6 +140,16 @@ export default function AnalyticsPage() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
+      {/* Mock data warning */}
+      {usingMockData && (
+        <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-orange-500 flex-shrink-0" />
+          <p className="text-sm text-orange-700">
+            Unable to connect to backend API. Showing simulated data for demonstration.
+          </p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between">

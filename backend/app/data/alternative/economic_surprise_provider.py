@@ -147,6 +147,8 @@ class EconomicSurpriseProvider(AlternativeDataProvider):
         end_date: date,
     ) -> pd.DataFrame:
         """Generate economic surprise and release calendar features."""
+        import bisect
+
         dates = pd.bdate_range(start=start_date, end=end_date)
         result = pd.DataFrame(index=dates)
 
@@ -158,79 +160,95 @@ class EconomicSurpriseProvider(AlternativeDataProvider):
         for year in range(start_date.year, end_date.year + 1):
             all_releases.update(_get_data_release_dates(year))
 
-        # Pre-compute release dates by type
+        # Pre-compute sorted release dates by type for binary search
         release_by_type = {}
         for rd, rtype in all_releases.items():
             if rtype not in release_by_type:
                 release_by_type[rtype] = []
             release_by_type[rtype].append(rd)
+        for rtype in release_by_type:
+            release_by_type[rtype].sort()
 
-        for d in dates:
-            dt = d.date() if hasattr(d, 'date') else d
+        # Convert dates to python date objects for comparison
+        date_objs = np.array([d.date() for d in dates])
+        all_release_set = set(all_releases.keys())
 
-            # Days to nearest release of each type
-            for rtype, col_name in [
-                ("nfp", "econ_nfp_days"),
-                ("cpi", "econ_cpi_days"),
-                ("fomc", "econ_fomc_days"),
-                ("gdp", "econ_gdp_days"),
-                ("ism", "econ_ism_days"),
-            ]:
-                release_dates = release_by_type.get(rtype, [])
-                if release_dates:
-                    # Find nearest release (signed: negative=before, positive=after)
-                    diffs = [(rd - dt).days for rd in release_dates]
-                    # Find the closest upcoming or most recent
-                    upcoming = [d for d in diffs if d >= 0]
-                    recent = [d for d in diffs if d < 0]
-                    if upcoming:
-                        nearest = min(upcoming)
-                    elif recent:
-                        nearest = max(recent)  # Most recent past
-                    else:
-                        nearest = 30
-                    # Normalize: clip to [-10, 10] days and scale
-                    result.loc[d, col_name] = np.clip(nearest, -10, 10) / 10.0
+        # --- Vectorized: Days to nearest release of each type ---
+        for rtype, col_name in [
+            ("nfp", "econ_nfp_days"),
+            ("cpi", "econ_cpi_days"),
+            ("fomc", "econ_fomc_days"),
+            ("gdp", "econ_gdp_days"),
+            ("ism", "econ_ism_days"),
+        ]:
+            release_dates = release_by_type.get(rtype, [])
+            if not release_dates:
+                result[col_name] = 0.0
+                continue
 
-            # Release windows
-            is_release = dt in all_releases
-            is_pre = (dt + timedelta(days=1)) in all_releases
-            is_post = (dt - timedelta(days=1)) in all_releases
+            nearest_vals = np.empty(len(date_objs))
+            for i, dt in enumerate(date_objs):
+                pos = bisect.bisect_left(release_dates, dt)
+                candidates = []
+                if pos < len(release_dates):
+                    candidates.append((release_dates[pos] - dt).days)
+                if pos > 0:
+                    candidates.append((release_dates[pos - 1] - dt).days)
+                if candidates:
+                    # Pick the one closest to zero (upcoming preferred)
+                    upcoming = [d for d in candidates if d >= 0]
+                    nearest_vals[i] = min(upcoming) if upcoming else max(candidates)
+                else:
+                    nearest_vals[i] = 30
+            result[col_name] = np.clip(nearest_vals, -10, 10) / 10.0
 
-            result.loc[d, "econ_pre_release_24h"] = 1.0 if is_pre else 0.0
-            result.loc[d, "econ_release_day"] = 1.0 if is_release else 0.0
-            result.loc[d, "econ_post_release_24h"] = 1.0 if is_post else 0.0
+        # --- Vectorized: Release windows ---
+        result["econ_pre_release_24h"] = np.array([
+            1.0 if (dt + timedelta(days=1)) in all_release_set else 0.0
+            for dt in date_objs
+        ])
+        result["econ_release_day"] = np.array([
+            1.0 if dt in all_release_set else 0.0
+            for dt in date_objs
+        ])
+        result["econ_post_release_24h"] = np.array([
+            1.0 if (dt - timedelta(days=1)) in all_release_set else 0.0
+            for dt in date_objs
+        ])
 
-            # Release density: count releases within 5 business days
-            week_releases = sum(
-                1 for rd in all_releases
-                if 0 <= (rd - dt).days <= 5
-            )
-            result.loc[d, "econ_release_density"] = min(week_releases, 5) / 5.0
+        # --- Vectorized: Release density ---
+        all_release_dates_sorted = sorted(all_release_set)
+        density = np.empty(len(date_objs))
+        for i, dt in enumerate(date_objs):
+            pos = bisect.bisect_left(all_release_dates_sorted, dt)
+            count = 0
+            for j in range(pos, len(all_release_dates_sorted)):
+                diff = (all_release_dates_sorted[j] - dt).days
+                if diff > 5:
+                    break
+                if diff >= 0:
+                    count += 1
+            density[i] = min(count, 5) / 5.0
+        result["econ_release_density"] = density
 
-            # Proxy economic cycle: sinusoidal approximation of ~4 year business cycle
-            # (Crude but captures the general expansion/contraction rhythm)
-            # US business cycle averages ~47 months (NBER)
-            cycle_months = 47
-            days_in_cycle = cycle_months * 30.44
-            # Anchor: Jan 2020 = cycle trough (COVID recession bottom)
-            days_from_anchor = (dt - date(2020, 4, 1)).days
-            cycle_phase = (days_from_anchor % days_in_cycle) / days_in_cycle
-            result.loc[d, "econ_cycle_phase"] = np.sin(2 * np.pi * cycle_phase)
+        # --- Fully vectorized: Economic cycle features ---
+        cycle_months = 47
+        days_in_cycle = cycle_months * 30.44
+        anchor = date(2020, 4, 1)
+        days_from_anchor = np.array([(dt - anchor).days for dt in date_objs], dtype=float)
+        cycle_phase = (days_from_anchor % days_in_cycle) / days_in_cycle
 
-            # Cycle momentum (derivative of cycle)
-            result.loc[d, "econ_cycle_momentum"] = np.cos(2 * np.pi * cycle_phase)
+        result["econ_cycle_phase"] = np.sin(2 * np.pi * cycle_phase)
+        result["econ_cycle_momentum"] = np.cos(2 * np.pi * cycle_phase)
+        result["econ_surprise_proxy"] = np.clip(
+            np.sin(2 * np.pi * cycle_phase + np.pi / 4), -1, 1
+        )
 
-            # Proxy surprise index: based on cycle position
-            # In early expansion, surprises tend positive; in late cycle, negative
-            # This is a crude but directionally correct proxy
-            surprise_proxy = np.sin(2 * np.pi * cycle_phase + np.pi / 4)
-            result.loc[d, "econ_surprise_proxy"] = np.clip(surprise_proxy, -1, 1)
-
-            # Seasonal economic patterns
-            result.loc[d, "econ_q4_spending"] = 1.0 if dt.month in [11, 12] else 0.0
-            result.loc[d, "econ_tax_season"] = 1.0 if dt.month in [2, 3, 4] else 0.0
-            result.loc[d, "econ_summer_slowdown"] = 1.0 if dt.month in [6, 7, 8] else 0.0
+        # --- Fully vectorized: Seasonal patterns ---
+        months = np.array([dt.month for dt in date_objs])
+        result["econ_q4_spending"] = np.isin(months, [11, 12]).astype(float)
+        result["econ_tax_season"] = np.isin(months, [2, 3, 4]).astype(float)
+        result["econ_summer_slowdown"] = np.isin(months, [6, 7, 8]).astype(float)
 
         result = result.fillna(0.0)
         logger.info(f"Economic surprise: {len(result.columns)} features")

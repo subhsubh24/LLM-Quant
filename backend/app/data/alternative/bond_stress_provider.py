@@ -224,7 +224,7 @@ class BondStressProvider(AlternativeDataProvider):
 
         # Filter to requested date range
         result = result.loc[str(start_date):str(end_date)]
-        result = result.fillna(method='ffill').fillna(0.0)
+        result = result.ffill().fillna(0.0)
 
         logger.info(f"Bond stress: {len(result.columns)} features")
         return result

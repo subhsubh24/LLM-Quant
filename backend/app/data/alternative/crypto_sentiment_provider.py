@@ -136,11 +136,12 @@ class CryptoSentimentProvider(AlternativeDataProvider):
                     result["crypto_btc_spy_corr_63d"] = corr_63d
 
                     # Correlation regime: high (>0.5), low (<0.2), negative (<0)
-                    result["crypto_btc_corr_regime"] = pd.cut(
+                    regime = pd.cut(
                         corr_63d,
                         bins=[-1, 0, 0.3, 0.6, 1],
                         labels=[0, 1, 2, 3],
-                    ).astype(float)
+                    )
+                    result["crypto_btc_corr_regime"] = pd.to_numeric(regime, errors='coerce').fillna(1.0)
 
             # ETH/BTC ratio (risk-on within crypto = more speculative)
             if "ETH-USD" in prices.columns and "BTC-USD" in prices.columns:

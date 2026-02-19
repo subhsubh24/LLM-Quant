@@ -28,6 +28,7 @@ USAGE IN BACKTESTER:
 
 from datetime import date, timedelta
 from typing import Optional, List, Dict
+import bisect
 import pandas as pd
 import numpy as np
 import logging
@@ -54,6 +55,7 @@ class AltDataContext:
         self._features: Optional[np.ndarray] = None
         self._feature_names: List[str] = []
         self._date_to_idx: Dict[date, int] = {}
+        self._sorted_dates: List[date] = []  # For binary search fallback
         self._n_features: int = 0
         self._is_prepared: bool = False
 
@@ -126,6 +128,9 @@ class AltDataContext:
                 d = ts.date() if hasattr(ts, 'date') else ts
                 self._date_to_idx[d] = i
 
+            # Pre-sort dates for binary search in get_features()
+            self._sorted_dates = sorted(self._date_to_idx.keys())
+
             self._is_prepared = True
 
             logger.info(
@@ -160,19 +165,13 @@ class AltDataContext:
 
         # If exact date not found, find the most recent available date
         # (forward-fill logic - use last available data)
-        available_dates = sorted(self._date_to_idx.keys())
-        if not available_dates:
+        if not self._sorted_dates:
             return np.zeros(self._n_features, dtype=np.float32)
 
-        # Binary search for the latest date <= query_date
-        best_date = None
-        for d in available_dates:
-            if d <= query_date:
-                best_date = d
-            else:
-                break
-
-        if best_date is not None:
+        # Binary search for the latest date <= query_date (O(log n))
+        pos = bisect.bisect_right(self._sorted_dates, query_date)
+        if pos > 0:
+            best_date = self._sorted_dates[pos - 1]
             return self._features[self._date_to_idx[best_date]]
 
         return np.zeros(self._n_features, dtype=np.float32)
