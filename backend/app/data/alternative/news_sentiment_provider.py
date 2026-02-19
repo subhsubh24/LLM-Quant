@@ -241,10 +241,19 @@ class NewsSentimentProvider(AlternativeDataProvider):
         Simple but effective: keyword counting with financial-specific words.
         """
         text = headline.lower()
+        words_in_text = set(re.findall(r'\b\w+\b', text))
 
-        pos_count = sum(1 for word in POSITIVE_WORDS if word in text)
-        neg_count = sum(1 for word in NEGATIVE_WORDS if word in text)
-        crisis_count = sum(1 for word in CRISIS_WORDS if word in text)
+        # Use word boundary matching to avoid substring false positives
+        # (e.g. "gain" matching "against", "cut" matching "executive")
+        pos_count = sum(1 for word in POSITIVE_WORDS
+                        if (' ' in word and word in text)  # Multi-word: use substring
+                        or (' ' not in word and word in words_in_text))  # Single word: exact match
+        neg_count = sum(1 for word in NEGATIVE_WORDS
+                        if (' ' in word and word in text)
+                        or (' ' not in word and word in words_in_text))
+        crisis_count = sum(1 for word in CRISIS_WORDS
+                           if (' ' in word and word in text)
+                           or (' ' not in word and word in words_in_text))
 
         total = pos_count + neg_count + crisis_count
         if total == 0:

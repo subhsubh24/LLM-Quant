@@ -184,17 +184,24 @@ class CalendarEffectsProvider(AlternativeDataProvider):
         result["cal_sell_in_may"] = ((month >= 5) & (month <= 10)).astype(float)
 
     def _compute_turn_of_month(self, result: pd.DataFrame) -> None:
-        """Turn of month effect (last 3 + first 3 business days)."""
-        dom = result.index.day
-        days_in_month = result.index.to_series().apply(
-            lambda x: pd.Timestamp(x.year, x.month, 1) + pd.offsets.MonthEnd(0)
-        ).dt.day
+        """Turn of month effect (last 3 + first 3 business days).
 
-        # First 3 business days
-        result["cal_month_start"] = (dom <= 3).astype(float)
+        Uses actual business day ranking within each month, not calendar days,
+        so weekends/holidays don't distort the window.
+        """
+        dates_series = result.index.to_series()
+        ym = dates_series.dt.to_period('M')
 
-        # Last 3 business days (approximate)
-        result["cal_month_end"] = (dom >= days_in_month - 3).astype(float)
+        # Rank business days within each month (1-based from start)
+        bday_rank = ym.groupby(ym).cumcount() + 1
+        # Reverse rank (1 = last bday of month)
+        bday_reverse_rank = ym.groupby(ym).cumcount(ascending=False) + 1
+
+        # First 3 business days of month
+        result["cal_month_start"] = (bday_rank <= 3).astype(float)
+
+        # Last 3 business days of month
+        result["cal_month_end"] = (bday_reverse_rank <= 3).astype(float)
 
         # Combined turn of month
         result["cal_turn_of_month"] = (
@@ -237,35 +244,27 @@ class CalendarEffectsProvider(AlternativeDataProvider):
         """
         dates = result.index
 
-        # Create indicators for days relative to FOMC
-        fomc_m2 = pd.Series(0.0, index=dates)
-        fomc_m1 = pd.Series(0.0, index=dates)
-        fomc_day = pd.Series(0.0, index=dates)
-        fomc_p1 = pd.Series(0.0, index=dates)
-        fomc_window = pd.Series(0.0, index=dates)
+        # Create boolean indicators for days relative to FOMC
+        fomc_m2 = pd.Series(False, index=dates)
+        fomc_m1 = pd.Series(False, index=dates)
+        fomc_day = pd.Series(False, index=dates)
+        fomc_p1 = pd.Series(False, index=dates)
+        fomc_window = pd.Series(False, index=dates)
 
+        # Vectorized FOMC computation (O(N*F) where F=num FOMC dates, not O(N*M))
         for fomc_date in self._fomc_dates:
-            # Find the business days around this FOMC date
-            for i, d in enumerate(dates):
-                diff = (d - fomc_date).days
-                if diff == -2 or diff == -3:  # Account for weekends
-                    fomc_m2.iloc[i] = 1.0
-                elif diff == -1:
-                    fomc_m1.iloc[i] = 1.0
-                elif diff == 0:
-                    fomc_day.iloc[i] = 1.0
-                elif diff == 1:
-                    fomc_p1.iloc[i] = 1.0
+            diffs = (dates - fomc_date).days  # Returns Int64Index of day differences
+            fomc_m2 = fomc_m2 | ((diffs == -2) | (diffs == -3))
+            fomc_m1 = fomc_m1 | (diffs == -1)
+            fomc_day = fomc_day | (diffs == 0)
+            fomc_p1 = fomc_p1 | (diffs == 1)
+            fomc_window = fomc_window | ((diffs >= -3) & (diffs <= 1))
 
-                # FOMC window: day-2 through day+1
-                if -3 <= diff <= 1:
-                    fomc_window.iloc[i] = 1.0
-
-        result["cal_fomc_minus2"] = fomc_m2
-        result["cal_fomc_minus1"] = fomc_m1
-        result["cal_fomc_day"] = fomc_day
-        result["cal_fomc_plus1"] = fomc_p1
-        result["cal_fomc_window"] = fomc_window
+        result["cal_fomc_minus2"] = fomc_m2.astype(float)
+        result["cal_fomc_minus1"] = fomc_m1.astype(float)
+        result["cal_fomc_day"] = fomc_day.astype(float)
+        result["cal_fomc_plus1"] = fomc_p1.astype(float)
+        result["cal_fomc_window"] = fomc_window.astype(float)
 
     def _compute_opex_effects(self, result: pd.DataFrame) -> None:
         """
@@ -276,33 +275,35 @@ class CalendarEffectsProvider(AlternativeDataProvider):
         """
         dates = result.index
 
-        opex_day = pd.Series(0.0, index=dates)
+        # Vectorized OpEx computation
+        dow = dates.dayofweek  # 0=Mon, 4=Fri
+        dom = dates.day
+        month = dates.month
+
+        # 3rd Friday: Friday (dow==4) with day 15-21
+        is_third_friday = (dow == 4) & (dom >= 15) & (dom <= 21)
+        result["cal_opex_day"] = is_third_friday.astype(float)
+
+        # Quad witching: 3rd Friday of Mar, Jun, Sep, Dec
+        result["cal_quad_witching"] = (
+            is_third_friday & month.isin([3, 6, 9, 12])
+        ).astype(float)
+
+        # OpEx week: pre-compute 3rd Friday per (year, month), then vectorize
         opex_week = pd.Series(0.0, index=dates)
-        quad_witch = pd.Series(0.0, index=dates)
-
+        seen_months = set()
         for d in dates:
-            # 3rd Friday: day 15-21 and Friday (weekday=4)
-            if d.weekday() == 4 and 15 <= d.day <= 21:
-                opex_day.loc[d] = 1.0
-
-                # Quad witching months
-                if d.month in [3, 6, 9, 12]:
-                    quad_witch.loc[d] = 1.0
-
-            # OpEx week: the week containing the 3rd Friday
-            # Find 3rd Friday of this month
+            key = (d.year, d.month)
+            if key in seen_months:
+                continue
+            seen_months.add(key)
             first_day = pd.Timestamp(d.year, d.month, 1)
             first_friday = first_day + timedelta(days=(4 - first_day.weekday()) % 7)
             third_friday = first_friday + timedelta(weeks=2)
-
-            # Within 5 business days of OpEx
-            days_to_opex = abs((d - third_friday).days)
-            if days_to_opex <= 5:
-                opex_week.loc[d] = 1.0
-
-        result["cal_opex_day"] = opex_day
+            # Mark all dates within 5 calendar days
+            mask = abs((dates - third_friday).days) <= 5
+            opex_week[mask] = 1.0
         result["cal_opex_week"] = opex_week
-        result["cal_quad_witching"] = quad_witch
 
     def _compute_holiday_effects(self, result: pd.DataFrame) -> None:
         """

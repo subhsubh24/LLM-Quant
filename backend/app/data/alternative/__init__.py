@@ -2,7 +2,7 @@
 Alternative data providers for non-price/volume signals.
 
 Quant firms use dozens of alternative data sources beyond market data.
-This module implements 15 provider categories:
+This module implements 17 provider categories:
 
 1.  Macroeconomic data (FRED) - interest rates, inflation, employment
 2.  Cross-asset signals - bonds, commodities, currencies, credit spreads
@@ -19,6 +19,8 @@ This module implements 15 provider categories:
 13. Economic surprise - data release calendar, surprise index proxy
 14. Sector rotation - SPDR sector momentum, relative strength
 15. Bond stress - credit risk, yield curve, bond-equity correlation
+16. Market microstructure - liquidity, order flow, price impact
+17. Volatility surface - term structure, risk premium, vol regime
 """
 
 from .base import AlternativeDataProvider, AltDataConfig
@@ -37,6 +39,8 @@ from .congressional_provider import CongressionalProvider
 from .economic_surprise_provider import EconomicSurpriseProvider
 from .sector_rotation_provider import SectorRotationProvider
 from .bond_stress_provider import BondStressProvider
+from .market_microstructure_provider import MarketMicrostructureProvider
+from .volatility_surface_provider import VolatilitySurfaceProvider
 from .alt_feature_engineer import AlternativeFeatureEngineer
 
 __all__ = [
@@ -57,5 +61,7 @@ __all__ = [
     "EconomicSurpriseProvider",
     "SectorRotationProvider",
     "BondStressProvider",
+    "MarketMicrostructureProvider",
+    "VolatilitySurfaceProvider",
     "AlternativeFeatureEngineer",
 ]

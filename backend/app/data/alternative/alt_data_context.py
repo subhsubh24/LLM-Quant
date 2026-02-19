@@ -158,7 +158,7 @@ class AltDataContext:
         prepare_features() loop, once per candle.
         """
         if not self._is_prepared or self._features is None:
-            return np.zeros(max(self._n_features, 1), dtype=np.float32)
+            return np.zeros(self._n_features, dtype=np.float32) if self._n_features > 0 else np.zeros(0, dtype=np.float32)
 
         idx = self._date_to_idx.get(query_date)
         if idx is not None:

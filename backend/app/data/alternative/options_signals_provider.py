@@ -222,17 +222,22 @@ class OptionsSignalsProvider(AlternativeDataProvider):
             # Higher ratio = more convexity = higher skew
             return avg_vix_on_down / (abs(avg_vix_on_up) + 1e-8)
 
-        # Rolling skew computation
-        skew_values = []
-        for i in range(len(vix_ret)):
-            if i < 21:
-                skew_values.append(np.nan)
-                continue
-            w_vix = vix_ret.iloc[i-21:i]
-            w_spy = spy_ret.iloc[i-21:i]
-            skew_values.append(compute_skew_ratio(w_vix, w_spy))
+        # Rolling skew computation (vectorized using rolling.apply on paired data)
+        paired = pd.DataFrame({'vix_ret': vix_ret, 'spy_ret': spy_ret}).dropna()
+        # Pre-compute rolling means for down/up days using vectorized masks
+        spy_down = (spy_ret < 0).astype(float)
+        spy_up = (spy_ret > 0).astype(float)
+        vix_on_down = (vix_ret * spy_down)
+        vix_on_up = (vix_ret * spy_up)
 
-        skew = pd.Series(skew_values, index=vix.index)
+        down_count = spy_down.rolling(21, min_periods=10).sum()
+        up_count = spy_up.rolling(21, min_periods=10).sum()
+        avg_vix_down = vix_on_down.rolling(21, min_periods=10).sum() / (down_count + 1e-8)
+        avg_vix_up = vix_on_up.rolling(21, min_periods=10).sum() / (up_count + 1e-8)
+
+        # Skew ratio: VIX reaction on down days vs up days
+        skew = avg_vix_down / (avg_vix_up.abs() + 1e-8)
+        skew = skew.where((down_count >= 3) & (up_count >= 3), np.nan)
         result["opt_skew_proxy"] = skew
 
         # Skew z-score

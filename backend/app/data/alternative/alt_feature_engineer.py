@@ -48,6 +48,8 @@ from .congressional_provider import CongressionalProvider
 from .economic_surprise_provider import EconomicSurpriseProvider
 from .sector_rotation_provider import SectorRotationProvider
 from .bond_stress_provider import BondStressProvider
+from .market_microstructure_provider import MarketMicrostructureProvider
+from .volatility_surface_provider import VolatilitySurfaceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,10 @@ class AlternativeFeatureEngineer:
             self.providers["sector_rotation"] = SectorRotationProvider(self.config)
         if self.config.bond_stress_enabled:
             self.providers["bond_stress"] = BondStressProvider(self.config)
+        if self.config.microstructure_enabled:
+            self.providers["microstructure"] = MarketMicrostructureProvider(self.config)
+        if self.config.vol_surface_enabled:
+            self.providers["vol_surface"] = VolatilitySurfaceProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -192,6 +198,10 @@ class AlternativeFeatureEngineer:
         "econ_q4_",   # Binary seasonal flags
         "econ_tax_",  # Binary seasonal flags
         "econ_summer_",  # Binary seasonal flags
+        "vol_term_contango",       # Binary contango flag
+        "vol_regime_compressed",   # Binary regime
+        "vol_regime_exploding",    # Binary regime
+        "vol_risk_premium_regime", # Binary regime
     )
 
     def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -392,6 +402,40 @@ class AlternativeFeatureEngineer:
                 features[hy_mom] * features[cyc_def]
             )
 
+        # --- Microstructure x Vol Surface interactions ---
+
+        # Liquidity drying up + vol term structure inverting = crash risk
+        illiq_col = self._find_col(features, "micro_amihud_illiq_zscore")
+        term_col = self._find_col(features, "vol_term_slope_30_90")
+        if illiq_col and term_col:
+            result["interact_illiq_x_termslope"] = (
+                features[illiq_col] * features[term_col]
+            )
+
+        # Risk premium collapsing + volume surprise = dislocation
+        rp_col = self._find_col(features, "vol_risk_premium_zscore")
+        volsurp_col = self._find_col(features, "micro_volume_surprise")
+        if rp_col and volsurp_col:
+            result["interact_vrp_x_volume"] = (
+                features[rp_col] * features[volsurp_col]
+            )
+
+        # Order flow + VIX: buying pressure in high-vol = smart money accumulation
+        ofi_col = self._find_col(features, "micro_order_flow_imbalance")
+        vix_z = self._find_col(features, "sent_vix_zscore_21d")
+        if ofi_col and vix_z:
+            result["interact_ofi_x_vix"] = (
+                features[ofi_col] * features[vix_z]
+            )
+
+        # Overnight vol dominance + crypto move = macro event
+        vol_ratio_col = self._find_col(features, "micro_vol_ratio")
+        btc_col = self._find_col(features, "crypto_btc_ret_1d")
+        if vol_ratio_col and btc_col:
+            result["interact_overnightvol_x_btc"] = (
+                features[vol_ratio_col] * features[btc_col]
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -456,6 +500,21 @@ class AlternativeFeatureEngineer:
             result["regime_sector_riskon"] = (sr > 0.2).astype(float)
             result["regime_sector_riskoff"] = (sr < -0.2).astype(float)
 
+        # --- Liquidity Regime (from microstructure) ---
+        illiq_col = self._find_col(features, "micro_amihud_illiq_zscore")
+        if illiq_col:
+            illiq = features[illiq_col]
+            result["regime_liquidity_tight"] = (illiq > 1.0).astype(float)
+            result["regime_liquidity_crisis"] = (illiq > 2.0).astype(float)
+
+        # --- Vol Surface Regime ---
+        term_col = self._find_col(features, "vol_term_contango")
+        if term_col:
+            result["regime_vol_backwardation"] = (features[term_col] == 0).astype(float)
+        rp_regime_col = self._find_col(features, "vol_risk_premium_regime")
+        if rp_regime_col:
+            result["regime_negative_vrp"] = features[rp_regime_col]
+
         # --- Combined Regime Score ---
         # Sum of all regime indicators for a composite state
         regime_cols = [c for c in result.columns if c.startswith("regime_")]
@@ -470,11 +529,14 @@ class AlternativeFeatureEngineer:
         return result
 
     def _find_col(self, df: pd.DataFrame, pattern: str) -> Optional[str]:
-        """Find column matching pattern (exact match first, then contains)."""
+        """Find column matching pattern (exact match first, then shortest contains match)."""
         if pattern in df.columns:
             return pattern
         matches = [c for c in df.columns if pattern in c]
-        return matches[0] if matches else None
+        if not matches:
+            return None
+        # Return shortest match to avoid e.g. "bond_hy_momentum" matching "bond_hy_momentum_roc_5d"
+        return min(matches, key=len)
 
     def get_feature_groups(self) -> Dict[str, List[str]]:
         """Group features by source for analysis."""
@@ -494,6 +556,8 @@ class AlternativeFeatureEngineer:
             "econ_surprise": [],
             "sector_rotation": [],
             "bond_stress": [],
+            "microstructure": [],
+            "vol_surface": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
@@ -533,6 +597,10 @@ class AlternativeFeatureEngineer:
                 groups["sector_rotation"].append(name)
             elif name.startswith("bond_"):
                 groups["bond_stress"].append(name)
+            elif name.startswith("micro_"):
+                groups["microstructure"].append(name)
+            elif name.startswith("vol_"):
+                groups["vol_surface"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):

@@ -243,8 +243,12 @@ class SectorRotationProvider(AlternativeDataProvider):
         else:
             result["sector_risk_appetite"] = 0.0
 
-        # Filter to requested date range
-        result = result.loc[str(start_date):str(end_date)]
+        # Normalize timezone before filtering
+        if result.index.tz is not None:
+            result.index = result.index.tz_localize(None)
+
+        # Filter to requested date range using proper Timestamp slicing
+        result = result.loc[pd.Timestamp(start_date):pd.Timestamp(end_date)]
         result = result.ffill().fillna(0.0)
 
         logger.info(f"Sector rotation: {len(result.columns)} features")

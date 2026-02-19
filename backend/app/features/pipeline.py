@@ -235,8 +235,10 @@ class FeaturePipeline:
             logger.debug("Computing alternative data features")
             try:
                 # Determine date range from price index
-                start_date = prices.index.min().date()
-                end_date = prices.index.max().date()
+                idx_min = prices.index.min()
+                idx_max = prices.index.max()
+                start_date = idx_min.date() if hasattr(idx_min, 'date') else idx_min
+                end_date = idx_max.date() if hasattr(idx_max, 'date') else idx_max
 
                 alt_features = self._alt_engineer.compute_features(
                     start_date=start_date,
@@ -263,14 +265,33 @@ class FeaturePipeline:
         # Store feature names
         self.feature_names = features.columns.tolist()
 
-        # Standardize if configured
+        # Standardize if configured -- but SKIP alt data features that are already
+        # standardized (z-scored, percentile-ranked, or binary 0/1). Standardizing
+        # them again distorts their meaning (e.g. binary calendar flags become ~-0.3/+2.1).
+        _ALT_PREFIXES = (
+            "cal_", "regime_", "pol_", "econ_", "fred_", "xasset_", "sent_",
+            "opt_", "edgar_", "news_", "gtrends_", "weather_", "short_",
+            "dark_", "crypto_", "sector_", "bond_", "interact_",
+            "micro_", "vol_",
+        )
         if self.config.standardize_method != "none":
             logger.debug(f"Standardizing features using {self.config.standardize_method}")
-            features = standardize_features(
-                features,
-                method=self.config.standardize_method,
-                clip_outliers=self.config.clip_outliers
-            )
+            # Separate alt data columns from price-based columns
+            alt_cols = [c for c in features.columns
+                        if any(c.startswith(p) for p in _ALT_PREFIXES)]
+            price_cols = [c for c in features.columns if c not in alt_cols]
+
+            if price_cols:
+                price_features = standardize_features(
+                    features[price_cols],
+                    method=self.config.standardize_method,
+                    clip_outliers=self.config.clip_outliers
+                )
+                if alt_cols:
+                    features = pd.concat([price_features, features[alt_cols]], axis=1)
+                else:
+                    features = price_features
+            # If only alt cols, skip standardization entirely
 
         # Validate no leakage
         self._validate_no_leakage(features, prices)

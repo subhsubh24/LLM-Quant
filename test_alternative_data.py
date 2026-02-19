@@ -50,6 +50,8 @@ from backend.app.data.alternative import (
     EconomicSurpriseProvider,
     SectorRotationProvider,
     BondStressProvider,
+    MarketMicrostructureProvider,
+    VolatilitySurfaceProvider,
 )
 from backend.app.data.alternative.alt_data_context import AltDataContext
 
@@ -97,6 +99,8 @@ def test_all_providers():
         (EconomicSurpriseProvider(), "Economic Surprise"),
         (SectorRotationProvider(), "Sector Rotation"),
         (BondStressProvider(), "Bond Stress"),
+        (MarketMicrostructureProvider(), "Market Microstructure"),
+        (VolatilitySurfaceProvider(), "Volatility Surface"),
     ]
 
     total_ok = 0

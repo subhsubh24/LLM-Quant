@@ -196,13 +196,18 @@ class EDGARProvider(AlternativeDataProvider):
         # Align to business day index
         daily_counts = daily_counts.reindex(dates).fillna(0)
 
-        # 21-day rolling counts (approximation since we don't have buy/sell split)
-        result["edgar_insider_buy_count_21d"] = daily_counts.rolling(21).sum()
-        result["edgar_insider_sell_count_21d"] = daily_counts.rolling(21).sum() * 0.7  # ~70% are sells
+        # 21-day rolling total filings (we can't distinguish buy/sell from count alone)
+        total_21d = daily_counts.rolling(21).sum()
+        result["edgar_insider_buy_count_21d"] = total_21d
+        # Report total filings for sell count too (no buy/sell split available from Form 4 count)
+        result["edgar_insider_sell_count_21d"] = total_21d
         result["edgar_insider_net_ratio_21d"] = 0.0  # Would need transaction type parsing
         result["edgar_insider_buy_value_21d"] = 0.0
+
+        # Cluster signal: 5-day total > 2x the expected 5-day total (based on 63d daily avg)
+        expected_5d = daily_counts.rolling(63, min_periods=21).mean() * 5
         result["edgar_insider_cluster_signal"] = (
-            daily_counts.rolling(5).sum() > daily_counts.rolling(63).mean() * 2
+            daily_counts.rolling(5).sum() > expected_5d * 2
         ).astype(float)
         result["edgar_sector_insider_sentiment"] = 0.0
 

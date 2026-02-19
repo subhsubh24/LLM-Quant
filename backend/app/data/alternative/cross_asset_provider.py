@@ -119,7 +119,9 @@ class CrossAssetProvider(AlternativeDataProvider):
                 continue
             price = raw_prices[ticker]
             for period in [1, 5, 21]:
-                ret = np.log(np.maximum(price / price.shift(period), 1e-8))
+                ratio = price / price.shift(period)
+                ret = np.log(ratio)  # NaN propagates naturally for missing data
+                ret = ret.clip(-1, 1)  # Reasonable bounds for log returns
                 result[f"xasset_{alias}_ret_{period}d"] = ret
 
         # 2. Derived signals

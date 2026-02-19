@@ -113,7 +113,8 @@ class CryptoSentimentProvider(AlternativeDataProvider):
 
                 # Volatility
                 btc_ret = np.log(np.maximum(btc / btc.shift(1), eps))
-                vol_21d = btc_ret.rolling(21).std() * np.sqrt(365)
+                # Use sqrt(252) since after _resample_to_daily the index is business days
+                vol_21d = btc_ret.rolling(21).std() * np.sqrt(252)
                 result["crypto_btc_vol_21d"] = vol_21d
                 vol_mean = vol_21d.rolling(63, min_periods=21).mean()
                 vol_std = vol_21d.rolling(63, min_periods=21).std()

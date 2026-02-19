@@ -123,6 +123,12 @@ class AltDataConfig:
     # Bond market stress and credit risk (uses yfinance - free with internet)
     bond_stress_enabled: bool = True
 
+    # Market microstructure / liquidity signals (uses yfinance - free)
+    microstructure_enabled: bool = True
+
+    # Volatility surface / term structure (uses yfinance - free)
+    vol_surface_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -148,6 +154,8 @@ class AltDataConfig:
             "economic_surprise_enabled": self.economic_surprise_enabled,
             "sector_rotation_enabled": self.sector_rotation_enabled,
             "bond_stress_enabled": self.bond_stress_enabled,
+            "microstructure_enabled": self.microstructure_enabled,
+            "vol_surface_enabled": self.vol_surface_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }
