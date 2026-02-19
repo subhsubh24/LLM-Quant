@@ -506,7 +506,7 @@ class AristotleRulesStrategy(BaseStrategy):
             }
 
             self.last_signal_time = datetime.now()
-            logger.info(
+            logger.debug(
                 f"Aristotle signal: score={composite_score:+.3f}, "
                 f"confidence={confidence:.3f}, "
                 f"direction={'LONG' if composite_score > 0 else 'SHORT' if composite_score < 0 else 'FLAT'}"

@@ -24,15 +24,20 @@ from backend.app.trading.backtester import (
     CHECKPOINT_DIR, OHLCV
 )
 
-# Setup logging
+# Setup logging — quiet mode: suppress HTTP noise, keep key events
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
+    format='%(asctime)s | %(message)s',
+    datefmt='%H:%M:%S',
     handlers=[
         logging.FileHandler('backtest_only_output.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
+# Suppress noisy HTTP/network libraries
+for lib in ('urllib3', 'aiohttp', 'httpx', 'asyncio', 'charset_normalizer',
+            'requests', 'aiohttp.client', 'aiohttp.connector'):
+    logging.getLogger(lib).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

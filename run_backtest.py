@@ -13,20 +13,26 @@ import logging
 import sys
 from pathlib import Path
 
-# Add project root to path
+# Add project root and backend to path
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
 from backend.app.trading.backtester import run_full_training_pipeline
 
-# Setup logging
+# Setup logging — quiet mode: suppress HTTP noise, keep key events
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    format='%(asctime)s | %(message)s',
+    datefmt='%H:%M:%S',
     handlers=[
         logging.FileHandler('backtest_output.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
+# Suppress noisy HTTP/network libraries
+for lib in ('urllib3', 'aiohttp', 'httpx', 'asyncio', 'charset_normalizer',
+            'requests', 'aiohttp.client', 'aiohttp.connector'):
+    logging.getLogger(lib).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

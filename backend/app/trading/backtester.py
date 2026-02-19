@@ -1958,6 +1958,7 @@ class WalkForwardBacktester:
         rolling_max_equity = self.initial_capital  # Track peak equity for DD calculation
         max_portfolio_dd = config["max_portfolio_drawdown"]
         portfolio_trading_paused = False  # Pause trading if DD exceeds limit
+        degradation_halt_logged = False  # Only log AUTO-HALT message once
         recent_returns = []  # Track recent returns for volatility
 
         # TIER 1 FIX: DRAWDOWN RECOVERY SCALING (using config)
@@ -2147,34 +2148,23 @@ class WalkForwardBacktester:
                     # Continue anyway - state may be partially corrupted but backtest continues
             previous_symbol = symbol
 
-            # Periodic progress logging (every 10 seconds or 5000 candles)
+            # Periodic progress logging (every 60 seconds)
             current_time = time.time()
-            if current_time - last_log_time > 10 or candles_processed - last_log_index >= 5000:
+            if current_time - last_log_time > 60 or candles_processed - last_log_index >= 5000:
                 progress_pct = (candles_processed / len(all_candles)) * 100
                 rate = (candles_processed - last_log_index) / (current_time - last_log_time)
                 est_remaining = (len(all_candles) - candles_processed) / rate if rate > 0 else 0
                 logger.info(
-                    f"Progress: {candles_processed:,}/{len(all_candles):,} candles ({progress_pct:.1f}%) | "
-                    f"Positions: {len(positions)} | Trades: {len(trades)} | "
-                    f"Capital: ${capital:,.2f} | "
-                    f"Rate: {rate:.0f} candles/sec | ETA: {est_remaining:.0f}s"
+                    f"Progress: {candles_processed:,}/{len(all_candles):,} ({progress_pct:.0f}%) | "
+                    f"Trades: {len(trades)} | Capital: ${capital:,.2f} | ETA: {est_remaining:.0f}s"
                 )
-                # Log filter funnel every 60 seconds to diagnose zero-trade issues
-                if filter_stage_counters["total_predictions"] > 0:
+                # Filter funnel: only log at 25%/50%/75%/100% milestones
+                if filter_stage_counters["total_predictions"] > 0 and int(progress_pct) in (25, 50, 75, 99):
                     fc = filter_stage_counters
                     logger.info(
-                        f"  Filter funnel: predictions={fc['total_predictions']} → "
-                        f"not_hold={fc['not_hold']} → conf={fc['meets_confidence']} → "
-                        f"liquid={fc['is_liquid']} → consensus={fc['strong_consensus']} → "
-                        f"sig={fc['stat_significant']} → mr={fc.get('mean_reversion_ok', 0)} → opened={fc['positions_opened']}"
+                        f"  Filter funnel: {fc['total_predictions']} predictions → {fc['positions_opened']} trades "
+                        f"({fc['positions_opened']/max(fc['total_predictions'],1)*100:.1f}% conversion)"
                     )
-                    if fc.get("hybrid_signals", 0) > 0:
-                        logger.info(
-                            f"  Hybrid signals: {fc['hybrid_signals']} total | "
-                            f"agree={fc['hybrid_agree']} boost={fc['hybrid_boosted']} | "
-                            f"disagree={fc['hybrid_disagree']} dampen={fc['hybrid_dampened']} | "
-                            f"overrides={fc['hybrid_overridden']}"
-                        )
                 last_log_time = current_time
                 last_log_index = candles_processed
 
@@ -2195,7 +2185,7 @@ class WalkForwardBacktester:
 
                     # CORRELATION MATRIX UPDATE (every 500 candles)
                     if candles_processed - last_corr_update >= config["correlation_update_interval"] and len(positions) > 1:
-                        logger.info(f"📊 Updating correlation matrix...")
+                        logger.debug(f"Updating correlation matrix...")
                         # Calculate correlations between all symbol pairs in positions
                         position_symbols = list(positions.keys())
                         for i, sym1 in enumerate(position_symbols):
@@ -2681,8 +2671,8 @@ class WalkForwardBacktester:
                                 if symbol not in trade_churn:
                                     trade_churn[symbol] = 0
                                 trade_churn[symbol] += 1
-                                if trade_churn[symbol] > config["churn_alert_threshold"]:
-                                    logger.warning(f"⚠️ HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips (long<->short). Possible thrashing.")
+                                if trade_churn[symbol] == config["churn_alert_threshold"] + 1:  # Log once at threshold
+                                    logger.warning(f"HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips")
                                 # Block symbol temporarily if too many flips
                                 if trade_churn[symbol] >= max_flips_per_symbol:
                                     flip_block_until[symbol] = candles_processed + flip_block_candles
@@ -2794,22 +2784,25 @@ class WalkForwardBacktester:
                     # BUG FIX #13: Robust rolling window calculation (use neutral default, not 0)
                     rolling_win_rate = np.mean(recent_trades_window) if len(recent_trades_window) > 0 else 0.5
                     if len(recent_trades_window) >= 10 and rolling_win_rate < degradation_threshold:
-                        if rolling_win_rate < config["degradation_halt_threshold"]:
-                            logger.warning(
-                                f"🛑 CRITICAL DEGRADATION: Win rate {rolling_win_rate*100:.1f}% — "
-                                f"auto-halting all trading (threshold: {config['degradation_halt_threshold']*100:.0f}%)"
-                            )
-                        elif rolling_win_rate < config["degradation_invert_threshold"]:
-                            logger.warning(
-                                f"🔄 ANTI-PREDICTIVE: Win rate {rolling_win_rate*100:.1f}% — "
-                                f"inverting signals (threshold: {config['degradation_invert_threshold']*100:.0f}%)"
-                            )
-                        else:
-                            logger.warning(
-                                f"⚠️ Model degradation detected! Rolling win rate: {rolling_win_rate*100:.1f}% "
-                                f"(below {degradation_threshold*100:.0f}% threshold). "
-                                f"Consider retraining models."
-                            )
+                        # Rate-limit degradation warnings (log every 10th occurrence)
+                        degradation_warn_count = getattr(self, '_deg_warn_count', 0) + 1
+                        self._deg_warn_count = degradation_warn_count
+                        if degradation_warn_count <= 2 or degradation_warn_count % 10 == 0:
+                            if rolling_win_rate < config["degradation_halt_threshold"]:
+                                logger.warning(
+                                    f"DEGRADATION: Win rate {rolling_win_rate*100:.1f}% — "
+                                    f"halting (threshold: {config['degradation_halt_threshold']*100:.0f}%)"
+                                )
+                            elif rolling_win_rate < config["degradation_invert_threshold"]:
+                                logger.warning(
+                                    f"ANTI-PREDICTIVE: Win rate {rolling_win_rate*100:.1f}% — "
+                                    f"inverting signals (threshold: {config['degradation_invert_threshold']*100:.0f}%)"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Model degradation: Win rate {rolling_win_rate*100:.1f}% "
+                                    f"(below {degradation_threshold*100:.0f}%)"
+                                )
 
                     # Track individual model accuracy and P&L (PHASE C)
                     trade_was_profitable = realized_pnl > 0
@@ -2894,8 +2887,12 @@ class WalkForwardBacktester:
                 if not portfolio_trading_paused:
                     logger.warning(f"⚠️ PORTFOLIO DD LIMIT HIT: {current_dd*100:.1f}% > {max_portfolio_dd*100:.0f}% | Pausing new trades")
                 portfolio_trading_paused = True
-            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 50% of limit
-                portfolio_trading_paused = False
+            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 60% of limit
+                # Only resume from DD-pause, NOT from degradation halt
+                # (degradation halt should stay until win rate improves)
+                if portfolio_trading_paused and not degradation_halt_logged:
+                    logger.info(f"DD recovered to {current_dd*100:.1f}%. Resuming trading.")
+                    portfolio_trading_paused = False
 
             # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
             # Detect macro regime shifts (elevated vol = higher risk, extreme vol = don't trade)
@@ -3133,8 +3130,8 @@ class WalkForwardBacktester:
                                                 # ML has a view, rules neutral → heavily discount ML
                                                 prediction["confidence"] = ml_conf * 0.5
 
-                                    # Log hybrid diagnostics for first 50 signals
-                                    if signals_generated <= 50:
+                                    # Log hybrid diagnostics for first 5 signals (sample)
+                                    if signals_generated <= 5:
                                         ml_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(ml_action, '?')
                                         rules_dir = 'LONG' if rules_direction == 1 else ('SHORT' if rules_direction == -1 else 'NEUTRAL')
                                         final_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
@@ -3165,8 +3162,9 @@ class WalkForwardBacktester:
                         current_rolling_wr = np.mean(recent_trades_window)
                         if current_rolling_wr < config["degradation_halt_threshold"]:
                             # Models are useless — stop trading until they improve
-                            if not portfolio_trading_paused:
-                                logger.warning(f"🛑 AUTO-HALT: Win rate {current_rolling_wr*100:.1f}% < {config['degradation_halt_threshold']*100:.0f}% threshold. Pausing ALL trading.")
+                            if not degradation_halt_logged:
+                                logger.warning(f"AUTO-HALT: Win rate {current_rolling_wr*100:.1f}% < {config['degradation_halt_threshold']*100:.0f}%. Pausing trading.")
+                                degradation_halt_logged = True
                             portfolio_trading_paused = True
                             continue
                         elif current_rolling_wr < config["degradation_invert_threshold"]:
@@ -3179,8 +3177,8 @@ class WalkForwardBacktester:
                             # HOLD stays HOLD
                             if original_action != prediction["action"]:
                                 inverted_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
-                                if np.random.random() < 0.01:
-                                    logger.info(f"🔄 SIGNAL INVERTED: {symbol} (win rate {current_rolling_wr*100:.1f}% < {config['degradation_invert_threshold']*100:.0f}%) → {inverted_name}")
+                                if np.random.random() < 0.001:
+                                    logger.debug(f"Signal inverted: {symbol} (WR {current_rolling_wr*100:.1f}%) → {inverted_name}")
 
                     # ============================================================
                     # TREND-FOLLOWING FILTER (Aristotle's #1 Rule)
@@ -3553,9 +3551,9 @@ class WalkForwardBacktester:
                         not in_cooldown and
                         not position_conflict and
                         symbol not in positions):  # Don't open if already have position
-                        # ✅ SIGNAL ACCEPTED: Log for diagnostics
+                        # ✅ SIGNAL ACCEPTED
                         filter_stage_counters["positions_opened"] += 1
-                        logger.info(f"✅ TRADE #{filter_stage_counters['positions_opened']}: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
+                        logger.debug(f"TRADE #{filter_stage_counters['positions_opened']}: {action_name} {symbol} | Conf={prediction['confidence']:.3f} | Agreement={model_agreement}/4 | Regime={regime}")
 
                         # SIMPLIFIED POSITION SIZING (FIXED: Removed cascading multipliers that reduced positions to $0.30)
                         # Issue: Base Kelly * horizon * vol targeting * correlation * counter-trend * vol scaling * leverage
