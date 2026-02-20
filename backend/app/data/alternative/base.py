@@ -135,6 +135,9 @@ class AltDataConfig:
     # Factor momentum / cross-sectional signals (uses yfinance - free)
     factor_momentum_enabled: bool = True
 
+    # Intermarket correlation regime (uses yfinance - free)
+    correlation_regime_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -164,6 +167,7 @@ class AltDataConfig:
             "vol_surface_enabled": self.vol_surface_enabled,
             "earnings_seasonality_enabled": self.earnings_seasonality_enabled,
             "factor_momentum_enabled": self.factor_momentum_enabled,
+            "correlation_regime_enabled": self.correlation_regime_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }

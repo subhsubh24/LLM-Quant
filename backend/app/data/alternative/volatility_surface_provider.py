@@ -191,9 +191,10 @@ class VolatilitySurfaceProvider(AlternativeDataProvider):
             if len(common) > 0:
                 spy_aligned = spy.loc[common]
                 spy_ret = np.log(spy_aligned / spy_aligned.shift(1))
-                realized_21d = spy_ret.rolling(21, min_periods=10).std() * np.sqrt(252) * 100
+                realized_21d = spy_ret.rolling(21, min_periods=10).std() * np.sqrt(252)
 
-                vix_aligned = vix.loc[common]
+                # Convert VIX from percentage points to decimal for consistent scale
+                vix_aligned = vix.loc[common] / 100.0
                 risk_premium = vix_aligned - realized_21d
                 result["vol_risk_premium"] = risk_premium.reindex(vix.index)
 

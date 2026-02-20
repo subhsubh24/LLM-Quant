@@ -52,6 +52,7 @@ from .market_microstructure_provider import MarketMicrostructureProvider
 from .volatility_surface_provider import VolatilitySurfaceProvider
 from .earnings_seasonality_provider import EarningsSeasonalityProvider
 from .factor_momentum_provider import FactorMomentumProvider
+from .correlation_regime_provider import CorrelationRegimeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,8 @@ class AlternativeFeatureEngineer:
             self.providers["earnings_seasonality"] = EarningsSeasonalityProvider(self.config)
         if self.config.factor_momentum_enabled:
             self.providers["factor_momentum"] = FactorMomentumProvider(self.config)
+        if self.config.correlation_regime_enabled:
+            self.providers["correlation_regime"] = CorrelationRegimeProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -255,9 +258,9 @@ class AlternativeFeatureEngineer:
                 zscore = (series - rolling_mean) / (rolling_std + 1e-8)
                 engineered[f"{col}_zscore_{window}d"] = zscore.clip(-4, 4)
 
-            # Percentile rank (63-day)
+            # Percentile rank (63-day) - use >= to include ties, compare against full window
             engineered[f"{col}_pctile_63d"] = series.rolling(63, min_periods=21).apply(
-                lambda x: (x.iloc[-1] > x[:-1]).mean() if len(x) > 1 else np.nan,
+                lambda x: (x.iloc[-1] >= x).sum() / len(x) if len(x) > 0 else np.nan,
                 raw=False,
             )
 
@@ -482,6 +485,24 @@ class AlternativeFeatureEngineer:
                 features[earn_peak] * features[term_slope]
             )
 
+        # --- Correlation Regime interactions ---
+
+        # Stock-bond correlation × VIX: crisis regime amplified by vol
+        corr_eb = self._find_col(features, "corr_equity_bond")
+        vix_z3 = self._find_col(features, "sent_vix_zscore_21d")
+        if corr_eb and vix_z3:
+            result["interact_corr_x_vix"] = (
+                features[corr_eb] * features[vix_z3]
+            )
+
+        # Absorption ratio × credit stress: systemic + credit = maximum danger
+        absorption = self._find_col(features, "corr_absorption_ratio")
+        credit_stress = self._find_col(features, "bond_credit_stress")
+        if absorption and credit_stress:
+            result["interact_absorption_x_credit"] = (
+                features[absorption] * features[credit_stress]
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -560,6 +581,16 @@ class AlternativeFeatureEngineer:
         rp_regime_col = self._find_col(features, "vol_risk_premium_regime")
         if rp_regime_col:
             result["regime_negative_vrp"] = features[rp_regime_col]
+
+        # --- Correlation Regime ---
+        corr_crisis_col = self._find_col(features, "corr_crisis_regime")
+        if corr_crisis_col:
+            result["regime_corr_crisis"] = features[corr_crisis_col]
+        absorption_col = self._find_col(features, "corr_absorption_ratio")
+        if absorption_col:
+            ab = features[absorption_col]
+            # High absorption (>0.5) = systemic risk elevated
+            result["regime_systemic_risk"] = (ab > 0.5).astype(float)
 
         # --- Combined Regime Score ---
         # Sum of all regime indicators for a composite state
@@ -694,6 +725,7 @@ class AlternativeFeatureEngineer:
             "vol_surface": [],
             "earnings_seasonality": [],
             "factor_momentum": [],
+            "correlation_regime": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
@@ -741,6 +773,8 @@ class AlternativeFeatureEngineer:
                 groups["earnings_seasonality"].append(name)
             elif name.startswith("factor_"):
                 groups["factor_momentum"].append(name)
+            elif name.startswith("corr_"):
+                groups["correlation_regime"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):

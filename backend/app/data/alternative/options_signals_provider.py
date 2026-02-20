@@ -168,15 +168,16 @@ class OptionsSignalsProvider(AlternativeDataProvider):
         """
         result = pd.DataFrame(index=vix.index)
 
-        # Realized vol: annualized std of SPY log returns
+        # Realized vol: annualized std of SPY log returns (decimal form, same scale as VIX/100)
         spy_ret = np.log(spy / spy.shift(1))
-        realized_vol_21d = spy_ret.rolling(21).std() * np.sqrt(252) * 100
+        realized_vol_21d = spy_ret.rolling(21).std() * np.sqrt(252)
 
-        # VIX is implied vol (annualized, in percentage points)
+        # VIX is in percentage points (e.g. 20 = 20%), convert to decimal for consistency
+        vix_decimal = vix / 100.0
         result["opt_realized_vol_21d"] = realized_vol_21d
 
-        # VRP = VIX - Realized Vol
-        vrp = vix - realized_vol_21d
+        # VRP = implied vol - realized vol (both in decimal form)
+        vrp = vix_decimal - realized_vol_21d
         result["opt_vrp"] = vrp
 
         # Implied minus realized (same as VRP but clearer name)
@@ -187,9 +188,9 @@ class OptionsSignalsProvider(AlternativeDataProvider):
         vrp_std = vrp.rolling(63, min_periods=21).std()
         result["opt_vrp_zscore_21d"] = ((vrp - vrp_mean) / (vrp_std + 1e-8)).clip(-4, 4)
 
-        # VRP percentile
+        # VRP percentile (use >= for proper rank including ties)
         result["opt_vrp_percentile_63d"] = vrp.rolling(63, min_periods=21).apply(
-            lambda x: (x.iloc[-1] > x[:-1]).mean() if len(x) > 1 else np.nan,
+            lambda x: (x.iloc[-1] >= x).sum() / len(x) if len(x) > 0 else np.nan,
             raw=False,
         )
 

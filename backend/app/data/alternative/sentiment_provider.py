@@ -152,8 +152,9 @@ class SentimentProvider(AlternativeDataProvider):
             result["sent_vix_level"] = vix_close
 
             # VIX percentile over trailing 63 days (quarterly context)
+            # Use >= to include ties, compare against full window including self
             result["sent_vix_percentile_63d"] = vix_close.rolling(63).apply(
-                lambda x: (x.iloc[-1] > x[:-1]).mean() if len(x) > 1 else np.nan,
+                lambda x: (x.iloc[-1] >= x).sum() / len(x) if len(x) > 0 else np.nan,
                 raw=False,
             )
 
@@ -328,7 +329,8 @@ class SentimentProvider(AlternativeDataProvider):
         fg_components = []
 
         if "sent_vix_percentile_63d" in result.columns:
-            # Low VIX percentile = greed, high = fear
+            # High VIX percentile (fearful market) → negative score (fear)
+            # Low VIX percentile (greedy market) → positive score (greed)
             fg_components.append(1 - 2 * result["sent_vix_percentile_63d"])
 
         if "sent_breadth_thrust" in result.columns:
@@ -339,7 +341,16 @@ class SentimentProvider(AlternativeDataProvider):
                 pd.concat(fg_components, axis=1).mean(axis=1)
             )
 
-        # Skew proxy (VIX level relative to recent realized vol of SPY)
-        if "sent_vix_level" in result.columns:
-            # When implied vol (VIX) >> realized vol, put buying is extreme
-            result["sent_skew_proxy"] = result["sent_vix_zscore_21d"].clip(-3, 3) if "sent_vix_zscore_21d" in result.columns else np.nan
+        # Skew proxy: VIX relative to realized vol (VRP direction)
+        # When VIX >> realized vol, put demand is extreme = negative skew
+        if "sent_vix_level" in result.columns and "sent_vix_chg_5d" in result.columns:
+            # Use VIX change asymmetry as skew proxy
+            # VIX rises faster than it falls = negative skew in returns
+            vix_chg = result["sent_vix_chg_5d"]
+            pos_vix_mean = vix_chg.where(vix_chg > 0, 0).rolling(21, min_periods=10).mean()
+            neg_vix_mean = vix_chg.where(vix_chg < 0, 0).rolling(21, min_periods=10).mean().abs()
+            result["sent_skew_proxy"] = (
+                pos_vix_mean / (neg_vix_mean + 1e-8) - 1
+            ).clip(-3, 3)
+        else:
+            result["sent_skew_proxy"] = np.nan

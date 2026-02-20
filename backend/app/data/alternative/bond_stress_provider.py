@@ -151,7 +151,8 @@ class BondStressProvider(AlternativeDataProvider):
             lqd_ret = lqd.pct_change(1)
             # HY spread: when HYG underperforms LQD → credit stress rising
             spread = (hyg_ret - lqd_ret).rolling(5).mean()
-            result["bond_hy_spread"] = spread.clip(-0.02, 0.02)
+            # Wider clip to preserve crisis signals (old ±0.02 suppressed 2008/2020 spikes)
+            result["bond_hy_spread"] = spread.clip(-0.05, 0.05)
 
             # Z-score of spread
             spread_mean = spread.rolling(63, min_periods=21).mean()

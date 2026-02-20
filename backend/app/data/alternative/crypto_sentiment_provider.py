@@ -100,37 +100,36 @@ class CryptoSentimentProvider(AlternativeDataProvider):
             prices = prices.ffill()
 
             result = pd.DataFrame(index=prices.index)
-            eps = 1e-8
 
             # BTC features
             if "BTC-USD" in prices.columns:
                 btc = prices["BTC-USD"]
 
-                # Returns
-                result["crypto_btc_ret_1d"] = np.log(np.maximum(btc / btc.shift(1), eps))
-                result["crypto_btc_ret_5d"] = np.log(np.maximum(btc / btc.shift(5), eps))
-                result["crypto_btc_ret_21d"] = np.log(np.maximum(btc / btc.shift(21), eps))
+                # Returns - use np.log(ratio).clip(-1,1) pattern (NaN propagates naturally)
+                result["crypto_btc_ret_1d"] = np.log(btc / btc.shift(1)).clip(-1, 1)
+                result["crypto_btc_ret_5d"] = np.log(btc / btc.shift(5)).clip(-1, 1)
+                result["crypto_btc_ret_21d"] = np.log(btc / btc.shift(21)).clip(-1, 1)
 
                 # Volatility
-                btc_ret = np.log(np.maximum(btc / btc.shift(1), eps))
+                btc_ret = np.log(btc / btc.shift(1)).clip(-1, 1)
                 # Use sqrt(252) since after _resample_to_daily the index is business days
                 vol_21d = btc_ret.rolling(21).std() * np.sqrt(252)
                 result["crypto_btc_vol_21d"] = vol_21d
                 vol_mean = vol_21d.rolling(63, min_periods=21).mean()
                 vol_std = vol_21d.rolling(63, min_periods=21).std()
                 result["crypto_btc_vol_zscore"] = (
-                    (vol_21d - vol_mean) / (vol_std + eps)
+                    (vol_21d - vol_mean) / (vol_std + 1e-8)
                 ).clip(-3, 3)
 
                 # Drawdown from ATH
                 rolling_max = btc.expanding().max()
-                result["crypto_btc_drawdown"] = (btc - rolling_max) / (rolling_max + eps)
+                result["crypto_btc_drawdown"] = (btc - rolling_max) / rolling_max
 
                 # BTC-SPY correlation
                 if "SPY" in prices.columns:
-                    spy_ret = np.log(np.maximum(
-                        prices["SPY"] / prices["SPY"].shift(1), eps
-                    ))
+                    spy_ret = np.log(
+                        prices["SPY"] / prices["SPY"].shift(1)
+                    ).clip(-1, 1)
                     corr_21d = btc_ret.rolling(21, min_periods=10).corr(spy_ret)
                     corr_63d = btc_ret.rolling(63, min_periods=21).corr(spy_ret)
                     result["crypto_btc_spy_corr_21d"] = corr_21d
@@ -146,10 +145,10 @@ class CryptoSentimentProvider(AlternativeDataProvider):
 
             # ETH/BTC ratio (risk-on within crypto = more speculative)
             if "ETH-USD" in prices.columns and "BTC-USD" in prices.columns:
-                eth_btc = prices["ETH-USD"] / (prices["BTC-USD"] + eps)
+                eth_btc = prices["ETH-USD"] / prices["BTC-USD"]
                 result["crypto_eth_btc_ratio_chg"] = np.log(
-                    np.maximum(eth_btc / eth_btc.shift(5), eps)
-                )
+                    eth_btc / eth_btc.shift(5)
+                ).clip(-1, 1)
 
             # Composite risk appetite from crypto
             risk_components = []
