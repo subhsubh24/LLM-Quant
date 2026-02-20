@@ -64,7 +64,7 @@ class AlternativeFeatureEngineer:
 
     This is the main interface for the feature pipeline to get
     alternative data features. It:
-    1. Fetches data from all 10 configured provider categories
+    1. Fetches data from all 21 configured provider categories
     2. Engineers features (changes, z-scores, regimes)
     3. Computes interaction features
     4. Returns a properly lagged, standardized feature matrix
@@ -221,6 +221,8 @@ class AlternativeFeatureEngineer:
         "vol_risk_premium_regime", # Binary regime
         "earn_",                   # Earnings seasonality flags are binary/calendar
         "turb_regime_",            # Turbulence regime indicators are binary (0/1)
+        "interact_",               # Interaction features are already normalized products
+        "composite_",              # Composite signals are already aggregated/clipped
     )
 
     def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
