@@ -4470,6 +4470,8 @@ class ModelPreTrainer:
         self._pca_components = None  # shape: (state_dim, n_raw_features)
         self._pca_mean = None        # shape: (n_raw_features,)
         self._pca_n_raw = None       # original feature count before compression
+        self._pre_pca_mean = None    # per-feature mean before PCA (for normalization)
+        self._pre_pca_std = None     # per-feature std before PCA (for normalization)
 
         # Sequence length for LSTM/Transformer (must match training)
         self.seq_len = 10
@@ -4493,7 +4495,7 @@ class ModelPreTrainer:
                     input_dim=state_dim, hidden_dim=128, output_dim=action_dim, lr=0.001
                 ),
                 'transformer': TrainableTransformer(
-                    input_dim=state_dim, hidden_dim=64, output_dim=action_dim, lr=0.001
+                    input_dim=state_dim, hidden_dim=128, output_dim=action_dim, lr=0.001
                 ),
                 'vae': TrainableVAE(
                     input_dim=state_dim, hidden_dim=64, latent_dim=8, output_dim=action_dim, lr=0.001
@@ -4566,14 +4568,15 @@ class ModelPreTrainer:
 
         self._pca_n_raw = n_raw
 
-        # Log variance explained
-        total_var = np.sum(np.var(X_clean, axis=0))
-        explained_var = np.sum(eigenvalues[eigenvalues > 0]) if np.any(eigenvalues > 0) else 0
+        # Transform
+        X_compressed = X_centered @ self._pca_components.T
+
+        # Log variance explained using actual projected data (avoids eigenvalue scaling bugs)
+        total_var = np.sum(np.var(X_centered, axis=0))
+        explained_var = np.sum(np.var(X_compressed, axis=0))
         var_ratio = explained_var / (total_var + 1e-10)
         logger.info(f"   PCA variance explained: {var_ratio:.1%} ({target_dim} components from {n_raw} features)")
 
-        # Transform
-        X_compressed = X_centered @ self._pca_components.T
         return X_compressed.astype(np.float32)
 
     def _apply_pca_compress(self, X: np.ndarray) -> np.ndarray:
@@ -4605,6 +4608,11 @@ class ModelPreTrainer:
             X = X[:, :expected_raw]
 
         X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Apply pre-PCA normalization if fitted (matches training pipeline)
+        if hasattr(self, '_pre_pca_mean') and self._pre_pca_mean is not None:
+            X_clean = (X_clean - self._pre_pca_mean) / self._pre_pca_std
+
         X_centered = X_clean - self._pca_mean
         result = X_centered @ self._pca_components.T
 
@@ -4784,10 +4792,19 @@ class ModelPreTrainer:
             padding = np.zeros((X.shape[0], self.state_dim - X.shape[1]))
             X = np.hstack([X, padding])
         elif X.shape[1] > self.state_dim:
+            # CRITICAL FIX: Normalize features BEFORE PCA.
+            # Without this, PCA is dominated by high-magnitude raw features (e.g. volume,
+            # market cap) and ignores normalized technical indicators. A feature with
+            # variance 10^12 drowns out a carefully crafted indicator with variance 0.01.
+            # Per-feature z-score ensures all features contribute equally to PCA components.
+            X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+            self._pre_pca_mean = np.mean(X_clean, axis=0)
+            self._pre_pca_std = np.std(X_clean, axis=0) + 1e-8
+            X_normalized = (X_clean - self._pre_pca_mean) / self._pre_pca_std
+            logger.info(f"🔧 Pre-PCA normalization: feature means [{np.min(self._pre_pca_mean):.2f}, {np.max(self._pre_pca_mean):.2f}], "
+                        f"stds [{np.min(self._pre_pca_std):.4f}, {np.max(self._pre_pca_std):.4f}]")
             # PCA compression: preserve signal from ALL features instead of blind truncation.
-            # Old approach: X = X[:, :320] → discards 87% of alt data.
-            # New approach: PCA projects 2450-dim → 320-dim, retaining max variance.
-            X = self._fit_pca_compress(X, self.state_dim)
+            X = self._fit_pca_compress(X_normalized, self.state_dim)
 
         logger.info(f"✅ Prepared multi-horizon training data:")
         logger.info(f"   Features: {X.shape}")
@@ -4952,7 +4969,7 @@ class ModelPreTrainer:
             start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
         global_best_accuracy = best_val_accuracy  # Track GLOBAL best across all folds
-        patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting on expanding window)
+        patience = 7  # Stop if no improvement for 7 epochs (was 2 — too aggressive, models barely trained)
         patience_counter = getattr(self, '_patience_counter', 0)  # Persists across folds
 
         n = len(features)
@@ -5185,7 +5202,9 @@ class ModelPreTrainer:
             if len(X_train) >= seq_len + 1:
                 # Sample random starting positions to limit computation
                 # (full pass over 60K samples with stride 1 is too slow)
-                n_seq_samples = min(len(X_train) - seq_len, 2000)
+                # Was 2000 — far too few for 60K+ training samples. LSTM/Transformer
+                # were seeing 30x less data per epoch than DQN/PPO.
+                n_seq_samples = min(len(X_train) - seq_len, 15000)
                 seq_starts = np.random.choice(len(X_train) - seq_len, size=n_seq_samples, replace=False)
 
                 for start_idx in seq_starts:
@@ -5317,7 +5336,7 @@ class ModelPreTrainer:
             logger.info("🎯 MULTI-HORIZON TRAINING COMPLETE (7 TIMEFRAMES)")
             logger.info(f"   Training horizons: {sorted(labels.keys())} hours")
             logger.info(f"   Coverage: 1 day to 66+ days (micro-trends → macro-trends)")
-            logger.info(f"   Primary horizon (200h / 8+ days) accuracy: {best_val_accuracy:.2%}")
+            logger.info(f"   Primary horizon (800h / 33+ days) accuracy: {best_val_accuracy:.2%}")
             logger.info(f"")
             logger.info(f"   ✅ What this achieves:")
             logger.info(f"   • Captures short-term reversions (24h-100h)")
@@ -5755,6 +5774,9 @@ class ModelPreTrainer:
             "pca_components": self._pca_components,
             "pca_mean": self._pca_mean,
             "pca_n_raw": self._pca_n_raw,
+            # Pre-PCA normalization (per-feature z-score applied before PCA)
+            "pre_pca_mean": getattr(self, '_pre_pca_mean', None),
+            "pre_pca_std": getattr(self, '_pre_pca_std', None),
         }
 
         checkpoint_path = CHECKPOINT_DIR / "model_checkpoint.pkl"
@@ -5815,6 +5837,15 @@ class ModelPreTrainer:
                 logger.info(f"✅ Restored PCA compression ({self._pca_n_raw} → {self._pca_components.shape[0]} dims)")
             else:
                 logger.info("ℹ️ No PCA state in checkpoint (pre-PCA model or features <= state_dim)")
+
+            # Restore pre-PCA normalization (per-feature z-score before PCA)
+            if checkpoint.get("pre_pca_mean") is not None:
+                self._pre_pca_mean = checkpoint["pre_pca_mean"]
+                self._pre_pca_std = checkpoint["pre_pca_std"]
+                logger.info(f"✅ Restored pre-PCA normalization ({len(self._pre_pca_mean)} features)")
+            else:
+                self._pre_pca_mean = None
+                self._pre_pca_std = None
 
             logger.info(f"Loaded checkpoint from {checkpoint['timestamp']}")
             logger.info(f"DQN epsilon: {self.dqn.epsilon:.4f}")
