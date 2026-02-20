@@ -129,6 +129,12 @@ class AltDataConfig:
     # Volatility surface / term structure (uses yfinance - free)
     vol_surface_enabled: bool = True
 
+    # Earnings seasonality signals (zero API cost - computed from dates)
+    earnings_seasonality_enabled: bool = True
+
+    # Factor momentum / cross-sectional signals (uses yfinance - free)
+    factor_momentum_enabled: bool = True
+
     # Feature lag (minimum days to lag alternative data features)
     feature_lag_days: int = 1
 
@@ -156,6 +162,8 @@ class AltDataConfig:
             "bond_stress_enabled": self.bond_stress_enabled,
             "microstructure_enabled": self.microstructure_enabled,
             "vol_surface_enabled": self.vol_surface_enabled,
+            "earnings_seasonality_enabled": self.earnings_seasonality_enabled,
+            "factor_momentum_enabled": self.factor_momentum_enabled,
             "feature_lag_days": self.feature_lag_days,
             "lookback_windows": self.lookback_windows,
         }

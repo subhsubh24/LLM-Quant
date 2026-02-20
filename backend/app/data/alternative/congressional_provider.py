@@ -120,24 +120,32 @@ class CongressionalProvider(AlternativeDataProvider):
         result["pol_postelection_year"] = (year_in_cycle == 1).astype(float)
 
         # --- Days to next election (vectorized) ---
-        next_elections = [date(2024, 11, 5), date(2026, 11, 3), date(2028, 11, 3)]
-        dte = np.full(len(date_objs), 365.0)
-        win_30 = np.zeros(len(date_objs))
-        win_90 = np.zeros(len(date_objs))
-        post_30 = np.zeros(len(date_objs))
+        # US elections: first Tuesday after first Monday in November
+        # Presidential: every 4 years starting 2024; Midterm: even years between
+        next_elections = [
+            date(2024, 11, 5), date(2026, 11, 3), date(2028, 11, 5),
+            date(2030, 11, 5), date(2032, 11, 2), date(2034, 11, 7),
+            date(2036, 11, 4),
+        ]
+        # Convert to ordinal for vectorized arithmetic
+        date_ords = np.array([dt.toordinal() for dt in date_objs])
+        election_ords = np.array([e.toordinal() for e in next_elections])
 
-        for e in next_elections:
-            for i, dt in enumerate(date_objs):
-                days_diff = (e - dt).days
-                if days_diff >= 0:
-                    dte[i] = min(dte[i], days_diff)
-                if 0 <= days_diff <= 30:
-                    win_30[i] = 1.0
-                if 0 <= days_diff <= 90:
-                    win_90[i] = 1.0
-                days_after = (dt - e).days
-                if 0 <= days_after <= 30:
-                    post_30[i] = 1.0
+        # Compute distances to all elections at once: shape (n_dates, n_elections)
+        diffs = election_ords[np.newaxis, :] - date_ords[:, np.newaxis]
+
+        # Days to next election: minimum positive diff per date
+        future_mask = diffs >= 0
+        diffs_future = np.where(future_mask, diffs, 9999)
+        dte = diffs_future.min(axis=1).astype(float)
+        dte = np.minimum(dte, 730.0)
+
+        # Within 30/90 days of any upcoming election
+        win_30 = ((diffs >= 0) & (diffs <= 30)).any(axis=1).astype(float)
+        win_90 = ((diffs >= 0) & (diffs <= 90)).any(axis=1).astype(float)
+
+        # Within 30 days AFTER any election
+        post_30 = ((-diffs >= 0) & (-diffs <= 30)).any(axis=1).astype(float)
 
         result["pol_days_to_election"] = np.minimum(dte, 730) / 730.0
         result["pol_election_window_30d"] = win_30
@@ -158,26 +166,24 @@ class CongressionalProvider(AlternativeDataProvider):
         result["pol_lame_duck_session"] = is_lame_duck.astype(float)
 
         # --- Fiscal year end (vectorized) ---
-        fiscal_end = np.zeros(len(date_objs))
-        for i, dt in enumerate(date_objs):
-            fy = date(dt.year, 9, 30)
-            days_to_fy = (fy - dt).days
-            if days_to_fy < 0:
-                days_to_fy = (date(dt.year + 1, 9, 30) - dt).days
-            if days_to_fy <= 14:
-                fiscal_end[i] = 1.0
-        result["pol_fiscal_year_end"] = fiscal_end
+        # Fiscal year ends Sept 30. Check if within 14 days of next Sept 30.
+        fy_this_year = np.array([date(y, 9, 30).toordinal() for y in years])
+        fy_next_year = np.array([date(y + 1, 9, 30).toordinal() for y in years])
+        days_to_fy = fy_this_year - date_ords
+        days_to_fy = np.where(days_to_fy < 0, fy_next_year - date_ords, days_to_fy)
+        result["pol_fiscal_year_end"] = (days_to_fy <= 14).astype(float)
 
         # --- Debt ceiling window (vectorized) ---
         debt_events = [
             evt for evt, kind in _POLITICAL_EVENTS.items()
             if kind in ("debt_ceiling_deal", "funding_deadline")
         ]
-        debt_window = np.zeros(len(date_objs))
-        for evt in debt_events:
-            for i, dt in enumerate(date_objs):
-                if abs((evt - dt).days) <= 30:
-                    debt_window[i] = 1.0
+        if debt_events:
+            debt_ords = np.array([e.toordinal() for e in debt_events])
+            debt_diffs = np.abs(date_ords[:, np.newaxis] - debt_ords[np.newaxis, :])
+            debt_window = (debt_diffs <= 30).any(axis=1).astype(float)
+        else:
+            debt_window = np.zeros(len(date_objs))
         result["pol_debt_ceiling_window"] = debt_window
 
         # --- Sinusoidal encoding (fully vectorized) ---

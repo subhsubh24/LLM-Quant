@@ -50,6 +50,8 @@ from .sector_rotation_provider import SectorRotationProvider
 from .bond_stress_provider import BondStressProvider
 from .market_microstructure_provider import MarketMicrostructureProvider
 from .volatility_surface_provider import VolatilitySurfaceProvider
+from .earnings_seasonality_provider import EarningsSeasonalityProvider
+from .factor_momentum_provider import FactorMomentumProvider
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,10 @@ class AlternativeFeatureEngineer:
             self.providers["microstructure"] = MarketMicrostructureProvider(self.config)
         if self.config.vol_surface_enabled:
             self.providers["vol_surface"] = VolatilitySurfaceProvider(self.config)
+        if self.config.earnings_seasonality_enabled:
+            self.providers["earnings_seasonality"] = EarningsSeasonalityProvider(self.config)
+        if self.config.factor_momentum_enabled:
+            self.providers["factor_momentum"] = FactorMomentumProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -164,6 +170,11 @@ class AlternativeFeatureEngineer:
         if not regimes.empty:
             features = pd.concat([features, regimes], axis=1)
 
+        # 5b. Compute composite market signals
+        composites = self._compute_composite_signals(features)
+        if not composites.empty:
+            features = pd.concat([features, composites], axis=1)
+
         # 6. Apply lag to all features (prevent leakage)
         features = features.shift(self.config.feature_lag_days)
 
@@ -202,6 +213,7 @@ class AlternativeFeatureEngineer:
         "vol_regime_compressed",   # Binary regime
         "vol_regime_exploding",    # Binary regime
         "vol_risk_premium_regime", # Binary regime
+        "earn_",                   # Earnings seasonality flags are binary/calendar
     )
 
     def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -436,6 +448,40 @@ class AlternativeFeatureEngineer:
                 features[vol_ratio_col] * features[btc_col]
             )
 
+        # --- Factor Momentum interactions ---
+
+        # Growth-value spread + VIX: factor rotation in different vol regimes
+        gv_col = self._find_col(features, "factor_growth_value_21d")
+        vix_z2 = self._find_col(features, "sent_vix_zscore_21d")
+        if gv_col and vix_z2:
+            result["interact_growthvalue_x_vix"] = (
+                features[gv_col] * features[vix_z2]
+            )
+
+        # Small-large spread + credit: small caps hurt most in credit stress
+        sl_col = self._find_col(features, "factor_small_large_21d")
+        credit2 = self._find_col(features, "xasset_credit_spread")
+        if sl_col and credit2:
+            result["interact_smalllarge_x_credit"] = (
+                features[sl_col] * features[credit2]
+            )
+
+        # Sector dispersion + vol: high dispersion in low vol = stock picking heaven
+        disp_col = self._find_col(features, "factor_sector_dispersion")
+        realized_vol = self._find_col(features, "micro_realized_vol_21d")
+        if disp_col and realized_vol:
+            result["interact_dispersion_x_vol"] = (
+                features[disp_col] * features[realized_vol]
+            )
+
+        # Earnings season + vol surface: vol term structure during earnings
+        earn_peak = self._find_col(features, "earn_season_peak")
+        term_slope = self._find_col(features, "vol_term_slope_30_90")
+        if earn_peak and term_slope:
+            result["interact_earnings_x_termslope"] = (
+                features[earn_peak] * features[term_slope]
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -528,6 +574,94 @@ class AlternativeFeatureEngineer:
 
         return result
 
+    def _compute_composite_signals(self, features: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute composite market signals that combine multiple data sources.
+
+        These aggregate multiple weak signals into stronger composite
+        indicators. Each composite is designed to capture a specific
+        market dynamic that no single provider can measure alone.
+        """
+        result = pd.DataFrame(index=features.index)
+
+        # === COMPOSITE STRESS INDEX ===
+        # Combine VIX, credit spread, breadth, and bond stress into one score
+        stress_components = []
+
+        vix_z = self._find_col(features, "sent_vix_zscore_21d")
+        if vix_z:
+            stress_components.append(features[vix_z].clip(-3, 3))
+
+        credit = self._find_col(features, "xasset_credit_spread")
+        if credit:
+            # Credit spread widening = negative values = stress
+            stress_components.append(-features[credit].clip(-3, 3) * 10)
+
+        breadth = self._find_col(features, "sent_breadth_mcclellan")
+        if breadth:
+            # Poor breadth (negative) = stress
+            stress_components.append(-features[breadth].clip(-3, 3))
+
+        bond_stress = self._find_col(features, "bond_stress_score")
+        if bond_stress:
+            stress_components.append(features[bond_stress].clip(-3, 3))
+
+        illiq = self._find_col(features, "micro_amihud_illiq_zscore")
+        if illiq:
+            stress_components.append(features[illiq].clip(-3, 3))
+
+        if len(stress_components) >= 2:
+            combined = pd.concat(stress_components, axis=1)
+            result["composite_stress_index"] = combined.mean(axis=1)
+            # Rate of change of stress
+            result["composite_stress_chg_5d"] = result["composite_stress_index"].diff(5)
+
+        # === COMPOSITE RISK APPETITE ===
+        # Combine cross-asset, factor, and sentiment signals
+        appetite_components = []
+
+        risk_onoff = self._find_col(features, "xasset_risk_on_off")
+        if risk_onoff:
+            appetite_components.append(features[risk_onoff].clip(-0.1, 0.1) * 100)
+
+        sec_risk = self._find_col(features, "sector_risk_appetite")
+        if sec_risk:
+            appetite_components.append(features[sec_risk].clip(-3, 3))
+
+        breadth2 = self._find_col(features, "factor_sector_breadth")
+        if breadth2:
+            appetite_components.append((features[breadth2] - 0.5) * 4)  # center at 0
+
+        btc = self._find_col(features, "crypto_btc_ret_5d")
+        if btc:
+            appetite_components.append(features[btc].clip(-0.2, 0.2) * 10)
+
+        if len(appetite_components) >= 2:
+            combined = pd.concat(appetite_components, axis=1)
+            result["composite_risk_appetite"] = combined.mean(axis=1)
+
+        # === COMPOSITE MOMENTUM QUALITY ===
+        # Strong momentum + good breadth + factor confirmation = quality trend
+        quality_components = []
+
+        ofi = self._find_col(features, "micro_order_flow_imbalance")
+        if ofi:
+            quality_components.append(features[ofi].clip(-1, 1))
+
+        buy_press = self._find_col(features, "micro_buying_pressure")
+        if buy_press:
+            quality_components.append((features[buy_press] - 0.5) * 4)
+
+        fac_breadth = self._find_col(features, "factor_sector_breadth")
+        if fac_breadth:
+            quality_components.append((features[fac_breadth] - 0.5) * 4)
+
+        if len(quality_components) >= 2:
+            combined = pd.concat(quality_components, axis=1)
+            result["composite_momentum_quality"] = combined.mean(axis=1)
+
+        return result
+
     def _find_col(self, df: pd.DataFrame, pattern: str) -> Optional[str]:
         """Find column matching pattern (exact match first, then shortest contains match)."""
         if pattern in df.columns:
@@ -558,6 +692,8 @@ class AlternativeFeatureEngineer:
             "bond_stress": [],
             "microstructure": [],
             "vol_surface": [],
+            "earnings_seasonality": [],
+            "factor_momentum": [],
             "interactions": [],
             "regimes": [],
             "engineered": [],
@@ -601,6 +737,10 @@ class AlternativeFeatureEngineer:
                 groups["microstructure"].append(name)
             elif name.startswith("vol_"):
                 groups["vol_surface"].append(name)
+            elif name.startswith("earn_"):
+                groups["earnings_seasonality"].append(name)
+            elif name.startswith("factor_"):
+                groups["factor_momentum"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):

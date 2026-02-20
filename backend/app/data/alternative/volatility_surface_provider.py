@@ -174,9 +174,9 @@ class VolatilitySurfaceProvider(AlternativeDataProvider):
                         curvature = (2 * v30 - v9 - v90) / (v30 + eps)
                         result["vol_term_curvature"] = curvature.reindex(vix.index)
                     else:
-                        result["vol_term_curvature"] = 0.0
+                        result["vol_term_curvature"] = np.nan
                 else:
-                    result["vol_term_curvature"] = 0.0
+                    result["vol_term_curvature"] = np.nan
         else:
             # Fallback: estimate term structure from VIX dynamics
             result["vol_term_slope_30_90"] = 0.95  # Assume normal contango

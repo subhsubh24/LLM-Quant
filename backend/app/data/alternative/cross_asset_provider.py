@@ -195,9 +195,8 @@ class CrossAssetProvider(AlternativeDataProvider):
         if "HYG" not in prices.columns or "LQD" not in prices.columns:
             return
 
-        eps = 1e-8
-        hyg_ret = np.log(np.maximum(prices["HYG"] / prices["HYG"].shift(1), eps))
-        lqd_ret = np.log(np.maximum(prices["LQD"] / prices["LQD"].shift(1), eps))
+        hyg_ret = np.log(prices["HYG"] / prices["HYG"].shift(1)).clip(-1, 1)
+        lqd_ret = np.log(prices["LQD"] / prices["LQD"].shift(1)).clip(-1, 1)
 
         # Spread: negative = risk-off (HYG underperforming)
         spread = hyg_ret - lqd_ret
@@ -218,9 +217,8 @@ class CrossAssetProvider(AlternativeDataProvider):
         if "TLT" not in prices.columns or "SHY" not in prices.columns:
             return
 
-        eps = 1e-8
-        tlt_ret = np.log(np.maximum(prices["TLT"] / prices["TLT"].shift(1), eps))
-        shy_ret = np.log(np.maximum(prices["SHY"] / prices["SHY"].shift(1), eps))
+        tlt_ret = np.log(prices["TLT"] / prices["TLT"].shift(1)).clip(-1, 1)
+        shy_ret = np.log(prices["SHY"] / prices["SHY"].shift(1)).clip(-1, 1)
 
         # When TLT rallies vs SHY: curve flattening (risk-off signal)
         slope_proxy = shy_ret - tlt_ret  # Positive = steepening = risk-on
@@ -240,23 +238,22 @@ class CrossAssetProvider(AlternativeDataProvider):
         - EEM vs EFA (high-beta vs low-beta)
         - XLK vs XLU (growth vs defensive)
         """
-        eps = 1e-8
         risk_signals = []
 
         # HYG / TLT ratio change
         if "HYG" in prices.columns and "TLT" in prices.columns:
-            ratio = prices["HYG"] / np.maximum(prices["TLT"], eps)
-            risk_signals.append(np.log(np.maximum(ratio / ratio.shift(5), eps)))
+            ratio = prices["HYG"] / prices["TLT"]
+            risk_signals.append(np.log(ratio / ratio.shift(5)).clip(-1, 1))
 
         # EEM / EFA ratio change
         if "EEM" in prices.columns and "EFA" in prices.columns:
-            ratio = prices["EEM"] / np.maximum(prices["EFA"], eps)
-            risk_signals.append(np.log(np.maximum(ratio / ratio.shift(5), eps)))
+            ratio = prices["EEM"] / prices["EFA"]
+            risk_signals.append(np.log(ratio / ratio.shift(5)).clip(-1, 1))
 
         # XLK / XLU ratio change
         if "XLK" in prices.columns and "XLU" in prices.columns:
-            ratio = prices["XLK"] / np.maximum(prices["XLU"], eps)
-            risk_signals.append(np.log(np.maximum(ratio / ratio.shift(5), eps)))
+            ratio = prices["XLK"] / prices["XLU"]
+            risk_signals.append(np.log(ratio / ratio.shift(5)).clip(-1, 1))
 
         if risk_signals:
             # Average of all risk-on/off signals
@@ -275,30 +272,21 @@ class CrossAssetProvider(AlternativeDataProvider):
         if "DBB" not in prices.columns or "GLD" not in prices.columns:
             return
 
-        eps = 1e-8
-        ratio = prices["DBB"] / np.maximum(prices["GLD"], eps)
+        ratio = prices["DBB"] / prices["GLD"]
         result["xasset_copper_gold_ratio"] = ratio
-        result["xasset_copper_gold_chg_21d"] = np.log(
-            np.maximum(ratio / ratio.shift(21), eps)
-        )
+        result["xasset_copper_gold_chg_21d"] = np.log(ratio / ratio.shift(21)).clip(-1, 1)
 
     def _compute_dollar_signals(
         self, prices: pd.DataFrame, result: pd.DataFrame
     ) -> None:
         """US Dollar and Gold momentum signals."""
-        eps = 1e-8
-
         if "UUP" in prices.columns:
             uup = prices["UUP"]
-            result["xasset_dollar_momentum_21d"] = np.log(
-                np.maximum(uup / uup.shift(21), eps)
-            )
+            result["xasset_dollar_momentum_21d"] = np.log(uup / uup.shift(21)).clip(-1, 1)
 
         if "GLD" in prices.columns:
             gld = prices["GLD"]
-            result["xasset_gold_momentum_21d"] = np.log(
-                np.maximum(gld / gld.shift(21), eps)
-            )
+            result["xasset_gold_momentum_21d"] = np.log(gld / gld.shift(21)).clip(-1, 1)
 
     def _compute_relative_strength(
         self, prices: pd.DataFrame, result: pd.DataFrame
@@ -309,12 +297,10 @@ class CrossAssetProvider(AlternativeDataProvider):
         EM vs DM: risk appetite proxy
         Defensive vs Cyclical: market regime signal
         """
-        eps = 1e-8
-
         # EM vs DM spread
         if "EEM" in prices.columns and "EFA" in prices.columns:
-            em_ret = np.log(np.maximum(prices["EEM"] / prices["EEM"].shift(21), eps))
-            dm_ret = np.log(np.maximum(prices["EFA"] / prices["EFA"].shift(21), eps))
+            em_ret = np.log(prices["EEM"] / prices["EEM"].shift(21)).clip(-1, 1)
+            dm_ret = np.log(prices["EFA"] / prices["EFA"].shift(21)).clip(-1, 1)
             result["xasset_em_vs_dm"] = em_ret - dm_ret
 
         # Defensive (XLU + XLP) vs Cyclical (XLF + XLE)
@@ -323,12 +309,12 @@ class CrossAssetProvider(AlternativeDataProvider):
         for ticker in ["XLU", "XLP"]:
             if ticker in prices.columns:
                 defensive.append(
-                    np.log(np.maximum(prices[ticker] / prices[ticker].shift(21), eps))
+                    np.log(prices[ticker] / prices[ticker].shift(21)).clip(-1, 1)
                 )
         for ticker in ["XLF", "XLE"]:
             if ticker in prices.columns:
                 cyclical.append(
-                    np.log(np.maximum(prices[ticker] / prices[ticker].shift(21), eps))
+                    np.log(prices[ticker] / prices[ticker].shift(21)).clip(-1, 1)
                 )
 
         if defensive and cyclical:

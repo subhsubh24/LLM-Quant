@@ -235,8 +235,10 @@ class OptionsSignalsProvider(AlternativeDataProvider):
         avg_vix_down = vix_on_down.rolling(21, min_periods=10).sum() / (down_count + 1e-8)
         avg_vix_up = vix_on_up.rolling(21, min_periods=10).sum() / (up_count + 1e-8)
 
-        # Skew ratio: VIX reaction on down days vs up days
-        skew = avg_vix_down / (avg_vix_up.abs() + 1e-8)
+        # Skew ratio: magnitude of VIX reaction on down days vs up days
+        # Use abs() on BOTH sides so we measure relative reaction magnitude
+        # regardless of VIX direction (normally: up on down-days, down on up-days)
+        skew = avg_vix_down.abs() / (avg_vix_up.abs() + 1e-8)
         skew = skew.where((down_count >= 3) & (up_count >= 3), np.nan)
         result["opt_skew_proxy"] = skew
 
@@ -295,6 +297,6 @@ class OptionsSignalsProvider(AlternativeDataProvider):
         result["opt_variance_swap"] = var_swap
 
         var_swap_chg = var_swap.diff(5) / (var_swap.shift(5) + 1e-8)
-        result["opt_variance_swap_chg_5d"] = var_swap_chg.clip(-2, 2)
+        result["opt_variance_swap_chg_5d"] = var_swap_chg.clip(-5, 5)
 
         return result

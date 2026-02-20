@@ -199,7 +199,8 @@ class MarketMicrostructureProvider(AlternativeDataProvider):
 
         # === 6. KYLE'S LAMBDA (price impact) ===
         # Lambda = |return| / sqrt(volume) -- higher = more price impact per trade
-        kyle_lambda = abs_ret / (np.sqrt(volume) + eps)
+        # Use volume.clip(lower=1) to avoid division by zero when volume=0
+        kyle_lambda = abs_ret / np.sqrt(volume.clip(lower=1))
         kyle_21d = kyle_lambda.rolling(21, min_periods=10).mean() * 1e6
         result["micro_kyle_lambda"] = kyle_21d
 

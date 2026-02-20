@@ -272,7 +272,7 @@ class FeaturePipeline:
             "cal_", "regime_", "pol_", "econ_", "fred_", "xasset_", "sent_",
             "opt_", "edgar_", "news_", "gtrends_", "weather_", "short_",
             "dark_", "crypto_", "sector_", "bond_", "interact_",
-            "micro_", "vol_",
+            "micro_", "vol_", "earn_", "factor_", "composite_",
         )
         if self.config.standardize_method != "none":
             logger.debug(f"Standardizing features using {self.config.standardize_method}")
