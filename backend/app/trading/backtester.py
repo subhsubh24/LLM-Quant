@@ -2093,7 +2093,12 @@ class WalkForwardBacktester:
 
         # TIER 2 FIX: MACRO FILTERING - VOLATILITY REGIME DETECTION
         # Track baseline volatility and macro regime shifts
-        baseline_portfolio_vol = config["baseline_portfolio_vol"]  # 0.8% daily vol baseline
+        # CRITICAL FIX: Self-calibrate baseline from actual data instead of hardcoded 0.008.
+        # The old baseline (0.008 = daily vol) never updates because crypto hourly vol
+        # is ~0.02-0.04, so current_macro_vol < baseline*1.2 is NEVER true.
+        # This caused vol_ratio to be permanently 2.5-5x, blocking almost all trading.
+        baseline_portfolio_vol = None  # Will be set from first real data
+        baseline_calibrated = False
         macro_regime = "normal"  # Track current regime (normal, elevated, extreme)
         high_vol_threshold = config["high_vol_multiplier"]  # 1.5x baseline = elevated macro vol
         extreme_vol_threshold = config["extreme_vol_multiplier"]  # 2.5x baseline = extreme macro vol
@@ -2996,11 +3001,20 @@ class WalkForwardBacktester:
                 # CRITICAL FIX: Validate macro volatility is finite before using in division
                 if not np.isfinite(current_macro_vol):
                     logger.warning("Macro volatility is non-finite, keeping previous regime")
+                    if baseline_portfolio_vol is None:
+                        baseline_portfolio_vol = config["baseline_portfolio_vol"]
                     current_macro_vol = baseline_portfolio_vol
 
-                # Update baseline if we're in normal conditions
-                if current_macro_vol < baseline_portfolio_vol * 1.2:
-                    baseline_portfolio_vol = baseline_portfolio_vol * 0.99 + current_macro_vol * 0.01  # Exponential moving average
+                # Self-calibrate baseline from first real data (replaces hardcoded 0.008)
+                if not baseline_calibrated:
+                    baseline_portfolio_vol = current_macro_vol
+                    baseline_calibrated = True
+                    logger.info(f"📊 Volatility baseline self-calibrated: {baseline_portfolio_vol:.6f} (from actual data)")
+
+                # Update baseline with slow EMA (adapts to regime changes over time)
+                # Using 2x threshold instead of 1.2x so baseline can adapt to sustained vol changes
+                if current_macro_vol < baseline_portfolio_vol * 2.0:
+                    baseline_portfolio_vol = baseline_portfolio_vol * 0.995 + current_macro_vol * 0.005
 
                 # Detect regime shifts
                 # BUG FIX #25: Add epsilon protection for division by zero in vol_ratio
@@ -3253,20 +3267,34 @@ class WalkForwardBacktester:
                     prediction["ml_biased"] = ml_is_biased
 
                     # ============================================================
-                    # DEGRADATION AUTO-HALT & SIGNAL INVERSION
+                    # DEGRADATION AUTO-HALT & SIGNAL INVERSION (with recovery)
                     # ============================================================
                     # If models are anti-predictive (< 30% win rate), INVERT their signals.
                     # A model that's wrong 70%+ of the time is actually useful — just do the opposite.
-                    # If models are catastrophically bad (< 20%), halt trading entirely.
+                    # If models are catastrophically bad (< 20%), halt trading for 2000 candles
+                    # then resume with inverted signals to give the system another chance.
                     if len(recent_trades_window) >= 15:
                         current_rolling_wr = np.mean(recent_trades_window)
                         if current_rolling_wr < config["degradation_halt_threshold"]:
-                            # Models are useless — stop trading until they improve
+                            # Check if we've cooled down enough to resume
+                            candles_since_halt = total_candles - getattr(self, '_halt_candle', 0)
                             if not degradation_halt_logged:
-                                logger.warning(f"AUTO-HALT: Win rate {current_rolling_wr*100:.1f}% < {config['degradation_halt_threshold']*100:.0f}%. Pausing trading.")
+                                logger.warning(f"AUTO-HALT: Win rate {current_rolling_wr*100:.1f}% < {config['degradation_halt_threshold']*100:.0f}%. Pausing trading for 2000 candles.")
                                 degradation_halt_logged = True
-                            portfolio_trading_paused = True
-                            continue
+                                self._halt_candle = total_candles
+                                portfolio_trading_paused = True
+                                continue
+                            elif candles_since_halt < 2000:
+                                # Still in cooldown
+                                portfolio_trading_paused = True
+                                continue
+                            else:
+                                # Recovery: resume with signal inversion
+                                if portfolio_trading_paused:
+                                    logger.info(f"🔄 AUTO-HALT RECOVERY: Resuming after {candles_since_halt} candle cooldown (will invert signals)")
+                                    portfolio_trading_paused = False
+                                    degradation_halt_logged = False  # Allow re-halt if still bad
+                                # Fall through to inversion logic below
                         elif current_rolling_wr < config["degradation_invert_threshold"]:
                             # Models are anti-predictive — invert signals
                             original_action = prediction["action"]
@@ -5199,28 +5227,48 @@ class ModelPreTrainer:
             # would see BTC-hour-100 → ETH-hour-500 → ADA-hour-1 as a "sequence".
             # Now we extract rolling windows from the original time-ordered data.
             seq_len = 10
+            seq_batch_size = 32  # Batch sequences for stable gradients (was 1 — extremely noisy)
             if len(X_train) >= seq_len + 1:
-                # Sample random starting positions to limit computation
-                # (full pass over 60K samples with stride 1 is too slow)
-                # Was 2000 — far too few for 60K+ training samples. LSTM/Transformer
-                # were seeing 30x less data per epoch than DQN/PPO.
                 n_seq_samples = min(len(X_train) - seq_len, 15000)
                 seq_starts = np.random.choice(len(X_train) - seq_len, size=n_seq_samples, replace=False)
 
+                # Collect sequences into batches for vectorized training
+                batch_seqs = []
+                batch_targets = []
                 for start_idx in seq_starts:
                     seq = X_train[start_idx:start_idx + seq_len]
-                    target = y_train[start_idx + seq_len - 1:start_idx + seq_len]
+                    target = y_train[start_idx + seq_len - 1]
 
-                    if len(seq) == seq_len and len(target) > 0:
-                        seq_reshaped = seq.reshape(1, seq_len, -1)
+                    if len(seq) == seq_len:
+                        batch_seqs.append(seq)
+                        batch_targets.append(target)
 
-                        lstm_loss = self.lstm.train_step(seq_reshaped, target)
+                    # Train when batch is full
+                    if len(batch_seqs) == seq_batch_size:
+                        batch_X_seq = np.array(batch_seqs)  # (batch, seq_len, features)
+                        batch_y_seq = np.array(batch_targets)  # (batch,)
+
+                        lstm_loss = self.lstm.train_step(batch_X_seq, batch_y_seq)
                         epoch_losses.append(lstm_loss)
                         lstm_losses.append(lstm_loss)
 
-                        trans_loss = self.transformer.train_step(seq_reshaped, target)
+                        trans_loss = self.transformer.train_step(batch_X_seq, batch_y_seq)
                         epoch_losses.append(trans_loss)
                         trans_losses.append(trans_loss)
+
+                        batch_seqs = []
+                        batch_targets = []
+
+                # Train remaining partial batch
+                if batch_seqs:
+                    batch_X_seq = np.array(batch_seqs)
+                    batch_y_seq = np.array(batch_targets)
+                    lstm_loss = self.lstm.train_step(batch_X_seq, batch_y_seq)
+                    epoch_losses.append(lstm_loss)
+                    lstm_losses.append(lstm_loss)
+                    trans_loss = self.transformer.train_step(batch_X_seq, batch_y_seq)
+                    epoch_losses.append(trans_loss)
+                    trans_losses.append(trans_loss)
 
             # Training accuracy (sample subset for speed)
             # Reset buffer and iterate so LSTM/Transformer get sequential context
