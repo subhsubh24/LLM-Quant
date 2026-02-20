@@ -81,7 +81,7 @@ class RidgeRanker(BaseRanker):
         self.model: Optional[Pipeline] = None
         self.feature_names: List[str] = []
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "RidgeRanker":
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "RidgeRanker":
         self.feature_names = X.columns.tolist()
 
         # Build pipeline with optional scaling
@@ -91,7 +91,10 @@ class RidgeRanker(BaseRanker):
         steps.append(("ridge", Ridge(alpha=self.alpha)))
 
         self.model = Pipeline(steps)
-        self.model.fit(X.values, y.values)
+        fit_params = {}
+        if sample_weight is not None:
+            fit_params["ridge__sample_weight"] = sample_weight
+        self.model.fit(X.values, y.values, **fit_params)
 
         return self
 
@@ -140,7 +143,7 @@ class ElasticNetRanker(BaseRanker):
         self.model: Optional[Pipeline] = None
         self.feature_names: List[str] = []
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "ElasticNetRanker":
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "ElasticNetRanker":
         self.feature_names = X.columns.tolist()
 
         steps = []
@@ -153,7 +156,10 @@ class ElasticNetRanker(BaseRanker):
         )))
 
         self.model = Pipeline(steps)
-        self.model.fit(X.values, y.values)
+        fit_params = {}
+        if sample_weight is not None:
+            fit_params["elasticnet__sample_weight"] = sample_weight
+        self.model.fit(X.values, y.values, **fit_params)
 
         return self
 
@@ -204,7 +210,7 @@ class RandomForestRanker(BaseRanker):
         self.model: Optional[RandomForestRegressor] = None
         self.feature_names: List[str] = []
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "RandomForestRanker":
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "RandomForestRanker":
         self.feature_names = X.columns.tolist()
 
         self.model = RandomForestRegressor(
@@ -215,7 +221,7 @@ class RandomForestRanker(BaseRanker):
             random_state=self.random_state,
             n_jobs=-1
         )
-        self.model.fit(X.values, y.values)
+        self.model.fit(X.values, y.values, sample_weight=sample_weight)
 
         return self
 
@@ -267,7 +273,7 @@ class GradientBoostingRanker(BaseRanker):
         self.model: Optional[GradientBoostingRegressor] = None
         self.feature_names: List[str] = []
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "GradientBoostingRanker":
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "GradientBoostingRanker":
         self.feature_names = X.columns.tolist()
 
         self.model = GradientBoostingRegressor(
@@ -278,7 +284,7 @@ class GradientBoostingRanker(BaseRanker):
             subsample=self.subsample,
             random_state=self.random_state
         )
-        self.model.fit(X.values, y.values)
+        self.model.fit(X.values, y.values, sample_weight=sample_weight)
 
         return self
 
@@ -294,6 +300,106 @@ class GradientBoostingRanker(BaseRanker):
             return {}
 
         return dict(zip(self.feature_names, self.model.feature_importances_))
+
+
+class LightGBMRanker(BaseRanker):
+    """
+    LightGBM for stock ranking.
+
+    The gold standard for tabular ML in finance:
+    - Leaf-wise tree growth (faster, more accurate than depth-wise)
+    - Built-in L1/L2 regularization
+    - Feature/row subsampling for stability
+    - Handles high-dimensional data (900+ features) natively
+    - 10-20x faster than sklearn GBM
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 200,
+        learning_rate: float = 0.05,
+        num_leaves: int = 31,
+        max_depth: int = 6,
+        min_child_samples: int = 50,
+        feature_fraction: float = 0.5,
+        bagging_fraction: float = 0.8,
+        bagging_freq: int = 5,
+        lambda_l1: float = 1.0,
+        lambda_l2: float = 1.0,
+        random_state: int = 42
+    ):
+        self.params = {
+            'objective': 'regression',
+            'metric': 'mse',
+            'num_leaves': num_leaves,
+            'max_depth': max_depth,
+            'learning_rate': learning_rate,
+            'min_child_samples': min_child_samples,
+            'feature_fraction': feature_fraction,
+            'bagging_fraction': bagging_fraction,
+            'bagging_freq': bagging_freq,
+            'lambda_l1': lambda_l1,
+            'lambda_l2': lambda_l2,
+            'seed': random_state,
+            'verbose': -1,
+        }
+        self.n_estimators = n_estimators
+        self.model = None
+        self.feature_names: List[str] = []
+        self._lgb = None
+        try:
+            import lightgbm as lgb
+            self._lgb = lgb
+        except ImportError:
+            logger.warning("LightGBM not installed — falling back to GBM")
+
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "LightGBMRanker":
+        self.feature_names = X.columns.tolist()
+
+        if self._lgb is None:
+            # Fall back to sklearn GBM
+            fallback = GradientBoostingRanker(
+                n_estimators=min(self.n_estimators, 100),
+                learning_rate=self.params['learning_rate'],
+                max_depth=self.params['max_depth'],
+            )
+            fallback.fit(X, y, sample_weight=sample_weight)
+            self.model = fallback
+            return self
+
+        train_data = self._lgb.Dataset(
+            X.values, label=y.values, weight=sample_weight,
+            feature_name=self.feature_names, free_raw_data=False
+        )
+        self.model = self._lgb.train(
+            self.params,
+            train_data,
+            num_boost_round=self.n_estimators,
+            valid_sets=[train_data],
+            callbacks=[self._lgb.log_evaluation(period=0)],
+        )
+        return self
+
+    def predict(self, X: pd.DataFrame) -> pd.Series:
+        if self.model is None:
+            raise ValueError("Model not fitted")
+
+        if isinstance(self.model, GradientBoostingRanker):
+            return self.model.predict(X)
+
+        preds = self.model.predict(X.values)
+        return pd.Series(preds, index=X.index)
+
+    def get_feature_importance(self) -> Dict[str, float]:
+        if self.model is None:
+            return {}
+
+        if isinstance(self.model, GradientBoostingRanker):
+            return self.model.get_feature_importance()
+
+        importance = self.model.feature_importance(importance_type='gain')
+        total = importance.sum() + 1e-10
+        return dict(zip(self.feature_names, importance / total))
 
 
 class EnsembleRanker(BaseRanker):
@@ -312,19 +418,20 @@ class EnsembleRanker(BaseRanker):
         weights: Optional[List[float]] = None
     ):
         if models is None:
-            # Default ensemble
+            # Default ensemble: linear + tree models for diversity
             models = [
                 RidgeRanker(alpha=1.0),
                 ElasticNetRanker(alpha=0.5, l1_ratio=0.5),
                 RandomForestRanker(n_estimators=100, max_depth=5),
+                LightGBMRanker(n_estimators=200, feature_fraction=0.5),
             ]
         self.models = models
         self.weights = weights or [1.0 / len(models)] * len(models)
         self.fitted = False
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "EnsembleRanker":
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "EnsembleRanker":
         for model in self.models:
-            model.fit(X, y)
+            model.fit(X, y, sample_weight=sample_weight)
         self.fitted = True
         return self
 

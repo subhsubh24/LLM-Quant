@@ -15,7 +15,7 @@ from datetime import date
 
 from app.models.simplified_ml_ensemble import (
     LightGBMModelBase,
-    LSTMModelBase,
+    RidgeModelBase,
     SimpleStackingMeta,
     SimplifiedMLEnsemble,
     ModelMetrics,
@@ -53,27 +53,28 @@ class TestLightGBMModel:
         assert 'train_sharpe' in metrics or 'val_sharpe' in metrics
 
 
-class TestLSTMModel:
-    """Test LSTM base model."""
+class TestRidgeModel:
+    """Test Ridge base model."""
 
     def test_initialization(self):
-        """Test LSTM model initializes."""
-        model = LSTMModelBase()
+        """Test Ridge model initializes."""
+        model = RidgeModelBase()
         assert model is not None
-        assert model.dropout == 0.3  # Regularization
+        assert model.alpha == 10.0  # Strong regularization
 
     def test_predict_without_training(self):
         """Test graceful handling without training."""
-        model = LSTMModelBase()
+        model = RidgeModelBase()
 
         X = np.random.normal(0, 1, (100, 20))
         pred = model.predict_proba(X)
 
         assert len(pred) == 100
+        assert all(0 <= p <= 1 for p in pred)
 
     def test_mock_training(self):
         """Test mock training returns metrics."""
-        model = LSTMModelBase()
+        model = RidgeModelBase()
 
         X_train = np.random.normal(0, 1, (200, 20))
         y_train = np.random.randint(0, 2, 200)

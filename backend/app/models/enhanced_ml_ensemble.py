@@ -437,13 +437,6 @@ class ExtraTreesEnhanced:
 
         # Initialize default parameters
         self.params = {
-            'hidden_size': 64,
-            'num_layers': 2,
-            'dropout': 0.2,
-        }
-
-        # Initialize default parameters
-        self.params = {
             'n_estimators': self.n_estimators,
             'max_depth': self.max_depth,
         }

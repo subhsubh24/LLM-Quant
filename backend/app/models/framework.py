@@ -42,6 +42,11 @@ class ModelConfig:
     prediction_horizon: int = 5  # Days ahead to predict
     target_type: str = "return"  # return, rank
 
+    # Sample weighting
+    # Exponential decay: weight = exp(-decay_rate * (T - t) / T)
+    # 0.0 = equal weights, 1.0 = strong recency bias
+    sample_weight_decay: float = 0.5
+
     # Random seed
     random_state: int = 42
 
@@ -56,6 +61,7 @@ class ModelConfig:
             "embargo_days": self.embargo_days,
             "prediction_horizon": self.prediction_horizon,
             "target_type": self.target_type,
+            "sample_weight_decay": self.sample_weight_decay,
             "random_state": self.random_state,
         }
 
@@ -82,7 +88,9 @@ class TimeSeriesCV:
 
     Key concepts:
     - Purging: Remove samples near the train/validation boundary
-      to prevent information leakage from overlapping labels
+      whose labels overlap with validation data (e.g., if prediction_horizon=5,
+      the last 5 training samples have forward returns that peek into
+      the validation period)
     - Embargo: Add a gap between training and validation periods
       to account for serial correlation in returns
     """
@@ -93,6 +101,7 @@ class TimeSeriesCV:
         validation_window: int,
         step: int,
         embargo: int = 5,
+        purge: int = 0,
         expanding: bool = False
     ):
         """
@@ -101,12 +110,15 @@ class TimeSeriesCV:
             validation_window: Validation window size in samples
             step: Step size between folds
             embargo: Number of samples to skip between train and validation
+            purge: Number of samples to remove from end of training set
+                   (should equal prediction_horizon to prevent label leakage)
             expanding: If True, use expanding window; if False, use rolling
         """
         self.train_window = train_window
         self.validation_window = validation_window
         self.step = step
         self.embargo = embargo
+        self.purge = purge
         self.expanding = expanding
 
     def split(
@@ -115,9 +127,14 @@ class TimeSeriesCV:
         y: Optional[pd.Series] = None
     ) -> Iterator[CVFold]:
         """
-        Generate train/validation splits.
+        Generate train/validation splits with purging and embargo.
 
         Yields CVFold objects with indices for each fold.
+
+        Layout for each fold:
+        |--- Training (purged) ---|-- Purge --|-- Embargo --|--- Validation ---|
+                                  ^           ^
+                            labels overlap   serial correlation gap
         """
         n_samples = len(X)
         dates = X.index.tolist()
@@ -132,7 +149,9 @@ class TimeSeriesCV:
             else:
                 train_start_idx = current_pos - self.train_window
 
-            train_end_idx = current_pos
+            # Purge: remove last `purge` samples from training to prevent
+            # label leakage (their forward return labels extend into the gap)
+            train_end_idx = current_pos - self.purge
 
             # Validation indices (after embargo)
             val_start_idx = current_pos + self.embargo
@@ -141,6 +160,11 @@ class TimeSeriesCV:
             # Ensure we don't exceed data
             if val_end_idx > n_samples:
                 break
+
+            # Ensure training set is non-empty after purging
+            if train_end_idx <= train_start_idx:
+                current_pos += self.step
+                continue
 
             train_indices = np.arange(train_start_idx, train_end_idx)
             val_indices = np.arange(val_start_idx, val_end_idx)
@@ -220,12 +244,15 @@ class WalkForwardValidator:
         Returns:
             ValidationResult with all fold metrics
         """
-        # Create CV splitter
+        # Create CV splitter with purging to prevent label leakage
+        # Purge removes training samples whose forward-return labels
+        # overlap with the validation period
         cv = TimeSeriesCV(
             train_window=self.config.train_window_days,
             validation_window=self.config.validation_window_days,
             step=self.config.step_days,
             embargo=self.config.embargo_days,
+            purge=self.config.prediction_horizon,
             expanding=(self.config.validation_method == "expanding")
         )
 
@@ -256,8 +283,27 @@ class WalkForwardValidator:
                 logger.warning(f"Skipping fold {fold.fold_id}: insufficient data")
                 continue
 
-            # Train
-            model.fit(X_train, y_train)
+            # Apply temporal decay sample weighting if configured
+            # More recent samples get higher weight so the model adapts to
+            # regime changes faster
+            sample_weight = None
+            if self.config.sample_weight_decay > 0:
+                n = len(X_train)
+                # Exponential decay: weight increases towards the end of training
+                t = np.arange(n, dtype=float)
+                sample_weight = np.exp(self.config.sample_weight_decay * (t - n) / n)
+                # Normalize so weights sum to n (preserves effective sample size interpretation)
+                sample_weight = sample_weight * n / sample_weight.sum()
+
+            # Train (pass sample_weight if model supports it)
+            if sample_weight is not None and hasattr(model, 'fit'):
+                try:
+                    model.fit(X_train, y_train, sample_weight=sample_weight)
+                except TypeError:
+                    # Model doesn't accept sample_weight — train without it
+                    model.fit(X_train, y_train)
+            else:
+                model.fit(X_train, y_train)
 
             # Predict
             train_pred = model.predict(X_train)
@@ -371,6 +417,7 @@ class ModelTrainer:
             ElasticNetRanker,
             RandomForestRanker,
             GradientBoostingRanker,
+            LightGBMRanker,
             EnsembleRanker
         )
 
@@ -379,6 +426,7 @@ class ModelTrainer:
             "elasticnet": ElasticNetRanker,
             "rf": RandomForestRanker,
             "gbm": GradientBoostingRanker,
+            "lgbm": LightGBMRanker,
             "ensemble": EnsembleRanker,
         }
 
