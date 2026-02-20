@@ -148,16 +148,16 @@ class GoogleTrendsProvider(AlternativeDataProvider):
                         result[f"gtrends_{category}"] = series
 
                         # Z-score (relative to own history)
-                        # After _resample_to_daily, weekly data becomes daily, so
-                        # use rolling(60) for ~3 months and diff(20) for ~4 weeks
-                        mean = series.rolling(60, min_periods=20).mean()
-                        std = series.rolling(60, min_periods=20).std()
+                        # pytrends returns WEEKLY data, so use weekly-appropriate
+                        # windows: rolling(12) ≈ 3 months, diff(4) ≈ 4 weeks
+                        mean = series.rolling(12, min_periods=4).mean()
+                        std = series.rolling(12, min_periods=4).std()
                         result[f"gtrends_{category}_zscore"] = (
                             (series - mean) / (std + 1e-8)
                         ).clip(-4, 4)
 
-                        # Momentum (current vs ~4 weeks ago in business days)
-                        result[f"gtrends_{category}_momentum"] = series.diff(20)
+                        # Momentum (current vs ~4 weeks ago)
+                        result[f"gtrends_{category}_momentum"] = series.diff(4)
 
                     # Rate limit: Google limits requests
                     time.sleep(2)

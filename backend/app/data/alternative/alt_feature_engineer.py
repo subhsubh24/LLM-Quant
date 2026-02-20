@@ -53,6 +53,7 @@ from .volatility_surface_provider import VolatilitySurfaceProvider
 from .earnings_seasonality_provider import EarningsSeasonalityProvider
 from .factor_momentum_provider import FactorMomentumProvider
 from .correlation_regime_provider import CorrelationRegimeProvider
+from .turbulence_provider import TurbulenceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,8 @@ class AlternativeFeatureEngineer:
             self.providers["factor_momentum"] = FactorMomentumProvider(self.config)
         if self.config.correlation_regime_enabled:
             self.providers["correlation_regime"] = CorrelationRegimeProvider(self.config)
+        if self.config.turbulence_enabled:
+            self.providers["turbulence"] = TurbulenceProvider(self.config)
 
         self.feature_names: List[str] = []
 
@@ -217,6 +220,7 @@ class AlternativeFeatureEngineer:
         "vol_regime_exploding",    # Binary regime
         "vol_risk_premium_regime", # Binary regime
         "earn_",                   # Earnings seasonality flags are binary/calendar
+        "turb_regime_",            # Turbulence regime indicators are binary (0/1)
     )
 
     def _engineer_features(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -263,6 +267,22 @@ class AlternativeFeatureEngineer:
                 lambda x: (x.iloc[-1] >= x).sum() / len(x) if len(x) > 0 else np.nan,
                 raw=False,
             )
+
+            # EWMA crossover (signal decay detection):
+            # Fast EWMA / slow EWMA ratio — captures trend in the signal itself
+            # When fast > slow, the signal is trending up (strengthening)
+            ewma_fast = series.ewm(span=5, min_periods=3).mean()
+            ewma_slow = series.ewm(span=21, min_periods=10).mean()
+            denom = ewma_slow.abs() + 1e-8
+            engineered[f"{col}_ewma_cross"] = ((ewma_fast - ewma_slow) / denom).clip(-3, 3)
+
+            # Momentum-reversal: recent change vs longer-term change
+            # Positive when short-term and long-term agree (trend continuation)
+            # Negative when they disagree (potential reversal)
+            chg_5 = series.diff(5)
+            chg_21 = series.diff(21)
+            denom_mr = chg_21.abs() + 1e-8
+            engineered[f"{col}_mom_reversal"] = (chg_5 / denom_mr).clip(-3, 3)
 
         if engineered:
             return pd.DataFrame(engineered, index=raw.index)
@@ -503,6 +523,32 @@ class AlternativeFeatureEngineer:
                 features[absorption] * features[credit_stress]
             )
 
+        # --- Turbulence interactions ---
+
+        # Turbulence × VIX: turb spike + VIX spike = confirmed crisis
+        turb_z = self._find_col(features, "turb_zscore")
+        vix_z4 = self._find_col(features, "sent_vix_zscore_21d")
+        if turb_z and vix_z4:
+            result["interact_turb_x_vix"] = (
+                features[turb_z] * features[vix_z4]
+            )
+
+        # Turbulence × credit: turb + credit stress = systemic event
+        turb_z2 = self._find_col(features, "turb_zscore")
+        bond_credit = self._find_col(features, "bond_credit_stress")
+        if turb_z2 and bond_credit:
+            result["interact_turb_x_credit"] = (
+                features[turb_z2] * features[bond_credit]
+            )
+
+        # Turbulence mean-reversion × buying pressure: turb reverting + buying = recovery
+        turb_mr = self._find_col(features, "turb_mean_reversion")
+        buy_press2 = self._find_col(features, "micro_buying_pressure")
+        if turb_mr and buy_press2:
+            result["interact_turb_reversal_x_buying"] = (
+                features[turb_mr] * (features[buy_press2] - 0.5) * 4
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -592,6 +638,14 @@ class AlternativeFeatureEngineer:
             # High absorption (>0.5) = systemic risk elevated
             result["regime_systemic_risk"] = (ab > 0.5).astype(float)
 
+        # --- Turbulence Regime ---
+        turb_crisis_col = self._find_col(features, "turb_regime_crisis")
+        if turb_crisis_col:
+            result["regime_turb_crisis"] = features[turb_crisis_col]
+        turb_calm_col = self._find_col(features, "turb_regime_calm")
+        if turb_calm_col:
+            result["regime_turb_calm"] = features[turb_calm_col]
+
         # --- Combined Regime Score ---
         # Sum of all regime indicators for a composite state
         regime_cols = [c for c in result.columns if c.startswith("regime_")]
@@ -626,7 +680,12 @@ class AlternativeFeatureEngineer:
         credit = self._find_col(features, "xasset_credit_spread")
         if credit:
             # Credit spread widening = negative values = stress
-            stress_components.append(-features[credit].clip(-3, 3) * 10)
+            # Z-score credit spread to match other component scales
+            cs = features[credit]
+            cs_mean = cs.rolling(63, min_periods=21).mean()
+            cs_std = cs.rolling(63, min_periods=21).std()
+            cs_z = ((cs - cs_mean) / (cs_std + 1e-8)).clip(-3, 3)
+            stress_components.append(-cs_z)
 
         breadth = self._find_col(features, "sent_breadth_mcclellan")
         if breadth:
@@ -641,6 +700,10 @@ class AlternativeFeatureEngineer:
         if illiq:
             stress_components.append(features[illiq].clip(-3, 3))
 
+        turb = self._find_col(features, "turb_zscore")
+        if turb:
+            stress_components.append(features[turb].clip(-3, 3))
+
         if len(stress_components) >= 2:
             combined = pd.concat(stress_components, axis=1)
             result["composite_stress_index"] = combined.mean(axis=1)
@@ -653,7 +716,12 @@ class AlternativeFeatureEngineer:
 
         risk_onoff = self._find_col(features, "xasset_risk_on_off")
         if risk_onoff:
-            appetite_components.append(features[risk_onoff].clip(-0.1, 0.1) * 100)
+            # Z-score the risk-on/off signal to match other component scales
+            ro = features[risk_onoff]
+            ro_mean = ro.rolling(63, min_periods=21).mean()
+            ro_std = ro.rolling(63, min_periods=21).std()
+            ro_z = ((ro - ro_mean) / (ro_std + 1e-8)).clip(-3, 3)
+            appetite_components.append(ro_z)
 
         sec_risk = self._find_col(features, "sector_risk_appetite")
         if sec_risk:
@@ -726,7 +794,9 @@ class AlternativeFeatureEngineer:
             "earnings_seasonality": [],
             "factor_momentum": [],
             "correlation_regime": [],
+            "turbulence": [],
             "interactions": [],
+            "composites": [],
             "regimes": [],
             "engineered": [],
         }
@@ -775,6 +845,10 @@ class AlternativeFeatureEngineer:
                 groups["factor_momentum"].append(name)
             elif name.startswith("corr_"):
                 groups["correlation_regime"].append(name)
+            elif name.startswith("turb_"):
+                groups["turbulence"].append(name)
+            elif name.startswith("composite_"):
+                groups["composites"].append(name)
             elif name.startswith("interact_"):
                 groups["interactions"].append(name)
             elif name.startswith("regime_"):

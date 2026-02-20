@@ -24,6 +24,7 @@ This module implements 20 provider categories:
 18. Earnings seasonality - earnings calendar, quarter-end, seasonal patterns
 19. Factor momentum - style factors, dispersion, sector breadth
 20. Correlation regime - intermarket correlations, systemic risk, regime detection
+21. Turbulence index - Mahalanobis distance, multi-asset regime detection
 """
 
 from .base import AlternativeDataProvider, AltDataConfig
@@ -47,6 +48,7 @@ from .volatility_surface_provider import VolatilitySurfaceProvider
 from .earnings_seasonality_provider import EarningsSeasonalityProvider
 from .factor_momentum_provider import FactorMomentumProvider
 from .correlation_regime_provider import CorrelationRegimeProvider
+from .turbulence_provider import TurbulenceProvider
 from .alt_feature_engineer import AlternativeFeatureEngineer
 
 __all__ = [
@@ -72,5 +74,6 @@ __all__ = [
     "EarningsSeasonalityProvider",
     "FactorMomentumProvider",
     "CorrelationRegimeProvider",
+    "TurbulenceProvider",
     "AlternativeFeatureEngineer",
 ]

@@ -55,6 +55,7 @@ from backend.app.data.alternative import (
     EarningsSeasonalityProvider,
     FactorMomentumProvider,
     CorrelationRegimeProvider,
+    TurbulenceProvider,
 )
 from backend.app.data.alternative.alt_data_context import AltDataContext
 
@@ -107,6 +108,7 @@ def test_all_providers():
         (EarningsSeasonalityProvider(), "Earnings Seasonality"),
         (FactorMomentumProvider(), "Factor Momentum"),
         (CorrelationRegimeProvider(), "Correlation Regime"),
+        (TurbulenceProvider(), "Turbulence Index"),
     ]
 
     total_ok = 0

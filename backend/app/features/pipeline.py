@@ -272,7 +272,7 @@ class FeaturePipeline:
             "cal_", "regime_", "pol_", "econ_", "fred_", "xasset_", "sent_",
             "opt_", "edgar_", "news_", "gtrends_", "weather_", "short_",
             "dark_", "crypto_", "sector_", "bond_", "interact_",
-            "micro_", "vol_", "earn_", "factor_", "composite_", "corr_",
+            "micro_", "vol_", "earn_", "factor_", "composite_", "corr_", "turb_",
         )
         if self.config.standardize_method != "none":
             logger.debug(f"Standardizing features using {self.config.standardize_method}")
@@ -366,6 +366,13 @@ class FeaturePipeline:
             "econ_surprise": [],
             "sector_rotation": [],
             "bond_stress": [],
+            "microstructure": [],
+            "vol_surface": [],
+            "earnings_seasonality": [],
+            "factor_momentum": [],
+            "correlation_regime": [],
+            "turbulence": [],
+            "composites": [],
             "alt_interactions": [],
             "alt_regimes": [],
         }
@@ -408,6 +415,20 @@ class FeaturePipeline:
                 groups["sector_rotation"].append(name)
             elif name.startswith("bond_"):
                 groups["bond_stress"].append(name)
+            elif name.startswith("micro_"):
+                groups["microstructure"].append(name)
+            elif name.startswith("vol_"):
+                groups["vol_surface"].append(name)
+            elif name.startswith("earn_"):
+                groups["earnings_seasonality"].append(name)
+            elif name.startswith("factor_"):
+                groups["factor_momentum"].append(name)
+            elif name.startswith("corr_"):
+                groups["correlation_regime"].append(name)
+            elif name.startswith("turb_"):
+                groups["turbulence"].append(name)
+            elif name.startswith("composite_"):
+                groups["composites"].append(name)
             elif name.startswith("interact_"):
                 groups["alt_interactions"].append(name)
             elif name.startswith("regime_"):
