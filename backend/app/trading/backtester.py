@@ -1701,16 +1701,21 @@ class WalkForwardBacktester:
         self,
         candles: List[OHLCV],
         horizons: List[int] = None,
-        threshold: float = 0.02
+        threshold: float = 0.005
     ) -> Dict[int, np.ndarray]:
         """
         Generate trading labels for multiple lookahead horizons.
+
+        Threshold reduced from 0.02 (2%) to 0.005 (0.5%) to minimize the HOLD class.
+        With 3-class output (SELL/HOLD/BUY), the old 2% threshold created 15-17% HOLD
+        labels — a useless class that wasted model capacity. At 0.5%, HOLD drops to
+        ~2-5% and models effectively learn binary direction (UP/DOWN).
 
         Multi-horizon training allows the ensemble to learn patterns at different timescales:
         - 24h: Short-term tactical moves (1 day)
         - 48h: Medium-term directional bias (2 days)
         - 100h: Intermediate trend (4+ days)
-        - 200h: Longer trend (8+ days)
+        - 200h: Longer trend (8+ days) ← PRIMARY
         - 400h: Long-term direction (16+ days)
         - 800h: Ultra-long direction (33+ days)
         - 1600h: Extended direction (66+ days - macro trends, earnings cycles, seasonality)
@@ -1862,11 +1867,11 @@ class WalkForwardBacktester:
             # STRATEGIC OVERHAUL: Require 3/4 model agreement minimum.
             # 2/4 agreement = coin flip. 3/4+ = real consensus.
             "min_model_agreement": 3,                # Minimum 3/4 models for LONGS (was 2)
-            "min_model_agreement_short": 4,          # Require 4/4 models for SHORTS (shorting is harder, needs more conviction)
+            "min_model_agreement_short": 3,          # Require 3/4 models for SHORTS (was 4/4 — impossible to short)
             "weighted_agreement_threshold": 0.65,    # 65% weighted agreement (was 50%)
 
             # Liquidity & Volume
-            "min_volume_threshold": 1000,            # Minimum acceptable volume (in quote currency units, e.g., USDT)
+            "min_volume_threshold": 100,             # Minimum acceptable volume (was 1000 — rejected 89% of signals)
 
             # Correlation & Systemic Risk
             "max_correlation_threshold": 0.70,       # Reduce sizing if correlation > 70%
@@ -1969,14 +1974,14 @@ class WalkForwardBacktester:
             "flip_block_candles": 24,               # Block symbol for 24 candles after max flips (was 50)
 
             # HYBRID SIGNAL ENGINE (ML + Aristotle Rules)
-            # RULES-PRIMARY architecture: Backtest showed ML is ~99% LONG (directional
-            # bias, not real predictions). Rules are the only real signal source.
-            # ML acts as confirmation/filter, not driver.
+            # BALANCED architecture: Previous 99% LONG bias was caused by broken PCA
+            # (unnormalized features), batch_size=1 training, and 800h prediction horizon.
+            # With those fixed, ML models should learn real patterns. Give them equal voice.
             "hybrid_enabled": True,                  # Master switch for hybrid signals
-            "hybrid_ml_weight": 0.25,                # ML is SECONDARY (was 0.45 — ML has LONG bias)
-            "hybrid_rules_weight": 0.65,             # Rules are PRIMARY signal source (was 0.45)
-            "hybrid_agreement_bonus": 0.15,          # Boost when both agree (was 0.10)
-            "hybrid_disagreement_dampen": 0.30,      # Harder dampen on disagreement (was 0.50)
+            "hybrid_ml_weight": 0.45,                # ML is EQUAL partner (was 0.25 — punished for old bugs)
+            "hybrid_rules_weight": 0.45,             # Rules remain important signal source (was 0.65)
+            "hybrid_agreement_bonus": 0.10,          # Boost when both agree (was 0.15)
+            "hybrid_disagreement_dampen": 0.40,      # Lighter dampen on disagreement (was 0.30)
             "hybrid_min_rules_confidence": 0.25,     # Minimum rules confidence to use in hybrid
             "hybrid_ml_bias_threshold": 0.85,        # If >85% of recent ML preds are same direction, ML is biased
             "hybrid_ml_bias_window": 50,             # Window size for bias detection
@@ -4733,7 +4738,7 @@ class ModelPreTrainer:
             closes = np.array([c.close for c in candles])
             raw_rewards = []
             feature_lookback = 400
-            reward_horizon = 800  # Match primary label horizon
+            reward_horizon = 200  # Match primary label horizon (was 800 — now 200h for better alignment)
             for i in range(len(features)):
                 candle_idx = feature_lookback + i
                 if candle_idx + reward_horizon < len(closes):
@@ -4917,11 +4922,12 @@ class ModelPreTrainer:
                 return None
             logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
             logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
-            # Use 800h (~33 days) as primary to match swing/long-term holding periods.
-            # Was 200h (8 days) which mismatched the 30-166 day holding periods,
-            # causing models to lose predictive power after the first week.
-            # 800h aligns with the target 1 exit window (30-60 day swing trades).
-            primary_labels = labels.get(800, labels.get(400, labels.get(200, list(labels.values())[0])))
+            # Use 200h (~8 days) as primary prediction target.
+            # 800h (33 days) was too far — features use 14-20 period oscillators that
+            # lose predictive power beyond ~2 weeks. With 400h lookback, predicting 200h
+            # means we have 2x observation vs prediction horizon (sweet spot).
+            # 800h required extrapolating 2x BEYOND the observation window.
+            primary_labels = labels.get(200, labels.get(400, labels.get(800, list(labels.values())[0])))
         else:
             logger.info("Single-horizon training mode")
             primary_labels = labels
@@ -5384,7 +5390,7 @@ class ModelPreTrainer:
             logger.info("🎯 MULTI-HORIZON TRAINING COMPLETE (7 TIMEFRAMES)")
             logger.info(f"   Training horizons: {sorted(labels.keys())} hours")
             logger.info(f"   Coverage: 1 day to 66+ days (micro-trends → macro-trends)")
-            logger.info(f"   Primary horizon (800h / 33+ days) accuracy: {best_val_accuracy:.2%}")
+            logger.info(f"   Primary horizon (200h / 8+ days) accuracy: {best_val_accuracy:.2%}")
             logger.info(f"")
             logger.info(f"   ✅ What this achieves:")
             logger.info(f"   • Captures short-term reversions (24h-100h)")
