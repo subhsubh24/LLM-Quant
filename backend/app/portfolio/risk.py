@@ -474,3 +474,100 @@ class RiskManager:
         impact = base_impact_bps * np.sqrt(participation_rate)
 
         return float(impact)
+
+    def bootstrap_sharpe_ci(
+        self,
+        returns: pd.Series,
+        n_bootstrap: int = 1000,
+        block_size: int = 21,
+        confidence: float = 0.95,
+    ) -> Dict[str, float]:
+        """
+        Compute confidence interval for Sharpe ratio using block bootstrap.
+
+        Standard bootstrap assumes i.i.d. returns, which is wrong — returns
+        exhibit autocorrelation and volatility clustering. Block bootstrap
+        preserves this serial dependence by resampling contiguous blocks.
+
+        References:
+        - Politis & Romano (1994) "The Stationary Bootstrap"
+        - Ledoit & Wolf (2008) "Robust Performance Hypothesis Testing with the Sharpe Ratio"
+
+        Args:
+            returns: Daily return series
+            n_bootstrap: Number of bootstrap replications
+            block_size: Size of contiguous blocks (21 ≈ 1 month)
+            confidence: Confidence level for interval
+
+        Returns:
+            Dict with sharpe_point, sharpe_lower, sharpe_upper, sharpe_se, p_value
+        """
+        if len(returns) < 63:
+            point_sharpe = self._compute_sharpe(returns)
+            return {
+                "sharpe_point": point_sharpe,
+                "sharpe_lower": point_sharpe,
+                "sharpe_upper": point_sharpe,
+                "sharpe_se": 0.0,
+                "p_value": 1.0,
+                "n_bootstrap": 0,
+            }
+
+        rng = np.random.RandomState(42)
+        n = len(returns)
+        ret_values = returns.values
+
+        # Point estimate
+        point_sharpe = self._compute_sharpe(returns)
+
+        # Block bootstrap
+        n_blocks = max(n // block_size, 2)
+        sharpe_samples = []
+
+        for _ in range(n_bootstrap):
+            # Sample block start indices with replacement
+            block_starts = rng.randint(0, n - block_size + 1, size=n_blocks)
+
+            # Construct bootstrap sample from contiguous blocks
+            boot_returns = np.concatenate([
+                ret_values[start:start + block_size] for start in block_starts
+            ])[:n]  # Trim to original length
+
+            boot_sharpe = self._compute_sharpe_array(boot_returns)
+            sharpe_samples.append(boot_sharpe)
+
+        sharpe_samples = np.array(sharpe_samples)
+
+        # Confidence interval (percentile method)
+        alpha = 1 - confidence
+        lower = float(np.percentile(sharpe_samples, 100 * alpha / 2))
+        upper = float(np.percentile(sharpe_samples, 100 * (1 - alpha / 2)))
+        se = float(np.std(sharpe_samples))
+
+        # P-value: fraction of bootstrap samples with Sharpe <= 0
+        p_value = float(np.mean(sharpe_samples <= 0))
+
+        return {
+            "sharpe_point": point_sharpe,
+            "sharpe_lower": lower,
+            "sharpe_upper": upper,
+            "sharpe_se": se,
+            "p_value": p_value,
+            "n_bootstrap": n_bootstrap,
+        }
+
+    def _compute_sharpe(self, returns: pd.Series) -> float:
+        """Compute annualized Sharpe ratio."""
+        if len(returns) < 2:
+            return 0.0
+        excess = returns.mean() * 252 - self.risk_free_rate
+        vol = returns.std() * np.sqrt(252)
+        return excess / vol if vol > 1e-8 else 0.0
+
+    def _compute_sharpe_array(self, returns: np.ndarray) -> float:
+        """Compute annualized Sharpe ratio from numpy array."""
+        if len(returns) < 2:
+            return 0.0
+        excess = returns.mean() * 252 - self.risk_free_rate
+        vol = returns.std() * np.sqrt(252)
+        return excess / vol if vol > 1e-8 else 0.0

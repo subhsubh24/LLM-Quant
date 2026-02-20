@@ -21,11 +21,21 @@ from .enhanced_ml_ensemble import (
 from .framework import (
     ModelConfig,
     ModelTrainer,
+    FeatureSelector,
+    FDRCorrection,
+    HyperparameterTuner,
+    OOSResult,
+    ValidationResult,
 )
 
 from .estimators import (
     BaseRanker,
     EnsembleRanker,
+)
+
+from .checkpoint_manager import (
+    ModelCheckpointManager,
+    CheckpointMetadata,
 )
 
 __all__ = [
@@ -46,6 +56,14 @@ __all__ = [
     # Framework and estimators
     "ModelConfig",
     "ModelTrainer",
+    "FeatureSelector",
+    "FDRCorrection",
+    "HyperparameterTuner",
+    "OOSResult",
+    "ValidationResult",
     "BaseRanker",
     "EnsembleRanker",
+    # Checkpoint management
+    "ModelCheckpointManager",
+    "CheckpointMetadata",
 ]

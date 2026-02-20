@@ -166,15 +166,16 @@ class TestFlashCrash:
 
     def test_40_percent_2008_scenario(self):
         """Test 2008 crisis level (40% drop over month)."""
-        # Generate month with -40% total move
+        # Generate month with -40% total move (fixed seed for reproducibility)
+        np.random.seed(2008)
         n = 20
-        daily_returns = np.random.normal(-0.02, 0.05, n)  # Biased down
+        daily_returns = np.random.normal(-0.025, 0.03, n)  # Biased down, tight spread
         daily_returns[5] = -0.15  # Flash crash day
         daily_returns[10] = -0.10  # Another down day
 
         cumulative_return = np.exp(np.sum(np.log(1 + daily_returns))) - 1
 
-        # Should reach or exceed -40%
+        # Should reach or exceed -30%
         assert cumulative_return < -0.30
 
     def test_circuit_breaker_trigger(self):

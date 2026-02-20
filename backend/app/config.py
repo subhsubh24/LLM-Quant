@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 
 def find_env_file():
@@ -100,10 +100,11 @@ class Settings(BaseSettings):
     alt_data_cross_asset_enabled: bool = True  # Cross-asset signals (bonds, commodities, FX)
     alt_data_sentiment_enabled: bool = True    # Sentiment indicators (VIX, breadth)
 
-    class Config:
-        env_file = find_env_file()
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = ConfigDict(
+        env_file=find_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @property
     def has_llm_key(self) -> bool:
