@@ -112,15 +112,21 @@ class BacktestResult:
     cost_series: pd.Series
     drawdown_series: pd.Series
 
+    # Regime-stratified metrics (optional, populated by analyze_by_regime)
+    regime_metrics: Optional[Dict[str, Dict[str, float]]] = None
+
     def to_dict(self) -> dict:
         """Serialize for storage."""
-        return {
+        result = {
             "config": self.config.to_dict(),
             "equity_curve": self.equity_curve.to_dict(),
             "returns": self.returns.to_dict(),
             "metrics": self.metrics.to_dict(),
             "n_trades": len(self.trades),
         }
+        if self.regime_metrics:
+            result["regime_metrics"] = self.regime_metrics
+        return result
 
 
 class BacktestEngine:

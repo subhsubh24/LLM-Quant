@@ -930,29 +930,52 @@ class ModelTrainer:
         y: pd.Series,
         preds: pd.Series,
     ) -> Dict[str, float]:
-        """Score predictions stratified by volatility regime."""
+        """Score predictions stratified by volatility AND directional regime.
+
+        Splits OOS results into:
+        - Volatility regimes: low_volatility, high_volatility
+        - Directional regimes: bull, bear, sideways
+        This reveals whether the model only works in certain market conditions.
+        """
         from scipy.stats import spearmanr
 
         regimes = {}
 
-        # Use rolling volatility of target as regime indicator
         if len(y) < 63:
             return regimes
 
+        # ── Volatility regimes ──────────────────────────────────
         rolling_vol = y.rolling(21).std()
         vol_median = rolling_vol.median()
 
-        # Low-vol regime (calm markets)
         low_vol_mask = rolling_vol <= vol_median
         if low_vol_mask.sum() > 20:
             c, _ = spearmanr(y[low_vol_mask], preds[low_vol_mask])
             regimes["low_volatility"] = c if not np.isnan(c) else 0.0
 
-        # High-vol regime (stressed markets)
         high_vol_mask = rolling_vol > vol_median
         if high_vol_mask.sum() > 20:
             c, _ = spearmanr(y[high_vol_mask], preds[high_vol_mask])
             regimes["high_volatility"] = c if not np.isnan(c) else 0.0
+
+        # ── Directional regimes (bull / bear / sideways) ────────
+        # Use 63-day (quarterly) cumulative return as regime indicator
+        rolling_return = y.rolling(63).sum()
+        if rolling_return.notna().sum() < 60:
+            return regimes
+
+        ret_33 = rolling_return.quantile(0.33)
+        ret_67 = rolling_return.quantile(0.67)
+
+        bull_mask = rolling_return >= ret_67
+        bear_mask = rolling_return <= ret_33
+        sideways_mask = (rolling_return > ret_33) & (rolling_return < ret_67)
+
+        for regime_name, mask in [("bull", bull_mask), ("bear", bear_mask), ("sideways", sideways_mask)]:
+            valid = mask & y.notna() & preds.notna()
+            if valid.sum() > 20:
+                c, _ = spearmanr(y[valid], preds[valid])
+                regimes[regime_name] = c if not np.isnan(c) else 0.0
 
         return regimes
 

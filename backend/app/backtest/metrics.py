@@ -9,7 +9,7 @@ Computes standard quant performance metrics:
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
@@ -289,6 +289,112 @@ def _empty_metrics() -> PerformanceMetrics:
         alpha=0, beta=1, information_ratio=0, tracking_error=0,
         num_trades=0, avg_turnover=0, total_costs=0
     )
+
+
+def compute_regime_metrics(
+    returns: pd.Series,
+    benchmark_returns: Optional[pd.Series] = None,
+    risk_free_rate: float = 0.04,
+    trading_days: int = 252,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Compute performance metrics stratified by market regime.
+
+    Classifies each day into a directional regime using 63-day trailing
+    cumulative benchmark returns, then computes Sharpe, return, volatility,
+    drawdown, and win rate within each regime.
+
+    Regimes:
+    - bull: Top tercile of 63-day trailing benchmark returns
+    - bear: Bottom tercile
+    - sideways: Middle tercile
+    - high_volatility: Rolling 21-day vol above median
+    - low_volatility: Rolling 21-day vol at or below median
+
+    Args:
+        returns: Strategy daily return series
+        benchmark_returns: Market benchmark returns (for regime classification).
+            If None, strategy returns are used as the market proxy.
+        risk_free_rate: Annual risk-free rate
+        trading_days: Trading days per year
+
+    Returns:
+        Dict of {regime_name: {sharpe, annualized_return, volatility, max_drawdown,
+                                win_rate, n_days, pct_of_total}}
+    """
+    if len(returns) < 126:
+        return {}
+
+    # Use benchmark for regime detection, fall back to strategy returns
+    market = benchmark_returns if benchmark_returns is not None else returns
+    market = market.reindex(returns.index).fillna(0)
+
+    result = {}
+
+    # ── Directional regimes ─────────────────────────────────
+    rolling_ret = market.rolling(63).sum()
+    valid = rolling_ret.dropna()
+
+    if len(valid) >= 63:
+        ret_33 = valid.quantile(0.33)
+        ret_67 = valid.quantile(0.67)
+
+        regime_masks = {
+            "bull": rolling_ret >= ret_67,
+            "bear": rolling_ret <= ret_33,
+            "sideways": (rolling_ret > ret_33) & (rolling_ret < ret_67),
+        }
+
+        for name, mask in regime_masks.items():
+            mask = mask.reindex(returns.index, fill_value=False)
+            regime_ret = returns[mask].dropna()
+            if len(regime_ret) >= 21:
+                result[name] = _regime_stats(regime_ret, risk_free_rate, trading_days, len(returns))
+
+    # ── Volatility regimes ──────────────────────────────────
+    rolling_vol = returns.rolling(21).std()
+    vol_median = rolling_vol.median()
+
+    vol_masks = {
+        "high_volatility": rolling_vol > vol_median,
+        "low_volatility": rolling_vol <= vol_median,
+    }
+
+    for name, mask in vol_masks.items():
+        mask = mask.reindex(returns.index, fill_value=False)
+        regime_ret = returns[mask].dropna()
+        if len(regime_ret) >= 21:
+            result[name] = _regime_stats(regime_ret, risk_free_rate, trading_days, len(returns))
+
+    return result
+
+
+def _regime_stats(
+    returns: pd.Series,
+    risk_free_rate: float,
+    trading_days: int,
+    total_days: int,
+) -> Dict[str, float]:
+    """Compute summary stats for a single regime slice."""
+    daily_rf = risk_free_rate / trading_days
+    excess = returns - daily_rf
+    vol = returns.std() * np.sqrt(trading_days)
+    sharpe = (excess.mean() * trading_days) / vol if vol > 1e-8 else 0.0
+
+    cumulative = (1 + returns).cumprod()
+    running_max = cumulative.expanding().max()
+    drawdown = (cumulative - running_max) / running_max
+    max_dd = float(drawdown.min()) if len(drawdown) > 0 else 0.0
+
+    return {
+        "sharpe": round(float(sharpe), 3),
+        "annualized_return": round(float(returns.mean() * trading_days), 4),
+        "volatility": round(float(vol), 4),
+        "max_drawdown": round(max_dd, 4),
+        "win_rate": round(float((returns > 0).mean()), 4),
+        "n_days": len(returns),
+        "pct_of_total": round(len(returns) / total_days, 4),
+    }
 
 
 def compute_rolling_metrics(
