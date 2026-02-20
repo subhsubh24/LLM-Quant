@@ -82,6 +82,11 @@ class AltDataConfig:
         "XLU": "utilities",
         "XLP": "consumer_staples",
         "XLK": "technology",
+        "XLV": "healthcare",          # Defensive but also growth-sensitive
+        "XLY": "consumer_disc",       # Cyclical consumer discretionary
+        # Rate-sensitive / alternative assets
+        "VNQ": "real_estate",         # REIT ETF (rate-sensitive, inflation hedge)
+        "BIL": "tbills",              # 1-3 Month T-Bills (risk-free rate proxy/flight-to-safety)
     })
 
     # Sentiment proxies

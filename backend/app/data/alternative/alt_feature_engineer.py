@@ -551,6 +551,41 @@ class AlternativeFeatureEngineer:
                 features[turb_mr] * (features[buy_press2] - 0.5) * 4
             )
 
+        # --- New signals from enriched providers ---
+
+        # VVIX × VIX: when BOTH vol-of-vol and VIX are elevated = genuine fear spike
+        vvix_z = self._find_col(features, "vol_vvix_zscore")
+        vix_z5 = self._find_col(features, "sent_vix_zscore_21d")
+        if vvix_z and vix_z5:
+            result["interact_vvix_x_vix"] = features[vvix_z] * features[vix_z5]
+
+        # Commodity breadth × dollar: many commodities rising + weak dollar = inflation trade
+        com_breadth = self._find_col(features, "xasset_commodity_breadth")
+        dollar_mom = self._find_col(features, "xasset_dollar_momentum_21d")
+        if com_breadth and dollar_mom:
+            # Positive when commodities up AND dollar down (classic inflation signal)
+            result["interact_commodity_x_dollar"] = (
+                features[com_breadth] * (-features[dollar_mom])
+            )
+
+        # Real yield × growth-value: negative real yield favors growth stocks
+        real_yield = self._find_col(features, "fred_real_yield_10y")
+        gv_col2 = self._find_col(features, "factor_growth_value_21d")
+        if real_yield and gv_col2:
+            # Negative real yield + growth outperformance = momentum aligned
+            result["interact_realyield_x_growth"] = (
+                (-features[real_yield]) * features[gv_col2]
+            )
+
+        # M2 growth × real yield: money printing + tightening = policy stress signal
+        m2_growth = self._find_col(features, "fred_m2_yoy_growth")
+        real_yield2 = self._find_col(features, "fred_real_yield_10y")
+        if m2_growth and real_yield2:
+            # Rising M2 while real yield is negative = maximum liquidity
+            result["interact_m2_x_realyield"] = (
+                features[m2_growth] * (-features[real_yield2])
+            )
+
         return result
 
     def _compute_regime_features(self, features: pd.DataFrame) -> pd.DataFrame:
@@ -647,6 +682,15 @@ class AlternativeFeatureEngineer:
         turb_calm_col = self._find_col(features, "turb_regime_calm")
         if turb_calm_col:
             result["regime_turb_calm"] = features[turb_calm_col]
+
+        # --- Real Yield Regime (from derived FRED features) ---
+        # Negative real yield = financial conditions still stimulative
+        # This drives growth/tech outperformance vs value/cyclicals
+        real_yield_col = self._find_col(features, "fred_real_yield_10y")
+        if real_yield_col:
+            ry = features[real_yield_col]
+            result["regime_negative_real_yield"] = (ry < 0).astype(float)
+            result["regime_deeply_neg_real_yield"] = (ry < -1.0).astype(float)
 
         # --- Combined Regime Score ---
         # Sum of all regime indicators for a composite state

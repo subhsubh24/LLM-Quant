@@ -87,12 +87,50 @@ class FREDProvider(AlternativeDataProvider):
         # Resample to daily business days with forward-fill
         result = self._resample_to_daily(result)
 
+        # Compute derived macro signals from the raw FRED series
+        result = self._add_derived_features(result)
+
         logger.info(
-            f"FRED: fetched {len(result.columns)} series, "
+            f"FRED: fetched {len(result.columns)} series (including derived), "
             f"{len(result)} days from {start_date} to {end_date}"
         )
 
         return result
+
+    def _add_derived_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Compute derived macro signals from fetched FRED series.
+
+        These capture economically meaningful combinations that no single
+        FRED series can express alone:
+        - Real yields (nominal - inflation expectations) → growth vs value
+        - Yield curve butterfly → mid-cycle dynamics
+        - M2 money supply growth → liquidity conditions
+        - Real Fed Funds rate → monetary policy tightness
+        """
+        # Real 10-year yield = nominal 10Y yield - 10Y inflation breakeven
+        # Key driver of growth vs value rotation: negative real yields = growth wins
+        if "fred_dgs10" in df.columns and "fred_t10yie" in df.columns:
+            df["fred_real_yield_10y"] = df["fred_dgs10"] - df["fred_t10yie"]
+
+        # Yield curve butterfly = 2Y + 30Y - 2*10Y
+        # Measures the curvature/belly of the yield curve; negative = humped curve
+        if all(c in df.columns for c in ["fred_dgs2", "fred_dgs10", "fred_dgs30"]):
+            df["fred_yield_butterfly"] = (
+                df["fred_dgs2"] + df["fred_dgs30"] - 2.0 * df["fred_dgs10"]
+            )
+
+        # M2 money supply year-over-year growth rate (252 business days ≈ 1 year)
+        # High M2 growth = liquidity tailwind for risk assets
+        if "fred_m2sl" in df.columns:
+            df["fred_m2_yoy_growth"] = df["fred_m2sl"].pct_change(252).clip(-0.5, 0.5)
+
+        # Real Fed Funds rate = Fed Funds - 5Y breakeven inflation
+        # Negative = financial conditions still accommodative (even if hiking)
+        if "fred_dff" in df.columns and "fred_t5yie" in df.columns:
+            df["fred_real_fed_funds"] = df["fred_dff"] - df["fred_t5yie"]
+
+        return df
 
     def _fetch_single_series(
         self,

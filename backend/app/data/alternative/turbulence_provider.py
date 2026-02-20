@@ -257,19 +257,20 @@ class TurbulenceProvider(AlternativeDataProvider):
         """
         window = 63
 
+        # Compute total squared z-scores once (shared denominator for all contributions)
+        total_z2 = pd.DataFrame()
+        for t in available:
+            r = returns[t]
+            m = r.rolling(window, min_periods=21).mean()
+            s = r.rolling(window, min_periods=21).std()
+            total_z2[t] = ((r - m) / (s + 1e-8)) ** 2
+        total = total_z2.sum(axis=1) + 1e-8
+
         if "SPY" in available:
             spy_ret = returns["SPY"]
             spy_mean = spy_ret.rolling(window, min_periods=21).mean()
             spy_std = spy_ret.rolling(window, min_periods=21).std()
             spy_z = ((spy_ret - spy_mean) / (spy_std + 1e-8)) ** 2
-            # Normalize: what fraction of total squared deviation is from SPY?
-            total_z2 = pd.DataFrame()
-            for t in available:
-                r = returns[t]
-                m = r.rolling(window, min_periods=21).mean()
-                s = r.rolling(window, min_periods=21).std()
-                total_z2[t] = ((r - m) / (s + 1e-8)) ** 2
-            total = total_z2.sum(axis=1) + 1e-8
             result["turb_equity_contribution"] = (spy_z / total).reindex(result.index)
 
         if "HYG" in available:
@@ -277,11 +278,4 @@ class TurbulenceProvider(AlternativeDataProvider):
             hyg_mean = hyg_ret.rolling(window, min_periods=21).mean()
             hyg_std = hyg_ret.rolling(window, min_periods=21).std()
             hyg_z = ((hyg_ret - hyg_mean) / (hyg_std + 1e-8)) ** 2
-            total_z2 = pd.DataFrame()
-            for t in available:
-                r = returns[t]
-                m = r.rolling(window, min_periods=21).mean()
-                s = r.rolling(window, min_periods=21).std()
-                total_z2[t] = ((r - m) / (s + 1e-8)) ** 2
-            total = total_z2.sum(axis=1) + 1e-8
             result["turb_credit_contribution"] = (hyg_z / total).reindex(result.index)

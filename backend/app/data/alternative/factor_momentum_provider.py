@@ -284,8 +284,8 @@ class FactorMomentumProvider(AlternativeDataProvider):
         if len(sector_mom) >= 5:
             mom_df = pd.DataFrame(sector_mom)
 
-            # Fraction of sectors with positive 21d momentum
-            breadth = (mom_df > 0).sum(axis=1) / len(sector_mom)
+            # Fraction of sectors with positive 21d momentum (NaN-aware denominator)
+            breadth = (mom_df > 0).sum(axis=1) / mom_df.notna().sum(axis=1).clip(lower=1)
             result["factor_sector_breadth"] = breadth
 
             # Breadth change

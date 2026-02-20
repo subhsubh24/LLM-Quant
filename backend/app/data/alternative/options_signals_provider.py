@@ -73,14 +73,16 @@ class OptionsSignalsProvider(AlternativeDataProvider):
             "opt_vrp",
             "opt_vrp_zscore_21d",
             "opt_vrp_percentile_63d",
-            # Realized vs implied vol spread
+            # Realized vol signals
             "opt_realized_vol_21d",
-            "opt_implied_minus_realized",
+            "opt_realized_vol_zscore",   # Is current realized vol elevated vs history?
             # VIX level transformations for options context
             "opt_vix_squared",
             "opt_vix_regime",
-            # SKEW proxy
-            "opt_skew_proxy",
+            # SKEW: CBOE Skew Index (real) or synthetic proxy
+            "opt_skew_cboe",             # Raw CBOE Skew Index (or synthetic fallback)
+            "opt_skew_cboe_zscore",      # Z-score of Skew
+            "opt_skew_proxy",            # Synthetic skew from VIX/SPY asymmetry
             "opt_skew_zscore_21d",
             # Gamma exposure proxy
             "opt_gamma_proxy",
@@ -105,11 +107,17 @@ class OptionsSignalsProvider(AlternativeDataProvider):
             if not vrp_features.empty:
                 result = pd.concat([result, vrp_features], axis=1)
 
-        # Compute SKEW proxy from VIX behavior
+        # Compute SKEW proxy from VIX behavior (synthetic)
         if vix_data is not None and spy_data is not None:
             skew_features = self._compute_skew_proxy(vix_data, spy_data)
             if not skew_features.empty:
                 result = pd.concat([result, skew_features], axis=1)
+
+        # Fetch real CBOE Skew Index (^SKEW) - more accurate than synthetic
+        skew_series = self._fetch_cboe_skew(start_date, end_date)
+        cboe_skew_features = self._compute_cboe_skew_features(skew_series, vix_data)
+        if not cboe_skew_features.empty:
+            result = pd.concat([result, cboe_skew_features], axis=1)
 
         # Gamma exposure proxy
         if vix_data is not None:
@@ -180,8 +188,10 @@ class OptionsSignalsProvider(AlternativeDataProvider):
         vrp = vix_decimal - realized_vol_21d
         result["opt_vrp"] = vrp
 
-        # Implied minus realized (same as VRP but clearer name)
-        result["opt_implied_minus_realized"] = vrp
+        # Realized vol z-score: is current realized vol elevated vs its own history?
+        rv_mean = realized_vol_21d.rolling(63, min_periods=21).mean()
+        rv_std = realized_vol_21d.rolling(63, min_periods=21).std()
+        result["opt_realized_vol_zscore"] = ((realized_vol_21d - rv_mean) / (rv_std + 1e-8)).clip(-4, 4)
 
         # VRP z-score
         vrp_mean = vrp.rolling(63, min_periods=21).mean()
@@ -299,5 +309,61 @@ class OptionsSignalsProvider(AlternativeDataProvider):
 
         var_swap_chg = var_swap.diff(5) / (var_swap.shift(5) + 1e-8)
         result["opt_variance_swap_chg_5d"] = var_swap_chg.clip(-5, 5)
+
+        return result
+
+    def _fetch_cboe_skew(
+        self, start_date: date, end_date: date
+    ) -> Optional[pd.Series]:
+        """
+        Fetch the real CBOE Skew Index (^SKEW) from yfinance.
+
+        The CBOE SKEW Index measures the perceived tail risk in S&P 500
+        options. Normal range is 100-120; elevated (>130) signals high
+        demand for OTM put protection = bearish sentiment.
+        """
+        try:
+            import yfinance as yf
+            extended_start = start_date - timedelta(days=365)
+            t = yf.Ticker("^SKEW")
+            hist = t.history(start=extended_start, end=end_date + timedelta(days=1))
+            if hist.empty:
+                return None
+            s = hist["Close"]
+            s.index = s.index.tz_localize(None)
+            logger.info("CBOE SKEW Index fetched successfully")
+            return s
+        except Exception as e:
+            logger.debug(f"CBOE SKEW fetch failed (will use synthetic proxy): {e}")
+            return None
+
+    def _compute_cboe_skew_features(
+        self,
+        skew_series: Optional[pd.Series],
+        vix_data: Optional[pd.Series],
+    ) -> pd.DataFrame:
+        """
+        Compute features from the CBOE Skew Index.
+
+        If real CBOE data is unavailable, falls back to VIX-based
+        synthetic skew (already computed in _compute_skew_proxy).
+        Returns empty DataFrame in that case to avoid duplication.
+        """
+        if skew_series is None or skew_series.empty:
+            # Real CBOE data unavailable; synthetic skew already computed
+            return pd.DataFrame()
+
+        result = pd.DataFrame(index=skew_series.index)
+
+        # Raw level (centered: SKEW - 100 so 0 = normal, positive = elevated tail risk)
+        skew_centered = skew_series - 100.0
+        result["opt_skew_cboe"] = skew_centered
+
+        # Z-score: how unusual is the current SKEW reading?
+        skew_mean = skew_series.rolling(63, min_periods=21).mean()
+        skew_std = skew_series.rolling(63, min_periods=21).std()
+        result["opt_skew_cboe_zscore"] = (
+            (skew_series - skew_mean) / (skew_std + 1e-8)
+        ).clip(-4, 4)
 
         return result

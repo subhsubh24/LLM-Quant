@@ -89,6 +89,12 @@ class CrossAssetProvider(AlternativeDataProvider):
             "xasset_gold_momentum_21d",
             "xasset_em_vs_dm",
             "xasset_defensive_vs_cyclical",
+            # Commodity breadth and momentum
+            "xasset_commodity_breadth",    # Fraction of commodities trending up
+            "xasset_commodity_momentum",   # Aggregate commodity return (inflation signal)
+            # Real estate and T-bill signals
+            "xasset_reit_vs_bonds",        # REITs vs long bonds (rate sensitivity)
+            "xasset_tbill_momentum",       # T-bill momentum (flight-to-safety signal)
         ])
         return names
 
@@ -131,6 +137,8 @@ class CrossAssetProvider(AlternativeDataProvider):
         self._compute_copper_gold(raw_prices, result)
         self._compute_dollar_signals(raw_prices, result)
         self._compute_relative_strength(raw_prices, result)
+        self._compute_commodity_breadth(raw_prices, result)
+        self._compute_rate_sensitive_signals(raw_prices, result)
 
         # Resample to fill any gaps
         result = self._resample_to_daily(result)
@@ -322,3 +330,59 @@ class CrossAssetProvider(AlternativeDataProvider):
             cyc_avg = pd.concat(cyclical, axis=1).mean(axis=1)
             # Negative = defensive outperforming = risk-off
             result["xasset_defensive_vs_cyclical"] = cyc_avg - def_avg
+
+    def _compute_commodity_breadth(
+        self, prices: pd.DataFrame, result: pd.DataFrame
+    ) -> None:
+        """
+        Commodity breadth: what fraction of commodities are trending up?
+
+        A broad commodity rally (gold + oil + agriculture + metals all rising)
+        signals genuine inflationary pressure or global growth uptick.
+        A narrow rally (just gold) often signals risk-off, not inflation.
+        """
+        commodity_tickers = ["GLD", "SLV", "USO", "DBA", "DBB"]
+        commodity_rets = {}
+        for t in commodity_tickers:
+            if t in prices.columns:
+                ret_21d = np.log(prices[t] / prices[t].shift(21)).clip(-1, 1)
+                commodity_rets[t] = ret_21d
+
+        if len(commodity_rets) < 3:
+            return
+
+        com_df = pd.DataFrame(commodity_rets)
+
+        # Fraction with positive 21d momentum (NaN-aware)
+        available_each_day = com_df.notna().sum(axis=1).clip(lower=1)
+        breadth = (com_df > 0).sum(axis=1) / available_each_day
+        # Smooth slightly and center at 0 (0.5 = half trending up = neutral)
+        result["xasset_commodity_breadth"] = (
+            breadth.rolling(5, min_periods=1).mean() * 2 - 1
+        )
+
+        # Aggregate commodity momentum (equal-weight average 21d return)
+        result["xasset_commodity_momentum"] = com_df.mean(axis=1)
+
+    def _compute_rate_sensitive_signals(
+        self, prices: pd.DataFrame, result: pd.DataFrame
+    ) -> None:
+        """
+        Signals from rate-sensitive assets: REITs and T-bills.
+
+        REITs vs Long Bonds: When VNQ outperforms TLT, real estate is
+        getting a growth benefit beyond just falling rates.
+
+        T-bill momentum: When BIL gains relative strength, cash is king
+        = extreme risk-off / liquidity preference.
+        """
+        # REITs vs Long Treasury (rate sensitivity differential)
+        if "VNQ" in prices.columns and "TLT" in prices.columns:
+            vnq_ret = np.log(prices["VNQ"] / prices["VNQ"].shift(21)).clip(-1, 1)
+            tlt_ret = np.log(prices["TLT"] / prices["TLT"].shift(21)).clip(-1, 1)
+            result["xasset_reit_vs_bonds"] = vnq_ret - tlt_ret
+
+        # T-bill momentum: rising = flight to safety
+        if "BIL" in prices.columns:
+            bil_ret = np.log(prices["BIL"] / prices["BIL"].shift(21)).clip(-0.1, 0.1)
+            result["xasset_tbill_momentum"] = bil_ret
