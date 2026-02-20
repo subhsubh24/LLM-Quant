@@ -1897,7 +1897,7 @@ class WalkForwardBacktester:
 
             # Macro Regime Detection
             "baseline_portfolio_vol": 0.008,         # 0.8% daily baseline
-            "high_vol_multiplier": 1.5,              # 1.5x baseline = elevated (reduce position sizing)
+            "high_vol_multiplier": 2.5,              # 2.5x baseline = elevated (was 1.5x which fires constantly for crypto)
             "extreme_vol_multiplier": 4.0,           # 4.0x baseline = extreme (changed from 2.5 - was too aggressive)
             "regime_switch_threshold": 1.3,          # Require 30% trend change to switch regime (prevents whipsaw)
 
@@ -3063,13 +3063,12 @@ class WalkForwardBacktester:
                         alt_vec = self.alt_data_context.get_features(candle_date)
                         state = np.concatenate([state, alt_vec])
 
-                    # Pad/truncate state to match model's expected state_dim
-                    # This prevents crashes when alt data availability differs
-                    # between training and inference
+                    # Pad/compress state to match model's expected state_dim
+                    # Uses same PCA transform fitted during training for consistency
                     if len(state) < model_trainer.state_dim:
                         state = np.concatenate([state, np.zeros(model_trainer.state_dim - len(state))])
                     elif len(state) > model_trainer.state_dim:
-                        state = state[:model_trainer.state_dim]
+                        state = model_trainer._apply_pca_compress(state.reshape(1, -1)).flatten()
 
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
@@ -4465,6 +4464,13 @@ class ModelPreTrainer:
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
 
+        # PCA compressor: when raw features exceed state_dim, use PCA to compress
+        # instead of blind truncation which discards 87% of alt data signal.
+        # Stores: pca_components_ (state_dim x n_raw), pca_mean_ (n_raw,)
+        self._pca_components = None  # shape: (state_dim, n_raw_features)
+        self._pca_mean = None        # shape: (n_raw_features,)
+        self._pca_n_raw = None       # original feature count before compression
+
         # Sequence length for LSTM/Transformer (must match training)
         self.seq_len = 10
 
@@ -4512,6 +4518,99 @@ class ModelPreTrainer:
         self.min_training_epochs = 1  # No minimum - early stopping is the control, not epoch count
         self.min_training_samples = 10000
         self.regime_train_counts = {'bull': 0, 'bear': 0, 'neutral': 0}  # Track samples per regime
+
+    def _fit_pca_compress(self, X: np.ndarray, target_dim: int) -> np.ndarray:
+        """
+        Fit PCA on training data and compress features from n_raw → target_dim.
+
+        Instead of blind truncation (X[:, :320]) which discards 87% of alt data,
+        PCA finds the top-320 linear combinations that capture maximum variance.
+        This preserves signal from ALL 2450 features in a 320-dim representation.
+
+        Uses numpy SVD directly (no sklearn dependency).
+        """
+        n_samples, n_raw = X.shape
+        logger.info(f"🔬 PCA compression: {n_raw} features → {target_dim} components")
+
+        # Handle NaN/inf before PCA
+        X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Center the data (PCA requires mean-centered input)
+        self._pca_mean = X_clean.mean(axis=0)
+        X_centered = X_clean - self._pca_mean
+
+        # Compute top-k components via truncated SVD (much faster than full SVD)
+        # For n_samples >> n_features, compute covariance matrix approach
+        # For n_features >> n_samples, use X @ X.T approach
+        if n_raw > n_samples:
+            # Gram matrix approach: O(n_samples^2) instead of O(n_features^2)
+            gram = X_centered @ X_centered.T / (n_samples - 1)
+            eigenvalues, eigenvectors = np.linalg.eigh(gram)
+            # Sort descending
+            idx = np.argsort(eigenvalues)[::-1][:target_dim]
+            eigenvectors = eigenvectors[:, idx]
+            eigenvalues = eigenvalues[idx]
+            # Convert back to feature-space components
+            components = X_centered.T @ eigenvectors
+            # Normalize each component
+            norms = np.linalg.norm(components, axis=0, keepdims=True) + 1e-10
+            components = components / norms
+            self._pca_components = components.T  # (target_dim, n_raw)
+        else:
+            # Standard covariance approach
+            cov = X_centered.T @ X_centered / (n_samples - 1)
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+            idx = np.argsort(eigenvalues)[::-1][:target_dim]
+            self._pca_components = eigenvectors[:, idx].T  # (target_dim, n_raw)
+            eigenvalues = eigenvalues[idx]
+
+        self._pca_n_raw = n_raw
+
+        # Log variance explained
+        total_var = np.sum(np.var(X_clean, axis=0))
+        explained_var = np.sum(eigenvalues[eigenvalues > 0]) if np.any(eigenvalues > 0) else 0
+        var_ratio = explained_var / (total_var + 1e-10)
+        logger.info(f"   PCA variance explained: {var_ratio:.1%} ({target_dim} components from {n_raw} features)")
+
+        # Transform
+        X_compressed = X_centered @ self._pca_components.T
+        return X_compressed.astype(np.float32)
+
+    def _apply_pca_compress(self, X: np.ndarray) -> np.ndarray:
+        """
+        Apply previously fitted PCA transform to new data (inference time).
+
+        Falls back to truncation if PCA was not fitted (e.g. old checkpoint).
+        """
+        if self._pca_components is None or self._pca_mean is None:
+            # Fallback: no PCA fitted (old checkpoint or features <= state_dim during training)
+            if X.ndim == 1:
+                return X[:self.state_dim]
+            return X[:, :self.state_dim]
+
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+            squeeze = True
+        else:
+            squeeze = False
+
+        n_raw = X.shape[1]
+        expected_raw = self._pca_n_raw
+
+        # Handle dimension mismatch (different alt data availability at inference)
+        if n_raw < expected_raw:
+            padding = np.zeros((X.shape[0], expected_raw - n_raw))
+            X = np.hstack([X, padding])
+        elif n_raw > expected_raw:
+            X = X[:, :expected_raw]
+
+        X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        X_centered = X_clean - self._pca_mean
+        result = X_centered @ self._pca_components.T
+
+        if squeeze:
+            return result.flatten().astype(np.float32)
+        return result.astype(np.float32)
 
     def prepare_training_data(
         self,
@@ -4680,14 +4779,15 @@ class ModelPreTrainer:
         if X.shape[1] != expected_feature_dim and X.shape[1] != self.state_dim:
             logger.warning(f"⚠️ Feature dimension mismatch: generated={X.shape[1]}, expected={expected_feature_dim}")
 
-        # Pad/truncate features to state_dim
+        # Compress or pad features to state_dim
         if X.shape[1] < self.state_dim:
             padding = np.zeros((X.shape[0], self.state_dim - X.shape[1]))
             X = np.hstack([X, padding])
         elif X.shape[1] > self.state_dim:
-            # BUG FIX #5: Log feature truncation to warn of potential information loss
-            logger.warning(f"⚠️ TRUNCATING features from {X.shape[1]} to {self.state_dim} - potential information loss")
-            X = X[:, :self.state_dim]
+            # PCA compression: preserve signal from ALL features instead of blind truncation.
+            # Old approach: X = X[:, :320] → discards 87% of alt data.
+            # New approach: PCA projects 2450-dim → 320-dim, retaining max variance.
+            X = self._fit_pca_compress(X, self.state_dim)
 
         logger.info(f"✅ Prepared multi-horizon training data:")
         logger.info(f"   Features: {X.shape}")
@@ -4784,14 +4884,14 @@ class ModelPreTrainer:
         # Validate and normalize features to state_dim
         logger.info(f"Feature dimension before normalization: {features.shape[1]}")
 
-        # Pad/truncate features to state_dim (critical for model compatibility)
+        # Pad/compress features to state_dim (critical for model compatibility)
         if features.shape[1] < self.state_dim:
             padding = np.zeros((features.shape[0], self.state_dim - features.shape[1]))
             features = np.hstack([features, padding])
-            logger.info(f"✅ Padded features from {features.shape[1] - (self.state_dim - features.shape[1])} to {self.state_dim}")
+            logger.info(f"✅ Padded features to {self.state_dim}")
         elif features.shape[1] > self.state_dim:
-            features = features[:, :self.state_dim]
-            logger.info(f"✅ Truncated features to {self.state_dim}")
+            features = self._apply_pca_compress(features)
+            logger.info(f"✅ PCA-compressed features to {self.state_dim}")
 
         logger.info(f"✅ Final feature dimension: {features.shape}")
 
@@ -5331,7 +5431,7 @@ class ModelPreTrainer:
             if len(state) < self.state_dim:
                 state = np.pad(state, (0, self.state_dim - len(state)))
             elif len(state) > self.state_dim:
-                state = state[:self.state_dim]
+                state = self._apply_pca_compress(state)
 
         # CRITICAL FIX: Apply feature normalization (same as used in training)
         # Must use same normalization for predictions to match training distribution
@@ -5493,12 +5593,12 @@ class ModelPreTrainer:
             return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
 
         # Get baseline prediction from neutral ensemble (same models)
-        # Ensure state is correct shape (MUST pad BEFORE normalization)
+        # Ensure state is correct shape (MUST pad/compress BEFORE normalization)
         if len(state.shape) == 1:
             if len(state) < self.state_dim:
                 state = np.pad(state, (0, self.state_dim - len(state)))
             elif len(state) > self.state_dim:
-                state = state[:self.state_dim]
+                state = self._apply_pca_compress(state)
 
         # CRITICAL FIX: Apply feature normalization AFTER padding to match training dim
         if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
@@ -5651,6 +5751,10 @@ class ModelPreTrainer:
             # CRITICAL FIX: Save feature normalization params (must restore in load_checkpoints)
             "feature_mean": getattr(self, 'feature_mean', None),
             "feature_std": getattr(self, 'feature_std', None),
+            # PCA compression state (needed to transform inference features consistently)
+            "pca_components": self._pca_components,
+            "pca_mean": self._pca_mean,
+            "pca_n_raw": self._pca_n_raw,
         }
 
         checkpoint_path = CHECKPOINT_DIR / "model_checkpoint.pkl"
@@ -5702,6 +5806,15 @@ class ModelPreTrainer:
                 logger.info(f"✅ Restored feature normalization (mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f})")
             else:
                 logger.warning("⚠️ Feature normalization params not found in checkpoint - predictions may use wrong scale")
+
+            # Restore PCA compression state (required for consistent inference transforms)
+            if checkpoint.get("pca_components") is not None:
+                self._pca_components = checkpoint["pca_components"]
+                self._pca_mean = checkpoint["pca_mean"]
+                self._pca_n_raw = checkpoint["pca_n_raw"]
+                logger.info(f"✅ Restored PCA compression ({self._pca_n_raw} → {self._pca_components.shape[0]} dims)")
+            else:
+                logger.info("ℹ️ No PCA state in checkpoint (pre-PCA model or features <= state_dim)")
 
             logger.info(f"Loaded checkpoint from {checkpoint['timestamp']}")
             logger.info(f"DQN epsilon: {self.dqn.epsilon:.4f}")
