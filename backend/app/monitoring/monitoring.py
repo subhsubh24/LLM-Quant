@@ -127,6 +127,7 @@ class AlertManager:
         volatility_spike_threshold: float = 2.0,  # Multiples of normal vol
         max_drawdown_warning: float = 0.10,
         execution_failure_threshold: float = 0.05,  # 5% of intended
+        notification_dispatcher=None,
     ):
         """
         Initialize alert manager.
@@ -137,6 +138,7 @@ class AlertManager:
             volatility_spike_threshold: Alert if vol > normal_vol * this
             max_drawdown_warning: Alert if drawdown exceeds this
             execution_failure_threshold: Alert if execution deviation > this
+            notification_dispatcher: Optional NotificationDispatcher for push alerts
         """
         self.daily_loss_threshold_pct = daily_loss_threshold_pct
         self.weekly_loss_threshold_pct = weekly_loss_threshold_pct
@@ -146,6 +148,28 @@ class AlertManager:
 
         self.alerts: List[Alert] = []
         self.last_volatility_baseline: Optional[float] = None
+        self._dispatcher = notification_dispatcher
+
+    def _notify(self, alert: Alert) -> None:
+        """Push alert to notification dispatcher if configured."""
+        if not self._dispatcher:
+            return
+        try:
+            from .notifications import Severity
+            severity_map = {
+                AlertLevel.INFO: Severity.INFO,
+                AlertLevel.WARNING: Severity.WARNING,
+                AlertLevel.CRITICAL: Severity.CRITICAL,
+            }
+            self._dispatcher.dispatch_from_alert(
+                title=f"Alert: {alert.alert_type.value}",
+                message=alert.message,
+                severity=severity_map.get(alert.level, Severity.WARNING),
+                source="alert_manager",
+                metadata={k: str(v) for k, v in alert.metrics.items()},
+            )
+        except Exception as e:
+            logger.error(f"Notification dispatch failed: {e}")
 
     def check_daily_loss(
         self,
@@ -170,6 +194,7 @@ class AlertManager:
                 recommended_action="Review trades and consider reducing exposure",
             )
             self.alerts.append(alert)
+            self._notify(alert)
             return alert
 
         return None
@@ -200,6 +225,7 @@ class AlertManager:
                 recommended_action="Consider reducing position sizes or leverage",
             )
             self.alerts.append(alert)
+            self._notify(alert)
             return alert
 
         self.last_volatility_baseline = normal_volatility
@@ -218,6 +244,7 @@ class AlertManager:
                 recommended_action="Monitor closely, prepare risk reduction plan",
             )
             self.alerts.append(alert)
+            self._notify(alert)
             return alert
 
         return None

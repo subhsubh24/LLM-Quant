@@ -378,13 +378,15 @@ class ProductionMonitor:
     - Model staleness tracking
     - P&L attribution
     - Retraining triggers
+    - Alert notifications (webhook, Slack, email via NotificationDispatcher)
     """
 
-    def __init__(self):
+    def __init__(self, notification_dispatcher=None):
         self.drift_detector = DistributionDriftDetector()
         self.staleness_tracker = ModelStalenessTracker()
         self.pnl_engine = PnLAttributionEngine()
         self._alerts: List[str] = []
+        self._dispatcher = notification_dispatcher  # Optional NotificationDispatcher
 
     def initialize_from_training(
         self,
@@ -444,6 +446,10 @@ class ProductionMonitor:
 
         self._alerts = alerts
 
+        # Dispatch notifications if dispatcher is configured
+        if self._dispatcher and alerts:
+            self._dispatch_alerts(alerts, drift_events, staleness)
+
         return {
             "timestamp": datetime.now().isoformat(),
             "drift": self.drift_detector.get_drift_summary(),
@@ -458,3 +464,34 @@ class ProductionMonitor:
             "alerts": alerts,
             "needs_retrain": staleness.is_stale or len(drift_events) > 10,
         }
+
+    def _dispatch_alerts(self, alerts, drift_events, staleness):
+        """Send detected issues to notification channels."""
+        try:
+            from .notifications import Notification, Severity
+
+            for alert_msg in alerts:
+                # Determine severity based on content
+                if staleness.is_stale and staleness.recommended_action == "retrain_now":
+                    severity = Severity.CRITICAL
+                elif "drift" in alert_msg.lower() and len(drift_events) > 5:
+                    severity = Severity.CRITICAL
+                elif "stale" in alert_msg.lower() or "drift" in alert_msg.lower():
+                    severity = Severity.WARNING
+                else:
+                    severity = Severity.INFO
+
+                notification = Notification(
+                    title="Production Monitor Alert",
+                    message=alert_msg,
+                    severity=severity,
+                    source="production_monitor",
+                    metadata={
+                        "model_age_days": str(staleness.model_age_days),
+                        "ic_decay_pct": f"{staleness.ic_decay_pct:.1%}",
+                        "n_drift_events": str(len(drift_events)),
+                    },
+                )
+                self._dispatcher.dispatch(notification)
+        except Exception as e:
+            logger.error(f"Failed to dispatch notifications: {e}")

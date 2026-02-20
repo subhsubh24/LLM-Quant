@@ -28,6 +28,16 @@ from .drift_detector import (
     PnLAttributionEngine,
     ProductionMonitor,
 )
+from .notifications import (
+    Severity,
+    Notification,
+    NotificationChannel,
+    WebhookChannel,
+    SlackWebhookChannel,
+    EmailChannel,
+    LogChannel,
+    NotificationDispatcher,
+)
 
 __all__ = [
     # Enums
@@ -58,4 +68,13 @@ __all__ = [
     "ModelStalenessTracker",
     "PnLAttributionEngine",
     "ProductionMonitor",
+    # Notification System
+    "Severity",
+    "Notification",
+    "NotificationChannel",
+    "WebhookChannel",
+    "SlackWebhookChannel",
+    "EmailChannel",
+    "LogChannel",
+    "NotificationDispatcher",
 ]
