@@ -3066,10 +3066,10 @@ class WalkForwardBacktester:
                     # Pad/truncate state to match model's expected state_dim
                     # This prevents crashes when alt data availability differs
                     # between training and inference
-                    if len(state) < self.state_dim:
-                        state = np.concatenate([state, np.zeros(self.state_dim - len(state))])
-                    elif len(state) > self.state_dim:
-                        state = state[:self.state_dim]
+                    if len(state) < model_trainer.state_dim:
+                        state = np.concatenate([state, np.zeros(model_trainer.state_dim - len(state))])
+                    elif len(state) > model_trainer.state_dim:
+                        state = state[:model_trainer.state_dim]
 
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
