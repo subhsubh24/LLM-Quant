@@ -292,3 +292,185 @@ class RiskManager:
             "risk_contribution": rc,
             "pct_of_risk": pct_risk
         }, index=weights.index)
+
+    def compute_cvar(
+        self,
+        returns: pd.Series,
+        confidence: float = 0.95,
+    ) -> float:
+        """
+        Compute Conditional Value at Risk (Expected Shortfall).
+
+        CVaR is the expected loss in the worst (1-confidence)% of days.
+        More robust than VaR because it accounts for tail severity.
+
+        Args:
+            returns: Daily return series
+            confidence: Confidence level (0.95 = worst 5%)
+
+        Returns:
+            CVaR as a negative number (e.g., -0.025 means -2.5% expected loss)
+        """
+        if len(returns) < 21:
+            return 0.0
+
+        cutoff = returns.quantile(1 - confidence)
+        tail_returns = returns[returns <= cutoff]
+
+        if len(tail_returns) == 0:
+            return cutoff
+
+        return float(tail_returns.mean())
+
+    def check_cvar_limit(
+        self,
+        returns: pd.Series,
+        cvar_limit: float = -0.03,
+        confidence: float = 0.95,
+    ) -> Tuple[bool, float]:
+        """
+        Check if CVaR breaches the limit.
+
+        Args:
+            returns: Daily return series
+            cvar_limit: Maximum acceptable CVaR (e.g., -0.03 = -3%)
+            confidence: Confidence level
+
+        Returns:
+            Tuple of (is_breached, current_cvar)
+        """
+        cvar = self.compute_cvar(returns, confidence)
+        is_breached = cvar < cvar_limit
+
+        if is_breached:
+            logger.warning(
+                f"CVaR limit breached: CVaR={cvar:.2%} (limit: {cvar_limit:.2%})"
+            )
+
+        return is_breached, cvar
+
+    def detect_correlation_regime(
+        self,
+        returns: pd.DataFrame,
+        lookback: int = 63,
+    ) -> Dict[str, float]:
+        """
+        Detect correlation regime changes using average pairwise correlation.
+
+        High-correlation regimes (>0.6) indicate risk-off/crisis environments
+        where diversification breaks down. Low-correlation (<0.3) indicates
+        normal markets where stock-picking alpha is most effective.
+
+        Returns:
+            Dict with avg_correlation, regime, correlation_zscore
+        """
+        if len(returns) < lookback or returns.shape[1] < 2:
+            return {"avg_correlation": 0.0, "regime": "unknown", "correlation_zscore": 0.0}
+
+        recent = returns.iloc[-lookback:]
+        corr_matrix = recent.corr()
+
+        # Average pairwise correlation (upper triangle, excluding diagonal)
+        n = len(corr_matrix)
+        if n < 2:
+            return {"avg_correlation": 0.0, "regime": "unknown", "correlation_zscore": 0.0}
+
+        upper_tri = corr_matrix.values[np.triu_indices(n, k=1)]
+        avg_corr = float(np.nanmean(upper_tri))
+
+        # Compare to longer-term average for z-score
+        regime = "normal"
+        corr_zscore = 0.0
+
+        if len(returns) >= lookback * 4:
+            # Compute rolling avg correlation
+            long_term_corrs = []
+            for i in range(lookback, len(returns), lookback):
+                window = returns.iloc[i - lookback:i]
+                c = window.corr().values[np.triu_indices(n, k=1)]
+                long_term_corrs.append(np.nanmean(c))
+
+            if long_term_corrs:
+                lt_mean = np.mean(long_term_corrs)
+                lt_std = np.std(long_term_corrs) + 1e-8
+                corr_zscore = (avg_corr - lt_mean) / lt_std
+
+        if avg_corr > 0.6 or corr_zscore > 2.0:
+            regime = "crisis"
+        elif avg_corr > 0.4:
+            regime = "elevated"
+        elif avg_corr < 0.15:
+            regime = "dispersed"
+
+        return {
+            "avg_correlation": avg_corr,
+            "regime": regime,
+            "correlation_zscore": float(corr_zscore),
+        }
+
+    def drawdown_position_scalar(
+        self,
+        equity_curve: pd.Series,
+        max_dd_limit: float = 0.15,
+    ) -> float:
+        """
+        Progressive position scaling based on current drawdown.
+
+        Instead of binary risk-on/risk-off, linearly reduces exposure
+        as drawdown deepens:
+        - 0% DD: 100% exposure
+        - 50% of limit: 75% exposure
+        - 75% of limit: 50% exposure
+        - 100% of limit: 25% exposure (emergency minimum)
+
+        Returns:
+            Scalar between 0.25 and 1.0 to multiply position sizes by
+        """
+        if len(equity_curve) < 2:
+            return 1.0
+
+        running_max = equity_curve.expanding().max()
+        current_dd = (equity_curve.iloc[-1] - running_max.iloc[-1]) / (running_max.iloc[-1] + 1e-8)
+
+        # current_dd is negative (e.g., -0.05 = 5% drawdown)
+        dd_ratio = min(abs(current_dd) / max_dd_limit, 1.0)
+
+        # Linear scaling: 1.0 at 0% DD, 0.25 at 100% of limit
+        scalar = max(1.0 - 0.75 * dd_ratio, 0.25)
+
+        if dd_ratio > 0.5:
+            logger.info(
+                f"Drawdown scaling active: DD={current_dd:.1%}, "
+                f"position scalar={scalar:.2f}"
+            )
+
+        return scalar
+
+    def compute_market_impact(
+        self,
+        order_size: float,
+        daily_volume: float,
+        base_impact_bps: float = 10.0,
+    ) -> float:
+        """
+        Estimate market impact using square-root model.
+
+        impact = base_impact * sqrt(order_size / daily_volume)
+
+        This is the industry standard model (Almgren & Chriss 2000).
+
+        Args:
+            order_size: Dollar value of order
+            daily_volume: Average daily dollar volume
+            base_impact_bps: Base impact coefficient in basis points
+
+        Returns:
+            Estimated impact in basis points
+        """
+        if daily_volume <= 0:
+            return base_impact_bps * 5  # Illiquid asset penalty
+
+        participation_rate = order_size / daily_volume
+        impact = base_impact_bps * np.sqrt(participation_rate)
+
+        return float(impact)
