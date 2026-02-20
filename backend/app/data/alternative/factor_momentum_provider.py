@@ -144,6 +144,7 @@ class FactorMomentumProvider(AlternativeDataProvider):
                 return pd.DataFrame()
 
         prices.index = self._make_tz_naive(pd.to_datetime(prices.index))
+        prices = prices.apply(pd.to_numeric, errors='coerce')
         prices = prices.ffill()
 
         result = pd.DataFrame(index=prices.index)
@@ -227,9 +228,13 @@ class FactorMomentumProvider(AlternativeDataProvider):
             )
 
             # Factor momentum persistence: which factor won last month?
-            winner = factor_df.idxmax(axis=1)
+            # Encode winner as numeric (idxmax returns strings, can't roll over strings)
+            factor_names = list(factor_df.columns)
+            name_to_int = {n: i for i, n in enumerate(factor_names)}
+            winner = factor_df.dropna(how='all').idxmax(axis=1)
+            winner_numeric = winner.map(name_to_int).reindex(factor_df.index)
             # Persistence = fraction of last 21 days where the same factor won
-            persistence = winner.rolling(21, min_periods=10).apply(
+            persistence = winner_numeric.rolling(21, min_periods=10).apply(
                 lambda x: (x == x.iloc[-1]).mean() if len(x) > 0 else 0.5,
                 raw=False,
             )

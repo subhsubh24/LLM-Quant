@@ -165,21 +165,27 @@ class AlternativeFeatureEngineer:
         # 3. Engineer derived features
         engineered = self._engineer_features(features)
         features = pd.concat([features, engineered], axis=1)
+        # Remove duplicates: engineered names like opt_vrp_zscore_21d can
+        # collide with raw columns (opt_vrp + _zscore_ + 21d == opt_vrp_zscore_21d)
+        features = features.loc[:, ~features.columns.duplicated()]
 
         # 4. Compute interaction features
         interactions = self._compute_interactions(features)
         if not interactions.empty:
             features = pd.concat([features, interactions], axis=1)
+            features = features.loc[:, ~features.columns.duplicated()]
 
         # 5. Compute regime features
         regimes = self._compute_regime_features(features)
         if not regimes.empty:
             features = pd.concat([features, regimes], axis=1)
+            features = features.loc[:, ~features.columns.duplicated()]
 
         # 5b. Compute composite market signals
         composites = self._compute_composite_signals(features)
         if not composites.empty:
             features = pd.concat([features, composites], axis=1)
+            features = features.loc[:, ~features.columns.duplicated()]
 
         # 6. Apply lag to all features (prevent leakage)
         features = features.shift(self.config.feature_lag_days)
