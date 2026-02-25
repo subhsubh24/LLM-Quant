@@ -1774,6 +1774,121 @@ class WalkForwardBacktester:
 
         return multi_labels
 
+    def generate_vol_harvest_signal(
+        self,
+        candles: List[OHLCV],
+        config: dict,
+    ) -> dict:
+        """
+        Volatility-harvesting mean-reversion strategy.
+
+        Inspired by Jane Street's approach: instead of predicting direction,
+        profit from price oscillation around a moving mean. Uses Keltner Channels
+        (EMA + ATR bands) to identify oversold/overbought extremes and trades
+        mean-reversion. Higher volatility = wider bands = bigger profit per trade.
+
+        Returns prediction dict compatible with the ML pipeline:
+            {"action": 0/1/2, "confidence": float, "predictions": [action]*4}
+        """
+        min_bars = config.get("vol_harvest_min_bars", 100)
+        if len(candles) < min_bars:
+            return {"action": 1, "confidence": 0.0, "predictions": [1, 1, 1, 1]}
+
+        closes = np.array([c.close for c in candles[-min_bars:]])
+        highs = np.array([c.high for c in candles[-min_bars:]])
+        lows = np.array([c.low for c in candles[-min_bars:]])
+        volumes = np.array([c.volume for c in candles[-min_bars:]])
+
+        # --- Core indicators ---
+
+        # EMA-50 as the "fair value" anchor
+        ema_period = config.get("vol_harvest_ema_period", 50)
+        alpha = 2.0 / (ema_period + 1)
+        ema = closes[0]
+        for p in closes[1:]:
+            ema = alpha * p + (1 - alpha) * ema
+
+        # ATR-14 for volatility-scaled bands
+        atr_period = config.get("vol_harvest_atr_period", 14)
+        trs = []
+        for k in range(1, len(closes)):
+            tr = max(
+                highs[k] - lows[k],
+                abs(highs[k] - closes[k - 1]),
+                abs(lows[k] - closes[k - 1])
+            )
+            trs.append(tr)
+        atr = np.mean(trs[-atr_period:]) if len(trs) >= atr_period else np.mean(trs)
+
+        # Keltner Channel: EMA ± multiplier * ATR
+        kc_mult = config.get("vol_harvest_kc_multiplier", 2.0)
+        upper_band = ema + kc_mult * atr
+        lower_band = ema - kc_mult * atr
+        band_width = upper_band - lower_band
+
+        if band_width < 1e-8:
+            return {"action": 1, "confidence": 0.0, "predictions": [1, 1, 1, 1]}
+
+        current_price = closes[-1]
+        band_position = (current_price - lower_band) / band_width  # 0=lower, 1=upper
+
+        # --- Confirmation signals ---
+
+        # RSI-14 for momentum confirmation
+        deltas = np.diff(closes[-15:])
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains) if len(gains) > 0 else 0
+        avg_loss = np.mean(losses) if len(losses) > 0 else 1e-8
+        rsi = 100 - (100 / (1 + avg_gain / (avg_loss + 1e-8)))
+
+        # Volume confirmation: is current volume elevated? (panic/euphoria)
+        avg_vol = np.mean(volumes[-20:]) if len(volumes) >= 20 else np.mean(volumes)
+        vol_ratio = volumes[-1] / (avg_vol + 1e-8)
+        vol_spike = vol_ratio > 1.5  # Volume 50%+ above average
+
+        # Price velocity: how fast is price moving toward the band?
+        returns_3 = (closes[-1] - closes[-4]) / (closes[-4] + 1e-8) if len(closes) >= 4 else 0
+
+        # --- Signal generation ---
+        # Buy zone: price near lower band + oversold RSI
+        # Sell zone: price near upper band + overbought RSI
+
+        buy_zone = config.get("vol_harvest_buy_zone", 0.15)   # Bottom 15% of channel
+        sell_zone = config.get("vol_harvest_sell_zone", 0.85)  # Top 85% of channel
+
+        if band_position < buy_zone:
+            # Price at/below lower Keltner band — mean reversion BUY
+            # Confidence scales with how far into the zone we are
+            base_conf = min(1.0, (buy_zone - band_position) / buy_zone)
+
+            # RSI confirmation bonus (oversold <30 = strong, <40 = moderate)
+            rsi_bonus = 0.15 if rsi < 30 else (0.08 if rsi < 40 else 0.0)
+
+            # Volume spike bonus (panic selling = better entry)
+            vol_bonus = 0.10 if vol_spike else 0.0
+
+            # Velocity bonus: price falling fast = likely to bounce
+            vel_bonus = 0.05 if returns_3 < -0.02 else 0.0
+
+            confidence = min(0.95, 0.40 + base_conf * 0.30 + rsi_bonus + vol_bonus + vel_bonus)
+            return {"action": 2, "confidence": confidence, "predictions": [2, 2, 2, 2]}
+
+        elif band_position > sell_zone:
+            # Price at/above upper Keltner band — mean reversion SELL
+            base_conf = min(1.0, (band_position - sell_zone) / (1.0 - sell_zone))
+
+            rsi_bonus = 0.15 if rsi > 70 else (0.08 if rsi > 60 else 0.0)
+            vol_bonus = 0.10 if vol_spike else 0.0
+            vel_bonus = 0.05 if returns_3 > 0.02 else 0.0
+
+            confidence = min(0.95, 0.40 + base_conf * 0.30 + rsi_bonus + vol_bonus + vel_bonus)
+            return {"action": 0, "confidence": confidence, "predictions": [0, 0, 0, 0]}
+
+        else:
+            # Inside the channel — no trade (let positions run, don't initiate)
+            return {"action": 1, "confidence": 0.0, "predictions": [1, 1, 1, 1]}
+
     def run_backtest(
         self,
         data: Dict[str, List[OHLCV]],
@@ -1786,7 +1901,7 @@ class WalkForwardBacktester:
         Args:
             data: Historical OHLCV data per symbol
             model_trainer: Pre-trainer with trained models
-            strategy: Trading strategy to use
+            strategy: Trading strategy ("ml_ensemble" or "vol_harvest")
         """
         logger.info("Starting walk-forward backtest...")
 
@@ -1986,6 +2101,20 @@ class WalkForwardBacktester:
             "hybrid_ml_bias_threshold": 0.85,        # If >85% of recent ML preds are same direction, ML is biased
             "hybrid_ml_bias_window": 50,             # Window size for bias detection
             "hybrid_model_min_winrate": 0.35,        # Exclude individual models below 35% win rate
+
+            # VOLATILITY HARVEST STRATEGY (Jane Street-inspired)
+            # Instead of predicting direction, profits from mean-reversion within
+            # Keltner Channels. Higher vol = wider bands = bigger profit per trade.
+            # Direction-agnostic: buys dips, sells rips, profits from oscillation.
+            "vol_harvest_min_bars": 100,             # Minimum candles to compute indicators
+            "vol_harvest_ema_period": 50,            # EMA period for "fair value" anchor
+            "vol_harvest_atr_period": 14,            # ATR period for volatility bands
+            "vol_harvest_kc_multiplier": 2.0,        # Keltner Channel width (2x ATR)
+            "vol_harvest_buy_zone": 0.15,            # Buy when price in bottom 15% of channel
+            "vol_harvest_sell_zone": 0.85,           # Sell when price in top 85% of channel
+            "vol_harvest_stop_atr_mult": 1.0,        # Tighter stops: 1x ATR (mean-reversion expects quick snap-back)
+            "vol_harvest_target_atr_mult": 2.5,      # Target: 2.5x ATR (capture reversion to mean)
+            "vol_harvest_max_hold_hours": 168,       # Max hold: 7 days (mean-reversion is fast, not swing)
         }
 
         # BUG #16 FIX: Validate all required configuration keys exist and have valid types/ranges
@@ -3039,6 +3168,113 @@ class WalkForwardBacktester:
 
             # Generate trading signal (only if we have enough data AND portfolio not paused AND not during extreme macro vol)
             macro_vol_safe = macro_regime != "extreme"
+
+            # ============================================================
+            # STRATEGY: VOLATILITY HARVEST (Jane Street-inspired)
+            # ============================================================
+            # Completely separate fast path — no ML models, no features, no hybrid logic.
+            # Uses Keltner Channel mean-reversion: buy at lower band, sell at upper band.
+            # Profits from price oscillation, not directional prediction.
+            if strategy == "vol_harvest":
+                vh_min_bars = config.get("vol_harvest_min_bars", 100)
+                if (len(window_data.get(symbol, [])) >= vh_min_bars
+                        and symbol not in positions
+                        and not portfolio_trading_paused
+                        and macro_vol_safe):
+
+                    vh_prediction = self.generate_vol_harvest_signal(
+                        window_data[symbol], config
+                    )
+                    vh_action = int(vh_prediction["action"])
+                    vh_confidence = float(vh_prediction["confidence"])
+
+                    if vh_action != 1:  # Not HOLD — we have a signal
+                        signals_generated += 1
+
+                        # Liquidity filter
+                        if len(window_data[symbol]) >= 20:
+                            avg_vol = np.mean([c.volume for c in window_data[symbol][-20:]])
+                            if avg_vol < config["min_volume_threshold"]:
+                                filter_stage_counters["liquidity_filtered"] = filter_stage_counters.get("liquidity_filtered", 0) + 1
+                                continue
+
+                        # Cooldown filter
+                        if symbol in last_exit_time:
+                            candles_since = candles_processed - last_exit_time[symbol]
+                            if candles_since < min_cooldown_candles:
+                                continue
+
+                        # ATR-based stops & targets (tighter for mean-reversion)
+                        vh_atr = 0.02  # default
+                        if len(window_data[symbol]) >= 20:
+                            vh_candles = window_data[symbol][-20:]
+                            vh_trs = []
+                            for k in range(1, len(vh_candles)):
+                                tr = max(
+                                    vh_candles[k].high - vh_candles[k].low,
+                                    abs(vh_candles[k].high - vh_candles[k - 1].close),
+                                    abs(vh_candles[k].low - vh_candles[k - 1].close)
+                                )
+                                vh_trs.append(tr)
+                            vh_atr = np.mean(vh_trs) if vh_trs else 0.02
+                        vh_atr_pct = vh_atr / (candle.close + 1e-8)
+
+                        # Mean-reversion: tight stop (1x ATR), close target (2.5x ATR)
+                        vh_stop_mult = config.get("vol_harvest_stop_atr_mult", 1.0)
+                        vh_target_mult = config.get("vol_harvest_target_atr_mult", 2.5)
+                        vh_stop = np.clip(vh_stop_mult * vh_atr_pct, 0.008, 0.025)
+                        vh_target_1 = np.clip(vh_target_mult * vh_atr_pct, 0.02, 0.08)
+                        vh_target_2 = np.clip(vh_target_mult * 2 * vh_atr_pct, 0.05, 0.15)
+
+                        # R:R check
+                        vh_rr = vh_target_1 / (vh_stop + 1e-8)
+                        if vh_rr < 1.5:
+                            continue
+
+                        # Position sizing: smaller (3-5%) for mean-reversion
+                        vh_position_pct = 0.04 * min(1.0, vh_confidence / 0.60)
+                        vh_position_size = capital * vh_position_pct
+
+                        # Capital check
+                        num_existing = len(positions)
+                        if num_existing >= 10 or vh_position_size <= 0:
+                            continue
+                        if capital - vh_position_size < (num_existing + 1) * 100:
+                            continue
+
+                        entry_price = candle.close
+                        if not (1e-4 <= entry_price <= 1e6):
+                            continue
+
+                        side = "long" if vh_action == 2 else "short"
+                        entry_cost = vh_position_size * COST_PER_SIDE
+                        positions[symbol] = {
+                            "side": side,
+                            "entry_price": entry_price,
+                            "size": vh_position_size,
+                            "entry_time": timestamp,
+                            "stop_distance": vh_stop,
+                            "pyramid_target_1": vh_target_1,
+                            "pyramid_target_2": vh_target_2,
+                            "highest_price": entry_price,
+                            "lowest_price": entry_price,
+                            "pyramided_1": False,
+                            "pyramided_2": False,
+                        }
+                        capital -= vh_position_size
+                        capital -= entry_cost
+                        positions_opened += 1
+
+                        if positions_opened <= 20:
+                            logger.info(
+                                f"  [VOL_HARVEST #{positions_opened}] {side.upper()} {symbol} "
+                                f"@ ${entry_price:.2f} | conf={vh_confidence:.2f} | "
+                                f"stop={vh_stop*100:.1f}% target={vh_target_1*100:.1f}% | "
+                                f"size=${vh_position_size:.0f}"
+                            )
+
+                continue  # Vol-harvest: skip ML path entirely for this candle
+
             # CRITICAL FIX: Need enough data for feature preparation
             # prepare_features needs lookback (400) + 20 candles = 420 minimum
             # But config["feature_lookback_window"] is only 100!
