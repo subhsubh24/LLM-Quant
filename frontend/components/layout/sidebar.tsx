@@ -15,11 +15,13 @@ import {
   Bitcoin,
   LineChart,
   Lightbulb,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, description: "Market Overview" },
+  { name: "Predictions", href: "/predictions", icon: Target, badge: "HOT", badgeColor: "violet", description: "Polymarket Scanner" },
   { name: "Quant Bot", href: "/bot", icon: Bot, badge: "LIVE", badgeColor: "green", description: "Automated Trading" },
   { name: "Trading", href: "/trading", icon: TrendingUp, description: "Auto Trader" },
   { name: "Options", href: "/options", icon: LineChart, description: "Options Trading" },
@@ -38,12 +40,12 @@ export function Sidebar() {
       {/* Logo */}
       <div className="h-16 flex items-center px-6">
         <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
             <Activity className="w-5 h-5 text-white" />
           </div>
           <div>
             <span className="font-semibold text-gray-900 text-lg">QuantLab</span>
-            <span className="block text-[10px] text-gray-400 font-medium -mt-0.5">HFT Trading</span>
+            <span className="block text-[10px] text-gray-400 font-medium -mt-0.5">Predictions & Trading</span>
           </div>
         </Link>
       </div>
@@ -57,6 +59,7 @@ export function Sidebar() {
               green: { active: "bg-white/20 text-white", inactive: "bg-green-50 text-green-600" },
               purple: { active: "bg-white/20 text-white", inactive: "bg-purple-50 text-purple-600" },
               orange: { active: "bg-white/20 text-white", inactive: "bg-orange-50 text-orange-600" },
+              violet: { active: "bg-white/20 text-white", inactive: "bg-violet-50 text-violet-600" },
             };
             return (
               <Link

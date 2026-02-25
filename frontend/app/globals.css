@@ -4,26 +4,26 @@
 
 @layer base {
   :root {
-    /* Apple-inspired Light Theme - Clean & Professional */
+    /* Prediction Market Era - Violet/Purple Primary */
     --background: 0 0% 98%;
     --foreground: 0 0% 9%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 9%;
-    --primary: 211 100% 50%;
+    --primary: 263 70% 58%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 96%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96%;
     --muted-foreground: 0 0% 45%;
-    --accent: 211 100% 96%;
-    --accent-foreground: 211 100% 40%;
+    --accent: 263 70% 96%;
+    --accent-foreground: 263 70% 40%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 90%;
     --input: 0 0% 90%;
-    --ring: 211 100% 50%;
+    --ring: 263 70% 58%;
     --radius: 0.75rem;
   }
 }
@@ -139,13 +139,13 @@ body {
   background-color: rgba(255, 59, 48, 0.1);
 }
 
-/* Brand colors */
+/* Brand colors — Prediction Market Era (violet primary) */
 .text-brand {
-  color: #007AFF;
+  color: #7C3AED;
 }
 
 .bg-brand {
-  background-color: #007AFF;
+  background-color: #7C3AED;
 }
 
 .text-brand-orange {
@@ -153,12 +153,16 @@ body {
 }
 
 .text-brand-purple {
-  color: #AF52DE;
+  color: #7C3AED;
+}
+
+.text-brand-cyan {
+  color: #06B6D4;
 }
 
 /* Gradient backgrounds */
 .gradient-brand {
-  background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+  background: linear-gradient(135deg, #7C3AED 0%, #A855F7 100%);
 }
 
 .gradient-success {
@@ -241,14 +245,14 @@ body {
 .input-field {
   @apply w-full px-4 py-3 bg-gray-50 border-0 rounded-xl text-gray-900;
   @apply placeholder-gray-400;
-  @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white;
+  @apply focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:bg-white;
   transition: all 0.15s ease;
 }
 
 /* Select styles */
 .select-field {
   @apply w-full px-4 py-3 bg-gray-50 border-0 rounded-xl text-gray-900;
-  @apply focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white;
+  @apply focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:bg-white;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='%236B7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-position: right 12px center;
@@ -475,6 +479,55 @@ body {
 
 .bg-negative\/20 {
   background-color: rgba(255, 59, 48, 0.2);
+}
+
+/* Prediction Market colors */
+.text-prediction {
+  color: #7C3AED;
+}
+
+.bg-prediction {
+  background-color: #7C3AED;
+}
+
+.bg-prediction-subtle {
+  background-color: rgba(124, 58, 237, 0.1);
+}
+
+.gradient-prediction {
+  background: linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #06B6D4 100%);
+}
+
+/* Edge/confidence indicators */
+.edge-high {
+  @apply text-emerald-600 font-bold;
+}
+
+.edge-medium {
+  @apply text-amber-600 font-semibold;
+}
+
+.edge-low {
+  @apply text-gray-500;
+}
+
+/* Probability bar */
+.prob-bar {
+  @apply h-1.5 rounded-full overflow-hidden bg-gray-200;
+}
+
+.prob-bar-fill {
+  @apply h-full rounded-full transition-all duration-500;
+}
+
+/* Scan pulse */
+@keyframes scan-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0); }
+}
+
+.scan-pulse {
+  animation: scan-pulse 2s ease-in-out infinite;
 }
 
 /* Print styles */
