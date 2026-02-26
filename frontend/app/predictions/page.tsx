@@ -24,6 +24,8 @@ import {
   Pause,
   Play,
   Settings2,
+  ArrowLeftRight,
+  Users,
 } from "lucide-react";
 
 // ----------------------------------------------------------------
@@ -153,6 +155,55 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
       "Max position": "$20.00",
     },
   },
+  {
+    id: "market_making",
+    name: "Market Making",
+    description: "Provide two-sided liquidity, capture bid-ask spread + Q-score rebates. Swisstony: $5 → $3.7M.",
+    icon: ArrowLeftRight,
+    enabled: true,
+    color: "blue",
+    positions: 15,
+    pnl: 2340.80,
+    config: {
+      "Target spread": "2c",
+      "Max spread": "3c (Q-score)",
+      "Min liquidity": "$10,000",
+      "Max volatility": "10%",
+      "Rebalance at": "60% one-sided",
+    },
+  },
+  {
+    id: "flash_crash",
+    name: "Flash Crash",
+    description: "Buy crashed BTC/ETH tokens on 15-min markets. Two-leg arb when YES+NO < $0.97. 0x8dxd: $313 → $438K.",
+    icon: AlertTriangle,
+    enabled: true,
+    color: "orange",
+    positions: 3,
+    pnl: 478.20,
+    config: {
+      "Crash threshold": "15%",
+      "Max combined cost": "$0.97",
+      "Min volume": "$5,000",
+      "Target markets": "BTC, ETH, SOL",
+    },
+  },
+  {
+    id: "whale_copy",
+    name: "Whale Copy Trading",
+    description: "Follow top 7.6% profitable wallets. Wallet basket consensus (80%+ must agree) before entry.",
+    icon: Users,
+    enabled: false,
+    color: "emerald",
+    positions: 0,
+    pnl: 0,
+    config: {
+      "Min trade size": "$1,000",
+      "Max entry odds": "80c",
+      "Basket consensus": "80%",
+      "Tracked wallets": "Theo4, Fredi9999, Len93",
+    },
+  },
 ];
 
 const DEMO_OPPORTUNITIES: Opportunity[] = [
@@ -211,6 +262,50 @@ const DEMO_OPPORTUNITIES: Opportunity[] = [
     reason: "NOAA: 90% chance of rain. Market only pricing 22%.",
     timestamp: "15 min ago",
   },
+  {
+    id: "6",
+    strategy: "market_making",
+    market: "Will TikTok ban be enforced by April 2026?",
+    side: "BUY",
+    entryPrice: 0.42,
+    edge: 0.035,
+    confidence: 0.80,
+    reason: "MM opportunity: spread=3.5c | liq=$245K | vol=$1.8M | Q-score=0.89",
+    timestamp: "1 min ago",
+  },
+  {
+    id: "7",
+    strategy: "flash_crash",
+    market: "BTC 15-min Up or Down — 2:30PM round",
+    side: "BUY",
+    entryPrice: 0.94,
+    edge: 0.041,
+    confidence: 0.95,
+    reason: "FLASH CRASH: Down crashed 22% to $0.08 | Both sides: $0.94 → 4.1% net profit",
+    timestamp: "30 sec ago",
+  },
+  {
+    id: "8",
+    strategy: "market_making",
+    market: "Fed rate decision March 2026 — Hold",
+    side: "BUY",
+    entryPrice: 0.65,
+    edge: 0.028,
+    confidence: 0.80,
+    reason: "MM opportunity: spread=2.8c | liq=$1.2M | vol=$8.9M | Q-score=0.92",
+    timestamp: "3 min ago",
+  },
+  {
+    id: "9",
+    strategy: "whale_copy",
+    market: "Will ETH exceed $5,000 by June 2026?",
+    side: "BUY",
+    entryPrice: 0.38,
+    edge: 0.15,
+    confidence: 0.88,
+    reason: "WHALE CONSENSUS: 4/5 tracked wallets buying \"Yes\" at $0.38 | Whales: Theo4, Fredi9999, Len93 | Total size: $127K",
+    timestamp: "7 min ago",
+  },
 ];
 
 const DEMO_POSITIONS: Position[] = [
@@ -219,6 +314,10 @@ const DEMO_POSITIONS: Position[] = [
   { id: "3", market: "Chicago temp Feb 25 — 20-25°F", outcome: "Yes", side: "BUY", entryPrice: 0.11, currentPrice: 0.82, size: 5.0, pnl: 3.55, strategy: "weather_arb", openedAt: "8h ago" },
   { id: "4", market: "Fed rate decision March — Hold", outcome: "Yes", side: "BUY", entryPrice: 0.97, currentPrice: 0.98, size: 10.0, pnl: 0.10, strategy: "near_certainty", openedAt: "1h ago" },
   { id: "5", market: "Atlanta temp Feb 25 — 50-55°F", outcome: "Yes", side: "BUY", entryPrice: 0.18, currentPrice: 0.45, size: 5.0, pnl: 1.35, strategy: "weather_arb", openedAt: "4h ago" },
+  { id: "6", market: "Will TikTok ban be enforced by April?", outcome: "Yes", side: "BUY", entryPrice: 0.42, currentPrice: 0.44, size: 25.0, pnl: 0.50, strategy: "market_making", openedAt: "15min ago" },
+  { id: "7", market: "BTC 15-min Up or Down — 1:45PM", outcome: "Up+Down", side: "BUY", entryPrice: 0.93, currentPrice: 1.00, size: 50.0, pnl: 3.50, strategy: "flash_crash", openedAt: "20min ago" },
+  { id: "8", market: "Oscar Best Picture 2026 — Film A", outcome: "Film A", side: "BUY", entryPrice: 0.33, currentPrice: 0.35, size: 25.0, pnl: 0.50, strategy: "market_making", openedAt: "30min ago" },
+  { id: "9", market: "BTC 15-min Up or Down — 2:00PM", outcome: "Up+Down", side: "BUY", entryPrice: 0.95, currentPrice: 1.00, size: 50.0, pnl: 2.50, strategy: "flash_crash", openedAt: "10min ago" },
 ];
 
 const DEMO_MARKETS: PredictionMarket[] = [
@@ -238,6 +337,9 @@ const strategyColors: Record<string, { bg: string; text: string; border: string;
   near_certainty: { bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200", badge: "bg-violet-100 text-violet-700", dot: "bg-violet-500" },
   same_market_arb: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", badge: "bg-amber-100 text-amber-700", dot: "bg-amber-500" },
   cross_market_arb: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", badge: "bg-rose-100 text-rose-700", dot: "bg-rose-500" },
+  market_making: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
+  flash_crash: { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", badge: "bg-orange-100 text-orange-700", dot: "bg-orange-500" },
+  whale_copy: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
 };
 
 const strategyLabels: Record<string, string> = {
@@ -245,6 +347,9 @@ const strategyLabels: Record<string, string> = {
   near_certainty: "Certainty",
   same_market_arb: "Arb",
   cross_market_arb: "Cross-Mkt",
+  market_making: "MM",
+  flash_crash: "Flash",
+  whale_copy: "Whale",
 };
 
 // ----------------------------------------------------------------
@@ -306,7 +411,7 @@ export default function PredictionsPage() {
             Prediction Markets
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Polymarket scanner &mdash; weather arbitrage, near-certainty harvesting, cross-market arb
+            Polymarket scanner &mdash; 7 strategies: weather arb, certainty harvest, market making, flash crash, whale copy &amp; more
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -367,7 +472,7 @@ export default function PredictionsPage() {
       </div>
 
       {/* Strategy Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {strategies.map((strategy) => {
           const colors = strategyColors[strategy.id] || strategyColors.weather_arb;
           return (

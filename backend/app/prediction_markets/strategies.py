@@ -9,6 +9,9 @@ Strategies:
 2. NearCertaintyHarvester: Buy 95c+ outcomes for penny profits at scale
 3. SameMarketArbitrage: Exploit YES + NO < $1.00 within a single market
 4. CrossMarketArbitrage: Find logical inconsistencies across related markets
+5. MarketMaking: Provide liquidity on both sides, capture spread + rebates
+6. FlashCrashDetector: Buy crashed tokens on BTC/crypto short-duration markets
+7. WhaleCopyTrading: Follow the top 7.6% of profitable wallets
 """
 
 import logging
@@ -493,6 +496,421 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                         f"({p2:.0%}) — {gap*100:.1f}% inconsistency"
                                     ),
                                 ))
+        return results
+
+
+# ================================================================
+# Strategy 5: Market Making (Swisstony: $5 → $3.7M)
+# ================================================================
+
+class MarketMakingStrategy(BaseStrategy):
+    """
+    Provide liquidity on both sides of a market, capturing the bid-ask spread.
+
+    The #1 revenue strategy on Polymarket. Swisstony turned $5 into $3.7M.
+    With 2026 maker rebates, makers pay zero fees and earn daily USDC rebates
+    from taker fee pools. Revenue = spread capture + rebates.
+
+    Mechanics:
+    1. Select markets with active liquidity reward pools
+    2. Calculate adjusted midpoint from order book
+    3. Place limit orders on BOTH sides (bid YES + ask YES, or bid YES + bid NO)
+    4. When takers fill one side, accumulate inventory
+    5. When they fill the other side, capture spread
+    6. Collect daily USDC rewards based on Q-score
+
+    Q-score formula (determines reward share):
+        Score = ((max_spread - order_spread) / max_spread)^2 * order_size
+        - max_spread: typically 3c from midpoint
+        - Two-sided liquidity scores ~3x single-sided
+
+    Risk: Inventory risk — news events can make one side worthless.
+    Mitigation: Avoid short-duration/high-volatility markets (NBA, crypto 15-min).
+    Best markets: Low-volatility political events weeks from resolution.
+    """
+
+    def __init__(
+        self,
+        client: PolymarketClient,
+        config: StrategyConfig,
+        target_spread: float = 0.02,      # 2c spread per side
+        max_spread: float = 0.03,          # 3c max from midpoint for Q-score
+        min_liquidity: float = 10000,      # Minimum market liquidity
+        max_volatility: float = 0.10,      # Skip markets with >10% daily price swings
+        rebalance_threshold: float = 0.60, # Rebalance when inventory >60% one-sided
+    ):
+        super().__init__(client, config)
+        self.target_spread = target_spread
+        self.max_spread = max_spread
+        self.min_liquidity = min_liquidity
+        self.max_volatility = max_volatility
+        self.rebalance_threshold = rebalance_threshold
+        self.inventory: Dict[str, Dict[str, float]] = {}  # market_id -> {yes: qty, no: qty}
+
+    @property
+    def name(self) -> str:
+        return "market_making"
+
+    def scan(self, markets: List[Market]) -> List[ScanResult]:
+        """
+        Find markets suitable for market making.
+
+        Looks for:
+        - Active binary markets with high liquidity
+        - Prices not at extremes (<0.10 or >0.90 — hard to two-side)
+        - Sufficient spread to capture (> target_spread)
+        - Not short-duration crypto markets (15-min = dangerous)
+        """
+        results = []
+
+        for market in markets:
+            if not market.active or market.closed:
+                continue
+            if not market.is_binary:
+                continue
+            if market.liquidity < self.min_liquidity:
+                continue
+
+            # Skip extreme probability markets (hard to provide two-sided liquidity)
+            yes_price = market.outcomes[0].price if market.outcomes else 0.5
+            if yes_price < 0.10 or yes_price > 0.90:
+                continue
+
+            # Skip crypto short-duration markets (too volatile for MM)
+            question_lower = market.question.lower()
+            if any(kw in question_lower for kw in ["15 min", "15-min", "1 hour", "1-hour"]):
+                continue
+
+            # Calculate potential spread revenue
+            spread = market.spread
+            if spread > self.target_spread:
+                # Estimate daily revenue from this market
+                # Assume ~100 fills/day at this spread level
+                est_daily_revenue = spread * 100 * self.config.max_position_usd * 0.1
+                q_score = ((self.max_spread - self.target_spread) / self.max_spread) ** 2
+
+                results.append(ScanResult(
+                    market=market,
+                    strategy=self.name,
+                    outcome_idx=-1,  # Both sides
+                    side="BUY",  # Market making = both sides
+                    entry_price=yes_price,
+                    expected_value=yes_price + spread / 2,
+                    edge=spread,
+                    confidence=0.80,  # High confidence for MM
+                    reason=(
+                        f"MM opportunity: {market.question[:60]} | "
+                        f"spread={spread*100:.1f}c | liq=${market.liquidity:,.0f} | "
+                        f"vol=${market.total_volume:,.0f} | Q-score={q_score:.2f}"
+                    ),
+                ))
+
+        return results
+
+
+# ================================================================
+# Strategy 6: Flash Crash Detector (0x8dxd: $313 → $438K)
+# ================================================================
+
+class FlashCrashStrategy(BaseStrategy):
+    """
+    Detect and exploit flash crashes on BTC/crypto short-duration markets.
+
+    When BTC moves sharply, the losing side of 15-minute Up/Down markets
+    crashes to near-zero before the market resolves. The bot buys BOTH
+    the crashed side AND the opposite side (which hasn't fully repriced yet),
+    locking in guaranteed profit when YES + NO < $1.00.
+
+    0x8dxd turned $313 into $438K in one month with 98% win rate.
+
+    Two-leg execution:
+    Leg 1: When token crashes >15% in seconds, buy the crashed side immediately
+    Leg 2: Buy the opposite side IF combined cost < $0.97 (3% profit after fees)
+    If both legs fill: guaranteed profit = $1.00 - total_cost
+
+    Risk: Leg 1 fills but Leg 2 never triggers (directional exposure).
+    Mitigation: Only complete Leg 2 if spread is profitable. Abandon if not.
+
+    Best timing: Final 30-40 seconds of each 15-minute round (direction clearest).
+    Note: Polymarket added dynamic taker fees (up to ~3.15%) on these markets
+    in January 2026, reducing but not eliminating profitability.
+    """
+
+    def __init__(
+        self,
+        client: PolymarketClient,
+        config: StrategyConfig,
+        crash_threshold: float = 0.15,        # 15% price drop = flash crash
+        max_combined_cost: float = 0.97,       # Both legs must cost < $0.97
+        min_volume: float = 5000,              # Skip illiquid markets
+    ):
+        super().__init__(client, config)
+        self.crash_threshold = crash_threshold
+        self.max_combined_cost = max_combined_cost
+        self.min_volume = min_volume
+        self._price_history: Dict[str, List[float]] = {}  # token_id -> recent prices
+
+    @property
+    def name(self) -> str:
+        return "flash_crash"
+
+    def update_prices(self, token_id: str, price: float):
+        """Record a price tick for crash detection."""
+        if token_id not in self._price_history:
+            self._price_history[token_id] = []
+        self._price_history[token_id].append(price)
+        # Keep last 60 ticks (5 minutes at 5-second intervals)
+        if len(self._price_history[token_id]) > 60:
+            self._price_history[token_id] = self._price_history[token_id][-60:]
+
+    def _detect_crash(self, token_id: str) -> Optional[float]:
+        """Check if token has crashed. Returns drop magnitude or None."""
+        history = self._price_history.get(token_id, [])
+        if len(history) < 3:
+            return None
+        recent_high = max(history[-10:]) if len(history) >= 10 else max(history)
+        current = history[-1]
+        if recent_high > 0:
+            drop = (recent_high - current) / recent_high
+            if drop >= self.crash_threshold:
+                return drop
+        return None
+
+    def scan(self, markets: List[Market]) -> List[ScanResult]:
+        """
+        Find flash crash opportunities on crypto short-duration markets.
+
+        Scans BTC/ETH/SOL 15-minute and 1-hour Up/Down markets for
+        tokens that have crashed significantly. If buying both sides
+        costs less than $0.97, it's a guaranteed profit opportunity.
+        """
+        results = []
+
+        for market in markets:
+            if not market.active or market.closed:
+                continue
+            if not market.is_binary:
+                continue
+            if market.total_volume < self.min_volume:
+                continue
+
+            # Filter to crypto short-duration markets
+            question_lower = market.question.lower()
+            is_crypto_short = any(
+                kw in question_lower
+                for kw in ["btc", "bitcoin", "eth", "ethereum", "sol", "solana"]
+            ) and any(
+                kw in question_lower
+                for kw in ["15 min", "1 hour", "up or down", "above", "below"]
+            )
+            if not is_crypto_short:
+                continue
+
+            # Check for flash crash on either outcome
+            for i, outcome in enumerate(market.outcomes):
+                crash_magnitude = self._detect_crash(outcome.token_id)
+                if crash_magnitude is not None:
+                    # Crashed side price
+                    crashed_price = outcome.price
+                    # Opposite side price
+                    other_idx = 1 - i
+                    other_price = market.outcomes[other_idx].price if other_idx < len(market.outcomes) else 1.0
+
+                    combined_cost = crashed_price + other_price
+                    if combined_cost < self.max_combined_cost:
+                        profit = 1.0 - combined_cost
+                        # Account for ~2% taker fee on the winning side
+                        net_profit = profit - 0.02
+                        if net_profit > 0:
+                            results.append(ScanResult(
+                                market=market,
+                                strategy=self.name,
+                                outcome_idx=-1,  # Buy BOTH sides
+                                side="BUY",
+                                entry_price=combined_cost,
+                                expected_value=1.0,
+                                edge=net_profit,
+                                confidence=0.95,  # Near-certain if both legs fill
+                                reason=(
+                                    f"FLASH CRASH: {outcome.label} crashed "
+                                    f"{crash_magnitude*100:.0f}% to ${crashed_price:.3f} | "
+                                    f"Both sides: ${combined_cost:.3f} → "
+                                    f"${net_profit*100:.1f}% net profit"
+                                ),
+                            ))
+
+        return results
+
+
+# ================================================================
+# Strategy 7: Whale Copy Trading (top 7.6% of wallets)
+# ================================================================
+
+class WhaleCopyTradingStrategy(BaseStrategy):
+    """
+    Follow trades from the most profitable Polymarket wallets.
+
+    Only 7.6% of Polymarket wallets are profitable. Only 0.51% earn >$1K.
+    By identifying and mirroring these "sharp" wallets, we gain an indirect
+    information edge. Uses on-chain Polygon data to detect whale trades.
+
+    Known top wallets (as of Feb 2026):
+    - Theo4: $22M profit, 88.9% win rate
+    - Fredi9999: $16.6M profit
+    - Len9311238: $8.7M profit, 100% win rate
+    - SeriouslySirius: $3.8M profit on sports
+
+    Advanced "Wallet Basket" approach:
+    1. Track 5-10 proven profitable wallets
+    2. Wait for 80%+ of the basket to enter same outcome
+    3. Ensure purchases in tight price band (not stale signals)
+    4. Only act if market spread is still favorable
+    5. This "consensus" approach reduces single-whale risk
+
+    Risks:
+    - Whales sometimes use decoy trades across multiple wallets
+    - By the time you copy, price may have moved (slippage)
+    - Top whales actively counter copy-traders
+    """
+
+    def __init__(
+        self,
+        client: PolymarketClient,
+        config: StrategyConfig,
+        min_trade_size: float = 1000,       # Only copy trades >$1K
+        max_entry_odds: float = 0.80,       # Don't copy above 80c (limited upside)
+        position_scale: float = 0.01,       # 1% of whale position size
+        basket_consensus: float = 0.80,     # 80% of basket must agree
+    ):
+        super().__init__(client, config)
+        self.min_trade_size = min_trade_size
+        self.max_entry_odds = max_entry_odds
+        self.position_scale = position_scale
+        self.basket_consensus = basket_consensus
+        self.tracked_wallets: Dict[str, dict] = {}  # address -> {name, pnl, win_rate, trades}
+        self._recent_whale_trades: List[dict] = []
+
+    @property
+    def name(self) -> str:
+        return "whale_copy"
+
+    def add_wallet(self, address: str, name: str = "", pnl: float = 0, win_rate: float = 0):
+        """Add a wallet to track."""
+        self.tracked_wallets[address.lower()] = {
+            "name": name or address[:8],
+            "pnl": pnl,
+            "win_rate": win_rate,
+            "trades": [],
+        }
+        logger.info(f"[WHALE] Tracking {name or address[:8]} (PnL: ${pnl:,.0f}, WR: {win_rate:.0%})")
+
+    def record_trade(self, wallet: str, market_id: str, outcome: str, side: str, price: float, size: float):
+        """Record a detected whale trade for analysis."""
+        trade = {
+            "wallet": wallet.lower(),
+            "market_id": market_id,
+            "outcome": outcome,
+            "side": side,
+            "price": price,
+            "size": size,
+            "timestamp": datetime.now(timezone.utc),
+        }
+        self._recent_whale_trades.append(trade)
+        # Keep last 500 trades
+        if len(self._recent_whale_trades) > 500:
+            self._recent_whale_trades = self._recent_whale_trades[-500:]
+
+        if wallet.lower() in self.tracked_wallets:
+            self.tracked_wallets[wallet.lower()]["trades"].append(trade)
+
+    def scan(self, markets: List[Market]) -> List[ScanResult]:
+        """
+        Scan recent whale trades for copy opportunities.
+
+        Uses the "Wallet Basket" approach: only generates signals when
+        multiple tracked whales enter the same market in the same direction
+        within a tight time window.
+        """
+        results = []
+        if not self._recent_whale_trades:
+            return results
+
+        # Group recent trades by market
+        from collections import defaultdict
+        market_trades: Dict[str, List[dict]] = defaultdict(list)
+        cutoff = datetime.now(timezone.utc)
+
+        for trade in self._recent_whale_trades:
+            age = (cutoff - trade["timestamp"]).total_seconds()
+            if age < 3600:  # Only trades from last hour
+                market_trades[trade["market_id"]].append(trade)
+
+        # Find consensus trades (multiple whales, same direction)
+        market_lookup = {m.id: m for m in markets}
+
+        for market_id, trades in market_trades.items():
+            if len(trades) < 2:
+                continue  # Need at least 2 whales
+
+            # Count direction consensus
+            buy_wallets = set()
+            sell_wallets = set()
+            buy_outcomes = {}
+            total_size = 0
+
+            for t in trades:
+                if t["side"] == "BUY":
+                    buy_wallets.add(t["wallet"])
+                    buy_outcomes[t["outcome"]] = buy_outcomes.get(t["outcome"], 0) + 1
+                    total_size += t["size"]
+                else:
+                    sell_wallets.add(t["wallet"])
+
+            n_tracked = len(self.tracked_wallets)
+            if n_tracked == 0:
+                continue
+
+            buy_consensus = len(buy_wallets) / n_tracked
+
+            if buy_consensus >= self.basket_consensus and buy_outcomes:
+                # Strong consensus — whales are buying
+                top_outcome = max(buy_outcomes, key=buy_outcomes.get)
+                market = market_lookup.get(market_id)
+                if not market:
+                    continue
+
+                # Find the outcome index
+                outcome_idx = next(
+                    (i for i, o in enumerate(market.outcomes) if o.label == top_outcome),
+                    0
+                )
+                entry_price = market.outcomes[outcome_idx].price
+
+                if entry_price > self.max_entry_odds:
+                    continue  # Too expensive, limited upside
+
+                whale_names = [
+                    self.tracked_wallets.get(w, {}).get("name", w[:8])
+                    for w in buy_wallets
+                ]
+
+                results.append(ScanResult(
+                    market=market,
+                    strategy=self.name,
+                    outcome_idx=outcome_idx,
+                    side="BUY",
+                    entry_price=entry_price,
+                    expected_value=entry_price * 1.15,  # Estimate 15% edge from whale alpha
+                    edge=0.15,
+                    confidence=min(0.90, buy_consensus),
+                    reason=(
+                        f"WHALE CONSENSUS: {len(buy_wallets)}/{n_tracked} tracked wallets "
+                        f"buying \"{top_outcome}\" at ${entry_price:.2f} | "
+                        f"Whales: {', '.join(whale_names[:3])} | "
+                        f"Total size: ${total_size:,.0f}"
+                    ),
+                ))
+
         return results
 
 
