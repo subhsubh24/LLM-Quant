@@ -47,6 +47,7 @@ interface PredictionMarket {
   liquidity: number;
   endDate: string;
   active: boolean;
+  exchange?: "polymarket" | "kalshi";
 }
 
 interface Opportunity {
@@ -367,6 +368,7 @@ export default function PredictionsPage() {
   const [scanLoading, setScanLoading] = useState(false);
   const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
   const [markets, setMarkets] = useState<PredictionMarket[]>(DEMO_MARKETS);
+  const [exchangeFilter, setExchangeFilter] = useState<"all" | "polymarket" | "kalshi">("all");
   const streamRef = useRef<HTMLDivElement>(null);
 
   // Map API opportunity to frontend type
@@ -398,6 +400,7 @@ export default function PredictionsPage() {
     liquidity: m.liquidity || 0,
     endDate: m.end_date || "",
     active: m.active ?? true,
+    exchange: m.exchange || "polymarket",
   });
 
   // Fetch live markets from API
@@ -471,9 +474,10 @@ export default function PredictionsPage() {
 
   const filteredMarkets = markets.filter(
     (m) =>
-      !searchQuery ||
-      m.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.category.toLowerCase().includes(searchQuery.toLowerCase())
+      (exchangeFilter === "all" || m.exchange === exchangeFilter) &&
+      (!searchQuery ||
+        m.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   return (
@@ -686,15 +690,32 @@ export default function PredictionsPage() {
       {activeTab === "markets" && (
         <div className="card overflow-hidden">
           <div className="p-5 border-b border-gray-100">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search markets... (weather, crypto, politics, sports)"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-field pl-10"
-              />
+            <div className="flex items-center gap-3 mb-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search markets... (weather, crypto, politics, sports)"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="input-field pl-10"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg">
+                {(["all", "polymarket", "kalshi"] as const).map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => setExchangeFilter(ex)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      exchangeFilter === ex
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    {ex === "all" ? "All" : ex === "polymarket" ? "Polymarket" : "Kalshi"}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="divide-y divide-gray-50">
@@ -703,18 +724,27 @@ export default function PredictionsPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        market.exchange === "kalshi"
+                          ? "bg-indigo-100 text-indigo-700"
+                          : "bg-purple-100 text-purple-700"
+                      }`}>
+                        {market.exchange === "kalshi" ? "Kalshi" : "Poly"}
+                      </span>
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                         {market.category}
                       </span>
                       <span className="text-xs text-gray-400">
-                        Ends {new Date(market.endDate).toLocaleDateString()}
+                        {market.endDate ? `Ends ${new Date(market.endDate).toLocaleDateString()}` : ""}
                       </span>
                     </div>
                     <p className="text-sm font-medium text-gray-900">{market.question}</p>
                   </div>
                   <div className="text-right ml-4 flex-shrink-0">
                     <p className="text-xs text-gray-400">Vol: ${(market.volume / 1000).toFixed(0)}K</p>
-                    <p className="text-xs text-gray-400">Liq: ${(market.liquidity / 1000).toFixed(0)}K</p>
+                    {market.liquidity > 0 && (
+                      <p className="text-xs text-gray-400">Liq: ${(market.liquidity / 1000).toFixed(0)}K</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">

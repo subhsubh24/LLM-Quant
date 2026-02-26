@@ -3705,6 +3705,7 @@ async def get_alpha_signals(symbol: str):
 
 # Lazy-initialized singletons (avoids import-time HTTP calls)
 _polymarket_client = None
+_kalshi_client = None
 _prediction_scanner = None
 
 
@@ -3714,6 +3715,14 @@ def _get_polymarket_client():
         from ..prediction_markets.polymarket_client import PolymarketClient
         _polymarket_client = PolymarketClient()
     return _polymarket_client
+
+
+def _get_kalshi_client():
+    global _kalshi_client
+    if _kalshi_client is None:
+        from ..prediction_markets.kalshi_client import KalshiClient
+        _kalshi_client = KalshiClient()
+    return _kalshi_client
 
 
 def _get_prediction_scanner():
@@ -3767,47 +3776,77 @@ def _get_prediction_scanner():
 class MarketSearchRequest(BaseModel):
     query: str
     limit: int = 20
+    exchange: str = "all"  # "polymarket", "kalshi", or "all"
+
+
+def _serialize_market(m, exchange: str = "polymarket") -> dict:
+    """Convert a Market dataclass to a JSON-safe dict with exchange tag."""
+    from dataclasses import asdict
+    d = asdict(m)
+    if m.end_date:
+        d["end_date"] = m.end_date.isoformat()
+    d["exchange"] = exchange
+    return d
 
 
 @router.get("/prediction-markets/markets")
-async def list_prediction_markets(limit: int = 100, offset: int = 0):
-    """List active prediction markets from Polymarket."""
-    from dataclasses import asdict
+async def list_prediction_markets(
+    limit: int = 100,
+    offset: int = 0,
+    exchange: str = "all",
+):
+    """
+    List active prediction markets.
 
-    client = _get_polymarket_client()
-    try:
-        markets = client.get_markets(limit=limit, offset=offset)
-        result = []
-        for m in markets:
-            d = asdict(m)
-            # Serialize datetimes
-            if m.end_date:
-                d["end_date"] = m.end_date.isoformat()
-            result.append(d)
-        return {"markets": result, "count": len(result)}
-    except Exception as e:
-        logger.error(f"Prediction markets fetch error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+    Args:
+        exchange: "polymarket", "kalshi", or "all" (default: all)
+    """
+    result = []
+
+    if exchange in ("polymarket", "all"):
+        try:
+            poly = _get_polymarket_client()
+            poly_markets = poly.get_markets(limit=limit, offset=offset)
+            result.extend(_serialize_market(m, "polymarket") for m in poly_markets)
+        except Exception as e:
+            logger.error(f"Polymarket fetch error: {e}")
+
+    if exchange in ("kalshi", "all"):
+        try:
+            kalshi = _get_kalshi_client()
+            kalshi_markets = kalshi.get_markets(limit=limit, offset=offset)
+            result.extend(_serialize_market(m, "kalshi") for m in kalshi_markets)
+        except Exception as e:
+            logger.error(f"Kalshi fetch error: {e}")
+
+    if not result:
+        raise HTTPException(status_code=502, detail="No exchanges reachable")
+
+    return {"markets": result, "count": len(result)}
 
 
 @router.post("/prediction-markets/search")
 async def search_prediction_markets(req: MarketSearchRequest):
-    """Search prediction markets by keyword."""
-    from dataclasses import asdict
+    """Search prediction markets by keyword across exchanges."""
+    result = []
 
-    client = _get_polymarket_client()
-    try:
-        markets = client.search_markets(req.query, limit=req.limit)
-        result = []
-        for m in markets:
-            d = asdict(m)
-            if m.end_date:
-                d["end_date"] = m.end_date.isoformat()
-            result.append(d)
-        return {"markets": result, "count": len(result)}
-    except Exception as e:
-        logger.error(f"Market search error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+    if req.exchange in ("polymarket", "all"):
+        try:
+            poly = _get_polymarket_client()
+            poly_results = poly.search_markets(req.query, limit=req.limit)
+            result.extend(_serialize_market(m, "polymarket") for m in poly_results)
+        except Exception as e:
+            logger.error(f"Polymarket search error: {e}")
+
+    if req.exchange in ("kalshi", "all"):
+        try:
+            kalshi = _get_kalshi_client()
+            kalshi_results = kalshi.search_markets(req.query, limit=req.limit)
+            result.extend(_serialize_market(m, "kalshi") for m in kalshi_results)
+        except Exception as e:
+            logger.error(f"Kalshi search error: {e}")
+
+    return {"markets": result, "count": len(result)}
 
 
 @router.post("/prediction-markets/scan")
@@ -3899,3 +3938,15 @@ async def get_prediction_strategies():
         ],
         "recent_opportunities": len(scanner.scan_history),
     }
+
+
+@router.get("/prediction-markets/kalshi/events")
+async def list_kalshi_events(limit: int = 50, status: Optional[str] = "open"):
+    """List Kalshi events (each event groups related markets)."""
+    kalshi = _get_kalshi_client()
+    try:
+        events = kalshi.get_events(limit=limit, status=status)
+        return {"events": events, "count": len(events)}
+    except Exception as e:
+        logger.error(f"Kalshi events error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
