@@ -10,9 +10,11 @@ services:
     volumes:
       - ./backend:/app
       - backend-data:/app/data
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=sqlite:///./data/quantlab.db
-      - DEMO_MODE=true
+      - DEMO_MODE=${DEMO_MODE:-true}
       - DEBUG=false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
