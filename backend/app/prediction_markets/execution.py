@@ -652,6 +652,12 @@ class PredictionMarketExecutor:
         self.order_history: List[OrderResult] = []
         self.total_fees: float = 0.0
 
+        # Kill switch: when True, ALL order placement is blocked immediately.
+        # This is the hard emergency stop — override everything, cancel all pending.
+        self._kill_switch_active: bool = False
+        self._kill_switch_reason: str = ""
+        self._kill_switch_time: Optional[datetime] = None
+
     @property
     def total_exposure(self) -> float:
         """Total USD exposed across all positions."""
@@ -662,8 +668,44 @@ class PredictionMarketExecutor:
         """Total P&L across all positions."""
         return sum(p.total_pnl for p in self.positions.values())
 
+    @property
+    def kill_switch_active(self) -> bool:
+        return self._kill_switch_active
+
+    def activate_kill_switch(self, reason: str = "manual"):
+        """
+        Emergency kill switch — blocks ALL new orders immediately.
+
+        Call this on: VPIN spike, connection loss, unexpected error,
+        or manual intervention. Unlike the circuit breaker in risk_manager
+        (which has a cooldown), the kill switch stays active until
+        explicitly deactivated.
+        """
+        self._kill_switch_active = True
+        self._kill_switch_reason = reason
+        self._kill_switch_time = datetime.now(timezone.utc)
+        logger.critical(
+            f"[KILL SWITCH] ACTIVATED — reason: {reason} | "
+            f"Positions: {len(self.positions)} | Exposure: ${self.total_exposure:.2f}"
+        )
+
+    def deactivate_kill_switch(self):
+        """Re-enable trading after kill switch was activated."""
+        if self._kill_switch_active:
+            logger.info(
+                f"[KILL SWITCH] Deactivated (was active since "
+                f"{self._kill_switch_time.isoformat() if self._kill_switch_time else 'unknown'})"
+            )
+        self._kill_switch_active = False
+        self._kill_switch_reason = ""
+        self._kill_switch_time = None
+
     def _check_risk(self, req: OrderRequest) -> Optional[str]:
         """Pre-trade risk checks. Returns error message or None if OK."""
+        # Kill switch overrides everything
+        if self._kill_switch_active:
+            return f"KILL SWITCH ACTIVE: {self._kill_switch_reason}"
+
         notional = req.notional
 
         if notional > self.max_position_usd:

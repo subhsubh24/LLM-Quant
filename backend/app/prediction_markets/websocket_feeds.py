@@ -84,6 +84,10 @@ class PolymarketWSFeed:
         self._max_reconnect_delay = 60.0
         self._callbacks: List[Callable] = []
         self._task: Optional[asyncio.Task] = None
+        # Sequence gap detection: track message sequence to detect missed updates
+        self._last_sequence: Dict[str, int] = {}  # token_id -> last seq number
+        self._gap_count: int = 0
+        self._total_messages: int = 0
 
     @property
     def is_connected(self) -> bool:
@@ -186,9 +190,27 @@ class PolymarketWSFeed:
                 await asyncio.sleep(self._reconnect_delay)
 
     def _handle_message(self, raw: str):
-        """Parse incoming Polymarket WebSocket message."""
+        """Parse incoming Polymarket WebSocket message with sequence validation."""
         data = json.loads(raw)
         msg_type = data.get("type", "")
+        self._total_messages += 1
+
+        # Sequence gap detection: if messages include a sequence number,
+        # verify continuity. A gap means our local state diverged from
+        # the exchange — stale quotes will get adversely selected.
+        seq = data.get("sequence") or data.get("seq")
+        token_id_for_seq = data.get("asset_id", "")
+        if seq is not None and token_id_for_seq:
+            seq = int(seq)
+            last = self._last_sequence.get(token_id_for_seq)
+            if last is not None and seq > last + 1:
+                gap = seq - last - 1
+                self._gap_count += gap
+                logger.warning(
+                    f"[WS GAP] Polymarket sequence gap for {token_id_for_seq}: "
+                    f"expected {last + 1}, got {seq} (missed {gap} messages)"
+                )
+            self._last_sequence[token_id_for_seq] = seq
 
         if msg_type == "price_change":
             # Book-level update
@@ -236,6 +258,8 @@ class PolymarketWSFeed:
             "subscribed_tokens": len(self._subscribed_tokens),
             "active_prices": len(self._prices),
             "provider": "polymarket",
+            "total_messages": self._total_messages,
+            "sequence_gaps": self._gap_count,
         }
 
 

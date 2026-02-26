@@ -612,26 +612,17 @@ class MarketMakingStrategy(BaseStrategy):
     """
     Provide liquidity on both sides of a market, capturing the bid-ask spread.
 
-    The #1 revenue strategy on Polymarket. Swisstony turned $5 into $3.7M.
-    With 2026 maker rebates, makers pay zero fees and earn daily USDC rebates
-    from taker fee pools. Revenue = spread capture + rebates.
-
-    Mechanics:
-    1. Select markets with active liquidity reward pools
-    2. Calculate adjusted midpoint from order book
-    3. Place limit orders on BOTH sides (bid YES + ask YES, or bid YES + bid NO)
-    4. When takers fill one side, accumulate inventory
-    5. When they fill the other side, capture spread
-    6. Collect daily USDC rewards based on Q-score
+    Uses the Avellaneda-Stoikov (2008) framework for optimal quote placement:
+    - Reservation price adjusts for inventory risk (logit-space PDE)
+    - Optimal spread compensates for adverse selection + inventory risk
+    - VPIN toxicity detection widens/withdraws when informed flow detected
 
     Q-score formula (determines reward share):
         Score = ((max_spread - order_spread) / max_spread)^2 * order_size
-        - max_spread: typically 3c from midpoint
         - Two-sided liquidity scores ~3x single-sided
 
     Risk: Inventory risk — news events can make one side worthless.
-    Mitigation: Avoid short-duration/high-volatility markets (NBA, crypto 15-min).
-    Best markets: Low-volatility political events weeks from resolution.
+    Mitigation: Avoid short-duration/high-volatility markets.
     """
 
     def __init__(
@@ -652,19 +643,35 @@ class MarketMakingStrategy(BaseStrategy):
         self.rebalance_threshold = rebalance_threshold
         self.inventory: Dict[str, Dict[str, float]] = {}  # market_id -> {yes: qty, no: qty}
 
+        # Avellaneda-Stoikov model + VPIN toxicity tracker
+        from .quant_models import AvellanedaStoikovModel, VPINTracker
+        self._as_model = AvellanedaStoikovModel()
+        self._vpin = VPINTracker()
+
     @property
     def name(self) -> str:
         return "market_making"
+
+    def record_trade(self, token_id: str, price: float, size: float):
+        """Record a trade for A-S volatility estimation and VPIN tracking."""
+        self._as_model.record_price(token_id, price)
+        self._vpin.record_trade(token_id, price, size)
+
+    def get_optimal_quotes(
+        self, token_id: str, mid_price: float, inventory: float,
+        time_to_resolution_hours: float,
+    ) -> Tuple[float, float, dict]:
+        """Get Avellaneda-Stoikov optimal bid/ask for a market."""
+        return self._as_model.compute_quotes(
+            token_id, mid_price, inventory, time_to_resolution_hours,
+        )
 
     def scan(self, markets: List[Market]) -> List[ScanResult]:
         """
         Find markets suitable for market making.
 
-        Looks for:
-        - Active binary markets with high liquidity
-        - Prices not at extremes (<0.10 or >0.90 — hard to two-side)
-        - Sufficient spread to capture (> target_spread)
-        - Not short-duration crypto markets (15-min = dangerous)
+        Uses Avellaneda-Stoikov for quote placement diagnostics.
+        Checks VPIN for each candidate — toxic markets are skipped.
         """
         results = []
 
@@ -686,13 +693,46 @@ class MarketMakingStrategy(BaseStrategy):
             if any(kw in question_lower for kw in ["15 min", "15-min", "1 hour", "1-hour"]):
                 continue
 
+            # VPIN toxicity check — skip if informed flow detected
+            token_id = market.outcomes[0].token_id if market.outcomes else ""
+            if token_id:
+                toxic, vpin_val = self._vpin.is_toxic(token_id)
+                if toxic:
+                    logger.info(
+                        f"[MM] Skipping {market.question[:40]} — "
+                        f"VPIN={vpin_val:.2f} (toxic flow detected)"
+                    )
+                    continue
+
+            # Run Avellaneda-Stoikov for diagnostics
+            as_info = ""
+            if token_id:
+                inv = self.inventory.get(market.id, {})
+                net_inventory = inv.get("yes", 0) - inv.get("no", 0)
+                hours_left = 168.0
+                if market.end_date:
+                    hours_left = max(1, (market.end_date - datetime.now(timezone.utc)).total_seconds() / 3600)
+                bid, ask, diag = self._as_model.compute_quotes(
+                    token_id, yes_price, net_inventory, hours_left,
+                )
+                as_info = (
+                    f"A-S: bid={bid:.3f} ask={ask:.3f} "
+                    f"resv={diag['reservation_price']:.3f} σ={diag['sigma']:.3f}"
+                )
+
             # Calculate potential spread revenue
             spread = market.spread
             if spread > self.target_spread:
-                # Estimate daily revenue from this market
-                # Assume ~100 fills/day at this spread level
-                est_daily_revenue = spread * 100 * self.config.max_position_usd * 0.1
                 q_score = ((self.max_spread - self.target_spread) / self.max_spread) ** 2
+
+                reason_parts = [
+                    f"MM: {market.question[:50]}",
+                    f"spread={spread*100:.1f}c",
+                    f"liq=${market.liquidity:,.0f}",
+                    f"Q={q_score:.2f}",
+                ]
+                if as_info:
+                    reason_parts.append(as_info)
 
                 results.append(ScanResult(
                     market=market,
@@ -702,12 +742,8 @@ class MarketMakingStrategy(BaseStrategy):
                     entry_price=yes_price,
                     expected_value=yes_price + spread / 2,
                     edge=spread,
-                    confidence=0.80,  # High confidence for MM
-                    reason=(
-                        f"MM opportunity: {market.question[:60]} | "
-                        f"spread={spread*100:.1f}c | liq=${market.liquidity:,.0f} | "
-                        f"vol=${market.total_volume:,.0f} | Q-score={q_score:.2f}"
-                    ),
+                    confidence=0.80,
+                    reason=" | ".join(reason_parts),
                 ))
 
         return results

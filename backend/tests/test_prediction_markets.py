@@ -697,3 +697,187 @@ class TestWeatherStrategy:
         assert strat._parse_temp_range("Above 80°F") == (80.0, 200.0)
         assert strat._parse_temp_range("Below 32°F") == (-50.0, 32.0)
         assert strat._parse_temp_range("No temp info") is None
+
+
+# ============================================================
+# Quant Models Tests (Avellaneda-Stoikov, VPIN, MC Kelly, Bayes)
+# ============================================================
+
+class TestLogitTransform:
+    def test_logit_sigmoid_inverse(self):
+        from app.prediction_markets.quant_models import logit, sigmoid
+        for p in [0.1, 0.25, 0.5, 0.75, 0.9]:
+            assert abs(sigmoid(logit(p)) - p) < 1e-6
+
+    def test_logit_midpoint_is_zero(self):
+        from app.prediction_markets.quant_models import logit
+        assert abs(logit(0.5)) < 1e-6
+
+    def test_logit_monotonic(self):
+        from app.prediction_markets.quant_models import logit
+        assert logit(0.3) < logit(0.5) < logit(0.7)
+
+    def test_logit_volatility(self):
+        from app.prediction_markets.quant_models import logit_volatility
+        prices = [0.50 + 0.01 * (i % 5 - 2) for i in range(30)]
+        vol = logit_volatility(prices)
+        assert vol > 0
+
+
+class TestAvellanedaStoikov:
+    def test_quotes_around_midpoint(self):
+        from app.prediction_markets.quant_models import AvellanedaStoikovModel
+        model = AvellanedaStoikovModel()
+        bid, ask, diag = model.compute_quotes("t1", 0.50, 0.0, 168.0)
+        assert bid < 0.50
+        assert ask > 0.50
+        assert ask > bid
+
+    def test_inventory_shifts_reservation(self):
+        from app.prediction_markets.quant_models import AvellanedaStoikovModel
+        model = AvellanedaStoikovModel()
+        # Long inventory → reservation price drops (wants to sell)
+        _, _, diag_long = model.compute_quotes("t1", 0.50, 10.0, 168.0)
+        _, _, diag_zero = model.compute_quotes("t1", 0.50, 0.0, 168.0)
+        _, _, diag_short = model.compute_quotes("t1", 0.50, -10.0, 168.0)
+        assert diag_long["reservation_price"] < diag_zero["reservation_price"]
+        assert diag_short["reservation_price"] > diag_zero["reservation_price"]
+
+    def test_extreme_prices_bounded(self):
+        from app.prediction_markets.quant_models import AvellanedaStoikovModel
+        model = AvellanedaStoikovModel()
+        bid, ask, _ = model.compute_quotes("t1", 0.95, 0.0, 24.0)
+        assert 0.01 <= bid < ask <= 0.99
+
+
+class TestVPIN:
+    def test_balanced_flow_low_vpin(self):
+        from app.prediction_markets.quant_models import VPINTracker, VPINConfig
+        vpin = VPINTracker(VPINConfig(bucket_size=10, n_buckets=5))
+        # Alternating buy/sell flow (balanced)
+        for i in range(100):
+            price = 0.50 + (0.01 if i % 2 == 0 else -0.01)
+            vpin.record_trade("t1", price, 5.0)
+        val = vpin.get_vpin("t1")
+        assert val is not None
+        assert val < 0.30  # Balanced → low VPIN
+
+    def test_onesided_flow_high_vpin(self):
+        from app.prediction_markets.quant_models import VPINTracker, VPINConfig
+        vpin = VPINTracker(VPINConfig(bucket_size=10, n_buckets=5))
+        # All buys (monotonically increasing price)
+        for i in range(100):
+            vpin.record_trade("t1", 0.50 + i * 0.001, 5.0)
+        val = vpin.get_vpin("t1")
+        assert val is not None
+        assert val > 0.70  # One-sided → high VPIN
+
+    def test_toxicity_detection(self):
+        from app.prediction_markets.quant_models import VPINTracker, VPINConfig
+        vpin = VPINTracker(VPINConfig(bucket_size=10, n_buckets=5, alert_threshold=0.60))
+        for i in range(100):
+            vpin.record_trade("t1", 0.50 + i * 0.001, 5.0)
+        toxic, val = vpin.is_toxic("t1")
+        assert toxic
+
+
+class TestMonteCarloKelly:
+    def test_reduces_bet_with_uncertain_edge(self):
+        from app.prediction_markets.quant_models import MonteCarloKelly, MonteCarloKellyConfig
+        mc = MonteCarloKelly(MonteCarloKellyConfig(
+            n_simulations=500, n_trades_per_path=50, min_historical_trades=5,
+        ))
+        # Record noisy returns (high variance)
+        import random
+        random.seed(42)
+        for _ in range(20):
+            mc.record_return("noisy", random.gauss(0.05, 0.30))
+
+        naive_fraction = 0.10  # 10% Kelly
+        bet, diag = mc.compute_size("noisy", naive_fraction, 1000.0)
+        assert diag["method"] == "monte_carlo_kelly"
+        # MC should reduce bet due to high variance
+        assert bet < naive_fraction * 1000.0
+
+    def test_fallback_with_no_data(self):
+        from app.prediction_markets.quant_models import MonteCarloKelly
+        mc = MonteCarloKelly()
+        bet, diag = mc.compute_size("unknown", 0.10, 1000.0)
+        assert diag["method"] == "naive_kelly_with_haircut"
+        assert bet > 0
+
+
+class TestBayesianUpdater:
+    def test_prior_from_market_price(self):
+        from app.prediction_markets.quant_models import BayesianUpdater
+        bu = BayesianUpdater()
+        bu.set_prior("test", market_price=0.60, confidence=20)
+        est = bu.get_estimate("test")
+        assert abs(est.mean - 0.60) < 0.05
+
+    def test_update_shifts_posterior(self):
+        from app.prediction_markets.quant_models import BayesianUpdater
+        bu = BayesianUpdater()
+        bu.set_prior("test", market_price=0.50, confidence=10)
+        # Observe 5 positive signals
+        for _ in range(5):
+            bu.update_with_outcome("test", True)
+        est = bu.get_estimate("test")
+        assert est.mean > 0.55  # Should shift upward
+
+    def test_signal_update(self):
+        from app.prediction_markets.quant_models import BayesianUpdater
+        bu = BayesianUpdater()
+        bu.set_prior("test", market_price=0.50, confidence=10)
+        bu.update_with_signal("test", signal_mean=0.80, signal_weight=10)
+        est = bu.get_estimate("test")
+        assert est.mean > 0.60  # Shifted toward 0.80
+
+    def test_edge_vs_market(self):
+        from app.prediction_markets.quant_models import BayesianUpdater
+        bu = BayesianUpdater()
+        bu.set_prior("test", market_price=0.40, confidence=5)
+        bu.update_with_signal("test", signal_mean=0.70, signal_weight=10)
+        edge = bu.get_edge_vs_market("test", market_price=0.40)
+        assert edge > 0.10  # Model says higher than market
+
+    def test_confidence_interval(self):
+        from app.prediction_markets.quant_models import BayesianUpdater
+        bu = BayesianUpdater()
+        bu.set_prior("test", market_price=0.50, confidence=100)
+        est = bu.get_estimate("test")
+        lo, hi = est.confidence_interval_95
+        assert lo < 0.50 < hi
+        assert hi - lo < 0.20  # High confidence → narrow CI
+
+
+class TestKillSwitch:
+    def test_blocks_orders_when_active(self):
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        executor.activate_kill_switch("test_emergency")
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET, market_id="m1", token_id="t1",
+            side=OrderSide.BUY, order_type=OrderType.LIMIT, size=5.0, price=0.50,
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.REJECTED
+        assert "KILL SWITCH" in result.error
+
+    def test_allows_orders_after_deactivation(self):
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        executor.activate_kill_switch("test")
+        executor.deactivate_kill_switch()
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET, market_id="m1", token_id="t1",
+            side=OrderSide.BUY, order_type=OrderType.LIMIT, size=5.0, price=0.50,
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.FILLED

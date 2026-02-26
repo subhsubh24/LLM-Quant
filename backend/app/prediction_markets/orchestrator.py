@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 class KellyConfig:
     """Configuration for Kelly criterion sizing."""
     fractional_kelly: float = 0.25   # Use quarter-Kelly (conservative)
+    use_monte_carlo: bool = True     # Use Monte Carlo Kelly when historical data available
     min_bet_usd: float = 1.0        # Don't place orders smaller than this
     max_bet_usd: float = 50.0       # Hard cap per position
     min_edge: float = 0.03          # Don't trade edges below 3%
@@ -139,9 +140,13 @@ def size_from_scan_result(
     result: ScanResult,
     bankroll: float,
     config: KellyConfig,
+    mc_kelly: Optional["MonteCarloKelly"] = None,
 ) -> Tuple[float, float]:
     """
     Calculate bet size from a scan result.
+
+    Uses Monte Carlo Kelly when historical trade data is available,
+    otherwise falls back to deterministic fractional Kelly.
 
     Returns:
         (bet_size_usd, num_contracts)
@@ -150,7 +155,8 @@ def size_from_scan_result(
     market_price = result.entry_price
     win_probability = market_price + result.edge
 
-    bet_usd = kelly_size(
+    # Deterministic Kelly first (always computed)
+    naive_bet_usd = kelly_size(
         edge=result.edge,
         confidence=result.confidence,
         win_probability=win_probability,
@@ -158,14 +164,37 @@ def size_from_scan_result(
         config=config,
     )
 
-    if bet_usd <= 0:
+    if naive_bet_usd <= 0:
         return 0.0, 0.0
+
+    # Monte Carlo Kelly adjustment (when enabled + historical data available)
+    bet_usd = naive_bet_usd
+    if config.use_monte_carlo and mc_kelly is not None:
+        naive_fraction = naive_bet_usd / bankroll if bankroll > 0 else 0
+        mc_bet, mc_diag = mc_kelly.compute_size(
+            strategy=result.strategy,
+            naive_kelly_fraction=naive_fraction,
+            bankroll=bankroll,
+        )
+        if mc_bet > 0:
+            bet_usd = mc_bet
+            logger.debug(
+                f"[MC-KELLY] {result.strategy}: naive=${naive_bet_usd:.2f} → "
+                f"mc=${mc_bet:.2f} (method={mc_diag.get('method')})"
+            )
 
     # Convert USD to contracts
     price = market_price if market_price > 0 else 0.50
     num_contracts = bet_usd / price
 
     return bet_usd, round(num_contracts, 1)
+
+
+# Type import for MC Kelly (avoids circular imports at module level)
+try:
+    from .quant_models import MonteCarloKelly
+except ImportError:
+    MonteCarloKelly = None
 
 
 # ============================================================
