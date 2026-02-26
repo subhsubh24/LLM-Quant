@@ -1,0 +1,903 @@
+"""
+Order Execution Layer for Prediction Markets.
+
+Supports:
+- Polymarket: via py-clob-client (Polygon/CLOB, wallet-based auth)
+- Kalshi: via REST API (API key + RSA signature auth)
+
+Both exchanges support limit and market orders.
+All execution goes through a unified interface so strategies don't
+need to know which exchange they're trading on.
+
+IMPORTANT: Start with dry_run=True to validate logic before real money.
+"""
+
+import hashlib
+import hmac
+import json
+import logging
+import time
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+import requests
+
+from .polymarket_client import (
+    CLOB_API,
+    Market,
+    OrderBook,
+    Outcome,
+    PolymarketClient,
+)
+from .kalshi_client import KalshiClient
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Shared Types
+# ============================================================
+
+class Exchange(Enum):
+    POLYMARKET = "polymarket"
+    KALSHI = "kalshi"
+
+
+class OrderSide(Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class OrderType(Enum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+    GTC = "GTC"  # Good til cancelled (Polymarket)
+    FOK = "FOK"  # Fill or kill
+
+
+class OrderStatus(Enum):
+    PENDING = "pending"
+    OPEN = "open"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+@dataclass
+class OrderRequest:
+    """Request to place an order on a prediction market."""
+    exchange: Exchange
+    market_id: str           # Polymarket condition_id or Kalshi ticker
+    token_id: str            # Polymarket token_id or Kalshi ticker
+    side: OrderSide
+    order_type: OrderType
+    size: float              # Number of contracts
+    price: Optional[float]   # Limit price (0.01 - 0.99). None for market orders
+    strategy: str = ""       # Strategy that generated this order
+    scan_result_id: str = "" # Link back to the scan result
+
+    @property
+    def notional(self) -> float:
+        """Estimated cost in USD."""
+        p = self.price if self.price else 0.50
+        return self.size * p
+
+
+@dataclass
+class OrderResult:
+    """Result of an order placement attempt."""
+    order_id: str
+    exchange: Exchange
+    market_id: str
+    token_id: str
+    side: OrderSide
+    order_type: OrderType
+    size: float
+    price: Optional[float]
+    status: OrderStatus
+    filled_size: float = 0.0
+    filled_price: float = 0.0
+    fees: float = 0.0
+    error: Optional[str] = None
+    raw_response: Dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def is_success(self) -> bool:
+        return self.status in (OrderStatus.OPEN, OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED)
+
+    @property
+    def net_cost(self) -> float:
+        """Total cost including fees."""
+        return self.filled_size * self.filled_price + self.fees
+
+
+@dataclass
+class Position:
+    """A live position on an exchange."""
+    exchange: Exchange
+    market_id: str
+    token_id: str
+    market_question: str
+    outcome_label: str
+    side: str              # "long" or "short"
+    size: float            # Number of contracts held
+    avg_entry_price: float
+    current_price: float
+    unrealized_pnl: float
+    realized_pnl: float
+    strategy: str = ""
+    opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def market_value(self) -> float:
+        return self.size * self.current_price
+
+    @property
+    def cost_basis(self) -> float:
+        return self.size * self.avg_entry_price
+
+    @property
+    def total_pnl(self) -> float:
+        return self.unrealized_pnl + self.realized_pnl
+
+
+# ============================================================
+# Polymarket Executor
+# ============================================================
+
+class PolymarketExecutor:
+    """
+    Order execution for Polymarket via the CLOB API.
+
+    Authentication requires:
+    - A Polygon wallet (private key)
+    - API key + secret + passphrase from Polymarket
+
+    For read-only operations, no auth is needed.
+    For order placement, set credentials via environment variables:
+        POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE, POLYMARKET_PRIVATE_KEY
+    """
+
+    def __init__(
+        self,
+        api_key: str = "",
+        api_secret: str = "",
+        passphrase: str = "",
+        private_key: str = "",
+        funder: str = "",
+    ):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.passphrase = passphrase
+        self.private_key = private_key
+        self.funder = funder
+        self._client = None  # Lazy py-clob-client ClobClient
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "LLM-Quant/1.0",
+            "Accept": "application/json",
+        })
+
+    @property
+    def is_authenticated(self) -> bool:
+        return bool(self.api_key and self.api_secret and self.passphrase)
+
+    def _get_clob_client(self):
+        """Lazy-init py-clob-client if available."""
+        if self._client is not None:
+            return self._client
+
+        if not self.is_authenticated:
+            raise RuntimeError(
+                "Polymarket auth not configured. Set POLYMARKET_API_KEY, "
+                "POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE env vars."
+            )
+
+        try:
+            from py_clob_client.client import ClobClient
+            from py_clob_client.clob_types import ApiCreds
+
+            creds = ApiCreds(
+                api_key=self.api_key,
+                api_secret=self.api_secret,
+                api_passphrase=self.passphrase,
+            )
+            self._client = ClobClient(
+                host=CLOB_API,
+                chain_id=137,  # Polygon mainnet
+                key=self.private_key if self.private_key else None,
+                creds=creds,
+                funder=self.funder if self.funder else None,
+            )
+            logger.info("Polymarket CLOB client initialized")
+            return self._client
+        except ImportError:
+            raise RuntimeError(
+                "py-clob-client not installed. Run: pip install py-clob-client"
+            )
+
+    def _build_auth_headers(self, method: str, path: str, body: str = "") -> dict:
+        """Build L2 authentication headers for CLOB API."""
+        timestamp = str(int(time.time()))
+        message = timestamp + method.upper() + path + body
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            message.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        return {
+            "POLY_API_KEY": self.api_key,
+            "POLY_SIGNATURE": signature,
+            "POLY_TIMESTAMP": timestamp,
+            "POLY_PASSPHRASE": self.passphrase,
+        }
+
+    def place_order(self, req: OrderRequest) -> OrderResult:
+        """
+        Place an order on Polymarket.
+
+        Uses py-clob-client if available, falls back to raw CLOB API.
+        """
+        try:
+            client = self._get_clob_client()
+        except RuntimeError:
+            client = None
+
+        if client is not None:
+            return self._place_via_clob_client(client, req)
+        else:
+            return self._place_via_rest(req)
+
+    def _place_via_clob_client(self, client, req: OrderRequest) -> OrderResult:
+        """Place order using py-clob-client library."""
+        try:
+            from py_clob_client.order_builder.constants import BUY, SELL
+
+            side_const = BUY if req.side == OrderSide.BUY else SELL
+
+            order_args = {
+                "token_id": req.token_id,
+                "price": req.price if req.price else 0.50,
+                "size": req.size,
+                "side": side_const,
+            }
+
+            if req.order_type == OrderType.GTC:
+                order_args["expiration"] = 0  # GTC = no expiration
+            elif req.order_type == OrderType.FOK:
+                order_args["order_type"] = "FOK"
+
+            signed_order = client.create_and_sign_order(order_args)
+            resp = client.post_order(signed_order)
+
+            order_id = resp.get("orderID", resp.get("id", str(uuid.uuid4())))
+            status = OrderStatus.OPEN
+            if resp.get("status") == "matched":
+                status = OrderStatus.FILLED
+
+            return OrderResult(
+                order_id=order_id,
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=status,
+                filled_size=float(resp.get("matchedAmount", 0)),
+                filled_price=req.price or 0.50,
+                raw_response=resp,
+            )
+        except Exception as e:
+            logger.error(f"Polymarket order failed: {e}")
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error=str(e),
+            )
+
+    def _place_via_rest(self, req: OrderRequest) -> OrderResult:
+        """Place order using raw CLOB REST API (fallback)."""
+        if not self.is_authenticated:
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error="Polymarket credentials not configured",
+            )
+
+        path = "/order"
+        body = json.dumps({
+            "tokenID": req.token_id,
+            "price": str(req.price or 0.50),
+            "size": str(req.size),
+            "side": req.side.value,
+            "type": "GTC" if req.order_type == OrderType.GTC else "FOK",
+        })
+
+        headers = self._build_auth_headers("POST", path, body)
+        headers["Content-Type"] = "application/json"
+
+        try:
+            resp = self.session.post(
+                f"{CLOB_API}{path}",
+                data=body,
+                headers=headers,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            return OrderResult(
+                order_id=data.get("orderID", str(uuid.uuid4())),
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.OPEN,
+                raw_response=data,
+            )
+        except requests.RequestException as e:
+            logger.error(f"Polymarket REST order failed: {e}")
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error=str(e),
+            )
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open order."""
+        try:
+            client = self._get_clob_client()
+            resp = client.cancel(order_id)
+            return resp.get("canceled", False) or resp.get("success", False)
+        except Exception as e:
+            logger.error(f"Polymarket cancel failed: {e}")
+            return False
+
+    def get_open_orders(self) -> List[dict]:
+        """Get all open orders."""
+        try:
+            client = self._get_clob_client()
+            return client.get_orders() or []
+        except Exception as e:
+            logger.error(f"Polymarket get_orders failed: {e}")
+            return []
+
+    def get_balances(self) -> Dict[str, float]:
+        """Get USDC balance on Polygon."""
+        try:
+            client = self._get_clob_client()
+            balance = client.get_balance_allowance()
+            return {"USDC": float(balance.get("balance", 0)) / 1e6}
+        except Exception as e:
+            logger.error(f"Polymarket balance check failed: {e}")
+            return {"USDC": 0.0}
+
+
+# ============================================================
+# Kalshi Executor
+# ============================================================
+
+class KalshiExecutor:
+    """
+    Order execution for Kalshi via REST API.
+
+    Authentication: API key + RSA private key for request signing.
+    Get credentials at: https://kalshi.com/account/api-keys
+
+    Environment variables:
+        KALSHI_API_KEY_ID, KALSHI_RSA_PRIVATE_KEY (PEM format or file path)
+    """
+
+    BASE_URL = "https://trading-api.kalshi.com/trade-api/v2"
+
+    def __init__(
+        self,
+        api_key_id: str = "",
+        private_key_pem: str = "",
+    ):
+        self.api_key_id = api_key_id
+        self.private_key_pem = private_key_pem
+        self._member_id: Optional[str] = None
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "LLM-Quant/1.0",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        })
+
+    @property
+    def is_authenticated(self) -> bool:
+        return bool(self.api_key_id and self.private_key_pem)
+
+    def _sign_request(self, method: str, path: str, body: str = "") -> dict:
+        """
+        Sign a Kalshi API request using RSA-PSS.
+
+        Kalshi uses: timestamp + method + path + body signed with RSA private key.
+        """
+        if not self.is_authenticated:
+            return {}
+
+        timestamp = str(int(time.time() * 1000))
+        message = timestamp + method.upper() + path + body
+
+        try:
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import padding
+
+            # Load private key
+            if self.private_key_pem.startswith("-----"):
+                key_data = self.private_key_pem.encode()
+            else:
+                # Treat as file path
+                with open(self.private_key_pem, "rb") as f:
+                    key_data = f.read()
+
+            private_key = serialization.load_pem_private_key(key_data, password=None)
+            signature = private_key.sign(
+                message.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH,
+                ),
+                hashes.SHA256(),
+            )
+
+            import base64
+            return {
+                "KALSHI-ACCESS-KEY": self.api_key_id,
+                "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
+                "KALSHI-ACCESS-TIMESTAMP": timestamp,
+            }
+        except ImportError:
+            logger.error("cryptography package required for Kalshi auth. pip install cryptography")
+            return {}
+        except Exception as e:
+            logger.error(f"Kalshi request signing failed: {e}")
+            return {}
+
+    def _authenticated_request(
+        self, method: str, path: str, body: Optional[dict] = None
+    ) -> Optional[dict]:
+        """Make an authenticated request to Kalshi API."""
+        body_str = json.dumps(body) if body else ""
+        headers = self._sign_request(method, path, body_str)
+        if not headers:
+            return None
+
+        url = f"{self.BASE_URL}{path}"
+        try:
+            if method == "GET":
+                resp = self.session.get(url, headers=headers, timeout=15)
+            elif method == "POST":
+                resp = self.session.post(url, data=body_str, headers=headers, timeout=15)
+            elif method == "DELETE":
+                resp = self.session.delete(url, headers=headers, timeout=15)
+            else:
+                return None
+
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as e:
+            logger.error(f"Kalshi API request failed: {e}")
+            return None
+
+    def place_order(self, req: OrderRequest) -> OrderResult:
+        """Place an order on Kalshi."""
+        if not self.is_authenticated:
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.KALSHI,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error="Kalshi credentials not configured",
+            )
+
+        # Kalshi uses cents for prices (1-99)
+        price_cents = int((req.price or 0.50) * 100)
+        price_cents = max(1, min(99, price_cents))
+
+        # Map side: Kalshi uses "yes"/"no" instead of "buy"/"sell"
+        kalshi_side = "yes" if req.side == OrderSide.BUY else "no"
+
+        order_body = {
+            "ticker": req.market_id,
+            "client_order_id": str(uuid.uuid4()),
+            "type": "limit",
+            "action": "buy",
+            "side": kalshi_side,
+            "count": int(req.size),
+            "yes_price": price_cents if kalshi_side == "yes" else None,
+            "no_price": price_cents if kalshi_side == "no" else None,
+        }
+        # Remove None values
+        order_body = {k: v for k, v in order_body.items() if v is not None}
+
+        path = "/portfolio/orders"
+        data = self._authenticated_request("POST", path, order_body)
+
+        if data and "order" in data:
+            order = data["order"]
+            status_map = {
+                "resting": OrderStatus.OPEN,
+                "canceled": OrderStatus.CANCELLED,
+                "executed": OrderStatus.FILLED,
+                "pending": OrderStatus.PENDING,
+            }
+            return OrderResult(
+                order_id=order.get("order_id", str(uuid.uuid4())),
+                exchange=Exchange.KALSHI,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=status_map.get(order.get("status", ""), OrderStatus.PENDING),
+                filled_size=float(order.get("count_filled", 0)),
+                filled_price=float(order.get("price_filled", 0)) / 100,
+                raw_response=data,
+            )
+        else:
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.KALSHI,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error="Order placement failed — check credentials and market status",
+            )
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open order."""
+        data = self._authenticated_request("DELETE", f"/portfolio/orders/{order_id}")
+        return data is not None
+
+    def get_open_orders(self) -> List[dict]:
+        """Get all open orders."""
+        data = self._authenticated_request("GET", "/portfolio/orders?status=resting")
+        if data and "orders" in data:
+            return data["orders"]
+        return []
+
+    def get_positions(self) -> List[dict]:
+        """Get current positions."""
+        data = self._authenticated_request("GET", "/portfolio/positions")
+        if data and "market_positions" in data:
+            return data["market_positions"]
+        return []
+
+    def get_balances(self) -> Dict[str, float]:
+        """Get account balance."""
+        data = self._authenticated_request("GET", "/portfolio/balance")
+        if data:
+            return {"USD": float(data.get("balance", 0)) / 100}
+        return {"USD": 0.0}
+
+
+# ============================================================
+# Unified Executor (routes both exchanges through one interface)
+# ============================================================
+
+class PredictionMarketExecutor:
+    """
+    Unified order execution across Polymarket and Kalshi.
+
+    Handles:
+    - Order routing based on exchange
+    - Position tracking (in-memory + DB persistence)
+    - Risk checks (max position size, max portfolio exposure)
+    - Dry-run mode for paper trading
+    """
+
+    def __init__(
+        self,
+        polymarket: Optional[PolymarketExecutor] = None,
+        kalshi: Optional[KalshiExecutor] = None,
+        dry_run: bool = True,
+        max_position_usd: float = 50.0,
+        max_portfolio_usd: float = 500.0,
+    ):
+        self.polymarket = polymarket or PolymarketExecutor()
+        self.kalshi = kalshi or KalshiExecutor()
+        self.dry_run = dry_run
+        self.max_position_usd = max_position_usd
+        self.max_portfolio_usd = max_portfolio_usd
+
+        # In-memory state
+        self.positions: Dict[str, Position] = {}  # token_id -> Position
+        self.order_history: List[OrderResult] = []
+        self.total_fees: float = 0.0
+
+    @property
+    def total_exposure(self) -> float:
+        """Total USD exposed across all positions."""
+        return sum(p.market_value for p in self.positions.values())
+
+    @property
+    def total_pnl(self) -> float:
+        """Total P&L across all positions."""
+        return sum(p.total_pnl for p in self.positions.values())
+
+    def _check_risk(self, req: OrderRequest) -> Optional[str]:
+        """Pre-trade risk checks. Returns error message or None if OK."""
+        notional = req.notional
+
+        if notional > self.max_position_usd:
+            return f"Order notional ${notional:.2f} exceeds max position ${self.max_position_usd:.2f}"
+
+        if self.total_exposure + notional > self.max_portfolio_usd:
+            return (
+                f"Portfolio exposure would be ${self.total_exposure + notional:.2f}, "
+                f"exceeds max ${self.max_portfolio_usd:.2f}"
+            )
+
+        return None
+
+    def execute(self, req: OrderRequest) -> OrderResult:
+        """
+        Execute an order with risk checks.
+
+        In dry_run mode, simulates the fill without touching any exchange.
+        """
+        # Risk check
+        risk_error = self._check_risk(req)
+        if risk_error:
+            logger.warning(f"Risk check failed: {risk_error}")
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=req.exchange,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error=f"Risk check: {risk_error}",
+            )
+
+        if self.dry_run:
+            result = self._simulate_fill(req)
+        elif req.exchange == Exchange.POLYMARKET:
+            result = self.polymarket.place_order(req)
+        elif req.exchange == Exchange.KALSHI:
+            result = self.kalshi.place_order(req)
+        else:
+            result = OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=req.exchange,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error=f"Unknown exchange: {req.exchange}",
+            )
+
+        # Track result
+        self.order_history.append(result)
+        if result.is_success:
+            self._update_position(req, result)
+            self.total_fees += result.fees
+
+        return result
+
+    def _simulate_fill(self, req: OrderRequest) -> OrderResult:
+        """Simulate a fill for dry-run / paper trading mode."""
+        fill_price = req.price or 0.50
+
+        # Simulate realistic slippage: 0.5% for market orders
+        if req.order_type == OrderType.MARKET:
+            slippage = 0.005
+            if req.side == OrderSide.BUY:
+                fill_price = min(fill_price * (1 + slippage), 0.99)
+            else:
+                fill_price = max(fill_price * (1 - slippage), 0.01)
+
+        # Simulate fees (Polymarket ~2%, Kalshi ~7% on settlement)
+        if req.exchange == Exchange.POLYMARKET:
+            fees = req.size * fill_price * 0.02
+        else:
+            fees = req.size * fill_price * 0.07
+
+        return OrderResult(
+            order_id=f"sim_{uuid.uuid4().hex[:12]}",
+            exchange=req.exchange,
+            market_id=req.market_id,
+            token_id=req.token_id,
+            side=req.side,
+            order_type=req.order_type,
+            size=req.size,
+            price=req.price,
+            status=OrderStatus.FILLED,
+            filled_size=req.size,
+            filled_price=fill_price,
+            fees=fees,
+            raw_response={"simulated": True, "dry_run": True},
+        )
+
+    def _update_position(self, req: OrderRequest, result: OrderResult):
+        """Update in-memory position after a fill."""
+        key = result.token_id
+
+        if key in self.positions:
+            pos = self.positions[key]
+            if req.side == OrderSide.BUY:
+                # Add to position
+                total_cost = pos.avg_entry_price * pos.size + result.filled_price * result.filled_size
+                pos.size += result.filled_size
+                pos.avg_entry_price = total_cost / pos.size if pos.size > 0 else 0
+            else:
+                # Reduce position
+                pnl = (result.filled_price - pos.avg_entry_price) * result.filled_size
+                pos.realized_pnl += pnl
+                pos.size -= result.filled_size
+                if pos.size <= 0.001:
+                    # Position closed
+                    del self.positions[key]
+                    return
+            pos.current_price = result.filled_price
+            pos.unrealized_pnl = (pos.current_price - pos.avg_entry_price) * pos.size
+            pos.updated_at = datetime.now(timezone.utc)
+        else:
+            # New position
+            self.positions[key] = Position(
+                exchange=req.exchange,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                market_question="",
+                outcome_label="",
+                side="long" if req.side == OrderSide.BUY else "short",
+                size=result.filled_size,
+                avg_entry_price=result.filled_price,
+                current_price=result.filled_price,
+                unrealized_pnl=0.0,
+                realized_pnl=0.0,
+                strategy=req.strategy,
+            )
+
+    def cancel_order(self, order_id: str, exchange: Exchange) -> bool:
+        """Cancel an order on the specified exchange."""
+        if self.dry_run:
+            return True
+        if exchange == Exchange.POLYMARKET:
+            return self.polymarket.cancel_order(order_id)
+        elif exchange == Exchange.KALSHI:
+            return self.kalshi.cancel_order(order_id)
+        return False
+
+    def get_portfolio_summary(self) -> dict:
+        """Get a summary of all positions and P&L."""
+        positions_list = []
+        for pos in self.positions.values():
+            positions_list.append({
+                "exchange": pos.exchange.value,
+                "market_id": pos.market_id,
+                "token_id": pos.token_id,
+                "side": pos.side,
+                "size": pos.size,
+                "avg_entry_price": pos.avg_entry_price,
+                "current_price": pos.current_price,
+                "market_value": pos.market_value,
+                "unrealized_pnl": pos.unrealized_pnl,
+                "realized_pnl": pos.realized_pnl,
+                "total_pnl": pos.total_pnl,
+                "strategy": pos.strategy,
+                "opened_at": pos.opened_at.isoformat(),
+            })
+
+        return {
+            "total_positions": len(self.positions),
+            "total_exposure": self.total_exposure,
+            "total_pnl": self.total_pnl,
+            "total_fees": self.total_fees,
+            "total_orders": len(self.order_history),
+            "dry_run": self.dry_run,
+            "positions": positions_list,
+        }
+
+    def get_order_history(self, limit: int = 50) -> List[dict]:
+        """Get recent order history."""
+        return [
+            {
+                "order_id": o.order_id,
+                "exchange": o.exchange.value,
+                "market_id": o.market_id,
+                "token_id": o.token_id,
+                "side": o.side.value,
+                "order_type": o.order_type.value,
+                "size": o.size,
+                "price": o.price,
+                "status": o.status.value,
+                "filled_size": o.filled_size,
+                "filled_price": o.filled_price,
+                "fees": o.fees,
+                "error": o.error,
+                "timestamp": o.timestamp.isoformat(),
+            }
+            for o in reversed(self.order_history[-limit:])
+        ]
+
+
+# ============================================================
+# Singleton accessor
+# ============================================================
+
+_executor: Optional[PredictionMarketExecutor] = None
+
+
+def get_executor(
+    dry_run: bool = True,
+    max_position_usd: float = 50.0,
+    max_portfolio_usd: float = 500.0,
+) -> PredictionMarketExecutor:
+    """Get or create the global prediction market executor."""
+    global _executor
+    if _executor is None:
+        import os
+
+        poly = PolymarketExecutor(
+            api_key=os.environ.get("POLYMARKET_API_KEY", ""),
+            api_secret=os.environ.get("POLYMARKET_API_SECRET", ""),
+            passphrase=os.environ.get("POLYMARKET_PASSPHRASE", ""),
+            private_key=os.environ.get("POLYMARKET_PRIVATE_KEY", ""),
+            funder=os.environ.get("POLYMARKET_FUNDER", ""),
+        )
+        kalshi = KalshiExecutor(
+            api_key_id=os.environ.get("KALSHI_API_KEY_ID", ""),
+            private_key_pem=os.environ.get("KALSHI_RSA_PRIVATE_KEY", ""),
+        )
+        _executor = PredictionMarketExecutor(
+            polymarket=poly,
+            kalshi=kalshi,
+            dry_run=dry_run,
+            max_position_usd=max_position_usd,
+            max_portfolio_usd=max_portfolio_usd,
+        )
+    return _executor

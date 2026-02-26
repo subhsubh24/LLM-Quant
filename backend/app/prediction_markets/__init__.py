@@ -16,4 +16,20 @@ Strategies:
 - Market making (two-sided liquidity, capture spread)
 - Flash crash detection (crypto short-duration markets)
 - Whale copy trading (follow profitable wallets)
+- Cross-exchange arbitrage (Polymarket vs Kalshi)
+
+Execution:
+- Order execution layer (Polymarket CLOB + Kalshi API)
+- Unified executor with risk checks and dry-run mode
+
+Persistence:
+- PredictionPortfolio, PredictionPosition, PredictionOrder (SQLModel)
+- PnL snapshots for equity curve tracking
+- WhaleActivity for on-chain whale tracking
+- PredictionPriceHistory for WebSocket price sampling
+
+Real-time:
+- WebSocket feeds for Polymarket and Kalshi
+- Periodic price sampling to DB
+- On-chain whale indexer (Polygon RPC)
 """

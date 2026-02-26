@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import date, datetime, timedelta
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -4051,3 +4052,348 @@ async def list_kalshi_events(limit: int = 50, status: Optional[str] = "open"):
     except Exception as e:
         logger.error(f"Kalshi events error: {e}")
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# ============ Prediction Markets — Execution ============
+
+_prediction_executor = None
+
+
+def _get_prediction_executor():
+    global _prediction_executor
+    if _prediction_executor is None:
+        from ..prediction_markets.execution import get_executor
+        _prediction_executor = get_executor(dry_run=True)
+    return _prediction_executor
+
+
+class PlaceOrderRequest(BaseModel):
+    exchange: str = "polymarket"  # "polymarket" or "kalshi"
+    market_id: str
+    token_id: str
+    side: str = "BUY"            # "BUY" or "SELL"
+    order_type: str = "LIMIT"    # "MARKET", "LIMIT", "GTC", "FOK"
+    size: float = 10.0           # Number of contracts
+    price: Optional[float] = None  # Limit price (0.01-0.99)
+    strategy: str = ""
+
+
+@router.post("/prediction-markets/execute")
+async def execute_prediction_order(req: PlaceOrderRequest):
+    """
+    Execute an order on a prediction market.
+
+    Runs through risk checks. In dry_run mode (default), simulates the fill.
+    """
+    from ..prediction_markets.execution import (
+        Exchange, OrderRequest, OrderSide, OrderType,
+    )
+
+    executor = _get_prediction_executor()
+
+    try:
+        exchange = Exchange(req.exchange)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: {req.exchange}")
+
+    try:
+        side = OrderSide(req.side.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid side: {req.side}")
+
+    try:
+        order_type = OrderType(req.order_type.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid order type: {req.order_type}")
+
+    order_req = OrderRequest(
+        exchange=exchange,
+        market_id=req.market_id,
+        token_id=req.token_id,
+        side=side,
+        order_type=order_type,
+        size=req.size,
+        price=req.price,
+        strategy=req.strategy,
+    )
+
+    result = executor.execute(order_req)
+
+    # Persist to DB
+    try:
+        from ..db.database import get_session
+        from ..prediction_markets.models import PredictionOrder
+
+        with get_session() as session:
+            db_order = PredictionOrder(
+                portfolio_id=1,  # Default portfolio
+                order_id=result.order_id,
+                exchange=result.exchange.value,
+                market_id=result.market_id,
+                token_id=result.token_id,
+                side=result.side.value,
+                order_type=result.order_type.value,
+                size=result.size,
+                limit_price=result.price,
+                status=result.status.value,
+                filled_size=result.filled_size,
+                filled_price=result.filled_price,
+                fees=result.fees,
+                strategy=req.strategy,
+                error=result.error,
+                is_dry_run=executor.dry_run,
+                raw_response_json=json.dumps(result.raw_response) if result.raw_response else None,
+            )
+            session.add(db_order)
+    except Exception as e:
+        logger.warning(f"Failed to persist order to DB: {e}")
+
+    return {
+        "order_id": result.order_id,
+        "exchange": result.exchange.value,
+        "market_id": result.market_id,
+        "side": result.side.value,
+        "order_type": result.order_type.value,
+        "size": result.size,
+        "price": result.price,
+        "status": result.status.value,
+        "filled_size": result.filled_size,
+        "filled_price": result.filled_price,
+        "fees": result.fees,
+        "error": result.error,
+        "is_success": result.is_success,
+        "dry_run": executor.dry_run,
+    }
+
+
+@router.get("/prediction-markets/portfolio")
+async def get_prediction_portfolio():
+    """Get prediction market portfolio summary with all positions and P&L."""
+    executor = _get_prediction_executor()
+    return executor.get_portfolio_summary()
+
+
+@router.get("/prediction-markets/orders")
+async def get_prediction_orders(limit: int = 50):
+    """Get prediction market order history."""
+    executor = _get_prediction_executor()
+    return {"orders": executor.get_order_history(limit=limit)}
+
+
+@router.post("/prediction-markets/cancel/{order_id}")
+async def cancel_prediction_order(order_id: str, exchange: str = "polymarket"):
+    """Cancel an open prediction market order."""
+    from ..prediction_markets.execution import Exchange
+    executor = _get_prediction_executor()
+    try:
+        ex = Exchange(exchange)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: {exchange}")
+
+    success = executor.cancel_order(order_id, ex)
+    return {"order_id": order_id, "cancelled": success}
+
+
+# ============ Prediction Markets — WebSocket Feeds ============
+
+@router.get("/prediction-markets/feeds/status")
+async def get_prediction_feed_status():
+    """Get WebSocket feed connection status for prediction markets."""
+    from ..prediction_markets.websocket_feeds import get_feed_manager
+    manager = get_feed_manager()
+    return manager.get_status()
+
+
+@router.get("/prediction-markets/feeds/prices")
+async def get_prediction_live_prices():
+    """Get all live prices from WebSocket feeds."""
+    from ..prediction_markets.websocket_feeds import get_feed_manager
+    manager = get_feed_manager()
+    prices = manager.get_all_prices()
+    return {
+        "count": len(prices),
+        "prices": {
+            key: {
+                "exchange": p.exchange,
+                "market_id": p.market_id,
+                "token_id": p.token_id,
+                "outcome_label": p.outcome_label,
+                "price": p.price,
+                "bid": p.bid,
+                "ask": p.ask,
+                "spread": p.spread,
+                "midpoint": p.midpoint,
+                "volume_24h": p.volume_24h,
+                "last_trade_price": p.last_trade_price,
+                "data_age_seconds": p.data_age_seconds,
+            }
+            for key, p in prices.items()
+        },
+    }
+
+
+class SubscribeRequest(BaseModel):
+    exchange: str = "polymarket"
+    identifiers: List[str] = []  # token_ids for Polymarket, tickers for Kalshi
+
+
+@router.post("/prediction-markets/feeds/subscribe")
+async def subscribe_prediction_feeds(req: SubscribeRequest):
+    """Subscribe to real-time price updates for specific markets."""
+    from ..prediction_markets.websocket_feeds import get_feed_manager
+    manager = get_feed_manager()
+
+    if req.exchange == "polymarket":
+        await manager.subscribe_polymarket(req.identifiers)
+    elif req.exchange == "kalshi":
+        await manager.subscribe_kalshi(req.identifiers)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown exchange: {req.exchange}")
+
+    return {
+        "subscribed": len(req.identifiers),
+        "exchange": req.exchange,
+    }
+
+
+# ============ Prediction Markets — Whale Indexer ============
+
+@router.get("/prediction-markets/whales/recent")
+async def get_recent_whale_activity(limit: int = 50):
+    """Get recently detected whale trading activity on Polymarket."""
+    from ..prediction_markets.whale_indexer import get_whale_indexer
+    indexer = get_whale_indexer()
+    events = indexer.get_recent_events(limit=limit)
+    return {
+        "count": len(events),
+        "events": [
+            {
+                "tx_hash": e.tx_hash,
+                "block_number": e.block_number,
+                "wallet_address": e.wallet_address,
+                "wallet_label": e.wallet_label,
+                "token_id": e.token_id,
+                "side": e.side,
+                "size": e.size,
+                "estimated_price": e.estimated_price,
+                "value_usd": e.value_usd,
+                "is_significant": e.is_significant,
+                "timestamp": e.timestamp.isoformat(),
+            }
+            for e in events
+        ],
+    }
+
+
+@router.get("/prediction-markets/whales/leaderboard")
+async def get_whale_leaderboard():
+    """Get whale leaderboard sorted by total volume."""
+    from ..prediction_markets.whale_indexer import get_whale_indexer
+    indexer = get_whale_indexer()
+    return {"leaderboard": indexer.get_whale_leaderboard()}
+
+
+@router.post("/prediction-markets/whales/scan")
+async def trigger_whale_scan(blocks: int = 50):
+    """Manually trigger a whale scan of recent Polygon blocks."""
+    from ..prediction_markets.whale_indexer import get_whale_indexer
+    indexer = get_whale_indexer()
+    try:
+        events = await indexer.scan_recent_blocks(blocks=blocks)
+        return {
+            "blocks_scanned": blocks,
+            "events_found": len(events),
+            "significant_events": len([e for e in events if e.is_significant]),
+            "status": indexer.get_status(),
+        }
+    except Exception as e:
+        logger.error(f"Whale scan error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/prediction-markets/whales/status")
+async def get_whale_indexer_status():
+    """Get whale indexer status."""
+    from ..prediction_markets.whale_indexer import get_whale_indexer
+    indexer = get_whale_indexer()
+    return indexer.get_status()
+
+
+# ============ Prediction Markets — Price History ============
+
+@router.get("/prediction-markets/price-history/{token_id}")
+async def get_prediction_price_history(
+    token_id: str,
+    limit: int = 100,
+    exchange: str = "polymarket",
+):
+    """Get price history for a prediction market outcome token."""
+    from ..db.database import get_session
+    from ..prediction_markets.models import PredictionPriceHistory
+    from sqlmodel import select
+
+    with get_session() as session:
+        statement = (
+            select(PredictionPriceHistory)
+            .where(PredictionPriceHistory.token_id == token_id)
+            .where(PredictionPriceHistory.exchange == exchange)
+            .order_by(PredictionPriceHistory.sampled_at.desc())
+            .limit(limit)
+        )
+        results = session.exec(statement).all()
+
+    return {
+        "token_id": token_id,
+        "exchange": exchange,
+        "count": len(results),
+        "history": [
+            {
+                "price": r.price,
+                "bid": r.bid,
+                "ask": r.ask,
+                "spread": r.spread,
+                "volume_24h": r.volume_24h,
+                "sampled_at": r.sampled_at.isoformat(),
+            }
+            for r in reversed(results)  # Chronological order
+        ],
+    }
+
+
+# ============ Prediction Markets — P&L Snapshots ============
+
+@router.get("/prediction-markets/pnl-history")
+async def get_prediction_pnl_history(portfolio_id: int = 1, limit: int = 200):
+    """Get P&L snapshot history for equity curve charting."""
+    from ..db.database import get_session
+    from ..prediction_markets.models import PredictionPnLSnapshot
+    from sqlmodel import select
+
+    with get_session() as session:
+        statement = (
+            select(PredictionPnLSnapshot)
+            .where(PredictionPnLSnapshot.portfolio_id == portfolio_id)
+            .order_by(PredictionPnLSnapshot.snapshot_at.desc())
+            .limit(limit)
+        )
+        results = session.exec(statement).all()
+
+    return {
+        "portfolio_id": portfolio_id,
+        "count": len(results),
+        "snapshots": [
+            {
+                "total_value_usd": s.total_value_usd,
+                "cash_usd": s.cash_usd,
+                "positions_value_usd": s.positions_value_usd,
+                "realized_pnl": s.realized_pnl,
+                "unrealized_pnl": s.unrealized_pnl,
+                "total_fees": s.total_fees,
+                "num_positions": s.num_positions,
+                "polymarket_value": s.polymarket_value,
+                "kalshi_value": s.kalshi_value,
+                "snapshot_at": s.snapshot_at.isoformat(),
+            }
+            for s in reversed(results)
+        ],
+    }

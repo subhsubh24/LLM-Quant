@@ -20,6 +20,9 @@ engine = create_engine(
 
 def init_db():
     """Initialize database and create all tables."""
+    # Import all model modules so SQLModel registers their tables
+    from ..db import models as _db_models  # noqa: F401 — equity/paper trading models
+    from ..prediction_markets import models as _pm_models  # noqa: F401 — prediction market models
     SQLModel.metadata.create_all(engine)
 
 
