@@ -4397,3 +4397,127 @@ async def get_prediction_pnl_history(portfolio_id: int = 1, limit: int = 200):
             for s in reversed(results)
         ],
     }
+
+
+# ============ Prediction Markets — Orchestrator ============
+
+_orchestrator_instance = None
+
+
+def _get_orchestrator():
+    global _orchestrator_instance
+    if _orchestrator_instance is None:
+        from ..prediction_markets.orchestrator import PredictionMarketOrchestrator
+        _orchestrator_instance = PredictionMarketOrchestrator(
+            scanner=_get_prediction_scanner(),
+            executor=_get_prediction_executor(),
+        )
+    return _orchestrator_instance
+
+
+@router.post("/prediction-markets/bot/start")
+async def start_prediction_bot(
+    scan_interval_sec: int = 120,
+    dry_run: bool = True,
+):
+    """
+    Start the prediction market trading bot.
+
+    The bot runs scan → Kelly size → execute → persist in a loop.
+    Default: dry_run=True (paper trading).
+    """
+    orchestrator = _get_orchestrator()
+    if orchestrator._running:
+        return {"status": "already_running", **orchestrator.get_status()}
+
+    # Update executor dry_run setting
+    executor = _get_prediction_executor()
+    executor.dry_run = dry_run
+
+    orchestrator.scan_interval_sec = scan_interval_sec
+    orchestrator.scanner = _get_prediction_scanner()
+    orchestrator.executor = executor
+
+    await orchestrator.start()
+
+    return {
+        "status": "started",
+        "dry_run": dry_run,
+        "scan_interval_sec": scan_interval_sec,
+    }
+
+
+@router.post("/prediction-markets/bot/stop")
+async def stop_prediction_bot():
+    """Stop the prediction market trading bot."""
+    orchestrator = _get_orchestrator()
+    if not orchestrator._running:
+        return {"status": "not_running"}
+
+    await orchestrator.stop()
+    return {"status": "stopped", **orchestrator.get_status()}
+
+
+@router.get("/prediction-markets/bot/status")
+async def get_prediction_bot_status():
+    """Get full bot status: orchestrator, risk manager, portfolio, MTM."""
+    orchestrator = _get_orchestrator()
+    return orchestrator.get_status()
+
+
+@router.post("/prediction-markets/bot/scan-now")
+async def trigger_scan_and_execute():
+    """Manually trigger one scan-and-execute cycle."""
+    orchestrator = _get_orchestrator()
+    if not orchestrator.scanner:
+        orchestrator.scanner = _get_prediction_scanner()
+    if not orchestrator.executor:
+        orchestrator.executor = _get_prediction_executor()
+
+    result = await orchestrator.scan_and_execute()
+    return result
+
+
+# ============ Prediction Markets — Risk Manager ============
+
+@router.get("/prediction-markets/risk/status")
+async def get_risk_status():
+    """Get risk manager status (daily P&L, circuit breaker, limits)."""
+    orchestrator = _get_orchestrator()
+    return orchestrator.risk_manager.get_status()
+
+
+@router.post("/prediction-markets/risk/enable-strategy/{strategy_name}")
+async def enable_strategy(strategy_name: str):
+    """Re-enable a strategy that was auto-disabled by drawdown."""
+    orchestrator = _get_orchestrator()
+    orchestrator.risk_manager.enable_strategy(strategy_name)
+    return {"strategy": strategy_name, "enabled": True}
+
+
+class RiskConfigUpdate(BaseModel):
+    daily_loss_limit_usd: Optional[float] = None
+    max_portfolio_exposure_usd: Optional[float] = None
+    max_single_position_usd: Optional[float] = None
+    max_total_positions: Optional[int] = None
+    max_orders_per_minute: Optional[int] = None
+
+
+@router.post("/prediction-markets/risk/config")
+async def update_risk_config(req: RiskConfigUpdate):
+    """Update risk manager configuration."""
+    orchestrator = _get_orchestrator()
+    config = orchestrator.risk_manager.config
+
+    if req.daily_loss_limit_usd is not None:
+        config.daily_loss_limit_usd = req.daily_loss_limit_usd
+    if req.max_portfolio_exposure_usd is not None:
+        config.max_portfolio_exposure_usd = req.max_portfolio_exposure_usd
+    if req.max_single_position_usd is not None:
+        config.max_single_position_usd = req.max_single_position_usd
+    if req.max_total_positions is not None:
+        config.max_total_positions = req.max_total_positions
+    if req.max_orders_per_minute is not None:
+        config.max_orders_per_minute = req.max_orders_per_minute
+
+    return {"status": "updated", "config": orchestrator.risk_manager.get_status()}

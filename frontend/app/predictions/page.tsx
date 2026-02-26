@@ -358,7 +358,7 @@ const strategyLabels: Record<string, string> = {
 // ----------------------------------------------------------------
 
 export default function PredictionsPage() {
-  const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions">("scanner");
+  const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions" | "portfolio" | "whales" | "bot">("scanner");
   const [strategies, setStrategies] = useState(DEMO_STRATEGIES);
   const [scanning, setScanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -370,6 +370,19 @@ export default function PredictionsPage() {
   const [markets, setMarkets] = useState<PredictionMarket[]>(DEMO_MARKETS);
   const [exchangeFilter, setExchangeFilter] = useState<"all" | "polymarket" | "kalshi">("all");
   const streamRef = useRef<HTMLDivElement>(null);
+
+  // Bot state
+  const [botRunning, setBotRunning] = useState(false);
+  const [botStatus, setBotStatus] = useState<any>(null);
+  const [livePositions, setLivePositions] = useState<Position[]>([]);
+
+  // Portfolio / Equity curve
+  const [equityCurve, setEquityCurve] = useState<any[]>([]);
+  const [portfolioSummary, setPortfolioSummary] = useState<any>(null);
+
+  // Whale feed
+  const [whaleEvents, setWhaleEvents] = useState<any[]>([]);
+  const [whaleLeaderboard, setWhaleLeaderboard] = useState<any[]>([]);
 
   // Map API opportunity to frontend type
   const mapOpportunity = (opp: any, idx: number): Opportunity => ({
@@ -442,10 +455,107 @@ export default function PredictionsPage() {
     }
   };
 
+  // Fetch bot status
+  const fetchBotStatus = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/bot/status");
+      if (res.ok) {
+        const data = await res.json();
+        setBotStatus(data);
+        setBotRunning(data.running);
+        setIsLive(true);
+      }
+    } catch {}
+  };
+
+  // Fetch live positions from executor
+  const fetchPositions = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/portfolio");
+      if (res.ok) {
+        const data = await res.json();
+        setPortfolioSummary(data);
+        if (data.positions && data.positions.length > 0) {
+          setLivePositions(data.positions.map((p: any, i: number) => ({
+            id: String(i),
+            market: p.market_id,
+            outcome: p.token_id,
+            side: p.side === "long" ? "BUY" : "SELL",
+            entryPrice: p.avg_entry_price,
+            currentPrice: p.current_price,
+            size: p.market_value,
+            pnl: p.total_pnl,
+            strategy: p.strategy,
+            openedAt: p.opened_at ? new Date(p.opened_at).toLocaleTimeString() : "",
+          })));
+        }
+      }
+    } catch {}
+  };
+
+  // Fetch equity curve
+  const fetchEquityCurve = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/pnl-history?limit=200");
+      if (res.ok) {
+        const data = await res.json();
+        setEquityCurve(data.snapshots || []);
+      }
+    } catch {}
+  };
+
+  // Fetch whale data
+  const fetchWhaleData = async () => {
+    try {
+      const [eventsRes, leaderRes] = await Promise.all([
+        fetch("/api/prediction-markets/whales/recent?limit=20"),
+        fetch("/api/prediction-markets/whales/leaderboard"),
+      ]);
+      if (eventsRes.ok) {
+        const data = await eventsRes.json();
+        setWhaleEvents(data.events || []);
+      }
+      if (leaderRes.ok) {
+        const data = await leaderRes.json();
+        setWhaleLeaderboard(data.leaderboard || []);
+      }
+    } catch {}
+  };
+
+  // Start/stop bot
+  const toggleBot = async () => {
+    try {
+      if (botRunning) {
+        await fetch("/api/prediction-markets/bot/stop", { method: "POST" });
+        setBotRunning(false);
+      } else {
+        await fetch("/api/prediction-markets/bot/start", { method: "POST" });
+        setBotRunning(true);
+      }
+      await fetchBotStatus();
+    } catch {}
+  };
+
   // On mount: try to connect to live API
   useEffect(() => {
     fetchMarkets();
+    fetchBotStatus();
+    fetchPositions();
   }, []);
+
+  // Refresh data when tabs change
+  useEffect(() => {
+    if (activeTab === "portfolio") {
+      fetchPositions();
+      fetchEquityCurve();
+    } else if (activeTab === "whales") {
+      fetchWhaleData();
+    } else if (activeTab === "bot") {
+      fetchBotStatus();
+    } else if (activeTab === "positions") {
+      fetchPositions();
+    }
+  }, [activeTab]);
 
   // Auto-scan every 2 minutes when scanning is enabled
   useEffect(() => {
@@ -602,7 +712,7 @@ export default function PredictionsPage() {
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
-        {(["scanner", "markets", "positions"] as const).map((tab) => (
+        {(["scanner", "markets", "positions", "portfolio", "whales", "bot"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -614,7 +724,15 @@ export default function PredictionsPage() {
           >
             {tab === "scanner" && "Live Scanner"}
             {tab === "markets" && "Browse Markets"}
-            {tab === "positions" && `Positions (${totalPositions})`}
+            {tab === "positions" && `Positions (${livePositions.length || totalPositions})`}
+            {tab === "portfolio" && "Portfolio"}
+            {tab === "whales" && "Whale Feed"}
+            {tab === "bot" && (
+              <span className="flex items-center gap-1.5">
+                {botRunning && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+                Bot
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -846,6 +964,322 @@ export default function PredictionsPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Portfolio / Equity Curve Tab */}
+      {activeTab === "portfolio" && (
+        <div className="space-y-6">
+          {/* Portfolio Summary Cards */}
+          <div className="grid grid-cols-4 gap-4">
+            <div className="card p-5">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Value</span>
+              <p className="text-2xl font-bold tabular-nums text-gray-900 mt-1">
+                ${portfolioSummary?.total_exposure?.toFixed(2) || "0.00"}
+              </p>
+            </div>
+            <div className="card p-5">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total P&L</span>
+              <p className={`text-2xl font-bold tabular-nums mt-1 ${(portfolioSummary?.total_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                {(portfolioSummary?.total_pnl || 0) >= 0 ? "+" : ""}${(portfolioSummary?.total_pnl || 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="card p-5">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Fees</span>
+              <p className="text-2xl font-bold tabular-nums text-gray-900 mt-1">
+                ${portfolioSummary?.total_fees?.toFixed(2) || "0.00"}
+              </p>
+            </div>
+            <div className="card p-5">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Orders</span>
+              <p className="text-2xl font-bold tabular-nums text-gray-900 mt-1">
+                {portfolioSummary?.total_orders || 0}
+              </p>
+            </div>
+          </div>
+
+          {/* Equity Curve */}
+          <div className="card p-5">
+            <h2 className="font-semibold text-gray-900 mb-4">Equity Curve</h2>
+            {equityCurve.length > 0 ? (
+              <div className="h-64 flex items-end gap-px">
+                {equityCurve.map((s: any, i: number) => {
+                  const maxVal = Math.max(...equityCurve.map((x: any) => x.total_value_usd || 100));
+                  const minVal = Math.min(...equityCurve.map((x: any) => x.total_value_usd || 100));
+                  const range = maxVal - minVal || 1;
+                  const height = ((s.total_value_usd - minVal) / range) * 100;
+                  const isPositive = (s.unrealized_pnl + s.realized_pnl) >= 0;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex-1 rounded-t ${isPositive ? "bg-emerald-400" : "bg-red-400"}`}
+                      style={{ height: `${Math.max(height, 2)}%` }}
+                      title={`$${s.total_value_usd?.toFixed(2)} | ${new Date(s.snapshot_at).toLocaleString()}`}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
+                No snapshots yet. Start the bot to build an equity curve.
+              </div>
+            )}
+          </div>
+
+          {/* Exchange Breakdown */}
+          {equityCurve.length > 0 && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="card p-5">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Polymarket Exposure</span>
+                <p className="text-xl font-bold tabular-nums text-purple-600 mt-1">
+                  ${equityCurve[equityCurve.length - 1]?.polymarket_value?.toFixed(2) || "0.00"}
+                </p>
+              </div>
+              <div className="card p-5">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Kalshi Exposure</span>
+                <p className="text-xl font-bold tabular-nums text-indigo-600 mt-1">
+                  ${equityCurve[equityCurve.length - 1]?.kalshi_value?.toFixed(2) || "0.00"}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Whale Feed Tab */}
+      {activeTab === "whales" && (
+        <div className="space-y-6">
+          {/* Whale Leaderboard */}
+          {whaleLeaderboard.length > 0 && (
+            <div className="card overflow-hidden">
+              <div className="p-5 border-b border-gray-100">
+                <h2 className="font-semibold text-gray-900">Whale Leaderboard</h2>
+              </div>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Wallet</th>
+                    <th>Label</th>
+                    <th>Volume</th>
+                    <th>Buys</th>
+                    <th>Sells</th>
+                    <th>Markets</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {whaleLeaderboard.map((w: any, i: number) => (
+                    <tr key={i}>
+                      <td className="text-xs font-mono text-gray-500">
+                        {w.address?.slice(0, 6)}...{w.address?.slice(-4)}
+                      </td>
+                      <td>
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          {w.label || "Unknown"}
+                        </span>
+                      </td>
+                      <td className="text-sm font-semibold tabular-nums">${(w.total_volume_usd || 0).toFixed(0)}</td>
+                      <td className="text-sm tabular-nums text-emerald-600">{w.buy_count || 0}</td>
+                      <td className="text-sm tabular-nums text-red-500">{w.sell_count || 0}</td>
+                      <td className="text-sm tabular-nums">{w.unique_markets || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Recent Whale Activity */}
+          <div className="card overflow-hidden">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-emerald-500" />
+                <h2 className="font-semibold text-gray-900">Recent Whale Activity</h2>
+              </div>
+              <button
+                onClick={fetchWhaleData}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-50"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Refresh
+              </button>
+            </div>
+            <div className="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
+              {whaleEvents.length > 0 ? whaleEvents.map((e: any, i: number) => (
+                <div key={i} className="p-4 hover:bg-gray-50/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        e.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                      }`}>
+                        {e.side}
+                      </span>
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">
+                          {e.wallet_label || `${e.wallet_address?.slice(0, 8)}...`}
+                        </span>
+                        <span className="text-xs text-gray-400 ml-2">
+                          {e.size?.toFixed(0)} contracts @ ${e.estimated_price?.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold tabular-nums text-gray-900">${e.value_usd?.toFixed(0)}</p>
+                      <p className="text-[10px] text-gray-400">Block #{e.block_number}</p>
+                    </div>
+                  </div>
+                </div>
+              )) : (
+                <div className="p-8 text-center text-gray-400 text-sm">
+                  No whale activity detected yet. The indexer scans Polygon every 60s.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bot Control Tab */}
+      {activeTab === "bot" && (
+        <div className="space-y-6">
+          {/* Bot Control Panel */}
+          <div className="card p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Trading Bot</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Automated scan → Kelly size → execute → persist loop
+                </p>
+              </div>
+              <button
+                onClick={toggleBot}
+                className={`px-6 py-3 rounded-xl font-semibold text-sm transition-all ${
+                  botRunning
+                    ? "bg-red-100 text-red-700 hover:bg-red-200"
+                    : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                }`}
+              >
+                {botRunning ? "Stop Bot" : "Start Bot"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Status</span>
+                <div className="flex items-center gap-2 mt-2">
+                  <div className={`w-3 h-3 rounded-full ${botRunning ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+                  <span className="text-sm font-semibold text-gray-900">
+                    {botRunning ? "Running" : "Stopped"}
+                  </span>
+                </div>
+              </div>
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Scans</span>
+                <p className="text-xl font-bold tabular-nums text-gray-900 mt-2">
+                  {botStatus?.total_scans || 0}
+                </p>
+              </div>
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Executions</span>
+                <p className="text-xl font-bold tabular-nums text-gray-900 mt-2">
+                  {botStatus?.total_executions || 0}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Risk Manager Status */}
+          <div className="card p-6">
+            <h2 className="font-semibold text-gray-900 mb-4">Risk Manager</h2>
+            <div className="grid grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase">Daily P&L</span>
+                <p className={`text-lg font-bold tabular-nums mt-1 ${
+                  (botStatus?.risk_manager?.daily_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"
+                }`}>
+                  ${(botStatus?.risk_manager?.daily_pnl || 0).toFixed(2)}
+                </p>
+              </div>
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase">Circuit Breaker</span>
+                <p className="text-sm font-semibold mt-2">
+                  {botStatus?.risk_manager?.circuit_breaker_active ? (
+                    <span className="text-red-600">ACTIVE</span>
+                  ) : (
+                    <span className="text-emerald-600">OK</span>
+                  )}
+                </p>
+              </div>
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase">Orders/min</span>
+                <p className="text-lg font-bold tabular-nums text-gray-900 mt-1">
+                  {botStatus?.risk_manager?.orders_last_minute || 0}
+                  <span className="text-sm font-normal text-gray-400">
+                    /{botStatus?.risk_manager?.max_orders_per_minute || 10}
+                  </span>
+                </p>
+              </div>
+              <div className="p-4 rounded-xl bg-gray-50">
+                <span className="text-xs font-medium text-gray-500 uppercase">Max Positions</span>
+                <p className="text-lg font-bold tabular-nums text-gray-900 mt-1">
+                  {botStatus?.portfolio?.total_positions || 0}
+                  <span className="text-sm font-normal text-gray-400">
+                    /{botStatus?.risk_manager?.max_total_positions || 50}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* Disabled strategies */}
+            {botStatus?.risk_manager?.disabled_strategies?.length > 0 && (
+              <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200">
+                <span className="text-xs font-semibold text-red-700 uppercase">Disabled Strategies</span>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {botStatus.risk_manager.disabled_strategies.map((s: string) => (
+                    <span key={s} className="text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-700">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Kelly Config */}
+          <div className="card p-6">
+            <h2 className="font-semibold text-gray-900 mb-4">Kelly Sizing</h2>
+            <div className="grid grid-cols-5 gap-4">
+              {[
+                { label: "Fractional Kelly", value: botStatus?.kelly_config?.fractional_kelly || 0.25 },
+                { label: "Min Bet", value: `$${botStatus?.kelly_config?.min_bet_usd || 1}` },
+                { label: "Max Bet", value: `$${botStatus?.kelly_config?.max_bet_usd || 50}` },
+                { label: "Min Edge", value: `${((botStatus?.kelly_config?.min_edge || 0.03) * 100).toFixed(0)}%` },
+                { label: "Min Confidence", value: `${((botStatus?.kelly_config?.min_confidence || 0.6) * 100).toFixed(0)}%` },
+              ].map((item) => (
+                <div key={item.label} className="p-3 rounded-xl bg-gray-50 text-center">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase">{item.label}</span>
+                  <p className="text-sm font-bold tabular-nums text-gray-900 mt-1">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Manual Scan Button */}
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch("/api/prediction-markets/bot/scan-now", { method: "POST" });
+                if (res.ok) {
+                  const data = await res.json();
+                  alert(`Scan complete: ${data.opportunities || 0} opportunities → ${data.executed || 0} executed`);
+                  fetchBotStatus();
+                  fetchPositions();
+                }
+              } catch {}
+            }}
+            className="w-full py-3 rounded-xl bg-violet-100 text-violet-700 font-semibold text-sm hover:bg-violet-200 transition-colors"
+          >
+            Run Manual Scan + Execute
+          </button>
         </div>
       )}
 
