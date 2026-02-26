@@ -359,19 +359,96 @@ const strategyLabels: Record<string, string> = {
 export default function PredictionsPage() {
   const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions">("scanner");
   const [strategies, setStrategies] = useState(DEMO_STRATEGIES);
-  const [scanning, setScanning] = useState(true);
+  const [scanning, setScanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [scanCount, setScanCount] = useState(147);
-  const [lastScan, setLastScan] = useState("Just now");
+  const [scanCount, setScanCount] = useState(0);
+  const [lastScan, setLastScan] = useState("Never");
+  const [isLive, setIsLive] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
+  const [markets, setMarkets] = useState<PredictionMarket[]>(DEMO_MARKETS);
   const streamRef = useRef<HTMLDivElement>(null);
 
-  // Simulate scan counter
-  useEffect(() => {
-    if (!scanning) return;
-    const interval = setInterval(() => {
+  // Map API opportunity to frontend type
+  const mapOpportunity = (opp: any, idx: number): Opportunity => ({
+    id: String(idx),
+    strategy: opp.strategy,
+    market: opp.market,
+    side: opp.side || "BUY",
+    entryPrice: opp.entry_price,
+    edge: opp.edge,
+    confidence: opp.confidence,
+    reason: opp.reason,
+    timestamp: opp.timestamp
+      ? new Date(opp.timestamp).toLocaleTimeString()
+      : "Just now",
+  });
+
+  // Map API market to frontend type
+  const mapMarket = (m: any): PredictionMarket => ({
+    id: m.id || m.condition_id,
+    question: m.question,
+    category: m.category || "General",
+    outcomes: (m.outcomes || []).map((o: any) => ({
+      label: o.label,
+      price: o.price || o.midpoint || 0,
+      tokenId: o.token_id,
+    })),
+    volume: m.total_volume || 0,
+    liquidity: m.liquidity || 0,
+    endDate: m.end_date || "",
+    active: m.active ?? true,
+  });
+
+  // Fetch live markets from API
+  const fetchMarkets = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/markets?limit=50");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.markets && data.markets.length > 0) {
+        setMarkets(data.markets.map(mapMarket));
+        setIsLive(true);
+      }
+    } catch {
+      // API unavailable — keep demo data
+    }
+  };
+
+  // Run scanner via API
+  const runScan = async () => {
+    setScanLoading(true);
+    try {
+      const res = await fetch("/api/prediction-markets/scan", {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Scan failed");
+      const data = await res.json();
+      setScanCount(data.scan_number || scanCount + 1);
+      setLastScan("Just now");
+      setIsLive(true);
+      if (data.opportunities && data.opportunities.length > 0) {
+        setOpportunities(data.opportunities.map(mapOpportunity));
+      }
+    } catch {
+      // API unavailable — increment counter with demo data
       setScanCount((c) => c + 1);
       setLastScan("Just now");
-    }, 120000); // every 2 min
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  // On mount: try to connect to live API
+  useEffect(() => {
+    fetchMarkets();
+  }, []);
+
+  // Auto-scan every 2 minutes when scanning is enabled
+  useEffect(() => {
+    if (!scanning) return;
+    runScan(); // Run immediately when scanning starts
+    const interval = setInterval(runScan, 120000);
     return () => clearInterval(interval);
   }, [scanning]);
 
@@ -380,7 +457,7 @@ export default function PredictionsPage() {
     if (streamRef.current) {
       streamRef.current.scrollTop = 0;
     }
-  }, []);
+  }, [opportunities]);
 
   const toggleStrategy = (id: string) => {
     setStrategies((prev) =>
@@ -392,7 +469,7 @@ export default function PredictionsPage() {
   const totalPositions = strategies.reduce((sum, s) => sum + s.positions, 0);
   const enabledCount = strategies.filter((s) => s.enabled).length;
 
-  const filteredMarkets = DEMO_MARKETS.filter(
+  const filteredMarkets = markets.filter(
     (m) =>
       !searchQuery ||
       m.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -411,7 +488,12 @@ export default function PredictionsPage() {
             Prediction Markets
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Polymarket scanner &mdash; 7 strategies: weather arb, certainty harvest, market making, flash crash, whale copy &amp; more
+            Polymarket scanner &mdash; 7 strategies
+            {isLive ? (
+              <span className="ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">LIVE</span>
+            ) : (
+              <span className="ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">DEMO</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -542,13 +624,17 @@ export default function PredictionsPage() {
               <h2 className="font-semibold text-gray-900">Opportunity Stream</h2>
               <span className="text-xs text-gray-400">Real-time signals from all active strategies</span>
             </div>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-50">
-              <RefreshCw className="w-3.5 h-3.5" />
-              Refresh
+            <button
+              onClick={runScan}
+              disabled={scanLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${scanLoading ? "animate-spin" : ""}`} />
+              {scanLoading ? "Scanning..." : "Scan Now"}
             </button>
           </div>
           <div ref={streamRef} className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
-            {DEMO_OPPORTUNITIES.map((opp) => {
+            {opportunities.map((opp) => {
               const colors = strategyColors[opp.strategy] || strategyColors.weather_arb;
               return (
                 <div key={opp.id} className="p-5 hover:bg-gray-50/50 transition-colors">
@@ -736,7 +822,9 @@ export default function PredictionsPage() {
       {/* Footer note */}
       <div className="mt-6 flex items-center gap-2 text-xs text-gray-400">
         <Shield className="w-3.5 h-3.5" />
-        <span>Paper trading mode. Connect Polymarket wallet to trade live.</span>
+        <span>
+          Paper trading mode (dry_run=true). {isLive ? "Connected to Polymarket API." : "API offline — showing demo data. Start backend: uvicorn backend.app.api.main:app --port 8000"}
+        </span>
       </div>
     </div>
   );

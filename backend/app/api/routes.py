@@ -35,7 +35,7 @@ async def debug_routes_loaded():
     return {
         "status": "ok",
         "message": "All routes loaded successfully",
-        "sections": ["universes", "data", "features", "models", "backtest", "portfolio", "trading", "options", "crypto", "bot"]
+        "sections": ["universes", "data", "features", "models", "backtest", "portfolio", "trading", "options", "crypto", "bot", "prediction-markets"]
     }
 
 
@@ -3699,3 +3699,203 @@ async def get_alpha_signals(symbol: str):
             "error": str(e),
             "symbol": symbol
         }
+
+
+# ============ Prediction Markets ============
+
+# Lazy-initialized singletons (avoids import-time HTTP calls)
+_polymarket_client = None
+_prediction_scanner = None
+
+
+def _get_polymarket_client():
+    global _polymarket_client
+    if _polymarket_client is None:
+        from ..prediction_markets.polymarket_client import PolymarketClient
+        _polymarket_client = PolymarketClient()
+    return _polymarket_client
+
+
+def _get_prediction_scanner():
+    global _prediction_scanner
+    if _prediction_scanner is None:
+        from ..prediction_markets.strategies import (
+            PredictionMarketScanner,
+            StrategyConfig,
+            NearCertaintyStrategy,
+            SameMarketArbitrageStrategy,
+            CrossMarketArbitrageStrategy,
+            MarketMakingStrategy,
+            FlashCrashStrategy,
+            WeatherArbitrageStrategy,
+            WhaleCopyTradingStrategy,
+        )
+        from ..prediction_markets.noaa_weather import NOAAWeatherClient
+
+        client = _get_polymarket_client()
+        _prediction_scanner = PredictionMarketScanner(client)
+
+        config = StrategyConfig(
+            enabled=True,
+            max_position_usd=5.0,
+            max_positions=20,
+            min_edge=0.05,
+            scan_interval_sec=120,
+            dry_run=True,
+        )
+
+        _prediction_scanner.add_strategy(NearCertaintyStrategy(client, config))
+        _prediction_scanner.add_strategy(SameMarketArbitrageStrategy(client, config))
+        _prediction_scanner.add_strategy(CrossMarketArbitrageStrategy(client, config))
+        _prediction_scanner.add_strategy(MarketMakingStrategy(client, config))
+        _prediction_scanner.add_strategy(FlashCrashStrategy(client, config))
+        _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+
+        # Weather arb needs NOAA forecasts
+        weather_strategy = WeatherArbitrageStrategy(client, config)
+        try:
+            noaa = NOAAWeatherClient()
+            forecasts = noaa.get_all_forecasts()
+            weather_strategy.update_forecasts(forecasts)
+        except Exception as e:
+            logger.warning(f"NOAA forecast fetch failed (weather arb degraded): {e}")
+        _prediction_scanner.add_strategy(weather_strategy)
+
+    return _prediction_scanner
+
+
+class MarketSearchRequest(BaseModel):
+    query: str
+    limit: int = 20
+
+
+@router.get("/prediction-markets/markets")
+async def list_prediction_markets(limit: int = 100, offset: int = 0):
+    """List active prediction markets from Polymarket."""
+    from dataclasses import asdict
+
+    client = _get_polymarket_client()
+    try:
+        markets = client.get_markets(limit=limit, offset=offset)
+        result = []
+        for m in markets:
+            d = asdict(m)
+            # Serialize datetimes
+            if m.end_date:
+                d["end_date"] = m.end_date.isoformat()
+            result.append(d)
+        return {"markets": result, "count": len(result)}
+    except Exception as e:
+        logger.error(f"Prediction markets fetch error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/prediction-markets/search")
+async def search_prediction_markets(req: MarketSearchRequest):
+    """Search prediction markets by keyword."""
+    from dataclasses import asdict
+
+    client = _get_polymarket_client()
+    try:
+        markets = client.search_markets(req.query, limit=req.limit)
+        result = []
+        for m in markets:
+            d = asdict(m)
+            if m.end_date:
+                d["end_date"] = m.end_date.isoformat()
+            result.append(d)
+        return {"markets": result, "count": len(result)}
+    except Exception as e:
+        logger.error(f"Market search error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/prediction-markets/scan")
+async def scan_prediction_markets(market_limit: int = 200):
+    """Run all strategies and return identified opportunities."""
+    scanner = _get_prediction_scanner()
+    try:
+        results = scanner.scan(market_limit=market_limit)
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "scan_number": scanner.total_scans,
+            "total_opportunities": len(results),
+            "opportunities": [
+                {
+                    "strategy": r.strategy,
+                    "market": r.market.question,
+                    "market_id": r.market.id,
+                    "outcome": (
+                        r.market.outcomes[r.outcome_idx].label
+                        if 0 <= r.outcome_idx < len(r.market.outcomes)
+                        else "Both"
+                    ),
+                    "side": r.side,
+                    "entry_price": r.entry_price,
+                    "expected_value": r.expected_value,
+                    "edge": r.edge,
+                    "confidence": r.confidence,
+                    "reason": r.reason,
+                    "timestamp": r.timestamp.isoformat(),
+                }
+                for r in results
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Prediction scan error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/prediction-markets/weather")
+async def get_weather_forecasts():
+    """Get NOAA weather forecasts for tracked cities."""
+    from ..prediction_markets.noaa_weather import NOAAWeatherClient
+
+    try:
+        noaa = NOAAWeatherClient()
+        forecasts = noaa.get_all_forecasts()
+        return {
+            "count": len(forecasts),
+            "forecasts": {
+                city: {
+                    "location": f.location,
+                    "temp_high_f": f.temp_high_f,
+                    "temp_low_f": f.temp_low_f,
+                    "temp_mean_f": f.temp_mean_f,
+                    "precipitation_pct": f.precipitation_pct,
+                    "wind_mph": f.wind_mph,
+                    "confidence": f.confidence,
+                }
+                for city, f in forecasts.items()
+            },
+        }
+    except Exception as e:
+        logger.error(f"Weather forecast error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/prediction-markets/strategies")
+async def get_prediction_strategies():
+    """Get status of all registered prediction market strategies."""
+    scanner = _get_prediction_scanner()
+    return {
+        "total_scans": scanner.total_scans,
+        "strategies": [
+            {
+                "name": s.name,
+                "enabled": s.config.enabled,
+                "dry_run": s.config.dry_run,
+                "positions": len(s.positions),
+                "total_pnl": s.total_pnl,
+                "trades_executed": s.trades_executed,
+                "config": {
+                    "max_position_usd": s.config.max_position_usd,
+                    "max_positions": s.config.max_positions,
+                    "min_edge": s.config.min_edge,
+                    "scan_interval_sec": s.config.scan_interval_sec,
+                },
+            }
+            for s in scanner.strategies
+        ],
+        "recent_opportunities": len(scanner.scan_history),
+    }
