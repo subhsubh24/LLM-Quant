@@ -297,3 +297,84 @@ class PredictionPriceHistory(SQLModel, table=True):
     volume_24h: float = 0.0
 
     sampled_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+# ============================================================
+# Portfolio Snapshots (used by persistence.py equity curve)
+# ============================================================
+
+class PredictionPortfolioSnapshot(SQLModel, table=True):
+    """
+    Point-in-time snapshot of the prediction market portfolio.
+
+    Used by persistence.save_portfolio_snapshot() for equity curve rendering.
+    """
+    __tablename__ = "prediction_portfolio_snapshots"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    # Portfolio state
+    total_positions: int = 0
+    total_exposure: float = 0.0
+    cash_balance: float = 0.0
+    total_value: float = 0.0
+    unrealized_pnl: float = 0.0
+    realized_pnl: float = 0.0
+    total_pnl: float = 0.0
+    total_fees: float = 0.0
+
+    # Order stats
+    total_orders: int = 0
+    total_fills: int = 0
+    win_count: int = 0
+    loss_count: int = 0
+
+    # Exchange breakdown
+    polymarket_exposure: float = 0.0
+    kalshi_exposure: float = 0.0
+
+    is_dry_run: bool = True
+
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+# ============================================================
+# Strategy Performance Tracking
+# ============================================================
+
+class PredictionStrategyPerformance(SQLModel, table=True):
+    """
+    Cumulative performance metrics per strategy.
+
+    Updated by persistence.update_strategy_performance() each time
+    a position resolves.
+    """
+    __tablename__ = "prediction_strategy_performance"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    strategy: str = Field(unique=True, index=True)
+
+    # Trade counts
+    total_trades: int = 0
+    winning_trades: int = 0
+    losing_trades: int = 0
+    win_rate: float = 0.0
+
+    # P&L
+    total_pnl: float = 0.0
+    avg_pnl_per_trade: float = 0.0
+    max_win: float = 0.0
+    max_loss: float = 0.0
+    total_fees: float = 0.0
+
+    # Signal quality
+    avg_edge: float = 0.0
+    avg_confidence: float = 0.0
+
+    # Volume
+    total_notional: float = 0.0
+
+    # Timestamps
+    first_trade_at: Optional[datetime] = None
+    last_trade_at: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

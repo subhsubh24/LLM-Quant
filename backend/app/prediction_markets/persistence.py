@@ -46,22 +46,20 @@ def save_order(
     """Persist an order result to the database. Returns the row ID."""
     with get_session() as session:
         order = PredictionOrder(
+            portfolio_id=1,
             exchange=result.exchange.value,
             market_id=result.market_id,
             token_id=result.token_id,
             side=result.side.value,
             order_type=result.order_type.value,
             size=result.size,
-            price=result.price,
-            notional=result.size * (result.price or 0.50),
+            limit_price=result.price,
             order_id=result.order_id,
             status=result.status.value,
             filled_size=result.filled_size,
             filled_price=result.filled_price,
             fees=result.fees,
             strategy=strategy,
-            market_question=market_question,
-            outcome_label=outcome_label,
             error=result.error,
             is_dry_run=is_dry_run,
             raw_response_json=json.dumps(result.raw_response) if result.raw_response else None,
@@ -106,14 +104,13 @@ def save_position(pos: Position, market_question: str = "", outcome_label: str =
             existing.avg_entry_price = pos.avg_entry_price
             existing.current_price = pos.current_price
             existing.market_value = pos.market_value
-            existing.cost_basis = pos.cost_basis
             existing.unrealized_pnl = pos.unrealized_pnl
             existing.realized_pnl = pos.realized_pnl
-            existing.total_pnl = pos.total_pnl
             existing.updated_at = datetime.utcnow()
             session.add(existing)
         else:
             db_pos = PredictionPosition(
+                portfolio_id=1,
                 exchange=pos.exchange.value,
                 market_id=pos.market_id,
                 token_id=pos.token_id,
@@ -125,10 +122,8 @@ def save_position(pos: Position, market_question: str = "", outcome_label: str =
                 avg_entry_price=pos.avg_entry_price,
                 current_price=pos.current_price,
                 market_value=pos.market_value,
-                cost_basis=pos.cost_basis,
                 unrealized_pnl=pos.unrealized_pnl,
                 realized_pnl=pos.realized_pnl,
-                total_pnl=pos.total_pnl,
                 strategy=pos.strategy,
                 opened_at=pos.opened_at,
             )

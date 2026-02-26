@@ -15,6 +15,7 @@ from ..db.database import init_db
 from ..data.crypto_ws import start_crypto_ws, stop_crypto_ws
 from ..prediction_markets.websocket_feeds import start_prediction_feeds, stop_prediction_feeds
 from ..prediction_markets.whale_indexer import start_whale_indexer, stop_whale_indexer
+from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator
 from .routes import router
 
 
@@ -45,6 +46,36 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Whale indexer start failed (degraded): {e}")
 
+    # Bootstrap default prediction market portfolio (ensures FK target exists)
+    try:
+        from ..prediction_markets.models import PredictionPortfolio
+        from ..db.database import get_session
+        from sqlmodel import select
+        with get_session() as session:
+            existing = session.exec(
+                select(PredictionPortfolio).where(PredictionPortfolio.id == 1)
+            ).first()
+            if not existing:
+                session.add(PredictionPortfolio(
+                    name="default",
+                    exchange="all",
+                    initial_capital_usd=100.0,
+                    current_cash_usd=100.0,
+                    total_deposited_usd=100.0,
+                    total_value_usd=100.0,
+                    dry_run=True,
+                ))
+                logger.info("Created default prediction market portfolio")
+    except Exception as e:
+        logger.warning(f"Portfolio bootstrap skipped: {e}")
+
+    # Start prediction market orchestrator (dry-run, scan every 120s)
+    try:
+        await start_orchestrator(scan_interval_sec=120)
+        logger.info("Prediction market orchestrator started (dry-run)")
+    except Exception as e:
+        logger.warning(f"Prediction market orchestrator start failed (degraded): {e}")
+
     # Auto-initialize live brokers from config
     settings = get_settings()
     if settings.auto_connect_brokers:
@@ -62,6 +93,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down QuantLab API...")
+    await stop_orchestrator()
     await stop_prediction_feeds()
     await stop_whale_indexer()
     await stop_crypto_ws()

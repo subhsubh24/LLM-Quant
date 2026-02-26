@@ -398,16 +398,57 @@ class SameMarketArbitrageStrategy(BaseStrategy):
 # Strategy 4: Cross-Market Arbitrage
 # ================================================================
 
+@dataclass
+class ImplicationRule:
+    """A logical implication: if market A resolves YES, then market B must resolve YES."""
+    parent_keyword: str      # Keyword to match the broader market (e.g., "win election")
+    child_keyword: str       # Keyword to match the narrower market (e.g., "win pennsylvania")
+    direction: str           # "implies" (P(parent) <= P(child)) or "excludes"
+    category: str = ""       # Restrict to a category
+
+# Built-in implication rules for common prediction market patterns.
+# Rule: If parent resolves YES, child must also resolve YES ⟹ P(parent) ≤ P(child).
+# When the market violates this, buy the cheaper side.
+_IMPLICATION_RULES: List[ImplicationRule] = [
+    # Politics: winning the election implies winning swing states
+    ImplicationRule("win election", "win pennsylvania", "implies", "Politics"),
+    ImplicationRule("win election", "win michigan", "implies", "Politics"),
+    ImplicationRule("win election", "win wisconsin", "implies", "Politics"),
+    ImplicationRule("win election", "win georgia", "implies", "Politics"),
+    ImplicationRule("win election", "win arizona", "implies", "Politics"),
+    ImplicationRule("win election", "win nevada", "implies", "Politics"),
+    ImplicationRule("win popular vote", "win election", "implies", "Politics"),
+    ImplicationRule("republican sweep", "win election", "implies", "Politics"),
+    ImplicationRule("republican sweep", "win senate", "implies", "Politics"),
+    ImplicationRule("democratic sweep", "win election", "implies", "Politics"),
+    ImplicationRule("democratic sweep", "win senate", "implies", "Politics"),
+    # Economics: rate cuts imply lower rates
+    ImplicationRule("rate cut", "rates below", "implies", "Economics"),
+    ImplicationRule("recession", "gdp negative", "implies", "Economics"),
+    ImplicationRule("inflation above 4", "inflation above 3", "implies", "Economics"),
+    ImplicationRule("inflation above 5", "inflation above 4", "implies", "Economics"),
+    # Crypto: BTC > 150k implies BTC > 100k
+    ImplicationRule("btc above 150", "btc above 100", "implies", "Crypto"),
+    ImplicationRule("btc above 200", "btc above 150", "implies", "Crypto"),
+    ImplicationRule("eth above 10", "eth above 5", "implies", "Crypto"),
+    # Sports: winning championship implies winning conference/division
+    ImplicationRule("win super bowl", "win conference", "implies", "Sports"),
+    ImplicationRule("win world series", "win pennant", "implies", "Sports"),
+]
+
+
 class CrossMarketArbitrageStrategy(BaseStrategy):
     """
     Find logical inconsistencies across related markets.
 
-    Example: If "Will candidate X win the election?" = 60%
-    but "Will candidate X win key state Y?" = 40%,
-    that's an inconsistency worth exploiting.
+    Uses two approaches:
+    1. Structured implication rules (high confidence) — domain-specific
+       relationships like "winning election implies winning swing state"
+    2. Keyword overlap heuristic (lower confidence) — for discovering
+       new relationships automatically
 
-    This strategy maintains a graph of related markets and checks
-    for probability violations (e.g., P(A) > P(B) when A implies B).
+    When P(A) > P(B) but A implies B (A can't happen without B),
+    the cheap side is mispriced.
     """
 
     def __init__(
@@ -415,42 +456,112 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
         client: PolymarketClient,
         config: StrategyConfig,
         min_inconsistency: float = 0.10,  # 10% probability gap
+        custom_rules: Optional[List[ImplicationRule]] = None,
     ):
         super().__init__(client, config)
         self.min_inconsistency = min_inconsistency
         self._related_markets: Dict[str, List[str]] = {}  # market_id -> [related_ids]
+        self.rules = list(_IMPLICATION_RULES) + (custom_rules or [])
 
     @property
     def name(self) -> str:
         return "cross_market_arb"
 
+    def add_rule(self, rule: ImplicationRule):
+        """Add a custom implication rule at runtime."""
+        self.rules.append(rule)
+
     def set_related_markets(self, relations: Dict[str, List[str]]):
         """Define which markets are logically related."""
         self._related_markets = relations
+
+    def _match_rule(self, keyword: str, question: str) -> bool:
+        """Check if a market question matches a rule keyword."""
+        q = question.lower()
+        return keyword.lower() in q
 
     def scan(self, markets: List[Market]) -> List[ScanResult]:
         """
         Find probability inconsistencies across related markets.
 
-        For now, uses a simple heuristic: if two markets share keywords
-        and their probabilities are inconsistent, flag it.
+        Phase 1: Check structured implication rules (high confidence).
+        Phase 2: Keyword overlap heuristic (lower confidence).
         """
         results = []
-        active_markets = [m for m in markets if m.active and not m.closed]
+        active_markets = [m for m in markets if m.active and not m.closed and m.is_binary]
 
-        # Build keyword index
+        # ── Phase 1: Structured implication rules ──
+        for rule in self.rules:
+            parents = [m for m in active_markets if self._match_rule(rule.parent_keyword, m.question)]
+            children = [m for m in active_markets if self._match_rule(rule.child_keyword, m.question)]
+
+            for parent in parents:
+                for child in children:
+                    if parent.id == child.id:
+                        continue
+                    # Category filter
+                    if rule.category:
+                        if parent.category != rule.category and child.category != rule.category:
+                            continue
+
+                    p_parent = parent.outcomes[0].price
+                    p_child = child.outcomes[0].price
+
+                    if rule.direction == "implies":
+                        # P(parent) should be <= P(child). If violated, arb exists.
+                        if p_parent > p_child + self.min_inconsistency:
+                            gap = p_parent - p_child
+                            results.append(ScanResult(
+                                market=child,
+                                strategy=self.name,
+                                outcome_idx=0,
+                                side="BUY",
+                                entry_price=p_child,
+                                expected_value=p_parent,
+                                edge=gap,
+                                confidence=0.85,
+                                reason=(
+                                    f"IMPLICATION VIOLATION: \"{parent.question[:50]}\" "
+                                    f"({p_parent:.0%}) implies \"{child.question[:50]}\" "
+                                    f"({p_child:.0%}) — buy child at {p_child:.0%}, "
+                                    f"gap={gap*100:.1f}%"
+                                ),
+                            ))
+                    elif rule.direction == "excludes":
+                        # P(A) + P(B) should be <= 1.0
+                        total = p_parent + p_child
+                        if total > 1.0 + self.min_inconsistency:
+                            gap = total - 1.0
+                            # Sell the more expensive one
+                            sell_market = parent if p_parent > p_child else child
+                            sell_price = max(p_parent, p_child)
+                            results.append(ScanResult(
+                                market=sell_market,
+                                strategy=self.name,
+                                outcome_idx=0,
+                                side="SELL",
+                                entry_price=sell_price,
+                                expected_value=sell_price - gap,
+                                edge=gap,
+                                confidence=0.80,
+                                reason=(
+                                    f"EXCLUSION VIOLATION: \"{parent.question[:50]}\" "
+                                    f"({p_parent:.0%}) + \"{child.question[:50]}\" "
+                                    f"({p_child:.0%}) = {total:.0%} > 100%"
+                                ),
+                            ))
+
+        # ── Phase 2: Keyword overlap heuristic ──
+        skip = {"will", "the", "a", "an", "in", "on", "at", "to", "of", "by", "be", "is"}
         keyword_groups: Dict[str, List[Market]] = {}
         for market in active_markets:
             words = set(market.question.lower().split())
-            # Use significant words as keys (skip common words)
-            skip = {"will", "the", "a", "an", "in", "on", "at", "to", "of", "by", "be", "is"}
             for word in words - skip:
                 if len(word) > 3:
                     if word not in keyword_groups:
                         keyword_groups[word] = []
                     keyword_groups[word].append(market)
 
-        # Check each group for inconsistencies
         checked = set()
         for keyword, group in keyword_groups.items():
             if len(group) < 2:
@@ -463,26 +574,18 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                         continue
                     checked.add(pair_key)
 
-                    # Check if probabilities are inconsistent
-                    # Simple heuristic: if one market implies another
-                    # (e.g., "X wins election" implies "X wins state"),
-                    # then P(election) should be <= P(state) for any given state
-                    # This is a simplification — real cross-market arb needs
-                    # domain-specific logic
                     if m1.is_binary and m2.is_binary:
-                        p1 = m1.outcomes[0].price  # YES price for m1
-                        p2 = m2.outcomes[0].price  # YES price for m2
+                        p1 = m1.outcomes[0].price
+                        p2 = m2.outcomes[0].price
                         gap = abs(p1 - p2)
 
                         if gap >= self.min_inconsistency:
-                            # Check if the gap represents a real inconsistency
-                            # (not just different questions)
                             shared_words = (
                                 set(m1.question.lower().split())
                                 & set(m2.question.lower().split())
                                 - skip
                             )
-                            if len(shared_words) >= 3:  # Strongly related
+                            if len(shared_words) >= 3:
                                 results.append(ScanResult(
                                     market=m1 if p1 < p2 else m2,
                                     strategy=self.name,
@@ -491,7 +594,7 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                     entry_price=min(p1, p2),
                                     expected_value=max(p1, p2),
                                     edge=gap,
-                                    confidence=0.60,  # Lower confidence (heuristic)
+                                    confidence=0.60,
                                     reason=(
                                         f"Cross-market gap: \"{m1.question[:60]}\" "
                                         f"({p1:.0%}) vs \"{m2.question[:60]}\" "
@@ -783,14 +886,25 @@ class WhaleCopyTradingStrategy(BaseStrategy):
         max_entry_odds: float = 0.80,       # Don't copy above 80c (limited upside)
         position_scale: float = 0.01,       # 1% of whale position size
         basket_consensus: float = 0.80,     # 80% of basket must agree
+        # Exit parameters
+        trailing_stop_pct: float = 0.15,    # Trailing stop at 15% from peak
+        time_exit_hours: float = 72.0,      # Force exit after 72 hours
+        profit_target_pct: float = 0.30,    # Take profit at 30% gain
+        whale_exit_trigger: bool = True,    # Exit if whales start selling
     ):
         super().__init__(client, config)
         self.min_trade_size = min_trade_size
         self.max_entry_odds = max_entry_odds
         self.position_scale = position_scale
         self.basket_consensus = basket_consensus
+        self.trailing_stop_pct = trailing_stop_pct
+        self.time_exit_hours = time_exit_hours
+        self.profit_target_pct = profit_target_pct
+        self.whale_exit_trigger = whale_exit_trigger
         self.tracked_wallets: Dict[str, dict] = {}  # address -> {name, pnl, win_rate, trades}
         self._recent_whale_trades: List[dict] = []
+        # Exit tracking: token_id -> {peak_price, entry_time, entry_price}
+        self._position_tracking: Dict[str, dict] = {}
 
     @property
     def name(self) -> str:
@@ -913,7 +1027,123 @@ class WhaleCopyTradingStrategy(BaseStrategy):
                     ),
                 ))
 
+                # Track position for exit management
+                token_id = market.outcomes[outcome_idx].token_id
+                if token_id not in self._position_tracking:
+                    self._position_tracking[token_id] = {
+                        "peak_price": entry_price,
+                        "entry_time": datetime.now(timezone.utc),
+                        "entry_price": entry_price,
+                        "market_id": market_id,
+                    }
+
         return results
+
+    def track_price_update(self, token_id: str, current_price: float):
+        """Update peak price for trailing stop calculation."""
+        if token_id in self._position_tracking:
+            tracking = self._position_tracking[token_id]
+            if current_price > tracking["peak_price"]:
+                tracking["peak_price"] = current_price
+
+    def check_exits(self, markets: List[Market]) -> List[ScanResult]:
+        """
+        Check all open whale-copy positions for exit signals.
+
+        Exit triggers (any one fires):
+        1. Trailing stop: price drops > trailing_stop_pct from peak
+        2. Time exit: position held longer than time_exit_hours
+        3. Profit target: unrealized gain exceeds profit_target_pct
+        4. Whale exit: tracked whales start selling the same token
+
+        Returns SELL ScanResults for positions that should be closed.
+        """
+        exits = []
+        now = datetime.now(timezone.utc)
+        market_lookup = {m.id: m for m in markets}
+
+        for token_id, tracking in list(self._position_tracking.items()):
+            entry_price = tracking["entry_price"]
+            peak_price = tracking["peak_price"]
+            entry_time = tracking["entry_time"]
+            market_id = tracking["market_id"]
+
+            market = market_lookup.get(market_id)
+            if not market:
+                continue
+
+            # Find current price for this token
+            current_price = None
+            outcome_idx = -1
+            for i, o in enumerate(market.outcomes):
+                if o.token_id == token_id:
+                    current_price = o.price
+                    outcome_idx = i
+                    break
+            if current_price is None:
+                continue
+
+            # Update peak
+            self.track_price_update(token_id, current_price)
+            exit_reason = None
+
+            # 1. Trailing stop
+            if peak_price > 0:
+                drawdown = (peak_price - current_price) / peak_price
+                if drawdown >= self.trailing_stop_pct:
+                    exit_reason = (
+                        f"TRAILING STOP: {drawdown:.1%} drop from peak "
+                        f"${peak_price:.3f} → ${current_price:.3f}"
+                    )
+
+            # 2. Time exit
+            if not exit_reason:
+                hours_held = (now - entry_time).total_seconds() / 3600
+                if hours_held >= self.time_exit_hours:
+                    exit_reason = (
+                        f"TIME EXIT: held {hours_held:.0f}h "
+                        f"(limit={self.time_exit_hours:.0f}h)"
+                    )
+
+            # 3. Profit target
+            if not exit_reason and entry_price > 0:
+                gain = (current_price - entry_price) / entry_price
+                if gain >= self.profit_target_pct:
+                    exit_reason = (
+                        f"PROFIT TARGET: +{gain:.1%} gain "
+                        f"(${entry_price:.3f} → ${current_price:.3f})"
+                    )
+
+            # 4. Whale exit signal
+            if not exit_reason and self.whale_exit_trigger:
+                sell_count = sum(
+                    1 for t in self._recent_whale_trades
+                    if t["market_id"] == market_id
+                    and t["side"] == "SELL"
+                    and t["wallet"] in self.tracked_wallets
+                    and (now - t["timestamp"]).total_seconds() < 3600
+                )
+                if sell_count >= 2:
+                    exit_reason = (
+                        f"WHALE EXIT: {sell_count} tracked wallets selling"
+                    )
+
+            if exit_reason:
+                exits.append(ScanResult(
+                    market=market,
+                    strategy=self.name,
+                    outcome_idx=outcome_idx,
+                    side="SELL",
+                    entry_price=current_price,
+                    expected_value=current_price,
+                    edge=0.0,
+                    confidence=0.80,
+                    reason=f"[EXIT] {exit_reason}",
+                ))
+                # Remove from tracking
+                del self._position_tracking[token_id]
+
+        return exits
 
 
 # ================================================================

@@ -709,13 +709,72 @@ async def start_orchestrator(
     scanner: Optional[PredictionMarketScanner] = None,
     scan_interval_sec: int = 120,
 ):
-    """Start the orchestrator (called from routes or app lifespan)."""
+    """Start the orchestrator (called from routes or app lifespan).
+
+    If no scanner is provided, auto-configures one with all strategies
+    and wires up Kalshi auth from environment variables.
+    """
     global _orchestrator
+    if scanner is None:
+        try:
+            scanner = _build_default_scanner()
+        except Exception as e:
+            logger.warning(f"[ORCHESTRATOR] Scanner auto-config failed: {e}")
+
     _orchestrator = PredictionMarketOrchestrator(
         scanner=scanner,
         scan_interval_sec=scan_interval_sec,
     )
     await _orchestrator.start()
+
+
+def _build_default_scanner() -> PredictionMarketScanner:
+    """Build a scanner with all strategies enabled."""
+    import os
+    from .polymarket_client import PolymarketClient
+    from .kalshi_client import KalshiClient
+    from .strategies import (
+        StrategyConfig,
+        NearCertaintyStrategy,
+        SameMarketArbitrageStrategy,
+        CrossMarketArbitrageStrategy,
+        MarketMakingStrategy,
+        FlashCrashStrategy,
+        WhaleCopyTradingStrategy,
+        CrossExchangeArbitrageStrategy,
+    )
+
+    client = PolymarketClient()
+    config = StrategyConfig(dry_run=True)
+    scanner = PredictionMarketScanner(client)
+
+    # Register all strategies
+    scanner.add_strategy(NearCertaintyStrategy(client, config))
+    scanner.add_strategy(SameMarketArbitrageStrategy(client, config))
+    scanner.add_strategy(CrossMarketArbitrageStrategy(client, config))
+    scanner.add_strategy(MarketMakingStrategy(client, config))
+    scanner.add_strategy(FlashCrashStrategy(client, config))
+    scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+
+    # Wire cross-exchange arb with Kalshi client if credentials available
+    kalshi_client = KalshiClient()
+    cross_exchange = CrossExchangeArbitrageStrategy(
+        client, config, kalshi_client=kalshi_client
+    )
+    scanner.add_strategy(cross_exchange)
+
+    # Wire weather strategy if NOAA data available
+    try:
+        from .noaa_weather import NOAAWeatherClient
+        from .strategies import WeatherArbitrageStrategy
+        noaa = NOAAWeatherClient()
+        weather = WeatherArbitrageStrategy(client, config)
+        scanner.add_strategy(weather)
+    except Exception:
+        pass
+
+    logger.info(f"[ORCHESTRATOR] Auto-configured scanner with {len(scanner.strategies)} strategies")
+    return scanner
 
 
 async def stop_orchestrator():
