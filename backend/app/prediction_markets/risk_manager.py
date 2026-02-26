@@ -193,7 +193,9 @@ class RiskManager:
         # Track daily P&L impact (fees reduce P&L)
         if result.is_success:
             self._daily_pnl -= result.fees
-            self._strategy_trades[result.raw_response.get("strategy", "")] += 1
+            strategy = result.raw_response.get("strategy", "") if result.raw_response else ""
+            if strategy:
+                self._strategy_trades[strategy] += 1
 
     def record_pnl(self, strategy: str, pnl: float):
         """Record realized P&L for a strategy (called when position closes)."""

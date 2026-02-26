@@ -799,8 +799,8 @@ def _build_default_scanner() -> PredictionMarketScanner:
         noaa = NOAAWeatherClient()
         weather = WeatherArbitrageStrategy(client, config)
         scanner.add_strategy(weather)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[ORCHESTRATOR] Weather strategy not loaded: {e}")
 
     logger.info(f"[ORCHESTRATOR] Auto-configured scanner with {len(scanner.strategies)} strategies")
     return scanner

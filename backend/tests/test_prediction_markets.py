@@ -881,3 +881,67 @@ class TestKillSwitch:
         )
         result = executor.execute(req)
         assert result.status == OrderStatus.FILLED
+
+
+class TestRiskManagerRecordExecution:
+    """Verify record_execution handles missing/empty raw_response."""
+
+    def test_record_execution_no_strategy_in_raw_response(self):
+        from app.prediction_markets.risk_manager import RiskManager
+        from app.prediction_markets.execution import (
+            OrderResult, Exchange, OrderSide, OrderType, OrderStatus,
+        )
+        rm = RiskManager()
+        result = OrderResult(
+            order_id="dry-001", exchange=Exchange.POLYMARKET,
+            market_id="m1", token_id="t1", side=OrderSide.BUY,
+            order_type=OrderType.LIMIT, size=5.0, price=0.50,
+            status=OrderStatus.FILLED, filled_size=5.0, filled_price=0.50,
+            fees=0.01, raw_response={},
+        )
+        # Should not raise even with empty raw_response
+        rm.record_execution(result)
+        assert rm._daily_pnl == -0.01
+
+    def test_record_execution_with_strategy(self):
+        from app.prediction_markets.risk_manager import RiskManager
+        from app.prediction_markets.execution import (
+            OrderResult, Exchange, OrderSide, OrderType, OrderStatus,
+        )
+        rm = RiskManager()
+        result = OrderResult(
+            order_id="dry-002", exchange=Exchange.POLYMARKET,
+            market_id="m1", token_id="t1", side=OrderSide.BUY,
+            order_type=OrderType.LIMIT, size=5.0, price=0.50,
+            status=OrderStatus.FILLED, filled_size=5.0, filled_price=0.50,
+            fees=0.02, raw_response={"strategy": "near_certainty"},
+        )
+        rm.record_execution(result)
+        assert rm._strategy_trades["near_certainty"] == 1
+
+    def test_record_execution_rejected_no_tracking(self):
+        from app.prediction_markets.risk_manager import RiskManager
+        from app.prediction_markets.execution import (
+            OrderResult, Exchange, OrderSide, OrderType, OrderStatus,
+        )
+        rm = RiskManager()
+        result = OrderResult(
+            order_id="dry-003", exchange=Exchange.POLYMARKET,
+            market_id="m1", token_id="t1", side=OrderSide.BUY,
+            order_type=OrderType.LIMIT, size=5.0, price=0.50,
+            status=OrderStatus.REJECTED, error="test rejection",
+        )
+        rm.record_execution(result)
+        # Rejected orders shouldn't affect P&L or strategy counts
+        assert rm._daily_pnl == 0.0
+        assert sum(rm._strategy_trades.values()) == 0
+
+
+class TestKalshiSigningErrorPropagation:
+    """Verify Kalshi signing raises instead of returning empty dict."""
+
+    def test_signing_raises_on_missing_cryptography(self):
+        from app.prediction_markets.execution import KalshiExecutor
+        executor = KalshiExecutor(api_key_id="test", private_key_pem="not-a-key")
+        with pytest.raises(RuntimeError, match="signing failed|cryptography"):
+            executor._sign_request("GET", "/trade-api/v2/portfolio/balance")

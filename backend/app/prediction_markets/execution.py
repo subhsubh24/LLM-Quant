@@ -484,18 +484,22 @@ class KalshiExecutor:
                 "KALSHI-ACCESS-TIMESTAMP": timestamp,
             }
         except ImportError:
-            logger.error("cryptography package required for Kalshi auth. pip install cryptography")
-            return {}
+            raise RuntimeError(
+                "cryptography package required for Kalshi auth. pip install cryptography"
+            )
         except Exception as e:
-            logger.error(f"Kalshi request signing failed: {e}")
-            return {}
+            raise RuntimeError(f"Kalshi request signing failed: {e}") from e
 
     def _authenticated_request(
         self, method: str, path: str, body: Optional[dict] = None
     ) -> Optional[dict]:
         """Make an authenticated request to Kalshi API."""
         body_str = json.dumps(body) if body else ""
-        headers = self._sign_request(method, path, body_str)
+        try:
+            headers = self._sign_request(method, path, body_str)
+        except RuntimeError as e:
+            logger.error(f"Kalshi auth failed: {e}")
+            return None
         if not headers:
             return None
 

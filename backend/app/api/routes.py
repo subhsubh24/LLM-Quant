@@ -4521,3 +4521,165 @@ async def update_risk_config(req: RiskConfigUpdate):
         config.max_orders_per_minute = req.max_orders_per_minute
 
     return {"status": "updated", "config": orchestrator.risk_manager.get_status()}
+
+
+# ============ Prediction Markets — Kill Switch ============
+
+@router.post("/prediction-markets/kill-switch/activate")
+async def activate_kill_switch(reason: str = "manual"):
+    """Emergency kill switch — immediately blocks ALL new orders."""
+    executor = _get_prediction_executor()
+    executor.activate_kill_switch(reason=reason)
+    return {
+        "status": "activated",
+        "reason": reason,
+        "timestamp": datetime.now().isoformat(),
+        "positions_held": len(executor.positions),
+        "exposure_usd": executor.total_exposure,
+    }
+
+
+@router.post("/prediction-markets/kill-switch/deactivate")
+async def deactivate_kill_switch():
+    """Deactivate the kill switch and resume trading."""
+    executor = _get_prediction_executor()
+    was_active = executor.kill_switch_active
+    executor.deactivate_kill_switch()
+    return {
+        "status": "deactivated",
+        "was_active": was_active,
+    }
+
+
+@router.get("/prediction-markets/kill-switch/status")
+async def kill_switch_status():
+    """Get kill switch status."""
+    executor = _get_prediction_executor()
+    return {
+        "active": executor._kill_switch_active,
+        "reason": executor._kill_switch_reason,
+        "activated_at": executor._kill_switch_time.isoformat() if executor._kill_switch_time else None,
+        "positions_held": len(executor.positions),
+        "exposure_usd": executor.total_exposure,
+    }
+
+
+# ============ Prediction Markets — Quant Model Diagnostics ============
+
+@router.get("/prediction-markets/quant/vpin")
+async def get_vpin_metrics(token_id: Optional[str] = None):
+    """Get VPIN (Volume-synchronized Probability of Informed Trading) metrics."""
+    try:
+        scanner = _get_prediction_scanner()
+        for strategy in scanner.strategies:
+            if strategy.name == "market_making" and hasattr(strategy, "_vpin"):
+                vpin_tracker = strategy._vpin
+                if token_id:
+                    vpin_val = vpin_tracker.get_vpin(token_id)
+                    is_toxic = vpin_tracker.is_toxic(token_id) if hasattr(vpin_tracker, "is_toxic") else (vpin_val or 0) > 0.7
+                    return {
+                        "token_id": token_id,
+                        "vpin": vpin_val,
+                        "is_toxic": is_toxic,
+                        "threshold": 0.7,
+                    }
+                else:
+                    # Return all tracked tokens
+                    all_vpin = {}
+                    for tid in vpin_tracker._buckets:
+                        val = vpin_tracker.get_vpin(tid)
+                        if val is not None:
+                            all_vpin[tid] = {"vpin": val, "is_toxic": val > 0.7}
+                    return {"tracked_tokens": len(all_vpin), "metrics": all_vpin}
+        return {"error": "Market making strategy not active or VPIN tracker not initialized"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/prediction-markets/quant/avellaneda-stoikov")
+async def get_as_diagnostics(token_id: str, mid_price: float, inventory: float = 0.0, hours_to_resolution: float = 24.0):
+    """Get Avellaneda-Stoikov optimal quotes for a given market state."""
+    try:
+        from ..prediction_markets.quant_models import AvellanedaStoikovModel
+        model = AvellanedaStoikovModel()
+        bid, ask, diagnostics = model.compute_quotes(
+            token_id=token_id,
+            mid_price=mid_price,
+            inventory=inventory,
+            time_to_resolution_hours=hours_to_resolution,
+        )
+        return {
+            "bid": bid,
+            "ask": ask,
+            "spread": ask - bid if bid and ask else None,
+            "diagnostics": diagnostics,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/prediction-markets/quant/bayesian")
+async def get_bayesian_priors():
+    """Get all active Bayesian priors and posteriors."""
+    try:
+        from ..prediction_markets.quant_models import BayesianUpdater
+        updater = BayesianUpdater()
+        # Return the singleton state if market making strategy has one
+        scanner = _get_prediction_scanner()
+        for strategy in scanner.strategies:
+            if hasattr(strategy, "_bayesian"):
+                updater = strategy._bayesian
+                break
+        priors = {}
+        for key, (alpha, beta) in updater._priors.items():
+            mean = alpha / (alpha + beta)
+            priors[key] = {
+                "alpha": alpha,
+                "beta": beta,
+                "mean": mean,
+                "confidence": alpha + beta,
+            }
+        return {"active_priors": len(priors), "priors": priors}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/prediction-markets/quant/bayesian/update")
+async def update_bayesian_prior(key: str, signal_mean: float, signal_weight: float = 5.0):
+    """Update a Bayesian prior with a new signal (e.g., from news, polls)."""
+    try:
+        from ..prediction_markets.quant_models import BayesianUpdater
+        scanner = _get_prediction_scanner()
+        for strategy in scanner.strategies:
+            if hasattr(strategy, "_bayesian"):
+                strategy._bayesian.update_with_signal(key, signal_mean, signal_weight)
+                alpha, beta = strategy._bayesian._priors[key]
+                return {
+                    "key": key,
+                    "updated_mean": alpha / (alpha + beta),
+                    "alpha": alpha,
+                    "beta": beta,
+                }
+        return {"error": "No strategy with Bayesian updater found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/prediction-markets/quant/monte-carlo-kelly")
+async def get_mc_kelly_estimate(
+    naive_kelly_fraction: float = 0.05,
+    bankroll: float = 500.0,
+    strategy: str = "market_making",
+):
+    """Run Monte Carlo Kelly simulation and return sizing recommendation."""
+    try:
+        from ..prediction_markets.quant_models import MonteCarloKelly
+        mc = MonteCarloKelly()
+        result = mc.compute_size(
+            strategy=strategy,
+            naive_kelly_fraction=naive_kelly_fraction,
+            bankroll=bankroll,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
