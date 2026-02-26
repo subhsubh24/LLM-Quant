@@ -3734,6 +3734,7 @@ def _get_prediction_scanner():
             NearCertaintyStrategy,
             SameMarketArbitrageStrategy,
             CrossMarketArbitrageStrategy,
+            CrossExchangeArbitrageStrategy,
             MarketMakingStrategy,
             FlashCrashStrategy,
             WeatherArbitrageStrategy,
@@ -3759,6 +3760,12 @@ def _get_prediction_scanner():
         _prediction_scanner.add_strategy(MarketMakingStrategy(client, config))
         _prediction_scanner.add_strategy(FlashCrashStrategy(client, config))
         _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+
+        # Cross-exchange arb: Polymarket vs Kalshi
+        cross_exchange = CrossExchangeArbitrageStrategy(
+            client, config, kalshi_client=_get_kalshi_client()
+        )
+        _prediction_scanner.add_strategy(cross_exchange)
 
         # Weather arb needs NOAA forecasts
         weather_strategy = WeatherArbitrageStrategy(client, config)
@@ -3938,6 +3945,100 @@ async def get_prediction_strategies():
         ],
         "recent_opportunities": len(scanner.scan_history),
     }
+
+
+@router.get("/prediction-markets/cross-exchange")
+async def scan_cross_exchange_arb(min_spread: float = 0.06):
+    """
+    Scan for arbitrage opportunities between Polymarket and Kalshi.
+
+    Returns matched market pairs and any profitable spread discrepancies.
+    """
+    from ..prediction_markets.strategies import CrossExchangeArbitrageStrategy, StrategyConfig
+
+    poly = _get_polymarket_client()
+    kalshi = _get_kalshi_client()
+
+    config = StrategyConfig(enabled=True, dry_run=True)
+    strategy = CrossExchangeArbitrageStrategy(
+        poly, config, kalshi_client=kalshi, min_spread=min_spread
+    )
+
+    try:
+        # Fetch Polymarket markets
+        poly_markets = []
+        for offset in range(0, 400, 100):
+            batch = poly.get_markets(limit=100, offset=offset)
+            poly_markets.extend(batch)
+            if len(batch) < 100:
+                break
+
+        # Fetch Kalshi markets for the match report
+        kalshi_markets = []
+        for offset in range(0, 400, 200):
+            batch = kalshi.get_markets(limit=200, offset=offset)
+            kalshi_markets.extend(batch)
+            if len(batch) < 200:
+                break
+
+        # Get matched pairs (for the full report)
+        pairs = strategy.match_markets(poly_markets, kalshi_markets)
+
+        # Run arb scan
+        opportunities = strategy.scan(poly_markets)
+
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "polymarket_count": len(poly_markets),
+            "kalshi_count": len(kalshi_markets),
+            "matched_pairs": len(pairs),
+            "min_spread": min_spread,
+            "fee_model": {
+                "polymarket": f"{strategy.polymarket_fee:.0%}",
+                "kalshi": f"{strategy.kalshi_fee:.0%}",
+                "total": f"{strategy.polymarket_fee + strategy.kalshi_fee:.0%}",
+            },
+            "pairs": [
+                {
+                    "polymarket": {
+                        "id": p.poly_market.id,
+                        "question": p.poly_market.question,
+                        "yes_price": p.poly_market.outcomes[0].price if p.poly_market.outcomes else None,
+                        "category": p.poly_market.category,
+                    },
+                    "kalshi": {
+                        "id": p.kalshi_market.id,
+                        "question": p.kalshi_market.question,
+                        "yes_price": p.kalshi_market.outcomes[0].price if p.kalshi_market.outcomes else None,
+                        "category": p.kalshi_market.category,
+                    },
+                    "match_score": p.match_score,
+                    "match_method": p.match_method,
+                    "spread": abs(
+                        (p.poly_market.outcomes[0].price if p.poly_market.outcomes else 0.5)
+                        - (p.kalshi_market.outcomes[0].price if p.kalshi_market.outcomes else 0.5)
+                    ),
+                }
+                for p in pairs[:50]  # Top 50 pairs
+            ],
+            "opportunities": [
+                {
+                    "strategy": r.strategy,
+                    "market": r.market.question,
+                    "market_id": r.market.id,
+                    "side": r.side,
+                    "entry_price": r.entry_price,
+                    "expected_value": r.expected_value,
+                    "edge": r.edge,
+                    "confidence": r.confidence,
+                    "reason": r.reason,
+                }
+                for r in opportunities
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Cross-exchange scan error: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/prediction-markets/kalshi/events")
