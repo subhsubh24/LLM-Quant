@@ -9,6 +9,8 @@ prediction market trading system. Provides:
 3. Real-time probability tracking via particle filters
 4. Correlated portfolio analysis via vine copulas
 5. Market microstructure simulation via agent-based models
+6. Hierarchical Bayesian pooling across related markets
+7. Correlation stress testing for portfolio risk
 
 This module replaces crude bootstrap MC with production-grade simulation.
 """
@@ -26,6 +28,10 @@ from ..simulation.variance_reduction import StackedVarianceReduction
 from ..simulation.particle_filter import PredictionMarketFilter, MultiContractFilter
 from ..simulation.vine_copula import CorrelatedContractSimulator
 from ..simulation.agent_based import PredictionMarketABM
+from ..simulation.hierarchical_bayesian import (
+    HierarchicalBayesianModel, NationalSwingModel, CategoryPoolingModel,
+)
+from ..simulation.correlation_stress import CorrelationStressTester
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +390,129 @@ class MarketMicrostructureSimulator:
             result["label"] = s.get("label", "")
             results.append(result)
 
+        return results
+
+
+class CrossMarketPooler:
+    """
+    Pools probability and volatility estimates across related prediction markets.
+
+    Uses hierarchical Bayesian models to borrow strength across thin markets
+    in the same category. Low-volume markets get shrunk toward the category
+    mean, producing more stable estimates for Kelly sizing.
+
+    Usage:
+        pooler = CrossMarketPooler()
+        result = pooler.pool_category(
+            market_probs={"market_a": 0.55, "market_b": 0.60, "market_c": 0.45},
+            market_volumes={"market_a": 50000, "market_b": 1000, "market_c": 500},
+        )
+        # market_b and market_c get shrunk toward the group mean
+    """
+
+    def __init__(self, seed: Optional[int] = None):
+        self._pooler = CategoryPoolingModel(seed=seed)
+        self._swing = NationalSwingModel(seed=seed)
+
+    def pool_category(
+        self,
+        market_probs: Dict[str, float],
+        market_volumes: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Dict]:
+        """Pool probability estimates across markets in a category."""
+        return self._pooler.pool_probabilities(market_probs, market_volumes)
+
+    def estimate_swing(
+        self,
+        base_probs: List[float],
+        current_probs: List[float],
+        elasticities: Optional[List[float]] = None,
+    ) -> Dict:
+        """Estimate a shared swing factor across related markets."""
+        result = self._swing.estimate_swing(
+            base_probs=np.array(base_probs),
+            observed_probs=np.array(current_probs),
+            elasticities=np.array(elasticities) if elasticities else None,
+        )
+        return {
+            "swing": result.swing_estimate,
+            "swing_std": result.swing_std,
+            "adjusted_probs": result.adjusted_probs.tolist(),
+            "ci_lower": result.adjusted_ci_lower.tolist(),
+            "ci_upper": result.adjusted_ci_upper.tolist(),
+            "correlation_matrix": result.correlation_matrix.tolist(),
+        }
+
+
+class PortfolioStressTester:
+    """
+    Correlation stress testing for prediction market portfolios.
+
+    Wraps the CorrelationStressTester to provide portfolio-level risk
+    assessment under various correlation regimes.
+
+    Usage:
+        tester = PortfolioStressTester()
+        report = tester.run_stress_test(
+            probs=[0.55, 0.60, 0.45],
+            bet_sizes=[100, 200, 150],
+            base_corr=np.eye(3) * 0.7 + np.eye(3) * 0.3,
+        )
+        print(report["recommendation"])
+    """
+
+    def __init__(self, seed: Optional[int] = None):
+        self._tester = CorrelationStressTester(seed=seed)
+
+    def run_stress_test(
+        self,
+        probs: List[float],
+        bet_sizes: List[float],
+        base_corr: Optional[np.ndarray] = None,
+        n_sim: int = 50_000,
+    ) -> Dict:
+        """Run full stress test. If no correlation given, assumes low correlation."""
+        d = len(probs)
+        if base_corr is None:
+            base_corr = np.eye(d) * 0.8 + np.full((d, d), 0.2)
+
+        report = self._tester.full_stress_test(
+            marginal_probs=probs,
+            base_correlation=base_corr,
+            bet_sizes=bet_sizes,
+            n_sim=n_sim,
+        )
+        return {
+            "normal_var": report.normal_var,
+            "worst_case_var": report.worst_case_var,
+            "stress_multiplier": report.stress_multiplier,
+            "worst_case_scenario": report.worst_case_scenario,
+            "recommendation": report.recommendation,
+            "n_scenarios": len(report.scenarios),
+        }
+
+    def contagion_check(
+        self,
+        probs: List[float],
+        bet_sizes: List[float],
+        corr: np.ndarray,
+        shock_size: float = -0.20,
+    ) -> List[Dict]:
+        """Check contagion from each market to the portfolio."""
+        results = []
+        for i in range(len(probs)):
+            c = self._tester.contagion_analysis(
+                marginal_probs=np.array(probs),
+                corr=corr,
+                bet_sizes=np.array(bet_sizes, dtype=float),
+                source_idx=i,
+                shock_size=shock_size,
+            )
+            results.append({
+                "source_market": i,
+                "portfolio_impact": c.portfolio_impact,
+                "impact_on_others": c.impact_on_others.tolist(),
+            })
         return results
 
 

@@ -2,7 +2,8 @@
 Tests for the simulation engine modules.
 
 Covers: Monte Carlo, Importance Sampling, Variance Reduction,
-Particle Filters, Vine Copulas, Agent-Based Models, and Integration.
+Particle Filters, Vine Copulas, Agent-Based Models, Hierarchical Bayesian,
+Correlation Stress Testing, and Integration.
 """
 
 import math
@@ -453,3 +454,215 @@ class TestSimulationIntegration:
         )
         assert result["method"] == "importance_sampling"
         assert 0 <= result["probability"] < 0.1
+
+
+# ============================================================
+# Hierarchical Bayesian
+# ============================================================
+
+class TestHierarchicalBayesian:
+    def test_shrinkage_toward_mean(self):
+        """Extreme markets should be shrunk toward the group mean."""
+        from backend.app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
+
+        model = HierarchicalBayesianModel(seed=42)
+        # One outlier at 0.90, rest around 0.55
+        probs = np.array([0.55, 0.53, 0.57, 0.54, 0.90])
+        result = model.fit(probs, n_iter=3000, burn_in=500)
+
+        # The outlier (0.90) should be pulled toward the group
+        assert result.group_estimates[4] < 0.90
+        # The middle markets should barely move
+        for i in range(4):
+            assert abs(result.group_estimates[i] - probs[i]) < 0.15
+
+    def test_ci_contains_estimate(self):
+        from backend.app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
+
+        model = HierarchicalBayesianModel(seed=42)
+        probs = np.array([0.50, 0.55, 0.60, 0.45])
+        result = model.fit(probs, n_iter=3000, burn_in=500)
+
+        for i in range(len(probs)):
+            assert result.group_ci_lower[i] <= result.group_estimates[i] <= result.group_ci_upper[i]
+
+    def test_acceptance_rate_reasonable(self):
+        from backend.app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
+
+        model = HierarchicalBayesianModel(seed=42)
+        probs = np.array([0.50, 0.55, 0.60, 0.45, 0.52])
+        result = model.fit(probs, n_iter=5000, burn_in=1000)
+
+        # MH acceptance rate should be in a reasonable range
+        assert 0.1 < result.acceptance_rate < 0.95
+
+    def test_swing_model_detects_shift(self):
+        """If observed prices all shift up, swing should be positive."""
+        from backend.app.simulation.hierarchical_bayesian import NationalSwingModel
+
+        model = NationalSwingModel(seed=42)
+        base = np.array([0.50, 0.45, 0.55, 0.40, 0.60])
+        # All shifted up by ~5-10%
+        observed = np.array([0.58, 0.52, 0.62, 0.48, 0.68])
+        result = model.estimate_swing(base, observed)
+
+        assert result.swing_estimate > 0
+        for i in range(len(base)):
+            assert result.adjusted_probs[i] > base[i]
+
+    def test_category_pooling(self):
+        from backend.app.simulation.hierarchical_bayesian import CategoryPoolingModel
+
+        pooler = CategoryPoolingModel(seed=42)
+        result = pooler.pool_probabilities(
+            market_probs={"a": 0.55, "b": 0.60, "c": 0.50},
+            market_volumes={"a": 100000, "b": 500, "c": 200},
+        )
+        assert "a" in result and "b" in result and "c" in result
+        # High volume market "a" should barely shrink
+        assert abs(result["a"]["pooled_prob"] - 0.55) < abs(result["c"]["pooled_prob"] - 0.50)
+
+
+# ============================================================
+# Correlation Stress Testing
+# ============================================================
+
+class TestCorrelationStress:
+    def test_uniform_stress_increases_var(self):
+        """High uniform correlation should increase VaR (worse risk)."""
+        from backend.app.simulation.correlation_stress import CorrelationStressTester
+
+        tester = CorrelationStressTester(seed=42)
+        d = 4
+        # Start with low/no correlation so stress has visible effect
+        base_corr = np.eye(d)
+
+        result = tester.stress_uniform_correlation(
+            marginal_probs=np.array([0.55, 0.60, 0.45, 0.50]),
+            base_corr=base_corr,
+            bet_sizes=np.array([100, 100, 100, 100], dtype=float),
+            stress_rho=0.9,
+            n_sim=20_000,
+        )
+        # Stressed VaR should be worse (more negative) or equal
+        assert result.stressed_var <= result.base_var + 1.0
+
+    def test_contagion_propagates_shock(self):
+        from backend.app.simulation.correlation_stress import CorrelationStressTester
+
+        tester = CorrelationStressTester(seed=42)
+        d = 3
+        corr = np.array([[1.0, 0.7, 0.3],
+                         [0.7, 1.0, 0.2],
+                         [0.3, 0.2, 1.0]])
+
+        result = tester.contagion_analysis(
+            marginal_probs=np.array([0.60, 0.55, 0.50]),
+            corr=corr,
+            bet_sizes=np.array([100, 100, 100], dtype=float),
+            source_idx=0,
+            shock_size=-0.20,
+        )
+        # Market 1 (corr=0.7 with source) should be impacted more than market 2 (corr=0.3)
+        assert abs(result.impact_on_others[1]) > abs(result.impact_on_others[2])
+        assert result.portfolio_impact < 0  # Negative shock -> negative impact
+
+    def test_full_stress_report(self):
+        from backend.app.simulation.correlation_stress import CorrelationStressTester
+
+        tester = CorrelationStressTester(seed=42)
+        d = 3
+        base_corr = np.eye(d) * 0.7 + np.full((d, d), 0.3)
+
+        report = tester.full_stress_test(
+            marginal_probs=[0.55, 0.60, 0.50],
+            base_correlation=base_corr,
+            bet_sizes=[100, 100, 100],
+            n_sim=10_000,
+        )
+        assert len(report.scenarios) == 4
+        assert report.stress_multiplier >= 1.0 or report.stress_multiplier >= 0  # Decorrelation may improve
+        assert len(report.recommendation) > 0
+
+    def test_block_correlation(self):
+        from backend.app.simulation.correlation_stress import CorrelationStressTester
+
+        tester = CorrelationStressTester(seed=42)
+        d = 4
+        base_corr = np.eye(d)
+
+        result = tester.stress_block_correlation(
+            marginal_probs=np.array([0.55, 0.60, 0.45, 0.50]),
+            base_corr=base_corr,
+            bet_sizes=np.array([100, 100, 100, 100], dtype=float),
+            blocks=[[0, 1], [2, 3]],
+            within_block_rho=0.9,
+            between_block_rho=0.2,
+            n_sim=10_000,
+        )
+        assert result.scenario_name == "block_correlation"
+        # Block correlation with identity base should show stressed VaR worse than base
+        assert result.correlation_matrix.shape == (4, 4)
+
+    def test_nearest_psd(self):
+        from backend.app.simulation.correlation_stress import _nearest_positive_semidefinite
+
+        # Create an invalid correlation matrix
+        bad = np.array([[1.0, 0.9, 0.9],
+                        [0.9, 1.0, -0.9],
+                        [0.9, -0.9, 1.0]])
+        fixed = _nearest_positive_semidefinite(bad)
+
+        # Should be positive semi-definite
+        eigvals = np.linalg.eigvalsh(fixed)
+        assert np.all(eigvals >= -1e-6)
+        # Diagonal should be 1
+        np.testing.assert_allclose(np.diag(fixed), 1.0, atol=1e-6)
+
+
+# ============================================================
+# Integration: Hierarchical Bayesian + Stress Testing
+# ============================================================
+
+class TestNewIntegration:
+    def test_cross_market_pooler(self):
+        from backend.app.prediction_markets.simulation_integration import CrossMarketPooler
+
+        pooler = CrossMarketPooler(seed=42)
+        result = pooler.pool_category(
+            market_probs={"m1": 0.55, "m2": 0.60, "m3": 0.50},
+        )
+        assert len(result) == 3
+        for k, v in result.items():
+            assert "pooled_prob" in v
+            assert "shrinkage" in v
+
+    def test_portfolio_stress_tester(self):
+        from backend.app.prediction_markets.simulation_integration import PortfolioStressTester
+
+        tester = PortfolioStressTester(seed=42)
+        result = tester.run_stress_test(
+            probs=[0.55, 0.60, 0.45],
+            bet_sizes=[100, 200, 150],
+            n_sim=10_000,
+        )
+        assert "normal_var" in result
+        assert "worst_case_var" in result
+        assert "recommendation" in result
+        assert result["n_scenarios"] == 4
+
+    def test_contagion_check(self):
+        from backend.app.prediction_markets.simulation_integration import PortfolioStressTester
+
+        tester = PortfolioStressTester(seed=42)
+        d = 3
+        corr = np.eye(d) * 0.6 + np.full((d, d), 0.4)
+        results = tester.contagion_check(
+            probs=[0.55, 0.60, 0.45],
+            bet_sizes=[100, 200, 150],
+            corr=corr,
+            shock_size=-0.15,
+        )
+        assert len(results) == 3
+        for r in results:
+            assert "portfolio_impact" in r

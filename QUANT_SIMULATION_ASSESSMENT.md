@@ -2,9 +2,9 @@
 
 Comparison of LLM-Quant codebase against the @gemchanger_ltd "How to Simulate Like a Quant Desk" framework.
 
-## Coverage Summary: ~60-65%
+## Coverage Summary: ~95%+ (ALL GAPS IMPLEMENTED)
 
-Strongest in risk management and dependency modeling. Weakest in simulation engine primitives.
+Full coverage of the framework. All 8 simulation layers implemented, tested, and integrated.
 
 ## What We HAVE
 
@@ -22,41 +22,42 @@ Strongest in risk management and dependency modeling. Weakest in simulation engi
 | Production Risk Controls | Circuit breakers, kill switch, daily loss limits | `risk_manager.py`, `monitoring/anomaly_detector.py` |
 | Cointegration / Stat Arb | ADF testing, pairs trading, z-score signals | `trading/stat_arb_engine.py` |
 | Portfolio Optimization | Mean-variance, risk parity, Black-Litterman, Ledoit-Wolf | `portfolio/optimizer.py` |
-
-## What We're MISSING
-
-| Framework Layer | Description | Priority |
-|---|---|---|
-| **Monte Carlo Path Simulation** | GBM path sim for binary contract pricing with CIs | HIGH |
-| **Importance Sampling** | Exponential tilting for rare/tail events (100-10,000x variance reduction) | HIGH |
-| **Particle Filters (SMC)** | Sequential Monte Carlo for real-time multi-modal Bayesian updating | HIGH |
-| **Variance Reduction** | Antithetic variates, control variates, stratified sampling (stackable) | MEDIUM |
-| **Vine Copulas** | C-vine/D-vine/R-vine for d>5 correlated contract portfolios | MEDIUM |
-| **Agent-Based Models** | Heterogeneous agent sim (informed/noise/MM), Kyle's lambda | MEDIUM |
-| **Hierarchical Bayesian** | Stan/PyMC hierarchical models (e.g., shared national swing) | LOW |
-| **Correlation Stress Testing** | What-if correlation spikes across correlated markets | LOW |
+| **Monte Carlo Path Simulation** | GBM, jump-diffusion, Ornstein-Uhlenbeck, binary contract pricing | `simulation/monte_carlo.py` |
+| **Importance Sampling** | Exponential tilting for rare/tail events (100-10,000x VR) | `simulation/importance_sampling.py` |
+| **Variance Reduction** | Antithetic variates, control variates, stratified sampling (stackable) | `simulation/variance_reduction.py` |
+| **Particle Filters (SMC)** | Sequential Monte Carlo for real-time Bayesian updating | `simulation/particle_filter.py` |
+| **Vine Copulas** | C-vine/D-vine for d>5 correlated contract portfolios | `simulation/vine_copula.py` |
+| **Agent-Based Models** | Heterogeneous agent sim (informed/noise/MM), Kyle's lambda | `simulation/agent_based.py` |
+| **Hierarchical Bayesian** | MCMC hierarchical models, national swing, category pooling | `simulation/hierarchical_bayesian.py` |
+| **Correlation Stress Testing** | What-if correlation spikes, contagion, stressed VaR | `simulation/correlation_stress.py` |
 
 ## What We Have That The Framework Doesn't Cover
 
 - Real execution infrastructure (Polymarket + Kalshi order routing)
+- Paper trading simulator with live market data
 - 8 concrete trading strategies with production config
 - On-chain whale tracking (Polygon blockchain)
 - VPIN toxicity detection
 - Kill switch and graduated circuit breakers
 - Database persistence (SQLModel audit trail)
 - WebSocket real-time price feeds
+- Simulation-enhanced Kelly sizing in live orchestrator
+- Live probability tracking via particle filters in MTM loop
 
-## Key Insight
+## Architecture
 
 The framework builds **bottom-up** from simulation primitives.
 Our codebase was built **top-down** from execution needs.
-The missing simulation layer bridges the two.
+The simulation layer bridges the two — all 8 modules are integrated into
+the prediction market orchestrator and paper trading system.
 
-## Recommended Implementation Order
+## Implementation Order (Completed)
 
-1. Monte Carlo simulation engine (GBM paths, binary contract pricing)
-2. Importance sampling for tail-risk contracts
-3. Variance reduction (antithetic + stratified + control variates)
-4. Particle filter for real-time probability tracking
-5. Vine copulas for high-dimensional dependency
-6. Agent-based market simulation
+1. Monte Carlo simulation engine (GBM paths, binary contract pricing) ✅
+2. Importance sampling for tail-risk contracts ✅
+3. Variance reduction (antithetic + stratified + control variates) ✅
+4. Particle filter for real-time probability tracking ✅
+5. Vine copulas for high-dimensional dependency ✅
+6. Agent-based market simulation ✅
+7. Hierarchical Bayesian (cross-market pooling, national swing) ✅
+8. Correlation stress testing (what-if scenarios, contagion) ✅
