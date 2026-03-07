@@ -354,10 +354,8 @@ class CVine:
             nu = fit.dof or 4.0
             x = t_dist.ppf(np.clip(u, 1e-6, 1 - 1e-6), nu)
             y = t_dist.ppf(np.clip(v, 1e-6, 1 - 1e-6), nu)
-            return t_dist.cdf(
-                (y - rho * x) / math.sqrt(max((1 - rho ** 2) * (nu + x ** 2) / (nu + 1), 1e-8)),
-                nu + 1,
-            )
+            denom = np.sqrt(np.maximum((1 - rho ** 2) * (nu + x ** 2) / (nu + 1), 1e-8))
+            return t_dist.cdf((y - rho * x) / denom, nu + 1)
         else:
             # Fallback: Gaussian approximation
             rho = math.sin(math.pi * fit.tau / 2)
@@ -534,10 +532,8 @@ class DVine:
             nu = fit.dof or 4.0
             x = t_dist.ppf(np.clip(v, 1e-6, 1 - 1e-6), nu)
             y = t_dist.ppf(np.clip(u, 1e-6, 1 - 1e-6), nu)
-            return t_dist.cdf(
-                (y - rho * x) / math.sqrt(max((1 - rho ** 2) * (nu + x ** 2) / (nu + 1), 1e-8)),
-                nu + 1,
-            )
+            denom = np.sqrt(np.maximum((1 - rho ** 2) * (nu + x ** 2) / (nu + 1), 1e-8))
+            return t_dist.cdf((y - rho * x) / denom, nu + 1)
         else:
             rho = math.sin(math.pi * fit.tau / 2)
             rho = max(-0.99, min(0.99, rho))

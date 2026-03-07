@@ -43,6 +43,12 @@ from .execution import (
 from .strategies import PredictionMarketScanner, StrategyConfig
 from .risk_manager import RiskManager, RiskCheckResult
 
+try:
+    from .simulation_integration import EnhancedContractPricer, LiveProbabilityTracker
+except ImportError:
+    EnhancedContractPricer = None
+    LiveProbabilityTracker = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -166,6 +172,35 @@ def size_from_scan_result(
 
     if naive_bet_usd <= 0:
         return 0.0, 0.0
+
+    # Simulation-enhanced pricing (stacked variance reduction)
+    if EnhancedContractPricer is not None and config.use_monte_carlo:
+        try:
+            pricer = EnhancedContractPricer()
+            sim_result = pricer.price_contract(
+                current_prob=market_price,
+                vol=0.3,  # Default prediction market vol
+                T=30 / 365,  # Default 30-day horizon
+                n_paths=10_000,
+            )
+            sim_prob = sim_result["probability"]
+            # If simulation disagrees with market by > 2%, use sim estimate
+            if abs(sim_prob - market_price) > 0.02:
+                win_probability = sim_prob
+                naive_bet_usd = kelly_size(
+                    edge=win_probability - market_price,
+                    confidence=result.confidence,
+                    win_probability=win_probability,
+                    bankroll=bankroll,
+                    config=config,
+                )
+                logger.debug(
+                    f"[SIM-KELLY] {result.strategy}: market={market_price:.3f} → "
+                    f"sim={sim_prob:.3f} (method={sim_result['method']}, "
+                    f"VR={sim_result.get('variance_reduction', 'N/A')})"
+                )
+        except Exception as e:
+            logger.debug(f"[SIM-KELLY] Simulation pricing failed: {e}")
 
     # Monte Carlo Kelly adjustment (when enabled + historical data available)
     bet_usd = naive_bet_usd
@@ -368,6 +403,10 @@ class PredictionMarketOrchestrator:
         self.risk_manager = risk_manager or RiskManager()
         self.kelly_config = kelly_config or KellyConfig()
         self.mtm_engine = MarkToMarketEngine(self.executor)
+
+        # Simulation-enhanced pricing and probability tracking
+        self.simulation_pricer = EnhancedContractPricer() if EnhancedContractPricer else None
+        self.probability_trackers: Dict[str, "LiveProbabilityTracker"] = {}
 
         self.scan_interval_sec = scan_interval_sec
         self.mtm_interval_sec = mtm_interval_sec
@@ -620,6 +659,17 @@ class PredictionMarketOrchestrator:
         while self._running:
             try:
                 self.mtm_engine.update_prices()
+
+                # Update simulation probability trackers
+                if LiveProbabilityTracker is not None:
+                    for token_id, pos in list(self.executor.positions.items()):
+                        if token_id not in self.probability_trackers:
+                            self.probability_trackers[token_id] = LiveProbabilityTracker(
+                                prior_prob=pos.avg_entry_price
+                            )
+                        if pos.current_price > 0:
+                            self.probability_trackers[token_id].update(pos.current_price)
+
                 self.mtm_engine.check_resolutions()
             except asyncio.CancelledError:
                 break
@@ -712,6 +762,14 @@ class PredictionMarketOrchestrator:
                 "max_bet_usd": self.kelly_config.max_bet_usd,
                 "min_edge": self.kelly_config.min_edge,
                 "min_confidence": self.kelly_config.min_confidence,
+            },
+            "simulation": {
+                "pricer_available": self.simulation_pricer is not None,
+                "tracked_contracts": len(self.probability_trackers),
+                "tracker_divergences": {
+                    tid: t.divergence_from_market()
+                    for tid, t in list(self.probability_trackers.items())[:10]
+                },
             },
             "risk_manager": self.risk_manager.get_status(),
             "mtm": self.mtm_engine.get_summary(),
