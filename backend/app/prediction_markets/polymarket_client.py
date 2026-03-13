@@ -499,6 +499,38 @@ class PolymarketClient:
             return float(data[0].get("value", 0))
         return None
 
+    def get_open_interest(self, market: Optional[str] = None) -> List[dict]:
+        """
+        Get open interest for a market.
+
+        Returns list of dicts: [{"market": conditionId, "value": float}].
+        """
+        params: dict = {}
+        if market:
+            params["market"] = market
+        data = self._get(f"{DATA_API}/oi", params)
+        return data if isinstance(data, list) else []
+
+    def get_leaderboard(
+        self,
+        period: str = "all",
+        order_by: str = "pnl",
+        limit: int = 50,
+    ) -> List[dict]:
+        """
+        Get trader leaderboard ranked by PnL or volume.
+
+        Args:
+            period: "1d", "7d", "30d", or "all".
+            order_by: "pnl" or "volume".
+            limit: Max results (up to 100).
+
+        Returns list of trader dicts with address, pnl, volume, etc.
+        """
+        params: dict = {"period": period, "orderBy": order_by, "limit": min(limit, 100)}
+        data = self._get(f"{DATA_API}/leaderboard", params)
+        return data if isinstance(data, list) else []
+
     # ================================================================
     # Parsing
     # ================================================================

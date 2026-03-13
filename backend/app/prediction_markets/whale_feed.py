@@ -68,7 +68,36 @@ class WhaleDataFeed:
         self._discovery_count = 0
 
     def seed_known_whales(self):
-        """Register well-known whale wallets from the public leaderboard."""
+        """
+        Seed whale wallets from two sources:
+        1. Hardcoded known whales (fallback)
+        2. Live leaderboard from Data API /leaderboard (preferred)
+        """
+        # Try live leaderboard first
+        leaderboard_whales = 0
+        try:
+            leaders = self.client.get_leaderboard(period="all", order_by="pnl", limit=30)
+            for entry in leaders:
+                addr = (entry.get("address", "") or entry.get("proxyWallet", "")).lower()
+                if not addr:
+                    continue
+                pnl = float(entry.get("pnl", 0))
+                name = entry.get("pseudonym", "") or entry.get("name", "") or addr[:8]
+                if addr not in self.whales:
+                    self.whales[addr] = WhaleProfile(
+                        address=addr,
+                        name=name,
+                        pnl=pnl,
+                        discovered_via="leaderboard",
+                    )
+                    leaderboard_whales += 1
+            if leaderboard_whales > 0:
+                logger.info(f"[WHALE-FEED] Seeded {leaderboard_whales} whales from /leaderboard")
+        except Exception as e:
+            logger.warning(f"[WHALE-FEED] Leaderboard fetch failed, using hardcoded seeds: {e}")
+
+        # Also add hardcoded whales (in case leaderboard is empty or different)
+        hardcoded = 0
         for w in KNOWN_WHALES:
             addr = w["address"].lower()
             if addr not in self.whales:
@@ -79,7 +108,12 @@ class WhaleDataFeed:
                     win_rate=w.get("win_rate", 0),
                     discovered_via="seed",
                 )
-        logger.info(f"[WHALE-FEED] Seeded {len(KNOWN_WHALES)} known whale wallets")
+                hardcoded += 1
+
+        logger.info(
+            f"[WHALE-FEED] Seeded {len(self.whales)} total whales "
+            f"({leaderboard_whales} from leaderboard, {hardcoded} hardcoded)"
+        )
 
     def discover_whales(self, markets: List[Market], max_markets: int = 10):
         """
