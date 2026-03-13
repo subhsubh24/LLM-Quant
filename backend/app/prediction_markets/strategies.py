@@ -1306,6 +1306,10 @@ class PredictionMarketScanner:
         self._clob_fetch_books = clob_fetch_books
         self._order_books: Dict[str, "OrderBook"] = {}  # Cached from last enrichment
 
+        # Whale data feed (auto-discovers whales from Data API)
+        self._whale_feed = None  # Lazy-initialized on first scan
+        self.use_whale_feed = True
+
     def add_strategy(self, strategy: BaseStrategy):
         """Register a strategy."""
         self.strategies.append(strategy)
@@ -1391,6 +1395,31 @@ class PredictionMarketScanner:
                         m.total_volume = 10000.0
                     if liq_unavail and m.liquidity == 0:
                         m.liquidity = 5000.0
+
+        # Feed whale strategies with real Data API trades
+        if all_markets and self.use_whale_feed:
+            try:
+                if self._whale_feed is None:
+                    from .whale_feed import WhaleDataFeed
+                    self._whale_feed = WhaleDataFeed(self.client)
+
+                # Find whale strategies in our registered list
+                whale_copy = None
+                wallet_div = None
+                for s in self.strategies:
+                    if s.name == "whale_copy":
+                        whale_copy = s
+                    elif s.name == "wallet_divergence":
+                        wallet_div = s
+
+                if whale_copy or wallet_div:
+                    self._whale_feed.refresh(
+                        markets=all_markets,
+                        whale_copy=whale_copy,
+                        wallet_divergence=wallet_div,
+                    )
+            except Exception as e:
+                logger.warning(f"[SCANNER] Whale feed error (strategies still run): {e}")
 
         # Run each strategy
         all_results = []

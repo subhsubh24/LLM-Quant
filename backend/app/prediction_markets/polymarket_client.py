@@ -3,8 +3,8 @@ Polymarket API Client.
 
 Wraps the three Polymarket APIs:
 - Gamma API: Market discovery (events, markets, metadata) — no auth
-- CLOB API: Trading (prices, order books, order placement) — auth required
-- Data API: Portfolio (positions, trade history) — auth required
+- CLOB API: Read-only pricing (no auth), order placement (auth required)
+- Data API: Trades, positions, holders, activity — no auth
 
 Uses py-clob-client for authenticated operations, raw HTTP for read-only scanning.
 """
@@ -388,6 +388,116 @@ class PolymarketClient:
                 + (f" ({errors} errors)" if errors else "")
             )
         return order_books
+
+    # ================================================================
+    # Data API (public, no auth required)
+    # ================================================================
+
+    def get_trades(
+        self,
+        market: Optional[str] = None,
+        user: Optional[str] = None,
+        side: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[dict]:
+        """
+        Fetch trades from Data API.
+
+        Args:
+            market: Condition ID to filter by (optional).
+            user: Wallet address to filter by (optional).
+            side: "BUY" or "SELL" (optional).
+            limit: Max results (up to 500).
+            offset: Pagination offset.
+
+        Returns list of trade dicts with keys: side, asset, conditionId,
+        size, price, timestamp, transactionHash, trader, etc.
+        """
+        params: dict = {"limit": min(limit, 500), "offset": offset}
+        if market:
+            params["market"] = market
+        if user:
+            params["user"] = user
+        if side:
+            params["side"] = side
+        data = self._get(f"{DATA_API}/trades", params)
+        return data if isinstance(data, list) else []
+
+    def get_positions(
+        self,
+        user: str,
+        market: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str = "CASHPNL",
+    ) -> List[dict]:
+        """
+        Fetch current positions for a wallet address.
+
+        Returns list of position dicts with keys: asset, conditionId,
+        size, avgPrice, currentValue, initialValue, cashPnl, percentPnl,
+        title, outcome, etc.
+        """
+        params: dict = {"user": user, "limit": min(limit, 500), "offset": offset, "sortBy": sort_by}
+        if market:
+            params["market"] = market
+        data = self._get(f"{DATA_API}/positions", params)
+        return data if isinstance(data, list) else []
+
+    def get_holders(
+        self,
+        market: str,
+        limit: int = 100,
+    ) -> List[dict]:
+        """
+        Get top holders for a market (condition ID).
+
+        Returns list of dicts, each containing tokenId and holders array.
+        Each holder has: proxyWallet, amount, outcomeIndex, pseudonym.
+        """
+        params: dict = {"market": market, "limit": limit}
+        data = self._get(f"{DATA_API}/holders", params)
+        return data if isinstance(data, list) else []
+
+    def get_activity(
+        self,
+        user: str,
+        activity_type: Optional[str] = None,
+        market: Optional[str] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[dict]:
+        """
+        Fetch on-chain activity for a wallet.
+
+        Args:
+            user: Wallet address.
+            activity_type: TRADE, SPLIT, MERGE, REDEEM, REWARD, or CONVERSION.
+            market: Condition ID filter.
+            start: Unix timestamp (seconds).
+            end: Unix timestamp (seconds).
+        """
+        params: dict = {"user": user, "limit": min(limit, 500), "offset": offset}
+        if activity_type:
+            params["type"] = activity_type
+        if market:
+            params["market"] = market
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        data = self._get(f"{DATA_API}/activity", params)
+        return data if isinstance(data, list) else []
+
+    def get_portfolio_value(self, user: str) -> Optional[float]:
+        """Get total USD position value for a wallet."""
+        data = self._get(f"{DATA_API}/value", params={"user": user})
+        if isinstance(data, list) and data:
+            return float(data[0].get("value", 0))
+        return None
 
     # ================================================================
     # Parsing
