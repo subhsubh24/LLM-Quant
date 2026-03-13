@@ -32,8 +32,8 @@ class StrategyConfig:
     enabled: bool = True
     max_position_usd: float = 5.0       # Max per-position size in USD
     max_positions: int = 20              # Max concurrent positions
-    min_edge: float = 0.05              # Minimum expected edge (5%)
-    min_liquidity: float = 1000.0       # Minimum market liquidity
+    min_edge: float = 0.02              # Minimum expected edge (2%)
+    min_liquidity: float = 500.0        # Minimum market liquidity
     scan_interval_sec: int = 120         # Scan every 2 minutes
     dry_run: bool = True                 # Paper trade by default
 
@@ -223,9 +223,9 @@ class NearCertaintyStrategy(BaseStrategy):
         self,
         client: PolymarketClient,
         config: StrategyConfig,
-        min_price: float = 0.90,
+        min_price: float = 0.80,
         max_price: float = 0.99,
-        min_volume: float = 5000,
+        min_volume: float = 1000,
         max_hours_to_resolution: int = 720,  # 30 days
     ):
         super().__init__(client, config)

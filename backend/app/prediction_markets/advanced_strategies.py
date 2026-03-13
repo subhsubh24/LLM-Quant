@@ -80,11 +80,11 @@ class NOPositionScanner(BaseStrategy):
         self,
         client: PolymarketClient,
         config: StrategyConfig,
-        min_yes_price: float = 0.95,      # YES must be priced above this
-        max_no_price: float = 0.10,        # NO must be priced below this
+        min_yes_price: float = 0.90,      # YES must be priced above this
+        max_no_price: float = 0.15,        # NO must be priced below this
         min_no_price: float = 0.01,        # NO must be priced above this (avoid dust)
-        min_volume: float = 5000,          # Minimum market volume
-        min_liquidity: float = 1000,       # Minimum market liquidity
+        min_volume: float = 1000,          # Minimum market volume
+        min_liquidity: float = 500,        # Minimum market liquidity
         max_hours_to_resolution: int = 720,  # 30 days
         category_rates: Optional[Dict[str, float]] = None,
     ):
@@ -182,7 +182,7 @@ class NOPositionScanner(BaseStrategy):
         now = datetime.now(timezone.utc)
         skipped = {
             "inactive": 0, "not_binary": 0, "low_volume": 0,
-            "low_liquidity": 0, "no_end_date": 0, "time": 0,
+            "low_liquidity": 0, "time": 0,
             "no_price_match": 0, "no_edge": 0,
         }
 
@@ -202,12 +202,13 @@ class NOPositionScanner(BaseStrategy):
 
             # Check time to resolution
             if not market.end_date:
-                skipped["no_end_date"] += 1
-                continue
-            hours_left = (market.end_date - now).total_seconds() / 3600
-            if hours_left > self.max_hours_to_resolution or hours_left < 0:
-                skipped["time"] += 1
-                continue
+                # No end date: assume mid-range horizon so strategy still considers it
+                hours_left = self.max_hours_to_resolution / 2.0
+            else:
+                hours_left = (market.end_date - now).total_seconds() / 3600
+                if hours_left > self.max_hours_to_resolution or hours_left < 0:
+                    skipped["time"] += 1
+                    continue
 
             # Find the NO side (outcome where YES is expensive)
             found = False

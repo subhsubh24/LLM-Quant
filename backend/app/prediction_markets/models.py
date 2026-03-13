@@ -212,6 +212,7 @@ class PredictionPnLSnapshot(SQLModel, table=True):
 
     # Breakdown by exchange
     polymarket_value: float = 0.0
+    kalshi_value: float = 0.0
 
     # Breakdown by strategy (JSON: {strategy_name: value})
     strategy_breakdown_json: Optional[str] = None
