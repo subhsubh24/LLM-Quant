@@ -279,7 +279,6 @@ class MarkToMarketEngine:
         """
         try:
             from .polymarket_client import PolymarketClient
-            from .kalshi_client import KalshiClient
         except ImportError:
             return
 
@@ -290,27 +289,18 @@ class MarkToMarketEngine:
 
             # Check if market has resolved
             try:
-                if pos.exchange == Exchange.POLYMARKET:
-                    # Check via Gamma API
-                    client = PolymarketClient()
-                    market = client.get_market_by_slug(pos.market_id)
-                    if market and market.resolved:
-                        # Find the winning outcome
-                        winning_price = 0.0
-                        for outcome in market.outcomes:
-                            if outcome.token_id == token_id:
-                                winning_price = outcome.price  # 1.0 if won, 0.0 if lost
-                                break
-                        resolved.append((token_id, winning_price))
-                        self._resolution_cache[token_id] = True
-
-                elif pos.exchange == Exchange.KALSHI:
-                    client = KalshiClient()
-                    market = client.get_market_by_ticker(pos.market_id)
-                    if market and market.resolved:
-                        winning_price = 1.0 if market.outcomes[0].price > 0.5 else 0.0
-                        resolved.append((token_id, winning_price))
-                        self._resolution_cache[token_id] = True
+                # Check via Gamma API
+                client = PolymarketClient()
+                market = client.get_market_by_slug(pos.market_id)
+                if market and market.resolved:
+                    # Find the winning outcome
+                    winning_price = 0.0
+                    for outcome in market.outcomes:
+                        if outcome.token_id == token_id:
+                            winning_price = outcome.price  # 1.0 if won, 0.0 if lost
+                            break
+                    resolved.append((token_id, winning_price))
+                    self._resolution_cache[token_id] = True
 
             except Exception as e:
                 logger.debug(f"[MTM] Resolution check failed for {token_id}: {e}")
@@ -507,12 +497,9 @@ class PredictionMarketOrchestrator:
                 skipped.append({"market": opp.market.question[:60], "reason": "Kelly size = 0"})
                 continue
 
-            # Determine exchange
+            # Determine token
             exchange = Exchange.POLYMARKET
             token_id = opp.market.outcomes[opp.outcome_idx].token_id if opp.outcome_idx >= 0 else ""
-            if opp.market.resolution_source == "kalshi":
-                exchange = Exchange.KALSHI
-                token_id = opp.market.id
 
             # Build order
             order = OrderRequest(
@@ -702,9 +689,6 @@ class PredictionMarketOrchestrator:
             poly_value = sum(
                 p.market_value for p in positions if p.exchange == Exchange.POLYMARKET
             )
-            kalshi_value = sum(
-                p.market_value for p in positions if p.exchange == Exchange.KALSHI
-            )
             total_exposure = sum(p.market_value for p in positions)
             total_unrealized = sum(p.unrealized_pnl for p in positions)
             total_realized = sum(p.realized_pnl for p in positions)
@@ -728,7 +712,6 @@ class PredictionMarketOrchestrator:
                     total_fees=self.executor.total_fees,
                     num_positions=len(positions),
                     polymarket_value=poly_value,
-                    kalshi_value=kalshi_value,
                     strategy_breakdown_json=json.dumps(strategy_values),
                 )
                 session.add(snapshot)
@@ -798,8 +781,7 @@ async def start_orchestrator(
 ):
     """Start the orchestrator (called from routes or app lifespan).
 
-    If no scanner is provided, auto-configures one with all strategies
-    and wires up Kalshi auth from environment variables.
+    If no scanner is provided, auto-configures one with all strategies.
     """
     global _orchestrator
     if scanner is None:
@@ -819,7 +801,6 @@ def _build_default_scanner() -> PredictionMarketScanner:
     """Build a scanner with all strategies enabled."""
     import os
     from .polymarket_client import PolymarketClient
-    from .kalshi_client import KalshiClient
     from .strategies import (
         StrategyConfig,
         NearCertaintyStrategy,
@@ -828,7 +809,6 @@ def _build_default_scanner() -> PredictionMarketScanner:
         MarketMakingStrategy,
         FlashCrashStrategy,
         WhaleCopyTradingStrategy,
-        CrossExchangeArbitrageStrategy,
     )
 
     client = PolymarketClient()
@@ -842,13 +822,6 @@ def _build_default_scanner() -> PredictionMarketScanner:
     scanner.add_strategy(MarketMakingStrategy(client, config))
     scanner.add_strategy(FlashCrashStrategy(client, config))
     scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
-
-    # Wire cross-exchange arb with Kalshi client if credentials available
-    kalshi_client = KalshiClient()
-    cross_exchange = CrossExchangeArbitrageStrategy(
-        client, config, kalshi_client=kalshi_client
-    )
-    scanner.add_strategy(cross_exchange)
 
     # Wire weather strategy if NOAA data available
     try:

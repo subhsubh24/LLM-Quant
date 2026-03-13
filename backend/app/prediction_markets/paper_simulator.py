@@ -1,7 +1,7 @@
 """
 Paper Trading Simulator for Prediction Markets.
 
-Connects to live Polymarket/Kalshi data feeds (read-only) and simulates
+Connects to live Polymarket data feeds (read-only) and simulates
 trading with virtual money. Uses the simulation engine for enhanced
 pricing, probability tracking, and risk analysis.
 
@@ -36,7 +36,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .polymarket_client import Market, Outcome, PolymarketClient, ScanResult
-from .kalshi_client import KalshiClient
 
 # Graceful imports for simulation modules
 try:
@@ -93,7 +92,7 @@ class SimulatedPosition:
 
     # Internal bookkeeping
     position_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    exchange: str = "polymarket"  # "polymarket" or "kalshi"
+    exchange: str = "polymarket"
     is_closed: bool = False
     close_time: Optional[datetime] = None
     close_price: Optional[float] = None
@@ -233,7 +232,7 @@ class PaperTradingSimulator:
     """
     Paper-trading simulation environment for prediction markets.
 
-    Connects to live Polymarket and Kalshi market data (read-only,
+    Connects to live Polymarket market data (read-only,
     no authentication required) and simulates trading with virtual money.
     Uses the simulation engine (EnhancedContractPricer) for fair-value
     estimates and LiveProbabilityTracker for noise-filtered probability
@@ -241,7 +240,7 @@ class PaperTradingSimulator:
 
     Features:
         - Virtual bankroll with full P&L accounting
-        - Live price feeds from Polymarket Gamma/CLOB and Kalshi APIs
+        - Live price feeds from Polymarket Gamma/CLOB API
         - Simulation-enhanced pricing on every trade
         - Per-position particle filter probability tracking
         - Automated scan-and-execute via the orchestrator scanner
@@ -257,7 +256,6 @@ class PaperTradingSimulator:
         self,
         bankroll: float = 10_000.0,
         polymarket_client: Optional[PolymarketClient] = None,
-        kalshi_client: Optional[KalshiClient] = None,
         pricer: Any = None,
         mc_paths: int = DEFAULT_MC_PATHS,
         vol: float = DEFAULT_VOL,
@@ -272,7 +270,6 @@ class PaperTradingSimulator:
         Args:
             bankroll: Starting virtual capital in USD.
             polymarket_client: Client for Polymarket data. Created lazily if None.
-            kalshi_client: Client for Kalshi data. Created lazily if None.
             pricer: EnhancedContractPricer instance. Created if sim modules available.
             mc_paths: Number of Monte Carlo paths for contract pricing.
             vol: Annualized volatility assumption for simulation pricing.
@@ -288,7 +285,6 @@ class PaperTradingSimulator:
 
         # Clients (lazy initialization)
         self._poly_client = polymarket_client
-        self._kalshi_client = kalshi_client
 
         # Simulation engine
         self._pricer = pricer
@@ -338,13 +334,6 @@ class PaperTradingSimulator:
             self._poly_client = PolymarketClient()
         return self._poly_client
 
-    @property
-    def kalshi_client(self) -> KalshiClient:
-        """Kalshi API client, lazily initialized."""
-        if self._kalshi_client is None:
-            self._kalshi_client = KalshiClient()
-        return self._kalshi_client
-
     # ================================================================
     # Market Data
     # ================================================================
@@ -355,23 +344,20 @@ class PaperTradingSimulator:
         """
         Fetch and cache a market by ID or slug.
 
-        Tries Polymarket first (by slug), then Kalshi (by ticker).
+        Fetches from Polymarket by slug.
         """
         if market_id in self._market_cache:
             return self._market_cache[market_id]
 
         market = None
-        if exchange == "polymarket":
-            market = self.poly_client.get_market_by_slug(market_id)
-            if market is None:
-                # Try as condition_id via market listing
-                markets = self.poly_client.get_markets(limit=100)
-                for m in markets:
-                    if m.id == market_id or m.condition_id == market_id:
-                        market = m
-                        break
-        elif exchange == "kalshi":
-            market = self.kalshi_client.get_market_by_ticker(market_id)
+        market = self.poly_client.get_market_by_slug(market_id)
+        if market is None:
+            # Try as condition_id via market listing
+            markets = self.poly_client.get_markets(limit=100)
+            for m in markets:
+                if m.id == market_id or m.condition_id == market_id:
+                    market = m
+                    break
 
         if market is not None:
             self._market_cache[market_id] = market
@@ -393,10 +379,7 @@ class PaperTradingSimulator:
         if not outcome.token_id:
             return outcome.price  # Fall back to cached price
 
-        if market.resolution_source == "kalshi":
-            return self.kalshi_client.get_midpoint(outcome.token_id)
-        else:
-            return self.poly_client.get_midpoint(outcome.token_id)
+        return self.poly_client.get_midpoint(outcome.token_id)
 
     def _get_sim_price(
         self, current_price: float, market: Optional[Market] = None
@@ -471,11 +454,11 @@ class PaperTradingSimulator:
         for a fair-value estimate, and attaches a probability tracker.
 
         Args:
-            market_id: Market slug (Polymarket) or ticker (Kalshi).
+            market_id: Market slug (Polymarket).
             outcome_idx: Index of the outcome to buy (0=Yes, 1=No for binary).
             size: Number of contracts to buy.
             price: Limit price override. If None, uses live midpoint.
-            exchange: "polymarket" or "kalshi".
+            exchange: "polymarket".
 
         Returns:
             SimulatedPosition if trade succeeds, None otherwise.
@@ -553,7 +536,7 @@ class PaperTradingSimulator:
             current_price=fill_price,
             sim_fair_value=sim_result["sim_price"],
             tracker=tracker,
-            exchange="kalshi" if market.resolution_source == "kalshi" else "polymarket",
+            exchange="polymarket",
         )
 
         self.positions[position.position_id] = position
@@ -617,7 +600,7 @@ class PaperTradingSimulator:
             size: Number of contracts to sell. None = sell entire position.
             price: Limit price override. None = use live midpoint.
             position_id: Specific position to close.
-            exchange: "polymarket" or "kalshi".
+            exchange: "polymarket".
 
         Returns:
             Realized P&L from the sale, or None if no matching position found.
@@ -744,7 +727,7 @@ class PaperTradingSimulator:
 
     def refresh_prices(self) -> int:
         """
-        Pull latest prices from Polymarket/Kalshi APIs for all open positions.
+        Pull latest prices from Polymarket API for all open positions.
 
         Returns the number of positions successfully updated.
         """
@@ -1019,7 +1002,7 @@ class PaperTradingSimulator:
 
             # Determine exchange
             exchange = (
-                "kalshi" if opp.market.resolution_source == "kalshi" else "polymarket"
+                "polymarket"
             )
 
             # Execute paper trade
@@ -1085,9 +1068,9 @@ class PaperTradingSimulator:
         edge estimate, and recommended Kelly size.
 
         Args:
-            market_id: Market slug (Polymarket) or ticker (Kalshi).
+            market_id: Market slug (Polymarket).
             outcome_idx: Which outcome to analyze (0=Yes, 1=No for binary).
-            exchange: "polymarket" or "kalshi".
+            exchange: "polymarket".
             n_paths: Override number of MC paths.
 
         Returns:

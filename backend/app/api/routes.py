@@ -3706,7 +3706,6 @@ async def get_alpha_signals(symbol: str):
 
 # Lazy-initialized singletons (avoids import-time HTTP calls)
 _polymarket_client = None
-_kalshi_client = None
 _prediction_scanner = None
 
 
@@ -3718,14 +3717,6 @@ def _get_polymarket_client():
     return _polymarket_client
 
 
-def _get_kalshi_client():
-    global _kalshi_client
-    if _kalshi_client is None:
-        from ..prediction_markets.kalshi_client import KalshiClient
-        _kalshi_client = KalshiClient()
-    return _kalshi_client
-
-
 def _get_prediction_scanner():
     global _prediction_scanner
     if _prediction_scanner is None:
@@ -3735,7 +3726,6 @@ def _get_prediction_scanner():
             NearCertaintyStrategy,
             SameMarketArbitrageStrategy,
             CrossMarketArbitrageStrategy,
-            CrossExchangeArbitrageStrategy,
             MarketMakingStrategy,
             FlashCrashStrategy,
             WeatherArbitrageStrategy,
@@ -3762,12 +3752,6 @@ def _get_prediction_scanner():
         _prediction_scanner.add_strategy(FlashCrashStrategy(client, config))
         _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
 
-        # Cross-exchange arb: Polymarket vs Kalshi
-        cross_exchange = CrossExchangeArbitrageStrategy(
-            client, config, kalshi_client=_get_kalshi_client()
-        )
-        _prediction_scanner.add_strategy(cross_exchange)
-
         # Weather arb needs NOAA forecasts
         weather_strategy = WeatherArbitrageStrategy(client, config)
         try:
@@ -3784,7 +3768,6 @@ def _get_prediction_scanner():
 class MarketSearchRequest(BaseModel):
     query: str
     limit: int = 20
-    exchange: str = "all"  # "polymarket", "kalshi", or "all"
 
 
 def _serialize_market(m, exchange: str = "polymarket") -> dict:
@@ -3801,58 +3784,34 @@ def _serialize_market(m, exchange: str = "polymarket") -> dict:
 async def list_prediction_markets(
     limit: int = 100,
     offset: int = 0,
-    exchange: str = "all",
 ):
-    """
-    List active prediction markets.
-
-    Args:
-        exchange: "polymarket", "kalshi", or "all" (default: all)
-    """
+    """List active prediction markets from Polymarket."""
     result = []
 
-    if exchange in ("polymarket", "all"):
-        try:
-            poly = _get_polymarket_client()
-            poly_markets = poly.get_markets(limit=limit, offset=offset)
-            result.extend(_serialize_market(m, "polymarket") for m in poly_markets)
-        except Exception as e:
-            logger.error(f"Polymarket fetch error: {e}")
-
-    if exchange in ("kalshi", "all"):
-        try:
-            kalshi = _get_kalshi_client()
-            kalshi_markets = kalshi.get_markets(limit=limit, offset=offset)
-            result.extend(_serialize_market(m, "kalshi") for m in kalshi_markets)
-        except Exception as e:
-            logger.error(f"Kalshi fetch error: {e}")
+    try:
+        poly = _get_polymarket_client()
+        poly_markets = poly.get_markets(limit=limit, offset=offset)
+        result.extend(_serialize_market(m, "polymarket") for m in poly_markets)
+    except Exception as e:
+        logger.error(f"Polymarket fetch error: {e}")
 
     if not result:
-        raise HTTPException(status_code=502, detail="No exchanges reachable")
+        raise HTTPException(status_code=502, detail="Polymarket not reachable")
 
     return {"markets": result, "count": len(result)}
 
 
 @router.post("/prediction-markets/search")
 async def search_prediction_markets(req: MarketSearchRequest):
-    """Search prediction markets by keyword across exchanges."""
+    """Search prediction markets by keyword on Polymarket."""
     result = []
 
-    if req.exchange in ("polymarket", "all"):
-        try:
-            poly = _get_polymarket_client()
-            poly_results = poly.search_markets(req.query, limit=req.limit)
-            result.extend(_serialize_market(m, "polymarket") for m in poly_results)
-        except Exception as e:
-            logger.error(f"Polymarket search error: {e}")
-
-    if req.exchange in ("kalshi", "all"):
-        try:
-            kalshi = _get_kalshi_client()
-            kalshi_results = kalshi.search_markets(req.query, limit=req.limit)
-            result.extend(_serialize_market(m, "kalshi") for m in kalshi_results)
-        except Exception as e:
-            logger.error(f"Kalshi search error: {e}")
+    try:
+        poly = _get_polymarket_client()
+        poly_results = poly.search_markets(req.query, limit=req.limit)
+        result.extend(_serialize_market(m, "polymarket") for m in poly_results)
+    except Exception as e:
+        logger.error(f"Polymarket search error: {e}")
 
     return {"markets": result, "count": len(result)}
 
@@ -3948,112 +3907,6 @@ async def get_prediction_strategies():
     }
 
 
-@router.get("/prediction-markets/cross-exchange")
-async def scan_cross_exchange_arb(min_spread: float = 0.06):
-    """
-    Scan for arbitrage opportunities between Polymarket and Kalshi.
-
-    Returns matched market pairs and any profitable spread discrepancies.
-    """
-    from ..prediction_markets.strategies import CrossExchangeArbitrageStrategy, StrategyConfig
-
-    poly = _get_polymarket_client()
-    kalshi = _get_kalshi_client()
-
-    config = StrategyConfig(enabled=True, dry_run=True)
-    strategy = CrossExchangeArbitrageStrategy(
-        poly, config, kalshi_client=kalshi, min_spread=min_spread
-    )
-
-    try:
-        # Fetch Polymarket markets
-        poly_markets = []
-        for offset in range(0, 400, 100):
-            batch = poly.get_markets(limit=100, offset=offset)
-            poly_markets.extend(batch)
-            if len(batch) < 100:
-                break
-
-        # Fetch Kalshi markets for the match report
-        kalshi_markets = []
-        for offset in range(0, 400, 200):
-            batch = kalshi.get_markets(limit=200, offset=offset)
-            kalshi_markets.extend(batch)
-            if len(batch) < 200:
-                break
-
-        # Get matched pairs (for the full report)
-        pairs = strategy.match_markets(poly_markets, kalshi_markets)
-
-        # Run arb scan
-        opportunities = strategy.scan(poly_markets)
-
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "polymarket_count": len(poly_markets),
-            "kalshi_count": len(kalshi_markets),
-            "matched_pairs": len(pairs),
-            "min_spread": min_spread,
-            "fee_model": {
-                "polymarket": f"{strategy.polymarket_fee:.0%}",
-                "kalshi": f"{strategy.kalshi_fee:.0%}",
-                "total": f"{strategy.polymarket_fee + strategy.kalshi_fee:.0%}",
-            },
-            "pairs": [
-                {
-                    "polymarket": {
-                        "id": p.poly_market.id,
-                        "question": p.poly_market.question,
-                        "yes_price": p.poly_market.outcomes[0].price if p.poly_market.outcomes else None,
-                        "category": p.poly_market.category,
-                    },
-                    "kalshi": {
-                        "id": p.kalshi_market.id,
-                        "question": p.kalshi_market.question,
-                        "yes_price": p.kalshi_market.outcomes[0].price if p.kalshi_market.outcomes else None,
-                        "category": p.kalshi_market.category,
-                    },
-                    "match_score": p.match_score,
-                    "match_method": p.match_method,
-                    "spread": abs(
-                        (p.poly_market.outcomes[0].price if p.poly_market.outcomes else 0.5)
-                        - (p.kalshi_market.outcomes[0].price if p.kalshi_market.outcomes else 0.5)
-                    ),
-                }
-                for p in pairs[:50]  # Top 50 pairs
-            ],
-            "opportunities": [
-                {
-                    "strategy": r.strategy,
-                    "market": r.market.question,
-                    "market_id": r.market.id,
-                    "side": r.side,
-                    "entry_price": r.entry_price,
-                    "expected_value": r.expected_value,
-                    "edge": r.edge,
-                    "confidence": r.confidence,
-                    "reason": r.reason,
-                }
-                for r in opportunities
-            ],
-        }
-    except Exception as e:
-        logger.error(f"Cross-exchange scan error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@router.get("/prediction-markets/kalshi/events")
-async def list_kalshi_events(limit: int = 50, status: Optional[str] = "open"):
-    """List Kalshi events (each event groups related markets)."""
-    kalshi = _get_kalshi_client()
-    try:
-        events = kalshi.get_events(limit=limit, status=status)
-        return {"events": events, "count": len(events)}
-    except Exception as e:
-        logger.error(f"Kalshi events error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
-
-
 # ============ Prediction Markets — Execution ============
 
 _prediction_executor = None
@@ -4068,7 +3921,7 @@ def _get_prediction_executor():
 
 
 class PlaceOrderRequest(BaseModel):
-    exchange: str = "polymarket"  # "polymarket" or "kalshi"
+    exchange: str = "polymarket"
     market_id: str
     token_id: str
     side: str = "BUY"            # "BUY" or "SELL"
@@ -4234,7 +4087,7 @@ async def get_prediction_live_prices():
 
 class SubscribeRequest(BaseModel):
     exchange: str = "polymarket"
-    identifiers: List[str] = []  # token_ids for Polymarket, tickers for Kalshi
+    identifiers: List[str] = []  # token_ids for Polymarket
 
 
 @router.post("/prediction-markets/feeds/subscribe")
@@ -4245,8 +4098,6 @@ async def subscribe_prediction_feeds(req: SubscribeRequest):
 
     if req.exchange == "polymarket":
         await manager.subscribe_polymarket(req.identifiers)
-    elif req.exchange == "kalshi":
-        await manager.subscribe_kalshi(req.identifiers)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown exchange: {req.exchange}")
 
@@ -4254,69 +4105,6 @@ async def subscribe_prediction_feeds(req: SubscribeRequest):
         "subscribed": len(req.identifiers),
         "exchange": req.exchange,
     }
-
-
-# ============ Prediction Markets — Whale Indexer ============
-
-@router.get("/prediction-markets/whales/recent")
-async def get_recent_whale_activity(limit: int = 50):
-    """Get recently detected whale trading activity on Polymarket."""
-    from ..prediction_markets.whale_indexer import get_whale_indexer
-    indexer = get_whale_indexer()
-    events = indexer.get_recent_events(limit=limit)
-    return {
-        "count": len(events),
-        "events": [
-            {
-                "tx_hash": e.tx_hash,
-                "block_number": e.block_number,
-                "wallet_address": e.wallet_address,
-                "wallet_label": e.wallet_label,
-                "token_id": e.token_id,
-                "side": e.side,
-                "size": e.size,
-                "estimated_price": e.estimated_price,
-                "value_usd": e.value_usd,
-                "is_significant": e.is_significant,
-                "timestamp": e.timestamp.isoformat(),
-            }
-            for e in events
-        ],
-    }
-
-
-@router.get("/prediction-markets/whales/leaderboard")
-async def get_whale_leaderboard():
-    """Get whale leaderboard sorted by total volume."""
-    from ..prediction_markets.whale_indexer import get_whale_indexer
-    indexer = get_whale_indexer()
-    return {"leaderboard": indexer.get_whale_leaderboard()}
-
-
-@router.post("/prediction-markets/whales/scan")
-async def trigger_whale_scan(blocks: int = 50):
-    """Manually trigger a whale scan of recent Polygon blocks."""
-    from ..prediction_markets.whale_indexer import get_whale_indexer
-    indexer = get_whale_indexer()
-    try:
-        events = await indexer.scan_recent_blocks(blocks=blocks)
-        return {
-            "blocks_scanned": blocks,
-            "events_found": len(events),
-            "significant_events": len([e for e in events if e.is_significant]),
-            "status": indexer.get_status(),
-        }
-    except Exception as e:
-        logger.error(f"Whale scan error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@router.get("/prediction-markets/whales/status")
-async def get_whale_indexer_status():
-    """Get whale indexer status."""
-    from ..prediction_markets.whale_indexer import get_whale_indexer
-    indexer = get_whale_indexer()
-    return indexer.get_status()
 
 
 # ============ Prediction Markets — Price History ============
@@ -4391,7 +4179,6 @@ async def get_prediction_pnl_history(portfolio_id: int = 1, limit: int = 200):
                 "total_fees": s.total_fees,
                 "num_positions": s.num_positions,
                 "polymarket_value": s.polymarket_value,
-                "kalshi_value": s.kalshi_value,
                 "snapshot_at": s.snapshot_at.isoformat(),
             }
             for s in reversed(results)

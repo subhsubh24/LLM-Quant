@@ -3,11 +3,9 @@ Order Execution Layer for Prediction Markets.
 
 Supports:
 - Polymarket: via py-clob-client (Polygon/CLOB, wallet-based auth)
-- Kalshi: via REST API (API key + RSA signature auth)
 
-Both exchanges support limit and market orders.
 All execution goes through a unified interface so strategies don't
-need to know which exchange they're trading on.
+need to know the exchange internals.
 
 IMPORTANT: Start with dry_run=True to validate logic before real money.
 """
@@ -32,7 +30,6 @@ from .polymarket_client import (
     Outcome,
     PolymarketClient,
 )
-from .kalshi_client import KalshiClient
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +40,6 @@ logger = logging.getLogger(__name__)
 
 class Exchange(Enum):
     POLYMARKET = "polymarket"
-    KALSHI = "kalshi"
 
 
 class OrderSide(Enum):
@@ -72,8 +68,8 @@ class OrderStatus(Enum):
 class OrderRequest:
     """Request to place an order on a prediction market."""
     exchange: Exchange
-    market_id: str           # Polymarket condition_id or Kalshi ticker
-    token_id: str            # Polymarket token_id or Kalshi ticker
+    market_id: str           # Polymarket condition_id
+    token_id: str            # Polymarket token_id
     side: OrderSide
     order_type: OrderType
     size: float              # Number of contracts
@@ -408,230 +404,15 @@ class PolymarketExecutor:
 
 
 # ============================================================
-# Kalshi Executor
-# ============================================================
-
-class KalshiExecutor:
-    """
-    Order execution for Kalshi via REST API.
-
-    Authentication: API key + RSA private key for request signing.
-    Get credentials at: https://kalshi.com/account/api-keys
-
-    Environment variables:
-        KALSHI_API_KEY_ID, KALSHI_RSA_PRIVATE_KEY (PEM format or file path)
-    """
-
-    BASE_URL = "https://trading-api.kalshi.com/trade-api/v2"
-
-    def __init__(
-        self,
-        api_key_id: str = "",
-        private_key_pem: str = "",
-    ):
-        self.api_key_id = api_key_id
-        self.private_key_pem = private_key_pem
-        self._member_id: Optional[str] = None
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "LLM-Quant/1.0",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        })
-
-    @property
-    def is_authenticated(self) -> bool:
-        return bool(self.api_key_id and self.private_key_pem)
-
-    def _sign_request(self, method: str, path: str, body: str = "") -> dict:
-        """
-        Sign a Kalshi API request using RSA-PSS.
-
-        Kalshi uses: timestamp + method + path + body signed with RSA private key.
-        """
-        if not self.is_authenticated:
-            return {}
-
-        timestamp = str(int(time.time() * 1000))
-        message = timestamp + method.upper() + path + body
-
-        try:
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import padding
-
-            # Load private key
-            if self.private_key_pem.startswith("-----"):
-                key_data = self.private_key_pem.encode()
-            else:
-                # Treat as file path
-                with open(self.private_key_pem, "rb") as f:
-                    key_data = f.read()
-
-            private_key = serialization.load_pem_private_key(key_data, password=None)
-            signature = private_key.sign(
-                message.encode(),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH,
-                ),
-                hashes.SHA256(),
-            )
-
-            import base64
-            return {
-                "KALSHI-ACCESS-KEY": self.api_key_id,
-                "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
-                "KALSHI-ACCESS-TIMESTAMP": timestamp,
-            }
-        except ImportError:
-            raise RuntimeError(
-                "cryptography package required for Kalshi auth. pip install cryptography"
-            )
-        except Exception as e:
-            raise RuntimeError(f"Kalshi request signing failed: {e}") from e
-
-    def _authenticated_request(
-        self, method: str, path: str, body: Optional[dict] = None
-    ) -> Optional[dict]:
-        """Make an authenticated request to Kalshi API."""
-        body_str = json.dumps(body) if body else ""
-        try:
-            headers = self._sign_request(method, path, body_str)
-        except RuntimeError as e:
-            logger.error(f"Kalshi auth failed: {e}")
-            return None
-        if not headers:
-            return None
-
-        url = f"{self.BASE_URL}{path}"
-        try:
-            if method == "GET":
-                resp = self.session.get(url, headers=headers, timeout=15)
-            elif method == "POST":
-                resp = self.session.post(url, data=body_str, headers=headers, timeout=15)
-            elif method == "DELETE":
-                resp = self.session.delete(url, headers=headers, timeout=15)
-            else:
-                return None
-
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as e:
-            logger.error(f"Kalshi API request failed: {e}")
-            return None
-
-    def place_order(self, req: OrderRequest) -> OrderResult:
-        """Place an order on Kalshi."""
-        if not self.is_authenticated:
-            return OrderResult(
-                order_id=str(uuid.uuid4()),
-                exchange=Exchange.KALSHI,
-                market_id=req.market_id,
-                token_id=req.token_id,
-                side=req.side,
-                order_type=req.order_type,
-                size=req.size,
-                price=req.price,
-                status=OrderStatus.REJECTED,
-                error="Kalshi credentials not configured",
-            )
-
-        # Kalshi uses cents for prices (1-99)
-        price_cents = int((req.price or 0.50) * 100)
-        price_cents = max(1, min(99, price_cents))
-
-        # Map side: Kalshi uses "yes"/"no" instead of "buy"/"sell"
-        kalshi_side = "yes" if req.side == OrderSide.BUY else "no"
-
-        order_body = {
-            "ticker": req.market_id,
-            "client_order_id": str(uuid.uuid4()),
-            "type": "limit",
-            "action": "buy",
-            "side": kalshi_side,
-            "count": int(req.size),
-            "yes_price": price_cents if kalshi_side == "yes" else None,
-            "no_price": price_cents if kalshi_side == "no" else None,
-        }
-        # Remove None values
-        order_body = {k: v for k, v in order_body.items() if v is not None}
-
-        path = "/portfolio/orders"
-        data = self._authenticated_request("POST", path, order_body)
-
-        if data and "order" in data:
-            order = data["order"]
-            status_map = {
-                "resting": OrderStatus.OPEN,
-                "canceled": OrderStatus.CANCELLED,
-                "executed": OrderStatus.FILLED,
-                "pending": OrderStatus.PENDING,
-            }
-            return OrderResult(
-                order_id=order.get("order_id", str(uuid.uuid4())),
-                exchange=Exchange.KALSHI,
-                market_id=req.market_id,
-                token_id=req.token_id,
-                side=req.side,
-                order_type=req.order_type,
-                size=req.size,
-                price=req.price,
-                status=status_map.get(order.get("status", ""), OrderStatus.PENDING),
-                filled_size=float(order.get("count_filled", 0)),
-                filled_price=float(order.get("price_filled", 0)) / 100,
-                raw_response=data,
-            )
-        else:
-            return OrderResult(
-                order_id=str(uuid.uuid4()),
-                exchange=Exchange.KALSHI,
-                market_id=req.market_id,
-                token_id=req.token_id,
-                side=req.side,
-                order_type=req.order_type,
-                size=req.size,
-                price=req.price,
-                status=OrderStatus.REJECTED,
-                error="Order placement failed — check credentials and market status",
-            )
-
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancel an open order."""
-        data = self._authenticated_request("DELETE", f"/portfolio/orders/{order_id}")
-        return data is not None
-
-    def get_open_orders(self) -> List[dict]:
-        """Get all open orders."""
-        data = self._authenticated_request("GET", "/portfolio/orders?status=resting")
-        if data and "orders" in data:
-            return data["orders"]
-        return []
-
-    def get_positions(self) -> List[dict]:
-        """Get current positions."""
-        data = self._authenticated_request("GET", "/portfolio/positions")
-        if data and "market_positions" in data:
-            return data["market_positions"]
-        return []
-
-    def get_balances(self) -> Dict[str, float]:
-        """Get account balance."""
-        data = self._authenticated_request("GET", "/portfolio/balance")
-        if data:
-            return {"USD": float(data.get("balance", 0)) / 100}
-        return {"USD": 0.0}
-
-
-# ============================================================
 # Unified Executor (routes both exchanges through one interface)
 # ============================================================
 
 class PredictionMarketExecutor:
     """
-    Unified order execution across Polymarket and Kalshi.
+    Unified order execution for Polymarket.
 
     Handles:
-    - Order routing based on exchange
+    - Order routing to Polymarket
     - Position tracking (in-memory + DB persistence)
     - Risk checks (max position size, max portfolio exposure)
     - Dry-run mode for paper trading
@@ -640,13 +421,11 @@ class PredictionMarketExecutor:
     def __init__(
         self,
         polymarket: Optional[PolymarketExecutor] = None,
-        kalshi: Optional[KalshiExecutor] = None,
         dry_run: bool = True,
         max_position_usd: float = 50.0,
         max_portfolio_usd: float = 500.0,
     ):
         self.polymarket = polymarket or PolymarketExecutor()
-        self.kalshi = kalshi or KalshiExecutor()
         self.dry_run = dry_run
         self.max_position_usd = max_position_usd
         self.max_portfolio_usd = max_portfolio_usd
@@ -750,8 +529,6 @@ class PredictionMarketExecutor:
             result = self._simulate_fill(req)
         elif req.exchange == Exchange.POLYMARKET:
             result = self.polymarket.place_order(req)
-        elif req.exchange == Exchange.KALSHI:
-            result = self.kalshi.place_order(req)
         else:
             result = OrderResult(
                 order_id=str(uuid.uuid4()),
@@ -786,11 +563,8 @@ class PredictionMarketExecutor:
             else:
                 fill_price = max(fill_price * (1 - slippage), 0.01)
 
-        # Simulate fees (Polymarket ~2%, Kalshi ~7% on settlement)
-        if req.exchange == Exchange.POLYMARKET:
-            fees = req.size * fill_price * 0.02
-        else:
-            fees = req.size * fill_price * 0.07
+        # Simulate fees (Polymarket ~2%)
+        fees = req.size * fill_price * 0.02
 
         return OrderResult(
             order_id=f"sim_{uuid.uuid4().hex[:12]}",
@@ -854,8 +628,6 @@ class PredictionMarketExecutor:
             return True
         if exchange == Exchange.POLYMARKET:
             return self.polymarket.cancel_order(order_id)
-        elif exchange == Exchange.KALSHI:
-            return self.kalshi.cancel_order(order_id)
         return False
 
     def get_portfolio_summary(self) -> dict:
@@ -935,13 +707,8 @@ def get_executor(
             private_key=os.environ.get("POLYMARKET_PRIVATE_KEY", ""),
             funder=os.environ.get("POLYMARKET_FUNDER", ""),
         )
-        kalshi = KalshiExecutor(
-            api_key_id=os.environ.get("KALSHI_API_KEY_ID", ""),
-            private_key_pem=os.environ.get("KALSHI_RSA_PRIVATE_KEY", ""),
-        )
         _executor = PredictionMarketExecutor(
             polymarket=poly,
-            kalshi=kalshi,
             dry_run=dry_run,
             max_position_usd=max_position_usd,
             max_portfolio_usd=max_portfolio_usd,

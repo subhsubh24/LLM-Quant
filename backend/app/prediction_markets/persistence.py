@@ -190,10 +190,6 @@ def save_portfolio_snapshot(executor: PredictionMarketExecutor):
         p.market_value for p in executor.positions.values()
         if p.exchange == Exchange.POLYMARKET
     )
-    kalshi_exposure = sum(
-        p.market_value for p in executor.positions.values()
-        if p.exchange == Exchange.KALSHI
-    )
     total_unrealized = sum(p.unrealized_pnl for p in executor.positions.values())
     total_realized = sum(p.realized_pnl for p in executor.positions.values())
 
@@ -216,7 +212,6 @@ def save_portfolio_snapshot(executor: PredictionMarketExecutor):
             win_count=wins,
             loss_count=losses,
             polymarket_exposure=poly_exposure,
-            kalshi_exposure=kalshi_exposure,
             is_dry_run=executor.dry_run,
         )
         session.add(snapshot)

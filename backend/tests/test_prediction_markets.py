@@ -3,7 +3,7 @@ Tests for prediction market module.
 
 Covers:
 - Kelly criterion sizing
-- Strategy scanning (all 8 strategies)
+- Strategy scanning (all 7 strategies)
 - Execution engine (dry-run)
 - Risk manager (circuit breaker, rate limiting, etc.)
 - Orchestrator lifecycle
@@ -601,59 +601,12 @@ class TestModels:
         assert perf.total_trades == 0
         assert perf.win_rate == 0.0
 
-    def test_whale_activity_model(self):
-        from app.prediction_markets.models import WhaleActivity
-        activity = WhaleActivity(
-            tx_hash="0xabc", block_number=12345, wallet_address="0x123",
-            market_id="m1", token_id="t1", side="BUY",
-            size=100.0, price=0.50, value_usd=50.0,
-        )
-        assert activity.value_usd == 50.0
-
     def test_price_history_model(self):
         from app.prediction_markets.models import PredictionPriceHistory
         ph = PredictionPriceHistory(
             exchange="polymarket", market_id="m1", token_id="t1", price=0.55,
         )
         assert ph.price == 0.55
-
-
-# ============================================================
-# Cross-Exchange Arbitrage Tests
-# ============================================================
-
-class TestCrossExchangeArb:
-    def test_match_score_ticker_map(self):
-        from app.prediction_markets.strategies import CrossExchangeArbitrageStrategy, StrategyConfig
-        from app.prediction_markets.polymarket_client import PolymarketClient
-        client = PolymarketClient()
-        strat = CrossExchangeArbitrageStrategy(client, StrategyConfig())
-
-        poly_market = _make_market(question="Will Bitcoin exceed $100k?", category="Crypto")
-        kalshi_market = _make_market(
-            mid="KXBTC_100k", question="Will BTC close above $100,000?", category="Crypto",
-        )
-        kalshi_market.condition_id = "KXBTC-100K"
-
-        score, method = strat._compute_match_score(poly_market, kalshi_market)
-        assert score > 0.5
-        assert "ticker_map" in method
-
-    def test_numeric_threshold_extraction(self):
-        from app.prediction_markets.strategies import CrossExchangeArbitrageStrategy, StrategyConfig
-        from app.prediction_markets.polymarket_client import PolymarketClient
-        client = PolymarketClient()
-        strat = CrossExchangeArbitrageStrategy(client, StrategyConfig())
-
-        result = strat._extract_numeric_threshold("Will BTC go above $100,000?")
-        assert result is not None
-        assert result[0] == "above"
-        assert result[1] == 100_000
-
-        result2 = strat._extract_numeric_threshold("Will temperature be below 50°F?")
-        assert result2 is not None
-        assert result2[0] == "below"
-        assert result2[1] == 50
 
 
 # ============================================================
@@ -937,11 +890,3 @@ class TestRiskManagerRecordExecution:
         assert sum(rm._strategy_trades.values()) == 0
 
 
-class TestKalshiSigningErrorPropagation:
-    """Verify Kalshi signing raises instead of returning empty dict."""
-
-    def test_signing_raises_on_missing_cryptography(self):
-        from app.prediction_markets.execution import KalshiExecutor
-        executor = KalshiExecutor(api_key_id="test", private_key_pem="not-a-key")
-        with pytest.raises(RuntimeError, match="signing failed|cryptography"):
-            executor._sign_request("GET", "/trade-api/v2/portfolio/balance")

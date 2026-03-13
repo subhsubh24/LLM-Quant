@@ -14,7 +14,6 @@ from ..config import get_settings
 from ..db.database import init_db
 from ..data.crypto_ws import start_crypto_ws, stop_crypto_ws
 from ..prediction_markets.websocket_feeds import start_prediction_feeds, stop_prediction_feeds
-from ..prediction_markets.whale_indexer import start_whale_indexer, stop_whale_indexer
 from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator
 from .routes import router
 
@@ -32,19 +31,12 @@ async def lifespan(app: FastAPI):
     await start_crypto_ws()
     logger.info("Crypto WebSocket started - LIVE prices enabled")
 
-    # Start prediction market WebSocket feeds (Polymarket + Kalshi)
+    # Start prediction market WebSocket feeds (Polymarket)
     try:
         await start_prediction_feeds()
         logger.info("Prediction market WebSocket feeds started")
     except Exception as e:
         logger.warning(f"Prediction market feeds start failed (degraded): {e}")
-
-    # Start on-chain whale indexer (Polygon)
-    try:
-        await start_whale_indexer(interval_sec=60)
-        logger.info("Whale indexer started (scanning every 60s)")
-    except Exception as e:
-        logger.warning(f"Whale indexer start failed (degraded): {e}")
 
     # Bootstrap default prediction market portfolio (ensures FK target exists)
     try:
@@ -95,7 +87,6 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down QuantLab API...")
     await stop_orchestrator()
     await stop_prediction_feeds()
-    await stop_whale_indexer()
     await stop_crypto_ws()
 
     # Disconnect brokers

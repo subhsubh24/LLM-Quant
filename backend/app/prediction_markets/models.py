@@ -29,7 +29,7 @@ class PredictionPortfolio(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True)
-    exchange: str = Field(index=True)  # "polymarket", "kalshi", "all"
+    exchange: str = Field(index=True)  # "polymarket" or "all"
 
     # Capital
     initial_capital_usd: float = 100.0
@@ -89,9 +89,9 @@ class PredictionPosition(SQLModel, table=True):
     portfolio_id: int = Field(foreign_key="prediction_portfolios.id", index=True)
 
     # Market identity
-    exchange: str = Field(index=True)   # "polymarket" or "kalshi"
-    market_id: str = Field(index=True)  # Polymarket condition_id or Kalshi ticker
-    token_id: str = Field(index=True)   # Polymarket token_id or Kalshi ticker
+    exchange: str = Field(index=True)   # "polymarket"
+    market_id: str = Field(index=True)  # Polymarket condition_id
+    token_id: str = Field(index=True)   # Polymarket token_id
     market_question: str = ""
     outcome_label: str = ""             # "Yes", "No", "42-45°F", etc.
     category: str = ""
@@ -212,7 +212,6 @@ class PredictionPnLSnapshot(SQLModel, table=True):
 
     # Breakdown by exchange
     polymarket_value: float = 0.0
-    kalshi_value: float = 0.0
 
     # Breakdown by strategy (JSON: {strategy_name: value})
     strategy_breakdown_json: Optional[str] = None
@@ -233,41 +232,6 @@ class PredictionPnLSnapshot(SQLModel, table=True):
 # ============================================================
 # Whale Activity (on-chain tracking)
 # ============================================================
-
-class WhaleActivity(SQLModel, table=True):
-    """
-    On-chain whale activity detected on Polygon.
-
-    Tracks large trades on Polymarket's CLOB contract.
-    """
-    __tablename__ = "whale_activity"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-
-    # Transaction details
-    tx_hash: str = Field(index=True)
-    block_number: int = Field(index=True)
-    wallet_address: str = Field(index=True)
-    wallet_label: Optional[str] = None  # "Theo4", "Fredi9999", etc.
-
-    # Trade details
-    market_id: str = Field(index=True)
-    token_id: str
-    side: str           # "BUY" or "SELL"
-    size: float         # Number of contracts
-    price: float        # Execution price
-    value_usd: float    # Total USD value
-
-    # Market context
-    market_question: Optional[str] = None
-    outcome_label: Optional[str] = None
-
-    # Metadata
-    is_significant: bool = False  # True if > threshold (e.g., $1000)
-    gas_price_gwei: Optional[float] = None
-
-    detected_at: datetime = Field(default_factory=datetime.utcnow, index=True)
-
 
 # ============================================================
 # Market Price History (from WebSocket feeds)
@@ -331,7 +295,6 @@ class PredictionPortfolioSnapshot(SQLModel, table=True):
 
     # Exchange breakdown
     polymarket_exposure: float = 0.0
-    kalshi_exposure: float = 0.0
 
     is_dry_run: bool = True
 

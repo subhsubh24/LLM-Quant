@@ -1,12 +1,11 @@
 """
 Prediction Markets Module.
 
-Integrates with Polymarket and Kalshi (extensible to Manifold, etc.)
-for automated scanning and trading of prediction market outcomes.
+Integrates with Polymarket for automated scanning and trading
+of prediction market outcomes.
 
-Exchanges:
+Exchange:
 - Polymarket: Crypto-based (Polygon), largest volume, no auth for scanning
-- Kalshi: CFTC-regulated US exchange, no auth for market data
 
 Strategies:
 - Weather arbitrage (NOAA vs market prices)
@@ -16,20 +15,17 @@ Strategies:
 - Market making (two-sided liquidity, capture spread)
 - Flash crash detection (crypto short-duration markets)
 - Whale copy trading (follow profitable wallets)
-- Cross-exchange arbitrage (Polymarket vs Kalshi)
 
 Execution:
-- Order execution layer (Polymarket CLOB + Kalshi API)
+- Order execution layer (Polymarket CLOB)
 - Unified executor with risk checks and dry-run mode
 
 Persistence:
 - PredictionPortfolio, PredictionPosition, PredictionOrder (SQLModel)
 - PnL snapshots for equity curve tracking
-- WhaleActivity for on-chain whale tracking
 - PredictionPriceHistory for WebSocket price sampling
 
 Real-time:
-- WebSocket feeds for Polymarket and Kalshi
+- WebSocket feeds for Polymarket
 - Periodic price sampling to DB
-- On-chain whale indexer (Polygon RPC)
 """
