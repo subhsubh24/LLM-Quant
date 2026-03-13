@@ -216,6 +216,19 @@ class PolymarketClient:
         if parse_errors > 3:
             logger.warning(f"[POLYMARKET] {parse_errors} total parse errors")
         logger.info(f"[POLYMARKET] Fetched {len(markets)} markets (offset={offset}, raw={len(data)}, errors={parse_errors})")
+
+        # Diagnostic: warn if most markets have zero volume/liquidity (likely API schema change)
+        if markets:
+            zero_vol = sum(1 for m in markets if m.total_volume == 0)
+            zero_liq = sum(1 for m in markets if m.liquidity == 0)
+            if zero_vol > len(markets) * 0.8:
+                sample_keys = list(data[0].keys()) if data and isinstance(data[0], dict) else []
+                logger.warning(
+                    f"[POLYMARKET] {zero_vol}/{len(markets)} markets have volume=0 — "
+                    f"API field names may have changed. Raw keys: {sample_keys}"
+                )
+            if zero_liq > len(markets) * 0.8:
+                logger.warning(f"[POLYMARKET] {zero_liq}/{len(markets)} markets have liquidity=0")
         return markets
 
     def get_market_by_slug(self, slug: str) -> Optional[Market]:
@@ -388,6 +401,30 @@ class PolymarketClient:
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
+        # Volume: try multiple field names (API schema changes over time)
+        volume = 0.0
+        for vol_key in ("volume", "volumeNum", "totalVolume", "total_volume", "volume_usd"):
+            v = raw.get(vol_key)
+            if v is not None:
+                try:
+                    volume = float(v)
+                    if volume > 0:
+                        break
+                except (ValueError, TypeError):
+                    pass
+
+        # Liquidity: try multiple field names
+        liquidity = 0.0
+        for liq_key in ("liquidity", "liquidityNum", "totalLiquidity", "liquidityClob"):
+            v = raw.get(liq_key)
+            if v is not None:
+                try:
+                    liquidity = float(v)
+                    if liquidity > 0:
+                        break
+                except (ValueError, TypeError):
+                    pass
+
         return Market(
             id=raw.get("id", ""),
             condition_id=raw.get("conditionId", ""),
@@ -397,8 +434,8 @@ class PolymarketClient:
             category=raw.get("category", ""),
             end_date=end_date,
             outcomes=outcomes,
-            total_volume=float(raw.get("volume", 0)),
-            liquidity=float(raw.get("liquidity", 0)),
+            total_volume=volume,
+            liquidity=liquidity,
             active=raw.get("active", False),
             closed=raw.get("closed", False),
             resolved=raw.get("resolved", False) if "resolved" in raw else False,
