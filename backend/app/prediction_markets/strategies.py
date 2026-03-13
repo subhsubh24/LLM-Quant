@@ -245,7 +245,7 @@ class NearCertaintyStrategy(BaseStrategy):
         Looks for:
         - Active, non-closed binary markets
         - At least one outcome priced 90-99c
-        - Market ends within 30 days
+        - Market ends within configured horizon (default 30 days)
         - Sufficient volume (liquid = less likely to reverse)
         """
         results = []
@@ -263,15 +263,15 @@ class NearCertaintyStrategy(BaseStrategy):
                 skipped["low_volume"] += 1
                 continue
 
-            # Check time to resolution
+            # Check time to resolution — markets without end dates still qualify
+            # (many Polymarket events don't set end_date until close to resolution)
+            hours_left = None
             if market.end_date:
                 hours_left = (market.end_date - now).total_seconds() / 3600
                 if hours_left > self.max_hours_to_resolution or hours_left < 0:
                     skipped["time"] += 1
                     continue
-            else:
-                skipped["no_end_date"] += 1
-                continue  # Skip markets without end dates
+            # No end_date: treat as long-duration (still scan for price opportunities)
 
             found_price = False
             for i, outcome in enumerate(market.outcomes):
@@ -283,6 +283,7 @@ class NearCertaintyStrategy(BaseStrategy):
                     edge = expected_value / outcome.price
 
                     if edge > 0 and self.can_open_position():
+                        time_info = f"{hours_left:.0f}h to resolution" if hours_left is not None else "no end date"
                         results.append(ScanResult(
                             market=market,
                             strategy=self.name,
@@ -296,7 +297,7 @@ class NearCertaintyStrategy(BaseStrategy):
                                 f"Near-certain: \"{outcome.label}\" at ${outcome.price:.3f} "
                                 f"({profit_per_share*100:.1f}c profit/share, "
                                 f"vol=${market.total_volume:,.0f}, "
-                                f"{hours_left:.0f}h to resolution)"
+                                f"{time_info})"
                             ),
                         ))
                         found_price = True
@@ -305,6 +306,8 @@ class NearCertaintyStrategy(BaseStrategy):
 
         if not results:
             logger.info(f"[near_certainty] 0 hits from {len(markets)} markets — filtered: {skipped}")
+        else:
+            logger.info(f"[near_certainty] {len(results)} hits from {len(markets)} markets")
         return results
 
 
@@ -403,6 +406,8 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                             f"${price_sum:.3f} (edge={edge*100:.1f}%)"
                         ),
                     ))
+        if not results:
+            logger.info(f"[same_market_arb] 0 hits from {len(markets)} markets")
         return results
 
 
@@ -613,6 +618,8 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                         f"({p2:.0%}) — {gap*100:.1f}% inconsistency"
                                     ),
                                 ))
+        if not results:
+            logger.info(f"[cross_market_arb] 0 hits from {len(markets)} markets ({len(self.rules)} rules, {len(checked)} pairs checked)")
         return results
 
 
@@ -736,33 +743,40 @@ class MarketMakingStrategy(BaseStrategy):
                 )
 
             # Calculate potential spread revenue
-            spread = market.spread
-            if spread <= self.target_spread:
+            # market.spread = |1 - sum(prices)| = pricing inefficiency.
+            # For MM, any binary market with decent liquidity and mid-range price is viable.
+            # The real bid-ask spread comes from the CLOB order book (not available in scan).
+            # Use the pricing inefficiency as a proxy — markets with YES+NO != 1.0 have wider books.
+            pricing_gap = market.spread  # |1 - sum(prices)|
+            # Estimate effective spread: at minimum use the pricing gap, but also assume
+            # a spread proportional to 1/sqrt(liquidity) for well-priced markets
+            est_spread = max(pricing_gap, 1.0 / (market.liquidity ** 0.5 + 1)) if market.liquidity > 0 else 0.05
+            if est_spread < self.target_spread * 0.5:
                 skipped["tight_spread"] += 1
                 continue
-            if spread > self.target_spread:
-                q_score = ((self.max_spread - self.target_spread) / self.max_spread) ** 2
 
-                reason_parts = [
-                    f"MM: {market.question[:50]}",
-                    f"spread={spread*100:.1f}c",
-                    f"liq=${market.liquidity:,.0f}",
-                    f"Q={q_score:.2f}",
-                ]
-                if as_info:
-                    reason_parts.append(as_info)
+            q_score = ((self.max_spread - min(est_spread, self.max_spread)) / self.max_spread) ** 2
 
-                results.append(ScanResult(
-                    market=market,
-                    strategy=self.name,
-                    outcome_idx=-1,  # Both sides
-                    side="BUY",  # Market making = both sides
-                    entry_price=yes_price,
-                    expected_value=yes_price + spread / 2,
-                    edge=spread,
-                    confidence=0.80,
-                    reason=" | ".join(reason_parts),
-                ))
+            reason_parts = [
+                f"MM: {market.question[:50]}",
+                f"est_spread={est_spread*100:.1f}c",
+                f"liq=${market.liquidity:,.0f}",
+                f"Q={q_score:.2f}",
+            ]
+            if as_info:
+                reason_parts.append(as_info)
+
+            results.append(ScanResult(
+                market=market,
+                strategy=self.name,
+                outcome_idx=-1,  # Both sides
+                side="BUY",  # Market making = both sides
+                entry_price=yes_price,
+                expected_value=yes_price + est_spread / 2,
+                edge=est_spread,
+                confidence=0.80,
+                reason=" | ".join(reason_parts),
+            ))
 
         if not results:
             logger.info(f"[market_making] 0 hits from {len(markets)} markets — filtered: {skipped}")

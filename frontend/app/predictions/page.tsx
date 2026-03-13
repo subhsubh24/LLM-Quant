@@ -91,7 +91,7 @@ interface StrategyConfig {
 // Demo Data
 // ----------------------------------------------------------------
 
-const DEMO_STRATEGIES: StrategyConfig[] = [
+const DEFAULT_STRATEGIES: StrategyConfig[] = [
   {
     id: "weather_arb",
     name: "Weather Arbitrage",
@@ -99,8 +99,8 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
     icon: CloudSun,
     enabled: true,
     color: "cyan",
-    positions: 8,
-    pnl: 127.50,
+    positions: 0,
+    pnl: 0,
     config: {
       "Entry threshold": "$0.15",
       "Exit threshold": "$0.45",
@@ -112,17 +112,17 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
   {
     id: "near_certainty",
     name: "Near-Certainty Harvest",
-    description: "Buy 95-99c outcomes at scale. Penny profits × thousands of trades.",
+    description: "Buy 90-99c outcomes at scale. Penny profits × thousands of trades.",
     icon: Target,
     enabled: true,
     color: "violet",
-    positions: 42,
-    pnl: 892.30,
+    positions: 0,
+    pnl: 0,
     config: {
-      "Min price": "$0.95",
+      "Min price": "$0.90",
       "Max price": "$0.99",
-      "Min volume": "$50,000",
-      "Max hours to resolution": "72h",
+      "Min volume": "$5,000",
+      "Max hours to resolution": "720h",
       "Max position": "$10.00",
     },
   },
@@ -131,12 +131,12 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
     name: "Same-Market Arbitrage",
     description: "YES + NO < $1.00? Buy both, guaranteed profit. Windows last milliseconds.",
     icon: Zap,
-    enabled: false,
+    enabled: true,
     color: "amber",
     positions: 0,
     pnl: 0,
     config: {
-      "Min discount": "2.5%",
+      "Min discount": "1%",
       "Min liquidity": "$1,000",
       "Max per trade": "$50.00",
     },
@@ -146,7 +146,7 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
     name: "Cross-Market Arbitrage",
     description: "Find logical inconsistencies between related markets.",
     icon: Globe,
-    enabled: false,
+    enabled: true,
     color: "rose",
     positions: 0,
     pnl: 0,
@@ -159,16 +159,16 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
   {
     id: "market_making",
     name: "Market Making",
-    description: "Provide two-sided liquidity, capture bid-ask spread + Q-score rebates. Swisstony: $5 → $3.7M.",
+    description: "Provide two-sided liquidity, capture bid-ask spread + Q-score rebates.",
     icon: ArrowLeftRight,
     enabled: true,
     color: "blue",
-    positions: 15,
-    pnl: 2340.80,
+    positions: 0,
+    pnl: 0,
     config: {
       "Target spread": "2c",
       "Max spread": "3c (Q-score)",
-      "Min liquidity": "$10,000",
+      "Min liquidity": "$1,000",
       "Max volatility": "10%",
       "Rebalance at": "60% one-sided",
     },
@@ -176,12 +176,12 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
   {
     id: "flash_crash",
     name: "Flash Crash",
-    description: "Buy crashed BTC/ETH tokens on 15-min markets. Two-leg arb when YES+NO < $0.97. 0x8dxd: $313 → $438K.",
+    description: "Buy crashed BTC/ETH tokens on 15-min markets. Two-leg arb when YES+NO < $0.97.",
     icon: AlertTriangle,
     enabled: true,
     color: "orange",
-    positions: 3,
-    pnl: 478.20,
+    positions: 0,
+    pnl: 0,
     config: {
       "Crash threshold": "15%",
       "Max combined cost": "$0.97",
@@ -194,7 +194,7 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
     name: "Whale Copy Trading",
     description: "Follow top 7.6% profitable wallets. Wallet basket consensus (80%+ must agree) before entry.",
     icon: Users,
-    enabled: false,
+    enabled: true,
     color: "emerald",
     positions: 0,
     pnl: 0,
@@ -205,128 +205,6 @@ const DEMO_STRATEGIES: StrategyConfig[] = [
       "Tracked wallets": "Theo4, Fredi9999, Len93",
     },
   },
-];
-
-const DEMO_OPPORTUNITIES: Opportunity[] = [
-  {
-    id: "1",
-    strategy: "weather_arb",
-    market: "NYC temperature Feb 26 — 35-40°F",
-    side: "BUY",
-    entryPrice: 0.12,
-    edge: 0.78,
-    confidence: 0.92,
-    reason: "NOAA forecasts 37°F. Bucket priced at $0.12 (88% edge).",
-    timestamp: "2 min ago",
-  },
-  {
-    id: "2",
-    strategy: "near_certainty",
-    market: "Will the sun rise tomorrow?",
-    side: "BUY",
-    entryPrice: 0.98,
-    edge: 0.018,
-    confidence: 0.99,
-    reason: "Near-certain outcome at $0.98. $0.02/share profit, $45K volume.",
-    timestamp: "5 min ago",
-  },
-  {
-    id: "3",
-    strategy: "weather_arb",
-    market: "Chicago temperature Feb 26 — 25-30°F",
-    side: "BUY",
-    entryPrice: 0.09,
-    edge: 0.81,
-    confidence: 0.88,
-    reason: "NOAA forecasts 27°F. Bucket severely underpriced at $0.09.",
-    timestamp: "8 min ago",
-  },
-  {
-    id: "4",
-    strategy: "near_certainty",
-    market: "Super Bowl LX will have a winner",
-    side: "BUY",
-    entryPrice: 0.97,
-    edge: 0.028,
-    confidence: 0.99,
-    reason: "Game is tomorrow. $0.03/share, $120K volume, 12h to resolution.",
-    timestamp: "12 min ago",
-  },
-  {
-    id: "5",
-    strategy: "weather_arb",
-    market: "Seattle precipitation Feb 26 — Yes",
-    side: "BUY",
-    entryPrice: 0.22,
-    edge: 0.58,
-    confidence: 0.85,
-    reason: "NOAA: 90% chance of rain. Market only pricing 22%.",
-    timestamp: "15 min ago",
-  },
-  {
-    id: "6",
-    strategy: "market_making",
-    market: "Will TikTok ban be enforced by April 2026?",
-    side: "BUY",
-    entryPrice: 0.42,
-    edge: 0.035,
-    confidence: 0.80,
-    reason: "MM opportunity: spread=3.5c | liq=$245K | vol=$1.8M | Q-score=0.89",
-    timestamp: "1 min ago",
-  },
-  {
-    id: "7",
-    strategy: "flash_crash",
-    market: "BTC 15-min Up or Down — 2:30PM round",
-    side: "BUY",
-    entryPrice: 0.94,
-    edge: 0.041,
-    confidence: 0.95,
-    reason: "FLASH CRASH: Down crashed 22% to $0.08 | Both sides: $0.94 → 4.1% net profit",
-    timestamp: "30 sec ago",
-  },
-  {
-    id: "8",
-    strategy: "market_making",
-    market: "Fed rate decision March 2026 — Hold",
-    side: "BUY",
-    entryPrice: 0.65,
-    edge: 0.028,
-    confidence: 0.80,
-    reason: "MM opportunity: spread=2.8c | liq=$1.2M | vol=$8.9M | Q-score=0.92",
-    timestamp: "3 min ago",
-  },
-  {
-    id: "9",
-    strategy: "whale_copy",
-    market: "Will ETH exceed $5,000 by June 2026?",
-    side: "BUY",
-    entryPrice: 0.38,
-    edge: 0.15,
-    confidence: 0.88,
-    reason: "WHALE CONSENSUS: 4/5 tracked wallets buying \"Yes\" at $0.38 | Whales: Theo4, Fredi9999, Len93 | Total size: $127K",
-    timestamp: "7 min ago",
-  },
-];
-
-const DEMO_POSITIONS: Position[] = [
-  { id: "1", market: "NYC temp Feb 25 — 32-37°F", outcome: "Yes", side: "BUY", entryPrice: 0.14, currentPrice: 0.67, size: 5.0, pnl: 2.65, strategy: "weather_arb", openedAt: "6h ago" },
-  { id: "2", market: "Will BTC be above $90K on Feb 28?", outcome: "Yes", side: "BUY", entryPrice: 0.96, currentPrice: 0.98, size: 10.0, pnl: 0.20, strategy: "near_certainty", openedAt: "2h ago" },
-  { id: "3", market: "Chicago temp Feb 25 — 20-25°F", outcome: "Yes", side: "BUY", entryPrice: 0.11, currentPrice: 0.82, size: 5.0, pnl: 3.55, strategy: "weather_arb", openedAt: "8h ago" },
-  { id: "4", market: "Fed rate decision March — Hold", outcome: "Yes", side: "BUY", entryPrice: 0.97, currentPrice: 0.98, size: 10.0, pnl: 0.10, strategy: "near_certainty", openedAt: "1h ago" },
-  { id: "5", market: "Atlanta temp Feb 25 — 50-55°F", outcome: "Yes", side: "BUY", entryPrice: 0.18, currentPrice: 0.45, size: 5.0, pnl: 1.35, strategy: "weather_arb", openedAt: "4h ago" },
-  { id: "6", market: "Will TikTok ban be enforced by April?", outcome: "Yes", side: "BUY", entryPrice: 0.42, currentPrice: 0.44, size: 25.0, pnl: 0.50, strategy: "market_making", openedAt: "15min ago" },
-  { id: "7", market: "BTC 15-min Up or Down — 1:45PM", outcome: "Up+Down", side: "BUY", entryPrice: 0.93, currentPrice: 1.00, size: 50.0, pnl: 3.50, strategy: "flash_crash", openedAt: "20min ago" },
-  { id: "8", market: "Oscar Best Picture 2026 — Film A", outcome: "Film A", side: "BUY", entryPrice: 0.33, currentPrice: 0.35, size: 25.0, pnl: 0.50, strategy: "market_making", openedAt: "30min ago" },
-  { id: "9", market: "BTC 15-min Up or Down — 2:00PM", outcome: "Up+Down", side: "BUY", entryPrice: 0.95, currentPrice: 1.00, size: 50.0, pnl: 2.50, strategy: "flash_crash", openedAt: "10min ago" },
-];
-
-const DEMO_MARKETS: PredictionMarket[] = [
-  { id: "1", question: "Will Bitcoin exceed $100,000 by March 2026?", category: "Crypto", outcomes: [{ label: "Yes", price: 0.72, tokenId: "a" }, { label: "No", price: 0.28, tokenId: "b" }], volume: 2500000, liquidity: 450000, endDate: "2026-03-31", active: true },
-  { id: "2", question: "NYC temperature Feb 26 — which range?", category: "Weather", outcomes: [{ label: "Below 30°F", price: 0.08, tokenId: "c" }, { label: "30-35°F", price: 0.15, tokenId: "d" }, { label: "35-40°F", price: 0.52, tokenId: "e" }, { label: "Above 40°F", price: 0.25, tokenId: "f" }], volume: 85000, liquidity: 12000, endDate: "2026-02-26", active: true },
-  { id: "3", question: "Will the Fed cut rates in March 2026?", category: "Economics", outcomes: [{ label: "Yes", price: 0.35, tokenId: "g" }, { label: "No", price: 0.65, tokenId: "h" }], volume: 8900000, liquidity: 1200000, endDate: "2026-03-19", active: true },
-  { id: "4", question: "Will it rain in Seattle on Feb 27?", category: "Weather", outcomes: [{ label: "Yes", price: 0.78, tokenId: "i" }, { label: "No", price: 0.22, tokenId: "j" }], volume: 32000, liquidity: 5000, endDate: "2026-02-27", active: true },
-  { id: "5", question: "Oscar Best Picture 2026 — which film?", category: "Entertainment", outcomes: [{ label: "Film A", price: 0.35, tokenId: "k" }, { label: "Film B", price: 0.28, tokenId: "l" }, { label: "Film C", price: 0.22, tokenId: "m" }, { label: "Other", price: 0.15, tokenId: "n" }], volume: 3200000, liquidity: 280000, endDate: "2026-03-02", active: true },
 ];
 
 // ----------------------------------------------------------------
@@ -359,15 +237,15 @@ const strategyLabels: Record<string, string> = {
 
 export default function PredictionsPage() {
   const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions" | "portfolio" | "analysis" | "bot">("scanner");
-  const [strategies, setStrategies] = useState(DEMO_STRATEGIES);
+  const [strategies, setStrategies] = useState(DEFAULT_STRATEGIES);
   const [scanning, setScanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [scanCount, setScanCount] = useState(0);
   const [lastScan, setLastScan] = useState("Never");
   const [isLive, setIsLive] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
-  const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
-  const [markets, setMarkets] = useState<PredictionMarket[]>(DEMO_MARKETS);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [markets, setMarkets] = useState<PredictionMarket[]>([]);
   const [exchangeFilter, setExchangeFilter] = useState<"all" | "polymarket">("all");
   const streamRef = useRef<HTMLDivElement>(null);
 
@@ -422,6 +300,29 @@ export default function PredictionsPage() {
     active: m.active ?? true,
     exchange: m.exchange || "polymarket",
   });
+
+  // Fetch live strategy data from API (positions, P&L, etc.)
+  const fetchStrategies = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/strategies");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.strategies && data.strategies.length > 0) {
+        setStrategies((prev) =>
+          prev.map((s) => {
+            const live = data.strategies.find((ls: any) => ls.name === s.id);
+            if (live) {
+              return { ...s, positions: live.positions || 0, pnl: live.total_pnl || 0 };
+            }
+            return s;
+          })
+        );
+        setIsLive(true);
+      }
+    } catch {
+      // API unavailable — keep defaults
+    }
+  };
 
   // Fetch live markets from API
   const fetchMarkets = async () => {
@@ -537,7 +438,7 @@ export default function PredictionsPage() {
     try {
       const res = await fetch("/api/prediction-markets/portfolio/reset", { method: "POST" });
       if (res.ok) {
-        setStrategies(DEMO_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
+        setStrategies(DEFAULT_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
         setOpportunities([]);
         setLivePositions([]);
         setEquityCurve([]);
@@ -548,7 +449,7 @@ export default function PredictionsPage() {
       }
     } catch {
       // Reset locally even if API fails
-      setStrategies(DEMO_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
+      setStrategies(DEFAULT_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
       setOpportunities([]);
       setLivePositions([]);
       setEquityCurve([]);
@@ -598,6 +499,7 @@ export default function PredictionsPage() {
   useEffect(() => {
     checkPolymarketConnection();
     fetchMarkets();
+    fetchStrategies();
     fetchBotStatus();
     fetchPositions();
   }, []);
@@ -977,7 +879,7 @@ export default function PredictionsPage() {
                 Unrealized P&L:
               </span>
               <span className="text-sm font-bold text-emerald-600 tabular-nums">
-                +${DEMO_POSITIONS.reduce((s, p) => s + p.pnl, 0).toFixed(2)}
+                {livePositions.length > 0 ? `+$${livePositions.reduce((s, p) => s + p.pnl, 0).toFixed(2)}` : "$0.00"}
               </span>
             </div>
           </div>
@@ -995,7 +897,7 @@ export default function PredictionsPage() {
               </tr>
             </thead>
             <tbody>
-              {DEMO_POSITIONS.map((pos) => {
+              {livePositions.map((pos) => {
                 const colors = strategyColors[pos.strategy] || strategyColors.weather_arb;
                 return (
                   <tr key={pos.id}>

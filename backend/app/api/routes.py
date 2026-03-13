@@ -3868,6 +3868,20 @@ async def scan_prediction_markets(market_limit: int = 200):
     """Run all strategies and return identified opportunities."""
     scanner = _get_prediction_scanner()
     try:
+        # Pre-scan diagnostics: log sample market data to debug 0-result scans
+        from ..prediction_markets.polymarket_client import PolymarketClient
+        diag_client = PolymarketClient()
+        diag_markets = diag_client.get_markets(limit=10, offset=0)
+        if diag_markets:
+            for m in diag_markets[:3]:
+                prices = [(o.label, o.price) for o in m.outcomes]
+                logger.info(
+                    f"[SCAN-DIAG] Market: {m.question[:80]} | "
+                    f"active={m.active} closed={m.closed} binary={m.is_binary} | "
+                    f"vol={m.total_volume:.0f} liq={m.liquidity:.0f} | "
+                    f"end={m.end_date} | prices={prices}"
+                )
+
         results = scanner.scan(market_limit=market_limit)
         return {
             "timestamp": datetime.now().isoformat(),
