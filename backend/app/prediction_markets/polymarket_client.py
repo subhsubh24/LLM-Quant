@@ -333,6 +333,62 @@ class PolymarketClient:
                 prices[market.id] = market_prices
         return prices
 
+    def enrich_markets_with_clob(
+        self,
+        markets: List[Market],
+        max_markets: int = 40,
+        fetch_books: bool = False,
+    ) -> Dict[str, OrderBook]:
+        """
+        Enrich markets in-place with live CLOB prices.
+
+        Updates each outcome's price and midpoint fields from the CLOB API.
+        Rate budget: ~2 requests per binary market (1 midpoint per outcome).
+        With max_markets=40 and 80 req/min limit, this takes ~60s worst case.
+
+        Args:
+            markets: Markets to enrich (modified in place).
+            max_markets: Max markets to price (rate limit budget).
+            fetch_books: Also fetch full order books (2x request budget).
+
+        Returns:
+            Dict of order books keyed by token_id (only if fetch_books=True).
+        """
+        order_books: Dict[str, OrderBook] = {}
+        enriched = 0
+        errors = 0
+
+        for market in markets[:max_markets]:
+            for outcome in market.outcomes:
+                if not outcome.token_id:
+                    continue
+                try:
+                    mid = self.get_midpoint(outcome.token_id)
+                    if mid is not None:
+                        outcome.price = mid
+                        outcome.midpoint = mid
+                        enriched += 1
+
+                    if fetch_books:
+                        book = self.get_order_book(outcome.token_id)
+                        if book:
+                            order_books[outcome.token_id] = book
+                            # Update price to best bid (what you'd actually get)
+                            if book.best_bid > 0:
+                                outcome.price = book.best_bid
+                except Exception as e:
+                    errors += 1
+                    if errors <= 3:
+                        logger.warning(f"[CLOB] Enrichment error for {outcome.token_id}: {e}")
+
+        if enriched > 0:
+            logger.info(
+                f"[CLOB] Enriched {enriched} outcomes across {min(len(markets), max_markets)} markets"
+                + (f" ({len(order_books)} order books)" if fetch_books else "")
+                + (f" ({errors} errors)" if errors else "")
+            )
+        return order_books
+
     # ================================================================
     # Parsing
     # ================================================================

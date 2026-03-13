@@ -3734,7 +3734,12 @@ def _get_prediction_scanner():
         from ..prediction_markets.noaa_weather import NOAAWeatherClient
 
         client = _get_polymarket_client()
-        _prediction_scanner = PredictionMarketScanner(client)
+        _prediction_scanner = PredictionMarketScanner(
+            client,
+            use_clob=True,           # Enrich Gamma data with live CLOB prices
+            clob_market_limit=40,    # Price up to 40 markets per scan (~80 API calls)
+            clob_fetch_books=False,  # Order books fetched on-demand by strategies
+        )
 
         config = StrategyConfig(
             enabled=True,

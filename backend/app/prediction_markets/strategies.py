@@ -275,26 +275,36 @@ class NearCertaintyStrategy(BaseStrategy):
 
             found_price = False
             for i, outcome in enumerate(market.outcomes):
-                if self.min_price <= outcome.price <= self.max_price:
-                    profit_per_share = 1.0 - outcome.price
+                price = outcome.price
+
+                # CLOB confirmation: if the outcome has a token_id, verify
+                # price via CLOB midpoint to avoid stale Gamma data.
+                if outcome.token_id:
+                    clob_mid = self.client.get_midpoint(outcome.token_id)
+                    if clob_mid is not None:
+                        price = clob_mid
+
+                if self.min_price <= price <= self.max_price:
+                    profit_per_share = 1.0 - price
                     # Assume ~2% chance of reversal (conservative)
                     reversal_risk = 0.02
-                    expected_value = (1.0 - reversal_risk) * profit_per_share - reversal_risk * outcome.price
-                    edge = expected_value / outcome.price
+                    expected_value = (1.0 - reversal_risk) * profit_per_share - reversal_risk * price
+                    edge = expected_value / price
 
                     if edge > 0 and self.can_open_position():
                         time_info = f"{hours_left:.0f}h to resolution" if hours_left is not None else "no end date"
+                        price_source = "clob" if outcome.token_id else "gamma"
                         results.append(ScanResult(
                             market=market,
                             strategy=self.name,
                             outcome_idx=i,
                             side="BUY",
-                            entry_price=outcome.price,
+                            entry_price=price,
                             expected_value=1.0 - reversal_risk,
                             edge=edge,
                             confidence=1.0 - reversal_risk,
                             reason=(
-                                f"Near-certain: \"{outcome.label}\" at ${outcome.price:.3f} "
+                                f"Near-certain: \"{outcome.label}\" at ${price:.3f} ({price_source}) "
                                 f"({profit_per_share*100:.1f}c profit/share, "
                                 f"vol=${market.total_volume:,.0f}, "
                                 f"{time_info})"
@@ -341,6 +351,17 @@ class SameMarketArbitrageStrategy(BaseStrategy):
     def name(self) -> str:
         return "same_market_arb"
 
+    def _get_clob_prices(self, market: Market) -> List[float]:
+        """Get CLOB-confirmed prices for all outcomes, falling back to Gamma."""
+        prices = []
+        for o in market.outcomes:
+            if o.token_id:
+                mid = self.client.get_midpoint(o.token_id)
+                prices.append(mid if mid is not None else o.price)
+            else:
+                prices.append(o.price)
+        return prices
+
     def scan(self, markets: List[Market]) -> List[ScanResult]:
         """Find binary markets where YES + NO < $1.00 - fees."""
         results = []
@@ -353,12 +374,16 @@ class SameMarketArbitrageStrategy(BaseStrategy):
             if market.liquidity < self.config.min_liquidity:
                 continue
 
-            price_sum = sum(o.price for o in market.outcomes)
+            # Use CLOB prices for arb detection (Gamma prices can be stale)
+            clob_prices = self._get_clob_prices(market)
+            price_sum = sum(clob_prices)
             discount = 1.0 - price_sum
 
             if discount >= self.min_discount:
                 edge = discount - 0.02  # Subtract ~2% winner fee
                 if edge > 0:
+                    has_clob = any(o.token_id for o in market.outcomes)
+                    source = "clob" if has_clob else "gamma"
                     results.append(ScanResult(
                         market=market,
                         strategy=self.name,
@@ -369,8 +394,8 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                         edge=edge,
                         confidence=0.99,  # Near-certain (market structure)
                         reason=(
-                            f"Arb: YES({market.outcomes[0].price:.3f}) + "
-                            f"NO({market.outcomes[1].price:.3f}) = "
+                            f"Arb ({source}): YES({clob_prices[0]:.3f}) + "
+                            f"NO({clob_prices[1]:.3f}) = "
                             f"${price_sum:.3f} (discount={discount*100:.1f}%, "
                             f"edge after fees={edge*100:.1f}%)"
                         ),
@@ -385,13 +410,16 @@ class SameMarketArbitrageStrategy(BaseStrategy):
             if market.liquidity < self.config.min_liquidity:
                 continue
 
-            price_sum = sum(o.price for o in market.outcomes)
+            clob_prices = self._get_clob_prices(market)
+            price_sum = sum(clob_prices)
             discount = 1.0 - price_sum
 
             if discount >= self.min_discount:
                 edge = discount - 0.02
                 if edge > 0:
-                    prices_str = " + ".join(f"{o.label}({o.price:.2f})" for o in market.outcomes[:5])
+                    prices_str = " + ".join(
+                        f"{o.label}({p:.2f})" for o, p in zip(market.outcomes[:5], clob_prices[:5])
+                    )
                     results.append(ScanResult(
                         market=market,
                         strategy=self.name,
@@ -742,15 +770,25 @@ class MarketMakingStrategy(BaseStrategy):
                     f"resv={diag['reservation_price']:.3f} σ={diag['sigma']:.3f}"
                 )
 
-            # Calculate potential spread revenue
-            # market.spread = |1 - sum(prices)| = pricing inefficiency.
-            # For MM, any binary market with decent liquidity and mid-range price is viable.
-            # The real bid-ask spread comes from the CLOB order book (not available in scan).
-            # Use the pricing inefficiency as a proxy — markets with YES+NO != 1.0 have wider books.
-            pricing_gap = market.spread  # |1 - sum(prices)|
-            # Estimate effective spread: at minimum use the pricing gap, but also assume
-            # a spread proportional to 1/sqrt(liquidity) for well-priced markets
-            est_spread = max(pricing_gap, 1.0 / (market.liquidity ** 0.5 + 1)) if market.liquidity > 0 else 0.05
+            # Calculate spread from CLOB order book when available,
+            # fall back to estimation from Gamma data.
+            clob_spread = None
+            book_depth = 0
+            if token_id:
+                book = self.client.get_order_book(token_id) if hasattr(self.client, 'get_order_book') else None
+                if book and book.spread > 0:
+                    clob_spread = book.spread
+                    book_depth = sum(b["size"] for b in book.bids[:5]) + sum(a["size"] for a in book.asks[:5])
+
+            if clob_spread is not None:
+                est_spread = clob_spread
+                spread_source = "clob"
+            else:
+                # Fall back to estimation
+                pricing_gap = market.spread  # |1 - sum(prices)|
+                est_spread = max(pricing_gap, 1.0 / (market.liquidity ** 0.5 + 1)) if market.liquidity > 0 else 0.05
+                spread_source = "est"
+
             if est_spread < self.target_spread * 0.5:
                 skipped["tight_spread"] += 1
                 continue
@@ -759,10 +797,12 @@ class MarketMakingStrategy(BaseStrategy):
 
             reason_parts = [
                 f"MM: {market.question[:50]}",
-                f"est_spread={est_spread*100:.1f}c",
+                f"spread={est_spread*100:.1f}c ({spread_source})",
                 f"liq=${market.liquidity:,.0f}",
                 f"Q={q_score:.2f}",
             ]
+            if book_depth > 0:
+                reason_parts.append(f"depth=${book_depth:,.0f}")
             if as_info:
                 reason_parts.append(as_info)
 
@@ -858,6 +898,8 @@ class FlashCrashStrategy(BaseStrategy):
         Scans BTC/ETH/SOL 15-minute and 1-hour Up/Down markets for
         tokens that have crashed significantly. If buying both sides
         costs less than $0.97, it's a guaranteed profit opportunity.
+
+        Uses CLOB API for live price checks on candidate markets.
         """
         results = []
 
@@ -881,11 +923,20 @@ class FlashCrashStrategy(BaseStrategy):
             if not is_crypto_short:
                 continue
 
+            # Fetch live CLOB prices for this crypto market and update history
+            for outcome in market.outcomes:
+                if outcome.token_id:
+                    live_price = self.client.get_midpoint(outcome.token_id)
+                    if live_price is not None:
+                        outcome.price = live_price
+                        outcome.midpoint = live_price
+                        self.update_prices(outcome.token_id, live_price)
+
             # Check for flash crash on either outcome
             for i, outcome in enumerate(market.outcomes):
                 crash_magnitude = self._detect_crash(outcome.token_id)
                 if crash_magnitude is not None:
-                    # Crashed side price
+                    # Crashed side price (already CLOB-updated)
                     crashed_price = outcome.price
                     # Opposite side price
                     other_idx = 1 - i
@@ -907,7 +958,7 @@ class FlashCrashStrategy(BaseStrategy):
                                 edge=net_profit,
                                 confidence=0.95,  # Near-certain if both legs fill
                                 reason=(
-                                    f"FLASH CRASH: {outcome.label} crashed "
+                                    f"FLASH CRASH (clob): {outcome.label} crashed "
                                     f"{crash_magnitude*100:.0f}% to ${crashed_price:.3f} | "
                                     f"Both sides: ${combined_cost:.3f} → "
                                     f"${net_profit*100:.1f}% net profit"
@@ -1236,17 +1287,37 @@ class PredictionMarketScanner:
             print(f"[{opp.strategy}] {opp.reason} (edge={opp.edge:.1%})")
     """
 
-    def __init__(self, client: PolymarketClient):
+    def __init__(
+        self,
+        client: PolymarketClient,
+        use_clob: bool = True,
+        clob_market_limit: int = 40,
+        clob_fetch_books: bool = False,
+    ):
         self.client = client
         self.strategies: List[BaseStrategy] = []
         self.scan_history: List[ScanResult] = []
         self.total_scans: int = 0
         self.last_market_count: int = 0
 
+        # CLOB enrichment settings
+        self.use_clob = use_clob
+        self._clob_market_limit = clob_market_limit
+        self._clob_fetch_books = clob_fetch_books
+        self._order_books: Dict[str, "OrderBook"] = {}  # Cached from last enrichment
+
     def add_strategy(self, strategy: BaseStrategy):
         """Register a strategy."""
         self.strategies.append(strategy)
         logger.info(f"[SCANNER] Registered strategy: {strategy.name}")
+
+    def get_order_book(self, token_id: str) -> Optional[OrderBook]:
+        """Get cached order book from last CLOB enrichment, or fetch live."""
+        if token_id in self._order_books:
+            return self._order_books[token_id]
+        if self.use_clob:
+            return self.client.get_order_book(token_id)
+        return None
 
     def scan(self, market_limit: int = 200) -> List[ScanResult]:
         """
@@ -1289,6 +1360,23 @@ class PredictionMarketScanner:
 
         if not all_markets:
             logger.warning("[SCANNER] No markets returned from Polymarket — check API connectivity")
+
+        # Enrich markets with live CLOB prices (unauthenticated, free).
+        # This replaces stale Gamma snapshot prices with real-time midpoints.
+        # Budget: ~40 markets × 2 outcomes = 80 CLOB requests (within rate limit).
+        if all_markets and self.use_clob:
+            try:
+                self._order_books = self.client.enrich_markets_with_clob(
+                    all_markets,
+                    max_markets=self._clob_market_limit,
+                    fetch_books=self._clob_fetch_books,
+                )
+                logger.info(
+                    f"[SCANNER] CLOB enrichment complete "
+                    f"({len(self._order_books)} order books cached)"
+                )
+            except Exception as e:
+                logger.warning(f"[SCANNER] CLOB enrichment failed (using Gamma prices): {e}")
 
         # When volume/liquidity data is unavailable, temporarily relax filters
         # so strategies don't discard every market
