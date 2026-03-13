@@ -3740,17 +3740,36 @@ def _get_prediction_scanner():
             enabled=True,
             max_position_usd=5.0,
             max_positions=20,
-            min_edge=0.05,
+            min_edge=0.02,       # 2% edge minimum (was 5% — too restrictive for scanning)
+            min_liquidity=500.0, # Lower bar — Gamma API often doesn't report liquidity
             scan_interval_sec=120,
             dry_run=True,
         )
 
-        _prediction_scanner.add_strategy(NearCertaintyStrategy(client, config))
+        _prediction_scanner.add_strategy(NearCertaintyStrategy(
+            client, config,
+            min_price=0.85,     # Wider price range (was 0.90)
+            min_volume=1000,    # Lower volume threshold (was 5000)
+        ))
         _prediction_scanner.add_strategy(SameMarketArbitrageStrategy(client, config))
         _prediction_scanner.add_strategy(CrossMarketArbitrageStrategy(client, config))
         _prediction_scanner.add_strategy(MarketMakingStrategy(client, config))
         _prediction_scanner.add_strategy(FlashCrashStrategy(client, config))
         _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+
+        # Advanced strategies
+        try:
+            from ..prediction_markets.advanced_strategies import (
+                NOPositionScanner,
+                LogicalImplicationDetector,
+                WalletBehaviorDivergence,
+                AdaptiveBuySignalThreshold,
+            )
+            _prediction_scanner.add_strategy(NOPositionScanner(client, config))
+            _prediction_scanner.add_strategy(LogicalImplicationDetector(client, config))
+            _prediction_scanner.add_strategy(WalletBehaviorDivergence(client, config))
+        except Exception as e:
+            logger.warning(f"Advanced strategies not loaded: {e}")
 
         # Weather arb needs NOAA forecasts
         weather_strategy = WeatherArbitrageStrategy(client, config)

@@ -1268,8 +1268,41 @@ class PredictionMarketScanner:
         self.last_market_count = len(all_markets)
         logger.info(f"[SCANNER] Found {len(all_markets)} active markets")
 
+        # Detect if the API isn't providing volume/liquidity data.
+        # When >80% of markets have zero volume, strategies should not
+        # filter on volume — it just means the Gamma API doesn't return it.
+        if all_markets:
+            zero_vol = sum(1 for m in all_markets if m.total_volume == 0)
+            zero_liq = sum(1 for m in all_markets if m.liquidity == 0)
+            self._volume_unavailable = zero_vol > len(all_markets) * 0.8
+            self._liquidity_unavailable = zero_liq > len(all_markets) * 0.8
+            if self._volume_unavailable:
+                logger.warning(
+                    f"[SCANNER] {zero_vol}/{len(all_markets)} markets have volume=0 — "
+                    f"disabling volume filters for this scan"
+                )
+            if self._liquidity_unavailable:
+                logger.warning(
+                    f"[SCANNER] {zero_liq}/{len(all_markets)} markets have liquidity=0 — "
+                    f"disabling liquidity filters for this scan"
+                )
+
         if not all_markets:
             logger.warning("[SCANNER] No markets returned from Polymarket — check API connectivity")
+
+        # When volume/liquidity data is unavailable, temporarily relax filters
+        # so strategies don't discard every market
+        if all_markets:
+            vol_unavail = getattr(self, '_volume_unavailable', False)
+            liq_unavail = getattr(self, '_liquidity_unavailable', False)
+            if vol_unavail or liq_unavail:
+                for m in all_markets:
+                    if vol_unavail and m.total_volume == 0:
+                        # Assign a synthetic volume so strategies don't filter it out.
+                        # Use a conservative estimate based on the market being active.
+                        m.total_volume = 10000.0
+                    if liq_unavail and m.liquidity == 0:
+                        m.liquidity = 5000.0
 
         # Run each strategy
         all_results = []
