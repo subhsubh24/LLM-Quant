@@ -3737,7 +3737,7 @@ def _get_prediction_scanner():
         _prediction_scanner = PredictionMarketScanner(
             client,
             use_clob=True,           # Enrich Gamma data with live CLOB prices
-            clob_market_limit=40,    # Price up to 40 markets per scan (~80 API calls)
+            clob_market_limit=15,    # Price up to 15 markets per scan (~30 API calls, ~25s)
             clob_fetch_books=False,  # Order books fetched on-demand by strategies
         )
 
@@ -4120,7 +4120,17 @@ async def reset_prediction_portfolio():
         executor.positions.clear()
         executor.order_history.clear()
         executor.total_fees = 0.0
-        return {"status": "ok", "message": "Portfolio reset successfully"}
+
+        # Also reset strategy-level state
+        scanner = _get_prediction_scanner()
+        for s in scanner.strategies:
+            s.positions.clear()
+            s.total_pnl = 0.0
+            s.trades_executed = 0
+        scanner.scan_history.clear()
+        scanner.total_scans = 0
+
+        return {"status": "ok", "message": "Portfolio and strategy state reset"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

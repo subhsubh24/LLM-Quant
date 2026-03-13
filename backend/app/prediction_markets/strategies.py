@@ -275,14 +275,9 @@ class NearCertaintyStrategy(BaseStrategy):
 
             found_price = False
             for i, outcome in enumerate(market.outcomes):
+                # Use the outcome price directly — it's already been enriched
+                # with CLOB midpoints by the scanner's enrich_markets_with_clob() pass.
                 price = outcome.price
-
-                # CLOB confirmation: if the outcome has a token_id, verify
-                # price via CLOB midpoint to avoid stale Gamma data.
-                if outcome.token_id:
-                    clob_mid = self.client.get_midpoint(outcome.token_id)
-                    if clob_mid is not None:
-                        price = clob_mid
 
                 if self.min_price <= price <= self.max_price:
                     profit_per_share = 1.0 - price
@@ -351,17 +346,6 @@ class SameMarketArbitrageStrategy(BaseStrategy):
     def name(self) -> str:
         return "same_market_arb"
 
-    def _get_clob_prices(self, market: Market) -> List[float]:
-        """Get CLOB-confirmed prices for all outcomes, falling back to Gamma."""
-        prices = []
-        for o in market.outcomes:
-            if o.token_id:
-                mid = self.client.get_midpoint(o.token_id)
-                prices.append(mid if mid is not None else o.price)
-            else:
-                prices.append(o.price)
-        return prices
-
     def scan(self, markets: List[Market]) -> List[ScanResult]:
         """Find binary markets where YES + NO < $1.00 - fees."""
         results = []
@@ -374,16 +358,13 @@ class SameMarketArbitrageStrategy(BaseStrategy):
             if market.liquidity < self.config.min_liquidity:
                 continue
 
-            # Use CLOB prices for arb detection (Gamma prices can be stale)
-            clob_prices = self._get_clob_prices(market)
-            price_sum = sum(clob_prices)
+            # Prices are already CLOB-enriched by the scanner's enrichment pass
+            price_sum = sum(o.price for o in market.outcomes)
             discount = 1.0 - price_sum
 
             if discount >= self.min_discount:
                 edge = discount - 0.02  # Subtract ~2% winner fee
                 if edge > 0:
-                    has_clob = any(o.token_id for o in market.outcomes)
-                    source = "clob" if has_clob else "gamma"
                     results.append(ScanResult(
                         market=market,
                         strategy=self.name,
@@ -394,8 +375,8 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                         edge=edge,
                         confidence=0.99,  # Near-certain (market structure)
                         reason=(
-                            f"Arb ({source}): YES({clob_prices[0]:.3f}) + "
-                            f"NO({clob_prices[1]:.3f}) = "
+                            f"Arb: YES({market.outcomes[0].price:.3f}) + "
+                            f"NO({market.outcomes[1].price:.3f}) = "
                             f"${price_sum:.3f} (discount={discount*100:.1f}%, "
                             f"edge after fees={edge*100:.1f}%)"
                         ),
@@ -410,15 +391,14 @@ class SameMarketArbitrageStrategy(BaseStrategy):
             if market.liquidity < self.config.min_liquidity:
                 continue
 
-            clob_prices = self._get_clob_prices(market)
-            price_sum = sum(clob_prices)
+            price_sum = sum(o.price for o in market.outcomes)
             discount = 1.0 - price_sum
 
             if discount >= self.min_discount:
                 edge = discount - 0.02
                 if edge > 0:
                     prices_str = " + ".join(
-                        f"{o.label}({p:.2f})" for o, p in zip(market.outcomes[:5], clob_prices[:5])
+                        f"{o.label}({o.price:.2f})" for o in market.outcomes[:5]
                     )
                     results.append(ScanResult(
                         market=market,
@@ -1342,6 +1322,18 @@ class PredictionMarketScanner:
 
         self.last_market_count = len(all_markets)
         logger.info(f"[SCANNER] Found {len(all_markets)} active markets")
+
+        # Log sample market data to diagnose zero-result scans
+        if all_markets:
+            sample = all_markets[:3]
+            for m in sample:
+                prices = [(o.label, round(o.price, 3)) for o in m.outcomes]
+                logger.info(
+                    f"[SCANNER-SAMPLE] {m.question[:60]} | "
+                    f"active={m.active} binary={m.is_binary} | "
+                    f"vol={m.total_volume:.0f} liq={m.liquidity:.0f} | "
+                    f"prices={prices}"
+                )
 
         # Detect if the API isn't providing volume/liquidity data.
         # When >80% of markets have zero volume, strategies should not
