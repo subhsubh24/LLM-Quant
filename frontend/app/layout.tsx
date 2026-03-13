@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/layout/theme-provider";
+import { TabNav } from "@/components/layout/tab-nav";
 
 export const metadata: Metadata = {
   title: "QuantLab - Quant Research & Paper Trading",
@@ -22,6 +23,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <div className="min-h-screen">
+            <TabNav />
             <main className="min-h-screen overflow-auto bg-gray-50">
               {children}
             </main>
