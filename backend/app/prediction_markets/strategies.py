@@ -223,10 +223,10 @@ class NearCertaintyStrategy(BaseStrategy):
         self,
         client: PolymarketClient,
         config: StrategyConfig,
-        min_price: float = 0.95,
+        min_price: float = 0.90,
         max_price: float = 0.99,
-        min_volume: float = 50000,
-        max_hours_to_resolution: int = 72,
+        min_volume: float = 5000,
+        max_hours_to_resolution: int = 720,  # 30 days
     ):
         super().__init__(client, config)
         self.min_price = min_price
@@ -244,29 +244,36 @@ class NearCertaintyStrategy(BaseStrategy):
 
         Looks for:
         - Active, non-closed binary markets
-        - At least one outcome priced 95-99c
-        - Market ends within 72 hours
+        - At least one outcome priced 90-99c
+        - Market ends within 30 days
         - Sufficient volume (liquid = less likely to reverse)
         """
         results = []
         now = datetime.now(timezone.utc)
+        skipped = {"inactive": 0, "not_binary": 0, "low_volume": 0, "time": 0, "no_end_date": 0, "no_price_match": 0}
 
         for market in markets:
             if not market.active or market.closed:
+                skipped["inactive"] += 1
                 continue
             if not market.is_binary:
+                skipped["not_binary"] += 1
                 continue
             if market.total_volume < self.min_volume:
+                skipped["low_volume"] += 1
                 continue
 
             # Check time to resolution
             if market.end_date:
                 hours_left = (market.end_date - now).total_seconds() / 3600
                 if hours_left > self.max_hours_to_resolution or hours_left < 0:
+                    skipped["time"] += 1
                     continue
             else:
+                skipped["no_end_date"] += 1
                 continue  # Skip markets without end dates
 
+            found_price = False
             for i, outcome in enumerate(market.outcomes):
                 if self.min_price <= outcome.price <= self.max_price:
                     profit_per_share = 1.0 - outcome.price
@@ -292,6 +299,12 @@ class NearCertaintyStrategy(BaseStrategy):
                                 f"{hours_left:.0f}h to resolution)"
                             ),
                         ))
+                        found_price = True
+            if not found_price:
+                skipped["no_price_match"] += 1
+
+        if not results:
+            logger.info(f"[near_certainty] 0 hits from {len(markets)} markets — filtered: {skipped}")
         return results
 
 
@@ -316,7 +329,7 @@ class SameMarketArbitrageStrategy(BaseStrategy):
         self,
         client: PolymarketClient,
         config: StrategyConfig,
-        min_discount: float = 0.025,  # Sum must be < $0.975 (2.5% discount)
+        min_discount: float = 0.01,  # Sum must be < $0.99 (1% discount)
     ):
         super().__init__(client, config)
         self.min_discount = min_discount
@@ -628,9 +641,9 @@ class MarketMakingStrategy(BaseStrategy):
         self,
         client: PolymarketClient,
         config: StrategyConfig,
-        target_spread: float = 0.02,      # 2c spread per side
+        target_spread: float = 0.01,      # 1c spread per side
         max_spread: float = 0.03,          # 3c max from midpoint for Q-score
-        min_liquidity: float = 10000,      # Minimum market liquidity
+        min_liquidity: float = 1000,       # Minimum market liquidity
         max_volatility: float = 0.10,      # Skip markets with >10% daily price swings
         rebalance_threshold: float = 0.60, # Rebalance when inventory >60% one-sided
     ):
@@ -673,23 +686,29 @@ class MarketMakingStrategy(BaseStrategy):
         Checks VPIN for each candidate — toxic markets are skipped.
         """
         results = []
+        skipped = {"inactive": 0, "not_binary": 0, "low_liq": 0, "extreme": 0, "short_dur": 0, "toxic": 0, "tight_spread": 0}
 
         for market in markets:
             if not market.active or market.closed:
+                skipped["inactive"] += 1
                 continue
             if not market.is_binary:
+                skipped["not_binary"] += 1
                 continue
             if market.liquidity < self.min_liquidity:
+                skipped["low_liq"] += 1
                 continue
 
             # Skip extreme probability markets (hard to provide two-sided liquidity)
             yes_price = market.outcomes[0].price if market.outcomes else 0.5
             if yes_price < 0.10 or yes_price > 0.90:
+                skipped["extreme"] += 1
                 continue
 
             # Skip crypto short-duration markets (too volatile for MM)
             question_lower = market.question.lower()
             if any(kw in question_lower for kw in ["15 min", "15-min", "1 hour", "1-hour"]):
+                skipped["short_dur"] += 1
                 continue
 
             # VPIN toxicity check — skip if informed flow detected
@@ -697,10 +716,7 @@ class MarketMakingStrategy(BaseStrategy):
             if token_id:
                 toxic, vpin_val = self._vpin.is_toxic(token_id)
                 if toxic:
-                    logger.info(
-                        f"[MM] Skipping {market.question[:40]} — "
-                        f"VPIN={vpin_val:.2f} (toxic flow detected)"
-                    )
+                    skipped["toxic"] += 1
                     continue
 
             # Run Avellaneda-Stoikov for diagnostics
@@ -721,6 +737,9 @@ class MarketMakingStrategy(BaseStrategy):
 
             # Calculate potential spread revenue
             spread = market.spread
+            if spread <= self.target_spread:
+                skipped["tight_spread"] += 1
+                continue
             if spread > self.target_spread:
                 q_score = ((self.max_spread - self.target_spread) / self.max_spread) ** 2
 
@@ -745,6 +764,8 @@ class MarketMakingStrategy(BaseStrategy):
                     reason=" | ".join(reason_parts),
                 ))
 
+        if not results:
+            logger.info(f"[market_making] 0 hits from {len(markets)} markets — filtered: {skipped}")
         return results
 
 
