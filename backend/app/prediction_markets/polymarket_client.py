@@ -381,11 +381,17 @@ class PolymarketClient:
                     if errors <= 3:
                         logger.warning(f"[CLOB] Enrichment error for {outcome.token_id}: {e}")
 
+        attempted = min(len(markets), max_markets)
         if enriched > 0:
             logger.info(
-                f"[CLOB] Enriched {enriched} outcomes across {min(len(markets), max_markets)} markets"
+                f"[CLOB] Enriched {enriched} outcomes across {attempted} markets"
                 + (f" ({len(order_books)} order books)" if fetch_books else "")
                 + (f" ({errors} errors)" if errors else "")
+            )
+        else:
+            logger.warning(
+                f"[CLOB] Enrichment returned 0 results from {attempted} markets "
+                f"({errors} errors) — CLOB API may be unreachable"
             )
         return order_books
 
