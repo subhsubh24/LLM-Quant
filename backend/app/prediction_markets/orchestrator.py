@@ -63,8 +63,8 @@ class KellyConfig:
     use_monte_carlo: bool = True     # Use Monte Carlo Kelly when historical data available
     min_bet_usd: float = 1.0        # Don't place orders smaller than this
     max_bet_usd: float = 50.0       # Hard cap per position
-    min_edge: float = 0.03          # Don't trade edges below 3%
-    min_confidence: float = 0.60    # Don't trade low-confidence signals
+    min_edge: float = 0.01          # Don't trade edges below 1%
+    min_confidence: float = 0.50    # Don't trade low-confidence signals
     max_kelly_fraction: float = 0.20  # Never bet more than 20% of bankroll
 
 
