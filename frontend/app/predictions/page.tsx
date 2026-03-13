@@ -380,6 +380,13 @@ export default function PredictionsPage() {
   const [equityCurve, setEquityCurve] = useState<any[]>([]);
   const [portfolioSummary, setPortfolioSummary] = useState<any>(null);
 
+  // Polymarket connection status
+  const [polyStatus, setPolyStatus] = useState<{
+    connected: boolean | null;
+    gamma_api: { connected: boolean; latency_ms: number | null };
+    clob_api: { connected: boolean; latency_ms: number | null };
+  }>({ connected: null, gamma_api: { connected: false, latency_ms: null }, clob_api: { connected: false, latency_ms: null } });
+
   // Analysis log stream
   const [analysisLog, setAnalysisLog] = useState<Array<{id: string; timestamp: string; type: "scan" | "signal" | "execute" | "skip" | "info"; strategy?: string; message: string}>>([]);
   const analysisRef = useRef<HTMLDivElement>(null);
@@ -552,6 +559,27 @@ export default function PredictionsPage() {
     }
   };
 
+  // Check Polymarket connection
+  const checkPolymarketConnection = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/status");
+      if (res.ok) {
+        const data = await res.json();
+        setPolyStatus(data);
+        if (data.connected) {
+          addLog("info", `Polymarket connected — Gamma API: ${data.gamma_api.latency_ms}ms, CLOB API: ${data.clob_api.latency_ms}ms`);
+        } else {
+          const issues = [];
+          if (!data.gamma_api.connected) issues.push(`Gamma API: ${data.gamma_api.error || "unreachable"}`);
+          if (!data.clob_api.connected) issues.push(`CLOB API: ${data.clob_api.error || "unreachable"}`);
+          addLog("info", `Polymarket connection issues: ${issues.join(", ")}`);
+        }
+      }
+    } catch {
+      setPolyStatus({ connected: false, gamma_api: { connected: false, latency_ms: null }, clob_api: { connected: false, latency_ms: null } });
+    }
+  };
+
   // Start/stop bot
   const toggleBot = async () => {
     try {
@@ -566,8 +594,9 @@ export default function PredictionsPage() {
     } catch {}
   };
 
-  // On mount: try to connect to live API
+  // On mount: check connection and fetch data
   useEffect(() => {
+    checkPolymarketConnection();
     fetchMarkets();
     fetchBotStatus();
     fetchPositions();
@@ -629,14 +658,35 @@ export default function PredictionsPage() {
             </div>
             Prediction Markets
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Polymarket scanner &mdash; 7 strategies
-            {isLive ? (
-              <span className="ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">LIVE</span>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-sm text-gray-500">
+              Polymarket scanner &mdash; 7 strategies
+            </p>
+            {polyStatus.connected === null ? (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Checking...</span>
+            ) : polyStatus.connected ? (
+              <button
+                onClick={checkPolymarketConnection}
+                className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+                title={`Gamma: ${polyStatus.gamma_api.latency_ms}ms | CLOB: ${polyStatus.clob_api.latency_ms}ms`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                CONNECTED
+              </button>
             ) : (
-              <span className="ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">DEMO</span>
+              <button
+                onClick={checkPolymarketConnection}
+                className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                title="Click to retry connection"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                DISCONNECTED
+              </button>
             )}
-          </p>
+            {isLive && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">LIVE DATA</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <button

@@ -3780,6 +3780,56 @@ def _serialize_market(m, exchange: str = "polymarket") -> dict:
     return d
 
 
+@router.get("/prediction-markets/status")
+async def get_polymarket_connection_status():
+    """Check if Polymarket APIs are reachable and return connection status."""
+    import requests
+    import time
+
+    status = {
+        "gamma_api": {"connected": False, "latency_ms": None, "error": None},
+        "clob_api": {"connected": False, "latency_ms": None, "error": None},
+    }
+
+    # Check Gamma API (market discovery)
+    try:
+        t0 = time.time()
+        resp = requests.get(
+            "https://gamma-api.polymarket.com/markets",
+            params={"limit": 1, "active": "true"},
+            timeout=10,
+        )
+        latency = round((time.time() - t0) * 1000)
+        status["gamma_api"]["connected"] = resp.status_code == 200
+        status["gamma_api"]["latency_ms"] = latency
+        if resp.status_code != 200:
+            status["gamma_api"]["error"] = f"HTTP {resp.status_code}"
+    except Exception as e:
+        status["gamma_api"]["error"] = str(e)
+
+    # Check CLOB API (pricing)
+    try:
+        t0 = time.time()
+        resp = requests.get(
+            "https://clob.polymarket.com/time",
+            timeout=10,
+        )
+        latency = round((time.time() - t0) * 1000)
+        status["clob_api"]["connected"] = resp.status_code == 200
+        status["clob_api"]["latency_ms"] = latency
+        if resp.status_code != 200:
+            status["clob_api"]["error"] = f"HTTP {resp.status_code}"
+    except Exception as e:
+        status["clob_api"]["error"] = str(e)
+
+    all_connected = status["gamma_api"]["connected"] and status["clob_api"]["connected"]
+    return {
+        "connected": all_connected,
+        "exchange": "polymarket",
+        **status,
+    }
+
+
 @router.get("/prediction-markets/markets")
 async def list_prediction_markets(
     limit: int = 100,
