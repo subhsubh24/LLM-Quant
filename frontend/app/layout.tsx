@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/sidebar";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 
 export const metadata: Metadata = {
@@ -23,8 +22,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <div className="min-h-screen">
-            <Sidebar />
-            <main className="ml-64 min-h-screen overflow-auto bg-gray-50">
+            <main className="min-h-screen overflow-auto bg-gray-50">
               {children}
             </main>
           </div>
