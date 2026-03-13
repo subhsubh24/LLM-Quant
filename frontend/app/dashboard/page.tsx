@@ -63,7 +63,7 @@ export default function DashboardPage() {
   const [watchlist, setWatchlist] = useState<Quote[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [searchSymbol, setSearchSymbol] = useState("");
 
   const fetchData = useCallback(async () => {
@@ -154,7 +154,7 @@ export default function DashboardPage() {
           </form>
           <div className="flex items-center gap-2 text-sm text-gray-500 bg-white px-4 py-2.5 rounded-xl border border-gray-200">
             <Clock className="w-4 h-4" />
-            <span>{formatTime(lastUpdate)}</span>
+            <span>{lastUpdate ? formatTime(lastUpdate) : "—"}</span>
           </div>
           <button
             onClick={fetchData}
