@@ -326,20 +326,44 @@ class PolymarketClient:
 
     def _parse_market(self, raw: dict) -> Market:
         """Parse raw Gamma API market into Market dataclass."""
+        import json as _json
+
         # Parse outcomes from parallel arrays
+        # Gamma API returns these as JSON-encoded strings: '["Yes","No"]' or CSV: "Yes,No"
         outcome_labels = raw.get("outcomes", "Yes,No")
         if isinstance(outcome_labels, str):
-            outcome_labels = outcome_labels.split(",")
+            try:
+                parsed = _json.loads(outcome_labels)
+                if isinstance(parsed, list):
+                    outcome_labels = parsed
+                else:
+                    outcome_labels = outcome_labels.split(",")
+            except (ValueError, TypeError):
+                outcome_labels = outcome_labels.split(",")
 
         outcome_prices = raw.get("outcomePrices", "0.5,0.5")
         if isinstance(outcome_prices, str):
-            outcome_prices = [float(p) for p in outcome_prices.split(",") if p]
+            try:
+                parsed = _json.loads(outcome_prices)
+                if isinstance(parsed, list):
+                    outcome_prices = [float(p) for p in parsed]
+                else:
+                    outcome_prices = [float(p) for p in outcome_prices.split(",") if p]
+            except (ValueError, TypeError):
+                outcome_prices = [float(p) for p in outcome_prices.split(",") if p]
         elif isinstance(outcome_prices, list):
             outcome_prices = [float(p) for p in outcome_prices]
 
         token_ids = raw.get("clobTokenIds", [])
         if isinstance(token_ids, str):
-            token_ids = [t.strip() for t in token_ids.split(",") if t.strip()]
+            try:
+                parsed = _json.loads(token_ids)
+                if isinstance(parsed, list):
+                    token_ids = [str(t) for t in parsed]
+                else:
+                    token_ids = [t.strip() for t in token_ids.split(",") if t.strip()]
+            except (ValueError, TypeError):
+                token_ids = [t.strip() for t in token_ids.split(",") if t.strip()]
 
         outcomes = []
         for i, label in enumerate(outcome_labels):
