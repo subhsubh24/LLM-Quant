@@ -334,6 +334,19 @@ class PaperTradingSimulator:
             self._poly_client = PolymarketClient()
         return self._poly_client
 
+    def reset(self):
+        """Reset all paper trading state back to initial bankroll."""
+        self.bankroll = self.initial_bankroll
+        self._high_watermark = self.initial_bankroll
+        self.positions.clear()
+        self.closed_positions.clear()
+        self.trade_log.clear()
+        self._market_cache.clear()
+        self._equity_curve = [(datetime.now(timezone.utc), self.initial_bankroll)]
+        self._total_trades = 0
+        self._total_volume = 0.0
+        logger.info(f"[PAPER-SIM] Reset | bankroll=${self.initial_bankroll:,.2f}")
+
     # ================================================================
     # Market Data
     # ================================================================

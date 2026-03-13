@@ -3795,9 +3795,6 @@ async def list_prediction_markets(
     except Exception as e:
         logger.error(f"Polymarket fetch error: {e}")
 
-    if not result:
-        raise HTTPException(status_code=502, detail="Polymarket not reachable")
-
     return {"markets": result, "count": len(result)}
 
 
@@ -3825,6 +3822,7 @@ async def scan_prediction_markets(market_limit: int = 200):
         return {
             "timestamp": datetime.now().isoformat(),
             "scan_number": scanner.total_scans,
+            "markets_scanned": getattr(scanner, 'last_market_count', market_limit),
             "total_opportunities": len(results),
             "opportunities": [
                 {
@@ -4024,6 +4022,19 @@ async def get_prediction_portfolio():
     """Get prediction market portfolio summary with all positions and P&L."""
     executor = _get_prediction_executor()
     return executor.get_portfolio_summary()
+
+
+@router.post("/prediction-markets/portfolio/reset")
+async def reset_prediction_portfolio():
+    """Reset all paper trading positions and P&L."""
+    executor = _get_prediction_executor()
+    try:
+        executor.positions.clear()
+        executor.order_history.clear()
+        executor.total_fees = 0.0
+        return {"status": "ok", "message": "Portfolio reset successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/prediction-markets/orders")

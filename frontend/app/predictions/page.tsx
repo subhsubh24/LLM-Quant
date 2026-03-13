@@ -47,7 +47,7 @@ interface PredictionMarket {
   liquidity: number;
   endDate: string;
   active: boolean;
-  exchange?: "polymarket" | "kalshi";
+  exchange?: "polymarket";
 }
 
 interface Opportunity {
@@ -358,7 +358,7 @@ const strategyLabels: Record<string, string> = {
 // ----------------------------------------------------------------
 
 export default function PredictionsPage() {
-  const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions" | "portfolio" | "whales" | "bot">("scanner");
+  const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions" | "portfolio" | "analysis" | "bot">("scanner");
   const [strategies, setStrategies] = useState(DEMO_STRATEGIES);
   const [scanning, setScanning] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -368,7 +368,7 @@ export default function PredictionsPage() {
   const [scanLoading, setScanLoading] = useState(false);
   const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES);
   const [markets, setMarkets] = useState<PredictionMarket[]>(DEMO_MARKETS);
-  const [exchangeFilter, setExchangeFilter] = useState<"all" | "polymarket" | "kalshi">("all");
+  const [exchangeFilter, setExchangeFilter] = useState<"all" | "polymarket">("all");
   const streamRef = useRef<HTMLDivElement>(null);
 
   // Bot state
@@ -380,9 +380,9 @@ export default function PredictionsPage() {
   const [equityCurve, setEquityCurve] = useState<any[]>([]);
   const [portfolioSummary, setPortfolioSummary] = useState<any>(null);
 
-  // Whale feed
-  const [whaleEvents, setWhaleEvents] = useState<any[]>([]);
-  const [whaleLeaderboard, setWhaleLeaderboard] = useState<any[]>([]);
+  // Analysis log stream
+  const [analysisLog, setAnalysisLog] = useState<Array<{id: string; timestamp: string; type: "scan" | "signal" | "execute" | "skip" | "info"; strategy?: string; message: string}>>([]);
+  const analysisRef = useRef<HTMLDivElement>(null);
 
   // Map API opportunity to frontend type
   const mapOpportunity = (opp: any, idx: number): Opportunity => ({
@@ -434,22 +434,30 @@ export default function PredictionsPage() {
   // Run scanner via API
   const runScan = async () => {
     setScanLoading(true);
+    addLog("scan", `Starting scan #${scanCount + 1} across all enabled strategies...`);
     try {
       const res = await fetch("/api/prediction-markets/scan", {
         method: "POST",
       });
       if (!res.ok) throw new Error("Scan failed");
       const data = await res.json();
-      setScanCount(data.scan_number || scanCount + 1);
+      const num = data.scan_number || scanCount + 1;
+      setScanCount(num);
       setLastScan("Just now");
       setIsLive(true);
       if (data.opportunities && data.opportunities.length > 0) {
         setOpportunities(data.opportunities.map(mapOpportunity));
+        addLog("scan", `Scan #${num} complete: ${data.opportunities.length} opportunities found across ${data.markets_scanned || "?"} markets`);
+        data.opportunities.forEach((opp: any) => {
+          addLog("signal", `${opp.strategy}: ${opp.reason}`, opp.strategy);
+        });
+      } else {
+        addLog("scan", `Scan #${num} complete: no opportunities (${data.markets_scanned || 0} markets checked)`);
       }
     } catch {
-      // API unavailable — increment counter with demo data
       setScanCount((c) => c + 1);
       setLastScan("Just now");
+      addLog("info", "Scan ran locally (API unavailable)");
     } finally {
       setScanLoading(false);
     }
@@ -504,22 +512,44 @@ export default function PredictionsPage() {
     } catch {}
   };
 
-  // Fetch whale data
-  const fetchWhaleData = async () => {
+  // Add entry to analysis log
+  const addLog = (type: "scan" | "signal" | "execute" | "skip" | "info", message: string, strategy?: string) => {
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toLocaleTimeString(),
+      type,
+      strategy,
+      message,
+    };
+    setAnalysisLog((prev) => [entry, ...prev].slice(0, 200));
+  };
+
+  // Reset paper trading state
+  const resetPortfolio = async () => {
+    if (!confirm("Reset all paper trading positions and P&L? This cannot be undone.")) return;
     try {
-      const [eventsRes, leaderRes] = await Promise.all([
-        fetch("/api/prediction-markets/whales/recent?limit=20"),
-        fetch("/api/prediction-markets/whales/leaderboard"),
-      ]);
-      if (eventsRes.ok) {
-        const data = await eventsRes.json();
-        setWhaleEvents(data.events || []);
+      const res = await fetch("/api/prediction-markets/portfolio/reset", { method: "POST" });
+      if (res.ok) {
+        setStrategies(DEMO_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
+        setOpportunities([]);
+        setLivePositions([]);
+        setEquityCurve([]);
+        setPortfolioSummary(null);
+        setScanCount(0);
+        setAnalysisLog([]);
+        addLog("info", "Portfolio reset. All positions cleared, P&L zeroed.");
       }
-      if (leaderRes.ok) {
-        const data = await leaderRes.json();
-        setWhaleLeaderboard(data.leaderboard || []);
-      }
-    } catch {}
+    } catch {
+      // Reset locally even if API fails
+      setStrategies(DEMO_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
+      setOpportunities([]);
+      setLivePositions([]);
+      setEquityCurve([]);
+      setPortfolioSummary(null);
+      setScanCount(0);
+      setAnalysisLog([]);
+      addLog("info", "Portfolio reset locally. Backend unavailable.");
+    }
   };
 
   // Start/stop bot
@@ -548,8 +578,6 @@ export default function PredictionsPage() {
     if (activeTab === "portfolio") {
       fetchPositions();
       fetchEquityCurve();
-    } else if (activeTab === "whales") {
-      fetchWhaleData();
     } else if (activeTab === "bot") {
       fetchBotStatus();
     } else if (activeTab === "positions") {
@@ -591,7 +619,7 @@ export default function PredictionsPage() {
   );
 
   return (
-    <div className="ml-64 min-h-screen bg-[#FAFAFA] p-8">
+    <div className="min-h-screen bg-[#FAFAFA] p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -611,6 +639,12 @@ export default function PredictionsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={resetPortfolio}
+            className="px-3 py-2 rounded-xl text-xs font-medium text-gray-500 bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
+          >
+            Reset
+          </button>
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200">
             <div className={`w-2 h-2 rounded-full ${scanning ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
             <span className="text-sm font-medium text-gray-700">
@@ -712,7 +746,7 @@ export default function PredictionsPage() {
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
-        {(["scanner", "markets", "positions", "portfolio", "whales", "bot"] as const).map((tab) => (
+        {(["scanner", "analysis", "markets", "positions", "portfolio", "bot"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -723,10 +757,15 @@ export default function PredictionsPage() {
             }`}
           >
             {tab === "scanner" && "Live Scanner"}
+            {tab === "analysis" && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+                Analysis
+              </span>
+            )}
             {tab === "markets" && "Browse Markets"}
             {tab === "positions" && `Positions (${livePositions.length || totalPositions})`}
             {tab === "portfolio" && "Portfolio"}
-            {tab === "whales" && "Whale Feed"}
             {tab === "bot" && (
               <span className="flex items-center gap-1.5">
                 {botRunning && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
@@ -819,21 +858,7 @@ export default function PredictionsPage() {
                   className="input-field pl-10"
                 />
               </div>
-              <div className="flex items-center gap-1 bg-gray-100 p-0.5 rounded-lg">
-                {(["all", "polymarket", "kalshi"] as const).map((ex) => (
-                  <button
-                    key={ex}
-                    onClick={() => setExchangeFilter(ex)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      exchangeFilter === ex
-                        ? "bg-white text-gray-900 shadow-sm"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  >
-                    {ex === "all" ? "All" : ex === "polymarket" ? "Polymarket" : "Kalshi"}
-                  </button>
-                ))}
-              </div>
+              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-purple-100 text-purple-700">Polymarket</span>
             </div>
           </div>
           <div className="divide-y divide-gray-50">
@@ -842,12 +867,8 @@ export default function PredictionsPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                        market.exchange === "kalshi"
-                          ? "bg-indigo-100 text-indigo-700"
-                          : "bg-purple-100 text-purple-700"
-                      }`}>
-                        {market.exchange === "kalshi" ? "Kalshi" : "Poly"}
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                        Poly
                       </span>
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                         {market.category}
@@ -1026,114 +1047,67 @@ export default function PredictionsPage() {
             )}
           </div>
 
-          {/* Exchange Breakdown */}
+          {/* Polymarket Exposure */}
           {equityCurve.length > 0 && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="card p-5">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Polymarket Exposure</span>
-                <p className="text-xl font-bold tabular-nums text-purple-600 mt-1">
-                  ${equityCurve[equityCurve.length - 1]?.polymarket_value?.toFixed(2) || "0.00"}
-                </p>
-              </div>
-              <div className="card p-5">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Kalshi Exposure</span>
-                <p className="text-xl font-bold tabular-nums text-indigo-600 mt-1">
-                  ${equityCurve[equityCurve.length - 1]?.kalshi_value?.toFixed(2) || "0.00"}
-                </p>
-              </div>
+            <div className="card p-5">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Polymarket Exposure</span>
+              <p className="text-xl font-bold tabular-nums text-purple-600 mt-1">
+                ${equityCurve[equityCurve.length - 1]?.polymarket_value?.toFixed(2) || "0.00"}
+              </p>
             </div>
           )}
         </div>
       )}
 
-      {/* Whale Feed Tab */}
-      {activeTab === "whales" && (
-        <div className="space-y-6">
-          {/* Whale Leaderboard */}
-          {whaleLeaderboard.length > 0 && (
-            <div className="card overflow-hidden">
-              <div className="p-5 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-900">Whale Leaderboard</h2>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Wallet</th>
-                    <th>Label</th>
-                    <th>Volume</th>
-                    <th>Buys</th>
-                    <th>Sells</th>
-                    <th>Markets</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {whaleLeaderboard.map((w: any, i: number) => (
-                    <tr key={i}>
-                      <td className="text-xs font-mono text-gray-500">
-                        {w.address?.slice(0, 6)}...{w.address?.slice(-4)}
-                      </td>
-                      <td>
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                          {w.label || "Unknown"}
-                        </span>
-                      </td>
-                      <td className="text-sm font-semibold tabular-nums">${(w.total_volume_usd || 0).toFixed(0)}</td>
-                      <td className="text-sm tabular-nums text-emerald-600">{w.buy_count || 0}</td>
-                      <td className="text-sm tabular-nums text-red-500">{w.sell_count || 0}</td>
-                      <td className="text-sm tabular-nums">{w.unique_markets || 0}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Analysis Stream Tab */}
+      {activeTab === "analysis" && (
+        <div className="card overflow-hidden">
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+              <h2 className="font-semibold text-gray-900">Live Analysis</h2>
+              <span className="text-xs text-gray-400">Strategy rationales, scan results, and trade logic</span>
             </div>
-          )}
-
-          {/* Recent Whale Activity */}
-          <div className="card overflow-hidden">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-emerald-500" />
-                <h2 className="font-semibold text-gray-900">Recent Whale Activity</h2>
-              </div>
-              <button
-                onClick={fetchWhaleData}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-50"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Refresh
-              </button>
-            </div>
-            <div className="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
-              {whaleEvents.length > 0 ? whaleEvents.map((e: any, i: number) => (
-                <div key={i} className="p-4 hover:bg-gray-50/50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        e.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                      }`}>
-                        {e.side}
+            <button
+              onClick={() => setAnalysisLog([])}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              Clear
+            </button>
+          </div>
+          <div ref={analysisRef} className="max-h-[700px] overflow-y-auto divide-y divide-gray-50">
+            {analysisLog.length > 0 ? analysisLog.map((entry) => {
+              const typeStyles: Record<string, { badge: string; label: string }> = {
+                scan: { badge: "bg-blue-100 text-blue-700", label: "SCAN" },
+                signal: { badge: "bg-emerald-100 text-emerald-700", label: "SIGNAL" },
+                execute: { badge: "bg-violet-100 text-violet-700", label: "EXEC" },
+                skip: { badge: "bg-gray-100 text-gray-600", label: "SKIP" },
+                info: { badge: "bg-amber-100 text-amber-700", label: "INFO" },
+              };
+              const style = typeStyles[entry.type] || typeStyles.info;
+              const stratColors = entry.strategy ? strategyColors[entry.strategy] : null;
+              return (
+                <div key={entry.id} className="px-5 py-3 hover:bg-gray-50/50 transition-colors">
+                  <div className="flex items-start gap-3">
+                    <span className="text-[10px] text-gray-400 tabular-nums whitespace-nowrap mt-0.5">{entry.timestamp}</span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${style.badge}`}>
+                      {style.label}
+                    </span>
+                    {stratColors && (
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${stratColors.badge}`}>
+                        {strategyLabels[entry.strategy!]}
                       </span>
-                      <div>
-                        <span className="text-sm font-medium text-gray-900">
-                          {e.wallet_label || `${e.wallet_address?.slice(0, 8)}...`}
-                        </span>
-                        <span className="text-xs text-gray-400 ml-2">
-                          {e.size?.toFixed(0)} contracts @ ${e.estimated_price?.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold tabular-nums text-gray-900">${e.value_usd?.toFixed(0)}</p>
-                      <p className="text-[10px] text-gray-400">Block #{e.block_number}</p>
-                    </div>
+                    )}
+                    <p className="text-sm text-gray-700 leading-relaxed">{entry.message}</p>
                   </div>
                 </div>
-              )) : (
-                <div className="p-8 text-center text-gray-400 text-sm">
-                  No whale activity detected yet. The indexer scans Polygon every 60s.
-                </div>
-              )}
-            </div>
+              );
+            }) : (
+              <div className="p-12 text-center">
+                <p className="text-gray-400 text-sm mb-2">No analysis entries yet.</p>
+                <p className="text-gray-400 text-xs">Start scanning or enable the bot to see live rationales here.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
