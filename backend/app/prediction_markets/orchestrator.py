@@ -810,6 +810,12 @@ def _build_default_scanner() -> PredictionMarketScanner:
         FlashCrashStrategy,
         WhaleCopyTradingStrategy,
     )
+    from .advanced_strategies import (
+        NOPositionScanner,
+        LogicalImplicationDetector,
+        WalletBehaviorDivergence,
+        AdaptiveBuySignalThreshold,
+    )
 
     client = PolymarketClient()
     config = StrategyConfig(dry_run=True)
@@ -822,6 +828,18 @@ def _build_default_scanner() -> PredictionMarketScanner:
     scanner.add_strategy(MarketMakingStrategy(client, config))
     scanner.add_strategy(FlashCrashStrategy(client, config))
     scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+
+    # Advanced strategies
+    scanner.add_strategy(NOPositionScanner(client, config))
+    scanner.add_strategy(LogicalImplicationDetector(client, config))
+    scanner.add_strategy(WalletBehaviorDivergence(client, config))
+
+    # Adaptive threshold wraps the other strategies for per-horizon filtering
+    adaptive = AdaptiveBuySignalThreshold(client, config)
+    adaptive.add_inner_strategy(NearCertaintyStrategy(client, config))
+    adaptive.add_inner_strategy(CrossMarketArbitrageStrategy(client, config))
+    adaptive.add_inner_strategy(NOPositionScanner(client, config))
+    scanner.add_strategy(adaptive)
 
     # Wire weather strategy if NOAA data available
     try:

@@ -29,6 +29,27 @@ import pandas as pd
 from .microstructure import MicrostructureExtractor, OrderBookFetcher
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
 from ..data.alternative.alt_data_context import AltDataContext
+from .regime_detector import detect_market_regime as _detect_market_regime
+from .signal_filters import (
+    is_signal_statistically_significant as _is_signal_statistically_significant,
+    check_trend_filter,
+    check_mean_reversion_filter,
+    check_microstructure_filter,
+    check_confidence_and_consensus,
+    check_cooldown as _check_cooldown,
+)
+from .position_manager import (
+    get_optimal_stop_distance as _get_optimal_stop_distance,
+    calculate_stop_loss,
+    check_exit_conditions,
+    update_position_tracking,
+    calculate_position_volatility,
+    process_exit,
+)
+from .backtest_metrics import (
+    calculate_metrics as _calculate_metrics_impl,
+    _empty_result as _empty_result_impl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1490,62 +1511,13 @@ class WalkForwardBacktester:
                             vol_threshold: float = 0.01) -> str:
         """
         Detect current market regime (bull, bear, or sideways) with hysteresis to prevent whipsaw.
-
-        Args:
-            candles: Recent candles to analyze
-            window: Look-back window
-            prev_regime: Previous regime (for hysteresis/stickiness)
-            switch_threshold: Multiplier for trend needed to switch regime (>1.0 = hysteresis)
-                             1.0 = no hysteresis (original behavior)
-                             1.3 = require 30% larger trend change to switch
-            base_threshold: Minimum trend strength (SMA divergence) to detect a regime (default: 2%)
-                           Lower = more sensitive to regime changes (catches more but more whipsaw)
-                           Higher = less sensitive (misses some but more stable)
-            vol_threshold: Minimum volatility to confirm a regime change (default: 1%)
-                          Prevents false regime detection in flat/quiet markets
-
-        Returns:
-            'bull', 'bear', or 'sideways'
+        Delegates to regime_detector module.
         """
-        if len(candles) < window:
-            return 'sideways'
-
-        recent = candles[-window:]
-        closes = np.array([c.close for c in recent])
-
-        # Calculate trend
-        sma_short = np.mean(closes[-20:])
-        sma_long = np.mean(closes)
-        # BUG FIX #24: Add epsilon protection for division by zero (if all closes near zero)
-        trend = (sma_short - sma_long) / (sma_long + 1e-8)
-
-        # Calculate volatility
-        # BUG FIX #17: Add epsilon protection for division by zero (close prices near zero)
-        returns = np.diff(closes) / (closes[:-1] + 1e-8)
-        volatility = np.std(returns)
-
-        # If already in a regime, require stronger signal to leave it (hysteresis)
-        if prev_regime == 'bull':
-            if trend < -base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bear'
-            elif trend > base_threshold and volatility > vol_threshold:
-                return 'bull'  # Stay in bull if still positive
-            else:
-                return 'sideways'
-        elif prev_regime == 'bear':
-            if trend > base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bull'
-            elif trend < -base_threshold and volatility > vol_threshold:
-                return 'bear'  # Stay in bear if still negative
-            else:
-                return 'sideways'
-        else:  # prev_regime == 'sideways'
-            if trend > base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bull'
-            elif trend < -base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bear'
-            else:
-                return 'sideways'
+        return _detect_market_regime(
+            candles, window=window, prev_regime=prev_regime,
+            switch_threshold=switch_threshold, base_threshold=base_threshold,
+            vol_threshold=vol_threshold,
+        )
 
     def calculate_correlation(self, candles1: List[OHLCV], candles2: List[OHLCV], lookback: int = 50) -> float:
         """
@@ -1587,90 +1559,16 @@ class WalkForwardBacktester:
     def is_signal_statistically_significant(self, symbol: str, action: int, signal_history: Dict) -> bool:
         """
         Test if a signal's historical win rate is statistically significant at 95% confidence.
-        Uses binomial test: H0 = win_rate = 50%, H1 = win_rate > 50%
-
-        Args:
-            symbol: Trading pair symbol
-            action: Action code (0=short, 2=long)
-            signal_history: Dict of symbol -> {action -> [win/loss results]}
-
-        Returns:
-            True if win rate is significantly > 50% at 95% confidence (p < 0.05)
+        Delegates to signal_filters module.
         """
-        try:
-            from scipy import stats
-
-            # Get history for this symbol-action combo
-            if symbol not in signal_history:
-                return True  # No history, allow the signal (neutral)
-
-            if action not in signal_history[symbol]:
-                return True  # No history for this action, allow it
-
-            trade_results = signal_history[symbol][action]  # List of 1 (win) or 0 (loss)
-
-            # Need minimum sample size for statistical significance
-            if len(trade_results) < 10:
-                return True  # Not enough data yet, allow signal
-
-            # Count wins and total trades
-            wins = sum(trade_results)
-            total = len(trade_results)
-
-            # Binomial test: is win rate > 50% at 95% confidence?
-            # H0: p = 0.5, H1: p > 0.5 (one-tailed test)
-            # BUG FIX #20: Handle scipy API compatibility (1.7+ uses binomtest instead of binom_test)
-            try:
-                # Try newer scipy API first (scipy >= 1.7)
-                p_value = stats.binomtest(wins, total, 0.5, alternative='greater').pvalue
-            except AttributeError:
-                # Fall back to older API (scipy < 1.7)
-                p_value = stats.binom_test(wins, total, 0.5, alternative='greater')
-
-            # If p < 0.05, we reject null hypothesis at 95% confidence
-            is_significant = p_value < 0.05
-
-            if not is_significant and total >= 20:
-                # Log when we're filtering due to statistical significance
-                # BUG FIX #33: Defensive division - ensure total is not zero (already checked but explicit protection)
-                win_rate = (wins / max(total, 1)) * 100 if total > 0 else 0.0
-                if total >= 10:
-                    logger.debug(f"🔍 Signal {symbol}:{action} filtered: {win_rate:.1f}% win rate ({wins}/{total}) not significantly > 50% (p={p_value:.3f})")
-
-            return is_significant
-
-        except Exception as e:
-            logger.error(f"❌ CRITICAL: Significance test failed for {symbol}:{action}: {e}")
-            return False  # If error, reject the signal (safe default)
+        return _is_signal_statistically_significant(symbol, action, signal_history)
 
     def get_optimal_stop_distance(self, stop_distance_effectiveness: Dict) -> float:
         """
         Learn optimal stop distance from historical data.
-        Returns the stop distance with highest win rate.
-
-        Args:
-            stop_distance_effectiveness: Dict mapping distance -> {wins, losses}
-
-        Returns:
-            Optimal stop distance to use (default 0.05 = 5%)
+        Delegates to position_manager module.
         """
-        try:
-            best_distance = 0.05  # Default fallback
-            best_win_rate = 0.0
-            min_trades = 10  # Need at least 10 trades to trust the metric
-
-            for distance, results in stop_distance_effectiveness.items():
-                total_trades = results["wins"] + results["losses"]
-                if total_trades >= min_trades:
-                    win_rate = results["wins"] / total_trades
-                    if win_rate > best_win_rate:
-                        best_win_rate = win_rate
-                        best_distance = distance
-
-            return best_distance
-        except Exception as e:
-            logger.error(f"Optimal stop distance calculation failed: {e} - using default 5%")
-            return 0.05  # Fallback to 5% if any error
+        return _get_optimal_stop_distance(stop_distance_effectiveness)
 
     def generate_labels(self, candles: List[OHLCV], lookahead: int = 5, threshold: float = 0.02) -> np.ndarray:
         """
@@ -4454,258 +4352,13 @@ class WalkForwardBacktester:
         equity_curve: List[Tuple[datetime, float]],
         trades: List[Dict]
     ) -> BacktestResult:
-        """Calculate backtest performance metrics."""
-        if not equity_curve:
-            return self._empty_result()
-
-        # BUG FIX #8: Need minimum samples for statistics (not just 1 point)
-        # With only 1 point, np.diff() produces empty array, std becomes 0
-        if len(equity_curve) < 10:
-            logger.warning(f"⚠️ Insufficient equity curve samples: {len(equity_curve)} (need ≥10 for statistics)")
-            # Still calculate what we can, but metrics will be limited
-            if len(equity_curve) == 1:
-                logger.warning("   Only 1 point in equity curve - no trades occurred or single candle backtest")
-
-        logger.info("Calculating returns and Sharpe/Sortino ratios...")
-        initial = self.initial_capital
-        final = equity_curve[-1][1]
-
-        # Returns
-        total_return = final - initial
-        total_return_pct = (total_return / initial) * 100
-
-        # Calculate daily returns for Sharpe/Sortino
-        equity_values = [e[1] for e in equity_curve]
-        returns = np.diff(equity_values) / (np.array(equity_values[:-1]) + 1e-8)
-
-        # Sharpe Ratio (annualized using configurable annualization factor)
-        # Uses annualization_factor from config (e.g., 8760 for 1h crypto, 2190 for 4h)
+        """Calculate backtest performance metrics. Delegates to backtest_metrics module."""
         annualization = getattr(self, '_annualization_factor', 365 * 24)
-        returns_std = np.std(returns)
-        if len(returns) > 1 and returns_std > 1e-8:
-            sharpe = np.mean(returns) / returns_std * np.sqrt(annualization)
-        else:
-            sharpe = 0
-
-        # Sortino Ratio (downside deviation only)
-        # Formula: (Mean Return) / (Downside Deviation) * sqrt(periods/year)
-        # Note: Uses mean of ALL returns (upside + downside) in numerator for excess return
-        # but only downside std in denominator, measuring return per unit downside risk
-        downside_returns = returns[returns < 0]
-        # BUG FIX #3: Use epsilon comparison instead of exact > 0 for float reliability
-        if len(downside_returns) > 0 and np.std(downside_returns) > 1e-8:
-            sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(annualization)
-        else:
-            # BUG FIX #4: Don't default to Sharpe when no downside
-            # If all returns are positive, Sortino is undefined (infinite)
-            # Set to a large number and log this rare condition
-            sortino = 999.9
-            if len(downside_returns) == 0:
-                logger.info("✅ PERFECT BACKTEST: All returns positive, Sortino = infinite (set to 999.9)")
-
-        # BUG FIX #19 & #20: Handle NaN values in metrics
-        # Protect against NaN/inf from edge cases
-        sharpe = 0.0 if not np.isfinite(sharpe) else sharpe
-        sortino = 0.0 if not np.isfinite(sortino) else sortino
-
-        logger.info("Calculating drawdown...")
-        # Max Drawdown - use epsilon protection for robustness
-        peak = equity_values[0]
-        max_dd = 0
-        for value in equity_values:
-            if value > peak:
-                peak = value
-            dd = (peak - value) / max(peak, 1e-8)  # Use epsilon for robust protection
-            if dd > max_dd:
-                max_dd = dd
-
-        logger.info("Analyzing trade statistics...")
-        # Trade statistics
-        winning_trades = [t for t in trades if t["pnl"] > 0]
-        losing_trades = [t for t in trades if t["pnl"] <= 0]
-
-        win_rate = len(winning_trades) / len(trades) if trades else 0
-        avg_win = np.mean([t["pnl"] for t in winning_trades]) if winning_trades else 0
-        avg_loss = np.mean([abs(t["pnl"]) for t in losing_trades]) if losing_trades else 0
-
-        # Profit factor (handle edge cases for JSON serialization)
-        gross_profit = sum(t["pnl"] for t in winning_trades)
-        gross_loss = abs(sum(t["pnl"] for t in losing_trades))
-        if len(trades) == 0:
-            profit_factor = 0.0  # No trades
-        elif gross_loss > 0:
-            profit_factor = gross_profit / gross_loss
-        else:
-            # Only winning trades (no losses) - use 100.0 instead of inf for JSON serialization
-            profit_factor = 100.0 if gross_profit > 0 else 0.0
-
-        # Average holding period
-        holding_periods = []
-        for t in trades:
-            entry = datetime.fromisoformat(t["entry_time"])
-            exit_time = datetime.fromisoformat(t["exit_time"])
-            holding_periods.append((exit_time - entry).total_seconds() / 3600)
-        avg_holding = np.mean(holding_periods) if holding_periods else 0
-
-        result = BacktestResult(
-            start_date=equity_curve[0][0],
-            end_date=equity_curve[-1][0],
-            initial_capital=initial,
-            final_capital=final,
-            total_return=total_return,
-            total_return_pct=total_return_pct,
-            sharpe_ratio=sharpe,
-            sortino_ratio=sortino,
-            max_drawdown=max_dd * initial,
-            max_drawdown_pct=max_dd * 100,
-            win_rate=win_rate,
-            profit_factor=profit_factor,
-            total_trades=len(trades),
-            winning_trades=len(winning_trades),
-            losing_trades=len(losing_trades),
-            avg_win=avg_win,
-            avg_loss=avg_loss,
-            avg_holding_period=avg_holding,
-            equity_curve=equity_curve,
-            trades=trades,
-        )
-
-        # Log final results
-        logger.info("=" * 80)
-        logger.info("📈 BACKTEST RESULTS")
-        logger.info("=" * 80)
-        logger.info(f"Period: {result.start_date.date()} to {result.end_date.date()}")
-        logger.info(f"Initial Capital: ${result.initial_capital:,.2f}")
-        logger.info(f"Final Capital: ${result.final_capital:,.2f}")
-        logger.info(f"Total Return: ${result.total_return:,.2f} ({result.total_return_pct:.2f}%)")
-        logger.info(f"Sharpe Ratio: {result.sharpe_ratio:.2f}")
-        logger.info(f"Sortino Ratio: {result.sortino_ratio:.2f}")
-        logger.info(f"Max Drawdown: ${result.max_drawdown:,.2f} ({result.max_drawdown_pct:.2f}%)")
-        logger.info(f"Win Rate: {result.win_rate*100:.2f}% ({result.winning_trades}/{result.total_trades} trades)")
-        logger.info(f"Profit Factor: {result.profit_factor:.2f}")
-        logger.info(f"Avg Win: ${result.avg_win:,.2f}")
-        logger.info(f"Avg Loss: ${result.avg_loss:,.2f}")
-        logger.info(f"Avg Holding Period: {result.avg_holding_period:.2f} hours")
-        logger.info(f"Win/Loss Ratio: {(avg_win / avg_loss if avg_loss > 0 else 0):.2f}")
-        logger.info(f"Expected Value/Trade: ${(win_rate * avg_win - (1 - win_rate) * avg_loss):,.2f}")
-        logger.info("=" * 80)
-
-        # ====================================================================
-        # DIAGNOSTIC METRICS: Understand WHY we win or lose
-        # ====================================================================
-        if trades:
-            logger.info("")
-            logger.info("📊 EXIT REASON BREAKDOWN:")
-            exit_reasons = {}
-            for t in trades:
-                reason = t.get("exit_reason", "unknown")
-                if reason not in exit_reasons:
-                    exit_reasons[reason] = {"count": 0, "total_pnl": 0, "wins": 0}
-                exit_reasons[reason]["count"] += 1
-                exit_reasons[reason]["total_pnl"] += t["pnl"]
-                if t["pnl"] > 0:
-                    exit_reasons[reason]["wins"] += 1
-            for reason, stats in sorted(exit_reasons.items(), key=lambda x: x[1]["count"], reverse=True):
-                wr = stats["wins"] / stats["count"] * 100 if stats["count"] > 0 else 0
-                avg = stats["total_pnl"] / stats["count"] if stats["count"] > 0 else 0
-                pct = stats["count"] / len(trades) * 100
-                logger.info(f"  {reason:20s}: {stats['count']:4d} trades ({pct:5.1f}%) | WR: {wr:5.1f}% | Avg P&L: ${avg:+7.2f} | Total: ${stats['total_pnl']:+9.2f}")
-
-            logger.info("")
-            logger.info("📊 POSITION SIZE ANALYSIS:")
-            sizes = [t.get("size", 0) for t in trades if t.get("size", 0) > 0]
-            if sizes:
-                logger.info(f"  Avg Position Size: ${np.mean(sizes):,.2f}")
-                logger.info(f"  Median Position:   ${np.median(sizes):,.2f}")
-                logger.info(f"  Min Position:      ${np.min(sizes):,.2f}")
-                logger.info(f"  Max Position:      ${np.max(sizes):,.2f}")
-                logger.info(f"  Avg % of Capital:  {np.mean(sizes) / initial * 100:.1f}%")
-
-            logger.info("")
-            logger.info("📊 PER-SYMBOL P&L (top 10 by absolute P&L):")
-            symbol_pnl = {}
-            for t in trades:
-                sym = t.get("symbol", "unknown")
-                if sym not in symbol_pnl:
-                    symbol_pnl[sym] = {"pnl": 0, "trades": 0, "wins": 0}
-                symbol_pnl[sym]["pnl"] += t["pnl"]
-                symbol_pnl[sym]["trades"] += 1
-                if t["pnl"] > 0:
-                    symbol_pnl[sym]["wins"] += 1
-            sorted_symbols = sorted(symbol_pnl.items(), key=lambda x: abs(x[1]["pnl"]), reverse=True)[:10]
-            for sym, stats in sorted_symbols:
-                wr = stats["wins"] / stats["trades"] * 100 if stats["trades"] > 0 else 0
-                logger.info(f"  {sym:10s}: ${stats['pnl']:+9.2f} | {stats['trades']:3d} trades | WR: {wr:5.1f}%")
-
-            logger.info("")
-            logger.info("📊 HOLDING PERIOD ANALYSIS:")
-            win_holds = []
-            loss_holds = []
-            for t in trades:
-                entry = datetime.fromisoformat(t["entry_time"])
-                exit_t = datetime.fromisoformat(t["exit_time"])
-                hours = (exit_t - entry).total_seconds() / 3600
-                if t["pnl"] > 0:
-                    win_holds.append(hours)
-                else:
-                    loss_holds.append(hours)
-            if win_holds:
-                logger.info(f"  Winners avg hold:  {np.mean(win_holds):,.0f} hours ({np.mean(win_holds)/24:.1f} days)")
-            if loss_holds:
-                logger.info(f"  Losers avg hold:   {np.mean(loss_holds):,.0f} hours ({np.mean(loss_holds)/24:.1f} days)")
-
-            logger.info("")
-            logger.info("📊 WIN/LOSS DISTRIBUTION:")
-            if winning_trades:
-                win_pnls = sorted([t["pnl"] for t in winning_trades], reverse=True)
-                logger.info(f"  Biggest win:       ${win_pnls[0]:+,.2f}")
-                logger.info(f"  Top 5 wins:        ${sum(win_pnls[:5]):+,.2f}")
-                logger.info(f"  Median win:        ${np.median(win_pnls):+,.2f}")
-            if losing_trades:
-                loss_pnls = sorted([t["pnl"] for t in losing_trades])
-                logger.info(f"  Biggest loss:      ${loss_pnls[0]:+,.2f}")
-                logger.info(f"  Top 5 losses:      ${sum(loss_pnls[:5]):+,.2f}")
-                logger.info(f"  Median loss:       ${np.median(loss_pnls):+,.2f}")
-
-            # Max Favorable/Adverse Excursion (if tracked)
-            mfe_values = [t.get("max_favorable_excursion", None) for t in trades]
-            mae_values = [t.get("max_adverse_excursion", None) for t in trades]
-            if any(v is not None for v in mfe_values):
-                mfe_vals = [v for v in mfe_values if v is not None]
-                mae_vals = [v for v in mae_values if v is not None]
-                logger.info("")
-                logger.info("📊 EXCURSION ANALYSIS (MFE/MAE):")
-                if mfe_vals:
-                    logger.info(f"  Avg MFE (max favorable): {np.mean(mfe_vals)*100:.2f}%")
-                    logger.info(f"  Avg MAE (max adverse):   {np.mean(mae_vals)*100:.2f}%")
-
-            logger.info("")
-
-        return result
+        return _calculate_metrics_impl(equity_curve, trades, self.initial_capital, annualization)
 
     def _empty_result(self) -> BacktestResult:
-        """Return empty backtest result."""
-        now = datetime.now()
-        return BacktestResult(
-            start_date=now,
-            end_date=now,
-            initial_capital=self.initial_capital,
-            final_capital=self.initial_capital,
-            total_return=0,
-            total_return_pct=0,
-            sharpe_ratio=0,
-            sortino_ratio=0,
-            max_drawdown=0,
-            max_drawdown_pct=0,
-            win_rate=0,
-            profit_factor=0,
-            total_trades=0,
-            winning_trades=0,
-            losing_trades=0,
-            avg_win=0,
-            avg_loss=0,
-            avg_holding_period=0,
-        )
+        """Return empty backtest result. Delegates to backtest_metrics module."""
+        return _empty_result_impl(self.initial_capital)
 
 
 class ModelPreTrainer:
