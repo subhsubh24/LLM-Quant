@@ -1206,6 +1206,7 @@ class PredictionMarketScanner:
         self.strategies: List[BaseStrategy] = []
         self.scan_history: List[ScanResult] = []
         self.total_scans: int = 0
+        self.last_market_count: int = 0
 
     def add_strategy(self, strategy: BaseStrategy):
         """Register a strategy."""
@@ -1229,7 +1230,11 @@ class PredictionMarketScanner:
             if len(batch) < 100:
                 break
 
+        self.last_market_count = len(all_markets)
         logger.info(f"[SCANNER] Found {len(all_markets)} active markets")
+
+        if not all_markets:
+            logger.warning("[SCANNER] No markets returned from Polymarket — check API connectivity")
 
         # Run each strategy
         all_results = []

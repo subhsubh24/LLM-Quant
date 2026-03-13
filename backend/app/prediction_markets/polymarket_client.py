@@ -152,7 +152,8 @@ class PolymarketClient:
             self._request_count += 1
             return resp.json()
         except requests.RequestException as e:
-            logger.error(f"Polymarket API error: {e}")
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            logger.error(f"Polymarket API error: {e} (status={status}, url={url})")
             return None
 
     # ================================================================
@@ -187,14 +188,34 @@ class PolymarketClient:
 
         data = self._get(f"{GAMMA_API}/markets", params)
         if not data:
+            logger.warning(f"[POLYMARKET] Gamma API returned empty/null for markets (params={params})")
+            return []
+
+        if isinstance(data, dict):
+            # Gamma API v2 may wrap results in a dict with "data" key
+            if "data" in data:
+                logger.info(f"[POLYMARKET] Gamma API returned dict with 'data' key, unwrapping")
+                data = data["data"]
+            else:
+                logger.warning(f"[POLYMARKET] Gamma API returned dict with keys: {list(data.keys())[:10]}")
+                return []
+
+        if not isinstance(data, list):
+            logger.warning(f"[POLYMARKET] Gamma API returned unexpected type: {type(data).__name__} (expected list)")
             return []
 
         markets = []
+        parse_errors = 0
         for m in data:
             try:
                 markets.append(self._parse_market(m))
             except Exception as e:
-                logger.debug(f"Skipping malformed market: {e}")
+                parse_errors += 1
+                if parse_errors <= 3:
+                    logger.warning(f"[POLYMARKET] Market parse error: {e} | raw keys: {list(m.keys()) if isinstance(m, dict) else type(m)}")
+        if parse_errors > 3:
+            logger.warning(f"[POLYMARKET] {parse_errors} total parse errors")
+        logger.info(f"[POLYMARKET] Fetched {len(markets)} markets (offset={offset}, raw={len(data)}, errors={parse_errors})")
         return markets
 
     def get_market_by_slug(self, slug: str) -> Optional[Market]:
