@@ -219,6 +219,10 @@ const strategyColors: Record<string, { bg: string; text: string; border: string;
   market_making: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
   flash_crash: { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", badge: "bg-orange-100 text-orange-700", dot: "bg-orange-500" },
   whale_copy: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
+  no_position_scanner: { bg: "bg-teal-50", text: "text-teal-700", border: "border-teal-200", badge: "bg-teal-100 text-teal-700", dot: "bg-teal-500" },
+  logical_implication: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", badge: "bg-indigo-100 text-indigo-700", dot: "bg-indigo-500" },
+  wallet_divergence: { bg: "bg-fuchsia-50", text: "text-fuchsia-700", border: "border-fuchsia-200", badge: "bg-fuchsia-100 text-fuchsia-700", dot: "bg-fuchsia-500" },
+  adaptive_threshold: { bg: "bg-lime-50", text: "text-lime-700", border: "border-lime-200", badge: "bg-lime-100 text-lime-700", dot: "bg-lime-500" },
 };
 
 const strategyLabels: Record<string, string> = {
@@ -229,6 +233,10 @@ const strategyLabels: Record<string, string> = {
   market_making: "MM",
   flash_crash: "Flash",
   whale_copy: "Whale",
+  no_position_scanner: "No-Pos",
+  logical_implication: "Logic",
+  wallet_divergence: "Diverge",
+  adaptive_threshold: "Adaptive",
 };
 
 // ----------------------------------------------------------------
@@ -394,8 +402,8 @@ export default function PredictionsPage() {
         if (data.positions && data.positions.length > 0) {
           setLivePositions(data.positions.map((p: any, i: number) => ({
             id: String(i),
-            market: p.market_id,
-            outcome: p.token_id,
+            market: p.market_question || p.market_id,
+            outcome: p.outcome_label || p.token_id,
             side: p.side === "long" ? "BUY" : "SELL",
             entryPrice: p.avg_entry_price,
             currentPrice: p.current_price,

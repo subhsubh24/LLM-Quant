@@ -497,9 +497,11 @@ class PredictionMarketOrchestrator:
                 skipped.append({"market": opp.market.question[:60], "reason": "Kelly size = 0"})
                 continue
 
-            # Determine token
+            # Determine token and labels
             exchange = Exchange.POLYMARKET
-            token_id = opp.market.outcomes[opp.outcome_idx].token_id if opp.outcome_idx >= 0 else ""
+            outcome = opp.market.outcomes[opp.outcome_idx] if opp.outcome_idx >= 0 else None
+            token_id = outcome.token_id if outcome else ""
+            outcome_label = outcome.label if outcome else ""
 
             # Build order
             order = OrderRequest(
@@ -511,6 +513,8 @@ class PredictionMarketOrchestrator:
                 size=num_contracts,
                 price=opp.entry_price,
                 strategy=opp.strategy,
+                market_question=opp.market.question,
+                outcome_label=outcome_label,
             )
 
             # Execute
@@ -558,10 +562,21 @@ class PredictionMarketOrchestrator:
             "skip_reasons": skipped[:10],
         }
 
-        logger.info(
-            f"[ORCHESTRATOR] Scan #{self.total_scans} complete: "
-            f"{len(opportunities)} opps → {len(executed)} executed, {len(skipped)} skipped"
-        )
+        # Log execution summary with skip reason breakdown
+        if skipped:
+            from collections import Counter
+            reason_counts = Counter(s["reason"].split(":")[0].strip() for s in skipped)
+            reason_summary = ", ".join(f"{r}: {c}" for r, c in reason_counts.most_common(5))
+            logger.info(
+                f"[ORCHESTRATOR] Scan #{self.total_scans} complete: "
+                f"{len(opportunities)} opps → {len(executed)} executed, {len(skipped)} skipped "
+                f"({reason_summary})"
+            )
+        else:
+            logger.info(
+                f"[ORCHESTRATOR] Scan #{self.total_scans} complete: "
+                f"{len(opportunities)} opps → {len(executed)} executed, {len(skipped)} skipped"
+            )
 
         return summary
 

@@ -76,6 +76,8 @@ class OrderRequest:
     price: Optional[float]   # Limit price (0.01 - 0.99). None for market orders
     strategy: str = ""       # Strategy that generated this order
     scan_result_id: str = "" # Link back to the scan result
+    market_question: str = "" # Human-readable market title
+    outcome_label: str = ""  # e.g., "Yes", "No", or specific outcome
 
     @property
     def notional(self) -> float:
@@ -611,8 +613,8 @@ class PredictionMarketExecutor:
                 exchange=req.exchange,
                 market_id=req.market_id,
                 token_id=req.token_id,
-                market_question="",
-                outcome_label="",
+                market_question=req.market_question,
+                outcome_label=req.outcome_label,
                 side="long" if req.side == OrderSide.BUY else "short",
                 size=result.filled_size,
                 avg_entry_price=result.filled_price,
@@ -638,6 +640,8 @@ class PredictionMarketExecutor:
                 "exchange": pos.exchange.value,
                 "market_id": pos.market_id,
                 "token_id": pos.token_id,
+                "market_question": pos.market_question,
+                "outcome_label": pos.outcome_label,
                 "side": pos.side,
                 "size": pos.size,
                 "avg_entry_price": pos.avg_entry_price,
