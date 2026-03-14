@@ -1,12 +1,12 @@
 # Project State Assessment
 
-**Date**: 2026-03-07
+**Date**: 2026-03-14 (updated from 2026-03-07)
 **Branch**: `claude/assess-project-state-rlGsj`
 **Codebase**: QuantLab (LLM-Quant)
 
 ## Executive Summary
 
-QuantLab is a large, ambitious educational quantitative finance platform with ~88,400 lines of Python backend code, 163 source files, 42 test files (1,077 tests, all passing), a Next.js frontend, and Docker containerization. The project is functionally rich but shows signs of rapid, AI-assisted development with significant documentation sprawl and some architectural debt.
+QuantLab is a large, ambitious quantitative finance platform with ~88,400 lines of Python backend code, a Next.js frontend, and Docker containerization. The system now runs live: the prediction market orchestrator scans Polymarket, tracks 50 whale wallets, enriches order books via the CLOB API, and executes through Alpaca (paper) and Binance (live) brokers with real-time WebSocket price feeds (Kraken, Polymarket). Recent commits fixed critical scanner bugs (stale markets, false 99%+ edges, aggressive adaptive thresholds) and reduced log noise. The core loop — scan → filter → size → execute — is operational in dry-run mode.
 
 ---
 
@@ -14,12 +14,10 @@ QuantLab is a large, ambitious educational quantitative finance platform with ~8
 
 | Metric | Value |
 |--------|-------|
-| Backend Python files | 163 |
+| Backend Python files | ~163 |
 | Backend lines of code | ~88,400 |
-| Test files | 42 |
-| Tests collected | 1,089 |
-| Tests passing | 1,077 (12 skipped, 14 warnings) |
-| Test pass rate | 100% (of non-skipped) |
+| Test files | 42+ |
+| Tests collected | 1,133 |
 | Largest file | `backtester.py` (6,824 lines) |
 | Markdown docs at root | 22 files |
 | Frontend pages | 12 (dashboard, research, crypto, options, performance, bot, insights, learn, trading, predictions) |
@@ -129,11 +127,64 @@ Three specific fixes are planned but not yet implemented.
 | Infra | Docker Compose, Redis (optional), uvicorn |
 | LLM | Anthropic Claude API (optional) |
 
-## 6. Recommended Priorities
+## 6. Live System Observations (2026-03-14)
 
-1. **Commit the simulation layer** — The 8 untracked files represent significant work. Add tests and commit them.
-2. **Fix backtester bugs** — Implement the 3 changes in PLAN.md (trailing stop, counter-trend stops, R:R gate).
-3. **Refactor `backtester.py`** — Extract position management, exit logic, and regime detection into separate modules.
-4. **Consolidate documentation** — Replace 22 root-level markdown files with a single CHANGELOG and a focused ARCHITECTURE doc.
-5. **Fix test warnings** — Convert `return True/False` patterns to proper `assert` statements in `test_training_pipeline.py`.
-6. **Add `.env` to `.gitignore`** — Prevent accidental secret commits.
+From the server startup logs, the following subsystems are **confirmed operational**:
+
+### Working Well
+- **Startup pipeline**: DB init → Crypto WS → Prediction feeds → Orchestrator → Broker auto-connect all succeed
+- **Polymarket scanner**: Fetches 100 markets, filters 58 stale ones, leaving 42 active markets
+- **CLOB enrichment**: Enriches 74 outcomes across 40 markets with live order book data
+- **Whale feed**: Seeds 3 hardcoded whales, discovers 47 more from `/holders` (50 total), fetches 334 whale trades, feeds them to WhaleCopy and WalletDivergence strategies
+- **Strategy execution**: 6 strategies run per scan cycle:
+  - `same_market_arb`: 0 hits (correct — no easy arb)
+  - `market_making`: 8 opportunities
+  - `logical_implication`: 9 hits (graph: 15 nodes, 14 edges)
+  - `wallet_divergence`: 0 signals (2 divergences, no actionable markets)
+  - `near_certainty`: 3 hits
+  - `cross_market_arb`: 0 hits (20 rules, 108 pairs)
+  - `no_position_scanner`: 2 hits
+  - `adaptive_threshold`: 3 passed / 2 filtered
+- **Broker connections**: Alpaca (paper) and Binance (US, live) both connect successfully
+- **Crypto WebSocket**: Kraken connected, streaming 51 pairs
+- **Polymarket WebSocket**: Connected for live price updates
+- **Scan result**: 20 total opportunities → 10 executed, 10 skipped (risk controls working)
+
+### Issues Observed
+1. **Coinbase WebSocket timeout**: `timed out during opening handshake` — falls back to Kraken (working as designed, but Coinbase is effectively dead)
+2. **Polymarket WS initial disconnect**: Timeout on first attempt, reconnects successfully after 1s
+3. **Most tracked whales show $0 PnL/0% WR**: 47 of 50 whales discovered from `/holders` have no profile data — the feed discovers them but can't fetch their historical PnL. Only the 3 hardcoded whales (Theo4, Fredi9999, SeriouslySirius) have meaningful profiles
+4. **All adaptive_threshold passes have very high edges**: 72.3% edge on "Wizards vs. Celtics" suggests the model may be mispricing or the market is illiquid — warrants investigation
+5. **Scan cycle takes ~108 seconds**: First scan started at 15:15:39, completed at 15:17:27. This is close to the 120s scan interval, meaning scans run nearly back-to-back with minimal idle time
+
+## 7. Recent Fixes (last 10 commits)
+
+| Commit | Fix |
+|--------|-----|
+| `26115fe` | Fix false 99%+ edges and reduce log noise |
+| `6272253` | Downgrade CLOB 404 errors to debug level |
+| `b1449fe` | Fix scanner fetching stale resolved markets from Gamma API |
+| `49e626f` | Fix Pydantic `protected_namespaces` warnings for `model_` fields |
+| `31ee2db` | Fix scanner finding zero opportunities due to 20% adaptive threshold |
+| `ef5f068` | Lower Kelly sizing min_edge 3%→1% and min_confidence 60%→50% |
+| `4d90f33` | Fix snapshot `kalshi_value` error and loosen scanner thresholds |
+| `bd47f1b` | Add top tab navigation with Dashboard, Predictions, Quant Bot |
+| `b7c2c5f` | Remove sidebar navigation and tabs |
+| `ceea83b` | Run scanner in thread, log CLOB enrichment failures |
+
+## 8. Recommended Priorities
+
+### Immediate (operational issues)
+1. **Enrich discovered whale profiles** — 47/50 whales have $0 PnL. Either fetch historical data from the Data API or rank by position size instead of PnL/win-rate.
+2. **Validate high-edge opportunities** — 72.3% edge on a sports market likely indicates a stale price or illiquid book. Add a liquidity/freshness gate.
+3. **Investigate Coinbase WS failures** — If Coinbase is consistently dead, remove it from the fallback chain or add a longer timeout.
+
+### Short-term (code quality)
+4. **Commit the simulation layer** — The 8 untracked files in `simulation/` represent significant work. Add tests and commit.
+5. **Fix backtester bugs** — Implement the 3 changes in PLAN.md (trailing stop, counter-trend stops, R:R gate).
+6. **Refactor `backtester.py`** — Extract position management, exit logic, and regime detection into separate modules (6,824 lines is unmaintainable).
+
+### Medium-term (project hygiene)
+7. **Consolidate documentation** — Replace 22 root-level markdown files with a single CHANGELOG and focused ARCHITECTURE doc.
+8. **Fix test warnings** — Convert `return True/False` patterns to proper `assert` in `test_training_pipeline.py`.
+9. **Add `.env` to `.gitignore`** — Prevent accidental secret commits.
