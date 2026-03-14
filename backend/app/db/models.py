@@ -107,6 +107,7 @@ class ExperimentConfig(SQLModel, table=True):
 class ModelRun(SQLModel, table=True):
     """ML model training run."""
     __tablename__ = "model_runs"
+    model_config = {"protected_namespaces": ()}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     config_hash: str = Field(index=True)
@@ -133,6 +134,7 @@ class ModelRun(SQLModel, table=True):
 class BacktestRun(SQLModel, table=True):
     """Backtest execution record."""
     __tablename__ = "backtest_runs"
+    model_config = {"protected_namespaces": ()}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     config_hash: str = Field(index=True)

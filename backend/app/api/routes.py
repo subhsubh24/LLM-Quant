@@ -70,6 +70,7 @@ class FeatureRequest(BaseModel):
 
 
 class ModelRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
     model_type: str = "ensemble"
     model_params: Dict[str, Any] = {}
     train_window_days: int = 756
