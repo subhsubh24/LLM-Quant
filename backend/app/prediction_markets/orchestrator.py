@@ -410,6 +410,21 @@ class PredictionMarketOrchestrator:
         self.total_skipped = 0
         self.last_scan_at: Optional[datetime] = None
         self.last_scan_opportunities: int = 0
+        self.activity_log: List[dict] = []  # Recent activity entries for frontend
+        self.last_scan_result: Optional[dict] = None  # Last scan summary
+
+    def _add_activity(self, type: str, message: str, strategy: str = None):
+        """Add an entry to the activity log (kept in memory, max 200)."""
+        entry = {
+            "id": f"{int(datetime.now(timezone.utc).timestamp()*1000)}-{id(message) % 10000}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": type,
+            "strategy": strategy,
+            "message": message,
+        }
+        self.activity_log.insert(0, entry)
+        if len(self.activity_log) > 200:
+            self.activity_log = self.activity_log[:200]
 
     async def start(self):
         """Start all background loops."""
@@ -468,11 +483,15 @@ class PredictionMarketOrchestrator:
 
         # 1. Scan
         logger.info(f"[ORCHESTRATOR] Scan #{self.total_scans} starting...")
+        self._add_activity("scan", f"Scan #{self.total_scans} starting across all strategies...")
         opportunities = self.scanner.scan(market_limit=200)
         self.last_scan_opportunities = len(opportunities)
 
         if not opportunities:
-            return {"scan": self.total_scans, "opportunities": 0, "executed": 0}
+            self._add_activity("scan", f"Scan #{self.total_scans} complete: 0 opportunities found")
+            no_result = {"scan": self.total_scans, "opportunities": 0, "executed": 0}
+            self.last_scan_result = no_result
+            return no_result
 
         # 2. Filter + Size + Execute
         executed = []
@@ -534,6 +553,12 @@ class PredictionMarketOrchestrator:
                     "kelly_bet_usd": bet_usd,
                 })
 
+                self._add_activity(
+                    "execute",
+                    f"Executed {opp.side} {num_contracts} @ ${opp.entry_price:.2f} — {opp.market.question[:60]} (edge: {opp.edge*100:.1f}%, Kelly: ${bet_usd:.2f})",
+                    opp.strategy,
+                )
+
                 # Persist order to DB
                 self._persist_order(result, opp)
 
@@ -552,6 +577,14 @@ class PredictionMarketOrchestrator:
                     "reason": result.error or result.status.value,
                 })
 
+        # Log signals for top opportunities
+        for opp in opportunities[:5]:
+            self._add_activity(
+                "signal",
+                f"{opp.reason[:80]} — edge: {opp.edge*100:.1f}%, confidence: {opp.confidence*100:.0f}%",
+                opp.strategy,
+            )
+
         summary = {
             "scan": self.total_scans,
             "opportunities": len(opportunities),
@@ -567,17 +600,21 @@ class PredictionMarketOrchestrator:
             from collections import Counter
             reason_counts = Counter(s["reason"].split(":")[0].strip() for s in skipped)
             reason_summary = ", ".join(f"{r}: {c}" for r, c in reason_counts.most_common(5))
-            logger.info(
-                f"[ORCHESTRATOR] Scan #{self.total_scans} complete: "
+            summary_msg = (
+                f"Scan #{self.total_scans} complete: "
                 f"{len(opportunities)} opps → {len(executed)} executed, {len(skipped)} skipped "
                 f"({reason_summary})"
             )
+            logger.info(f"[ORCHESTRATOR] {summary_msg}")
         else:
-            logger.info(
-                f"[ORCHESTRATOR] Scan #{self.total_scans} complete: "
+            summary_msg = (
+                f"Scan #{self.total_scans} complete: "
                 f"{len(opportunities)} opps → {len(executed)} executed, {len(skipped)} skipped"
             )
+            logger.info(f"[ORCHESTRATOR] {summary_msg}")
 
+        self._add_activity("scan", summary_msg)
+        self.last_scan_result = summary
         return summary
 
     def _persist_order(self, result: OrderResult, opp: ScanResult):
@@ -774,6 +811,8 @@ class PredictionMarketOrchestrator:
             "risk_manager": self.risk_manager.get_status(),
             "mtm": self.mtm_engine.get_summary(),
             "portfolio": self.executor.get_portfolio_summary(),
+            "activity_log": self.activity_log[:50],
+            "last_scan_result": self.last_scan_result,
         }
 
 

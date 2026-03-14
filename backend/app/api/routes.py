@@ -4264,11 +4264,8 @@ async def get_prediction_pnl_history(portfolio_id: int = 1, limit: int = 200):
             .limit(limit)
         )
         results = session.exec(statement).all()
-
-    return {
-        "portfolio_id": portfolio_id,
-        "count": len(results),
-        "snapshots": [
+        # Build response inside session to avoid DetachedInstanceError
+        snapshots = [
             {
                 "total_value_usd": s.total_value_usd,
                 "cash_usd": s.cash_usd,
@@ -4281,7 +4278,12 @@ async def get_prediction_pnl_history(portfolio_id: int = 1, limit: int = 200):
                 "snapshot_at": s.snapshot_at.isoformat(),
             }
             for s in reversed(results)
-        ],
+        ]
+
+    return {
+        "portfolio_id": portfolio_id,
+        "count": len(snapshots),
+        "snapshots": snapshots,
     }
 
 
@@ -4349,6 +4351,18 @@ async def get_prediction_bot_status():
     """Get full bot status: orchestrator, risk manager, portfolio, MTM."""
     orchestrator = _get_orchestrator()
     return orchestrator.get_status()
+
+
+@router.get("/prediction-markets/bot/activity")
+async def get_prediction_activity_log(limit: int = 50):
+    """Get recent activity log entries from the orchestrator."""
+    orchestrator = _get_orchestrator()
+    return {
+        "entries": orchestrator.activity_log[:limit],
+        "total_scans": orchestrator.total_scans,
+        "total_executions": orchestrator.total_executions,
+        "last_scan_result": orchestrator.last_scan_result,
+    }
 
 
 @router.post("/prediction-markets/bot/scan-now")

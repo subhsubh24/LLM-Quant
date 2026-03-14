@@ -106,7 +106,6 @@ body {
     0 0 0 1px rgba(0, 0, 0, 0.04),
     0 2px 4px rgba(0, 0, 0, 0.04),
     0 8px 24px rgba(0, 0, 0, 0.08);
-  transform: translateY(-1px);
 }
 
 /* Tabular numbers for financial data */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Target,
   Zap,
@@ -26,6 +26,15 @@ import {
   Settings2,
   ArrowLeftRight,
   Users,
+  Radio,
+  Eye,
+  Layers,
+  Wallet,
+  Bot,
+  CircleDot,
+  ChevronDown,
+  ExternalLink,
+  RotateCw,
 } from "lucide-react";
 
 // ----------------------------------------------------------------
@@ -128,7 +137,7 @@ const DEFAULT_STRATEGIES: StrategyConfig[] = [
   },
   {
     id: "same_market_arb",
-    name: "Same-Market Arbitrage",
+    name: "Same-Market Arb",
     description: "YES + NO < $1.00? Buy both, guaranteed profit. Windows last milliseconds.",
     icon: Zap,
     enabled: true,
@@ -143,7 +152,7 @@ const DEFAULT_STRATEGIES: StrategyConfig[] = [
   },
   {
     id: "cross_market_arb",
-    name: "Cross-Market Arbitrage",
+    name: "Cross-Market Arb",
     description: "Find logical inconsistencies between related markets.",
     icon: Globe,
     enabled: true,
@@ -191,8 +200,8 @@ const DEFAULT_STRATEGIES: StrategyConfig[] = [
   },
   {
     id: "whale_copy",
-    name: "Whale Copy Trading",
-    description: "Follow top 7.6% profitable wallets. Wallet basket consensus (80%+ must agree) before entry.",
+    name: "Whale Copy",
+    description: "Follow top 7.6% profitable wallets. Basket consensus (80%+ must agree) before entry.",
     icon: Users,
     enabled: true,
     color: "emerald",
@@ -202,41 +211,37 @@ const DEFAULT_STRATEGIES: StrategyConfig[] = [
       "Min trade size": "$1,000",
       "Max entry odds": "80c",
       "Basket consensus": "80%",
-      "Tracked wallets": "Theo4, Fredi9999, Len93",
     },
   },
 ];
 
-// ----------------------------------------------------------------
-// Strategy color maps
-// ----------------------------------------------------------------
-
-const strategyColors: Record<string, { bg: string; text: string; border: string; badge: string; dot: string }> = {
-  weather_arb: { bg: "bg-cyan-50", text: "text-cyan-700", border: "border-cyan-200", badge: "bg-cyan-100 text-cyan-700", dot: "bg-cyan-500" },
-  near_certainty: { bg: "bg-violet-50", text: "text-violet-700", border: "border-violet-200", badge: "bg-violet-100 text-violet-700", dot: "bg-violet-500" },
-  same_market_arb: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", badge: "bg-amber-100 text-amber-700", dot: "bg-amber-500" },
-  cross_market_arb: { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200", badge: "bg-rose-100 text-rose-700", dot: "bg-rose-500" },
-  market_making: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
-  flash_crash: { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", badge: "bg-orange-100 text-orange-700", dot: "bg-orange-500" },
-  whale_copy: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
-  no_position_scanner: { bg: "bg-teal-50", text: "text-teal-700", border: "border-teal-200", badge: "bg-teal-100 text-teal-700", dot: "bg-teal-500" },
-  logical_implication: { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", badge: "bg-indigo-100 text-indigo-700", dot: "bg-indigo-500" },
-  wallet_divergence: { bg: "bg-fuchsia-50", text: "text-fuchsia-700", border: "border-fuchsia-200", badge: "bg-fuchsia-100 text-fuchsia-700", dot: "bg-fuchsia-500" },
-  adaptive_threshold: { bg: "bg-lime-50", text: "text-lime-700", border: "border-lime-200", badge: "bg-lime-100 text-lime-700", dot: "bg-lime-500" },
+const strategyColors: Record<string, { border: string; bg: string; text: string; badge: string; dot: string }> = {
+  weather_arb: { border: "border-cyan-200", bg: "bg-cyan-50/50", text: "text-cyan-600", badge: "bg-cyan-100 text-cyan-700", dot: "bg-cyan-500" },
+  near_certainty: { border: "border-violet-200", bg: "bg-violet-50/50", text: "text-violet-600", badge: "bg-violet-100 text-violet-700", dot: "bg-violet-500" },
+  same_market_arb: { border: "border-amber-200", bg: "bg-amber-50/50", text: "text-amber-600", badge: "bg-amber-100 text-amber-700", dot: "bg-amber-500" },
+  cross_market_arb: { border: "border-rose-200", bg: "bg-rose-50/50", text: "text-rose-600", badge: "bg-rose-100 text-rose-700", dot: "bg-rose-500" },
+  market_making: { border: "border-blue-200", bg: "bg-blue-50/50", text: "text-blue-600", badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
+  flash_crash: { border: "border-orange-200", bg: "bg-orange-50/50", text: "text-orange-600", badge: "bg-orange-100 text-orange-700", dot: "bg-orange-500" },
+  whale_copy: { border: "border-emerald-200", bg: "bg-emerald-50/50", text: "text-emerald-600", badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
+  // Advanced strategies from backend
+  logical_implication: { border: "border-purple-200", bg: "bg-purple-50/50", text: "text-purple-600", badge: "bg-purple-100 text-purple-700", dot: "bg-purple-500" },
+  no_position_scanner: { border: "border-teal-200", bg: "bg-teal-50/50", text: "text-teal-600", badge: "bg-teal-100 text-teal-700", dot: "bg-teal-500" },
+  adaptive_threshold: { border: "border-indigo-200", bg: "bg-indigo-50/50", text: "text-indigo-600", badge: "bg-indigo-100 text-indigo-700", dot: "bg-indigo-500" },
+  wallet_divergence: { border: "border-lime-200", bg: "bg-lime-50/50", text: "text-lime-600", badge: "bg-lime-100 text-lime-700", dot: "bg-lime-500" },
 };
 
 const strategyLabels: Record<string, string> = {
   weather_arb: "Weather",
-  near_certainty: "Certainty",
-  same_market_arb: "Arb",
-  cross_market_arb: "Cross-Mkt",
-  market_making: "MM",
-  flash_crash: "Flash",
-  whale_copy: "Whale",
-  no_position_scanner: "No-Pos",
-  logical_implication: "Logic",
-  wallet_divergence: "Diverge",
+  near_certainty: "Near-Certainty",
+  same_market_arb: "Same-Mkt Arb",
+  cross_market_arb: "Cross-Mkt Arb",
+  market_making: "Market Making",
+  flash_crash: "Flash Crash",
+  whale_copy: "Whale Copy",
+  logical_implication: "Logical Imp.",
+  no_position_scanner: "No Position",
   adaptive_threshold: "Adaptive",
+  wallet_divergence: "Wallet Div.",
 };
 
 // ----------------------------------------------------------------
@@ -244,59 +249,33 @@ const strategyLabels: Record<string, string> = {
 // ----------------------------------------------------------------
 
 export default function PredictionsPage() {
-  const [activeTab, setActiveTab] = useState<"scanner" | "markets" | "positions" | "portfolio" | "analysis" | "bot">("scanner");
-  const [strategies, setStrategies] = useState(DEFAULT_STRATEGIES);
-  const [scanning, setScanning] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [scanCount, setScanCount] = useState(0);
-  const [lastScan, setLastScan] = useState("Never");
-  const [isLive, setIsLive] = useState(false);
-  const [scanLoading, setScanLoading] = useState(false);
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [strategies, setStrategies] = useState<StrategyConfig[]>(DEFAULT_STRATEGIES);
   const [markets, setMarkets] = useState<PredictionMarket[]>([]);
-  const [exchangeFilter, setExchangeFilter] = useState<"all" | "polymarket">("all");
-  const streamRef = useRef<HTMLDivElement>(null);
-
-  // Bot state
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [livePositions, setLivePositions] = useState<Position[]>([]);
+  const [activeTab, setActiveTab] = useState<"scanner" | "analysis" | "markets" | "positions" | "portfolio" | "bot">("scanner");
+  const [scanning, setScanning] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanCount, setScanCount] = useState(0);
+  const [lastScan, setLastScan] = useState<string>("Never");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [exchangeFilter] = useState<"all" | "polymarket">("all");
+  const [isLive, setIsLive] = useState(false);
   const [botRunning, setBotRunning] = useState(false);
   const [botStatus, setBotStatus] = useState<any>(null);
-  const [livePositions, setLivePositions] = useState<Position[]>([]);
-
-  // Portfolio / Equity curve
+  const [analysisLog, setAnalysisLog] = useState<any[]>([]);
   const [equityCurve, setEquityCurve] = useState<any[]>([]);
   const [portfolioSummary, setPortfolioSummary] = useState<any>(null);
-
-  // Polymarket connection status
-  const [polyStatus, setPolyStatus] = useState<{
-    connected: boolean | null;
-    gamma_api: { connected: boolean; latency_ms: number | null };
-    clob_api: { connected: boolean; latency_ms: number | null };
-  }>({ connected: null, gamma_api: { connected: false, latency_ms: null }, clob_api: { connected: false, latency_ms: null } });
-
-  // Analysis log stream
-  const [analysisLog, setAnalysisLog] = useState<Array<{id: string; timestamp: string; type: "scan" | "signal" | "execute" | "skip" | "info"; strategy?: string; message: string}>>([]);
+  const [polyStatus, setPolyStatus] = useState<any>({ connected: null });
+  const [activitySince, setActivitySince] = useState(0); // Track last fetched activity count
+  const streamRef = useRef<HTMLDivElement>(null);
   const analysisRef = useRef<HTMLDivElement>(null);
 
-  // Map API opportunity to frontend type
-  const mapOpportunity = (opp: any, idx: number): Opportunity => ({
-    id: String(idx),
-    strategy: opp.strategy,
-    market: opp.market,
-    side: opp.side || "BUY",
-    entryPrice: opp.entry_price,
-    edge: opp.edge,
-    confidence: opp.confidence,
-    reason: opp.reason,
-    timestamp: opp.timestamp
-      ? new Date(opp.timestamp).toLocaleTimeString()
-      : "Just now",
-  });
-
-  // Map API market to frontend type
+  // Map API market format
   const mapMarket = (m: any): PredictionMarket => ({
     id: m.id || m.condition_id,
     question: m.question,
-    category: m.category || "General",
+    category: m.category || "Unknown",
     outcomes: (m.outcomes || []).map((o: any) => ({
       label: o.label,
       price: o.price || o.midpoint || 0,
@@ -307,6 +286,18 @@ export default function PredictionsPage() {
     endDate: m.end_date || "",
     active: m.active ?? true,
     exchange: m.exchange || "polymarket",
+  });
+
+  const mapOpportunity = (opp: any): Opportunity => ({
+    id: opp.id || `${opp.strategy}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    strategy: opp.strategy,
+    market: opp.market || opp.market_question || "",
+    side: opp.side || "BUY",
+    entryPrice: opp.entry_price || opp.price || 0,
+    edge: opp.edge || 0,
+    confidence: opp.confidence || 0,
+    reason: opp.reason || "",
+    timestamp: opp.timestamp || new Date().toLocaleTimeString(),
   });
 
   // Fetch live strategy data from API (positions, P&L, etc.)
@@ -325,6 +316,7 @@ export default function PredictionsPage() {
             return s;
           })
         );
+        setScanCount(data.total_scans || 0);
         setIsLive(true);
       }
     } catch {
@@ -342,9 +334,7 @@ export default function PredictionsPage() {
         setMarkets(data.markets.map(mapMarket));
         setIsLive(true);
       }
-    } catch {
-      // API unavailable — keep demo data
-    }
+    } catch {}
   };
 
   // Run scanner via API
@@ -352,9 +342,7 @@ export default function PredictionsPage() {
     setScanLoading(true);
     addLog("scan", `Starting scan #${scanCount + 1} across all enabled strategies...`);
     try {
-      const res = await fetch("/api/prediction-markets/scan", {
-        method: "POST",
-      });
+      const res = await fetch("/api/prediction-markets/scan", { method: "POST" });
       if (!res.ok) throw new Error("Scan failed");
       const data = await res.json();
       const num = data.scan_number || scanCount + 1;
@@ -364,8 +352,8 @@ export default function PredictionsPage() {
       if (data.opportunities && data.opportunities.length > 0) {
         setOpportunities(data.opportunities.map(mapOpportunity));
         addLog("scan", `Scan #${num} complete: ${data.opportunities.length} opportunities found across ${data.markets_scanned || "?"} markets`);
-        data.opportunities.forEach((opp: any) => {
-          addLog("signal", `${opp.strategy}: ${opp.reason}`, opp.strategy);
+        data.opportunities.slice(0, 5).forEach((opp: any) => {
+          addLog("signal", `${opp.reason}`, opp.strategy);
         });
       } else {
         addLog("scan", `Scan #${num} complete: no opportunities (${data.markets_scanned || 0} markets checked)`);
@@ -388,6 +376,29 @@ export default function PredictionsPage() {
         setBotStatus(data);
         setBotRunning(data.running);
         setIsLive(true);
+
+        // Merge activity log from bot into local analysis log
+        if (data.activity_log && data.activity_log.length > 0) {
+          setAnalysisLog((prev) => {
+            const existingIds = new Set(prev.map((e: any) => e.id));
+            const newEntries = data.activity_log
+              .filter((e: any) => !existingIds.has(e.id))
+              .map((e: any) => ({
+                ...e,
+                timestamp: e.timestamp
+                  ? new Date(e.timestamp).toLocaleTimeString()
+                  : new Date().toLocaleTimeString(),
+              }));
+            if (newEntries.length === 0) return prev;
+            return [...newEntries, ...prev].slice(0, 200);
+          });
+        }
+
+        // Update scan count and opportunities from last scan
+        if (data.total_scans) setScanCount(data.total_scans);
+        if (data.last_scan_result?.executions) {
+          setLastScan(data.last_scan_at ? new Date(data.last_scan_at).toLocaleTimeString() : "Just now");
+        }
       }
     } catch {}
   };
@@ -428,10 +439,37 @@ export default function PredictionsPage() {
     } catch {}
   };
 
+  // Fetch latest opportunities from bot activity
+  const fetchBotOpportunities = async () => {
+    try {
+      const res = await fetch("/api/prediction-markets/bot/activity?limit=50");
+      if (res.ok) {
+        const data = await res.json();
+        // Merge activity entries
+        if (data.entries && data.entries.length > 0) {
+          setAnalysisLog((prev) => {
+            const existingIds = new Set(prev.map((e: any) => e.id));
+            const newEntries = data.entries
+              .filter((e: any) => !existingIds.has(e.id))
+              .map((e: any) => ({
+                ...e,
+                timestamp: e.timestamp
+                  ? new Date(e.timestamp).toLocaleTimeString()
+                  : new Date().toLocaleTimeString(),
+              }));
+            if (newEntries.length === 0) return prev;
+            return [...newEntries, ...prev].slice(0, 200);
+          });
+        }
+        if (data.total_scans) setScanCount(data.total_scans);
+      }
+    } catch {}
+  };
+
   // Add entry to analysis log
   const addLog = (type: "scan" | "signal" | "execute" | "skip" | "info", message: string, strategy?: string) => {
     const entry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toLocaleTimeString(),
       type,
       strategy,
@@ -456,7 +494,6 @@ export default function PredictionsPage() {
         addLog("info", "Portfolio reset. All positions cleared, P&L zeroed.");
       }
     } catch {
-      // Reset locally even if API fails
       setStrategies(DEFAULT_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
       setOpportunities([]);
       setLivePositions([]);
@@ -476,16 +513,11 @@ export default function PredictionsPage() {
         const data = await res.json();
         setPolyStatus(data);
         if (data.connected) {
-          addLog("info", `Polymarket connected — Gamma API: ${data.gamma_api.latency_ms}ms, CLOB API: ${data.clob_api.latency_ms}ms`);
-        } else {
-          const issues = [];
-          if (!data.gamma_api.connected) issues.push(`Gamma API: ${data.gamma_api.error || "unreachable"}`);
-          if (!data.clob_api.connected) issues.push(`CLOB API: ${data.clob_api.error || "unreachable"}`);
-          addLog("info", `Polymarket connection issues: ${issues.join(", ")}`);
+          addLog("info", `Polymarket connected — Gamma: ${data.gamma_api.latency_ms}ms, CLOB: ${data.clob_api.latency_ms}ms`);
         }
       }
     } catch {
-      setPolyStatus({ connected: false, gamma_api: { connected: false, latency_ms: null }, clob_api: { connected: false, latency_ms: null } });
+      setPolyStatus({ connected: false });
     }
   };
 
@@ -495,9 +527,11 @@ export default function PredictionsPage() {
       if (botRunning) {
         await fetch("/api/prediction-markets/bot/stop", { method: "POST" });
         setBotRunning(false);
+        addLog("info", "Bot stopped");
       } else {
         await fetch("/api/prediction-markets/bot/start", { method: "POST" });
         setBotRunning(true);
+        addLog("info", "Bot started — automated scanning enabled");
       }
       await fetchBotStatus();
     } catch {}
@@ -521,13 +555,32 @@ export default function PredictionsPage() {
       fetchBotStatus();
     } else if (activeTab === "positions") {
       fetchPositions();
+      fetchStrategies();
+    } else if (activeTab === "analysis") {
+      fetchBotOpportunities();
+    } else if (activeTab === "scanner") {
+      fetchBotOpportunities();
+      fetchPositions();
     }
   }, [activeTab]);
 
-  // Auto-scan every 2 minutes when scanning is enabled
+  // Auto-poll: refresh bot data and positions every 10s when bot is running
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchBotStatus();
+      fetchPositions();
+      fetchStrategies();
+      if (activeTab === "analysis" || activeTab === "scanner") {
+        fetchBotOpportunities();
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
+
+  // Auto-scan every 2 minutes when manual scanning is enabled
   useEffect(() => {
     if (!scanning) return;
-    runScan(); // Run immediately when scanning starts
+    runScan();
     const interval = setInterval(runScan, 120000);
     return () => clearInterval(interval);
   }, [scanning]);
@@ -545,9 +598,13 @@ export default function PredictionsPage() {
     );
   };
 
-  const totalPnl = strategies.reduce((sum, s) => sum + s.pnl, 0);
-  const totalPositions = strategies.reduce((sum, s) => sum + s.positions, 0);
+  // Use livePositions.length as the source of truth for position count
+  const positionCount = livePositions.length;
+  const totalPnl = portfolioSummary?.total_pnl ?? strategies.reduce((sum, s) => sum + s.pnl, 0);
   const enabledCount = strategies.filter((s) => s.enabled).length;
+  const marketsScanned = botStatus?.last_scan_result?.opportunities
+    ? scanCount * 12
+    : scanCount * 12;
 
   const filteredMarkets = markets.filter(
     (m) =>
@@ -557,672 +614,678 @@ export default function PredictionsPage() {
         m.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
+  // ----------------------------------------------------------------
+  // Render
+  // ----------------------------------------------------------------
+
   return (
-    <div className="min-h-screen bg-[#FAFAFA] p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
-              <Target className="w-5 h-5 text-white" />
-            </div>
-            Prediction Markets
-          </h1>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-sm text-gray-500">
-              Polymarket scanner &mdash; 7 strategies
-            </p>
-            {polyStatus.connected === null ? (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Checking...</span>
-            ) : polyStatus.connected ? (
-              <button
-                onClick={checkPolymarketConnection}
-                className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
-                title={`Gamma: ${polyStatus.gamma_api.latency_ms}ms | CLOB: ${polyStatus.clob_api.latency_ms}ms`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                CONNECTED
-              </button>
-            ) : (
-              <button
-                onClick={checkPolymarketConnection}
-                className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
-                title="Click to retry connection"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                DISCONNECTED
-              </button>
-            )}
-            {isLive && (
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">LIVE DATA</span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={resetPortfolio}
-            className="px-3 py-2 rounded-xl text-xs font-medium text-gray-500 bg-white border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
-          >
-            Reset
-          </button>
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200">
-            <div className={`w-2 h-2 rounded-full ${scanning ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
-            <span className="text-sm font-medium text-gray-700">
-              {scanning ? "Scanning" : "Paused"}
-            </span>
-            <span className="text-xs text-gray-400">#{scanCount}</span>
-          </div>
-          <button
-            onClick={() => setScanning(!scanning)}
-            className={`p-2.5 rounded-xl transition-colors ${
-              scanning
-                ? "bg-gray-100 hover:bg-gray-200 text-gray-600"
-                : "bg-violet-100 hover:bg-violet-200 text-violet-700"
-            }`}
-          >
-            {scanning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <DollarSign className="w-4 h-4 text-gray-400" />
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total P&L</span>
-          </div>
-          <p className={`text-2xl font-bold tabular-nums ${totalPnl >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-            {totalPnl >= 0 ? "+" : ""}${totalPnl.toFixed(2)}
-          </p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Activity className="w-4 h-4 text-gray-400" />
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Open Positions</span>
-          </div>
-          <p className="text-2xl font-bold tabular-nums text-gray-900">{totalPositions}</p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Zap className="w-4 h-4 text-gray-400" />
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Active Strategies</span>
-          </div>
-          <p className="text-2xl font-bold tabular-nums text-gray-900">
-            {enabledCount}<span className="text-base font-normal text-gray-400">/{strategies.length}</span>
-          </p>
-        </div>
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-1">
-            <BarChart3 className="w-4 h-4 text-gray-400" />
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Markets Scanned</span>
-          </div>
-          <p className="text-2xl font-bold tabular-nums text-gray-900">{scanCount * 12}</p>
-        </div>
-      </div>
-
-      {/* Strategy Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {strategies.map((strategy) => {
-          const colors = strategyColors[strategy.id] || strategyColors.weather_arb;
-          return (
-            <div
-              key={strategy.id}
-              className={`card p-5 border-2 transition-all cursor-pointer ${
-                strategy.enabled ? `${colors.border} ${colors.bg}` : "border-transparent opacity-60"
-              }`}
-              onClick={() => toggleStrategy(strategy.id)}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <strategy.icon className={`w-5 h-5 ${strategy.enabled ? colors.text : "text-gray-400"}`} />
-                  <span className={`text-sm font-semibold ${strategy.enabled ? "text-gray-900" : "text-gray-500"}`}>
-                    {strategy.name}
-                  </span>
-                </div>
-                <div
-                  className={`w-8 h-5 rounded-full transition-colors flex items-center px-0.5 ${
-                    strategy.enabled ? "bg-violet-500 justify-end" : "bg-gray-300 justify-start"
-                  }`}
-                >
-                  <div className="w-4 h-4 rounded-full bg-white shadow-sm" />
+    <div className="min-h-screen bg-[#F8F8FA]">
+      {/* ============ HEADER ============ */}
+      <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-xl border-b border-gray-200/60">
+        <div className="max-w-[1440px] mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+                <Target className="w-4.5 h-4.5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-gray-900 tracking-tight">Prediction Markets</h1>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {polyStatus.connected === null ? (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-400">Connecting...</span>
+                  ) : polyStatus.connected ? (
+                    <button
+                      onClick={checkPolymarketConnection}
+                      className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Connected
+                    </button>
+                  ) : (
+                    <button
+                      onClick={checkPolymarketConnection}
+                      className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                      Disconnected
+                    </button>
+                  )}
+                  <span className="text-[10px] text-gray-400">{enabledCount} strategies active</span>
                 </div>
               </div>
-              <p className="text-xs text-gray-500 mb-3 line-clamp-2">{strategy.description}</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">{strategy.positions} positions</span>
-                <span
-                  className={`text-sm font-semibold tabular-nums ${
-                    strategy.pnl >= 0 ? "text-emerald-600" : "text-red-500"
-                  }`}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Bot status indicator */}
+              {botRunning && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200/60">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-xs font-medium text-emerald-700">Bot Active</span>
+                  <span className="text-[10px] text-emerald-500 tabular-nums">#{scanCount}</span>
+                </div>
+              )}
+              <button
+                onClick={resetPortfolio}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+              >
+                Reset
+              </button>
+              <div className="w-px h-5 bg-gray-200" />
+              <button
+                onClick={() => setScanning(!scanning)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  scanning
+                    ? "bg-violet-100 text-violet-700 shadow-sm shadow-violet-500/10"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {scanning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                {scanning ? "Scanning" : "Auto-Scan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-[1440px] mx-auto px-6 py-6">
+        {/* ============ STATS ROW ============ */}
+        <div className="grid grid-cols-4 gap-3 mb-6">
+          {[
+            {
+              label: "Total P&L",
+              value: `${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`,
+              color: totalPnl >= 0 ? "text-emerald-600" : "text-red-500",
+              icon: DollarSign,
+              sub: portfolioSummary?.total_exposure ? `$${portfolioSummary.total_exposure.toFixed(2)} exposure` : null,
+            },
+            {
+              label: "Open Positions",
+              value: String(positionCount),
+              color: "text-gray-900",
+              icon: Activity,
+              sub: positionCount > 0 ? `across ${new Set(livePositions.map(p => p.strategy)).size} strategies` : null,
+            },
+            {
+              label: "Active Strategies",
+              value: `${enabledCount}`,
+              valueSuffix: `/${strategies.length}`,
+              color: "text-gray-900",
+              icon: Zap,
+              sub: botRunning ? "Bot running" : "Bot stopped",
+            },
+            {
+              label: "Scans Completed",
+              value: String(scanCount),
+              color: "text-gray-900",
+              icon: BarChart3,
+              sub: lastScan !== "Never" ? `Last: ${lastScan}` : null,
+            },
+          ].map((stat) => (
+            <div key={stat.label} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+              <div className="flex items-center gap-1.5 mb-2">
+                <stat.icon className="w-3.5 h-3.5 text-gray-400" />
+                <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{stat.label}</span>
+              </div>
+              <p className={`text-xl font-semibold tabular-nums ${stat.color}`}>
+                {stat.value}
+                {(stat as any).valueSuffix && <span className="text-sm font-normal text-gray-400">{(stat as any).valueSuffix}</span>}
+              </p>
+              {stat.sub && <p className="text-[11px] text-gray-400 mt-0.5">{stat.sub}</p>}
+            </div>
+          ))}
+        </div>
+
+        {/* ============ STRATEGY CARDS ============ */}
+        <div className="grid grid-cols-7 gap-2 mb-6">
+          {strategies.map((strategy) => {
+            const colors = strategyColors[strategy.id] || strategyColors.weather_arb;
+            return (
+              <button
+                key={strategy.id}
+                onClick={() => toggleStrategy(strategy.id)}
+                className={`relative rounded-xl p-3 text-left transition-all border ${
+                  strategy.enabled
+                    ? `${colors.border} ${colors.bg} shadow-sm`
+                    : "border-gray-100 bg-gray-50/50 opacity-50"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <strategy.icon className={`w-3.5 h-3.5 ${strategy.enabled ? colors.text : "text-gray-400"}`} />
+                  <span className="text-[11px] font-semibold text-gray-900 truncate">{strategy.name}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-gray-400 tabular-nums">{strategy.positions} pos</span>
+                  <span
+                    className={`text-[11px] font-semibold tabular-nums ${
+                      strategy.pnl >= 0 ? "text-emerald-600" : "text-red-500"
+                    }`}
+                  >
+                    {strategy.pnl >= 0 ? "+" : ""}${strategy.pnl.toFixed(2)}
+                  </span>
+                </div>
+                {/* Toggle dot */}
+                <div className={`absolute top-2 right-2 w-2 h-2 rounded-full ${strategy.enabled ? colors.dot : "bg-gray-300"}`} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ============ TAB NAVIGATION ============ */}
+        <div className="flex items-center gap-0.5 mb-5 border-b border-gray-200">
+          {([
+            { key: "scanner" as const, label: "Live Scanner", icon: Radio },
+            { key: "analysis" as const, label: "Analysis", icon: Eye },
+            { key: "markets" as const, label: "Markets", icon: Globe },
+            { key: "positions" as const, label: `Positions${positionCount > 0 ? ` (${positionCount})` : ""}`, icon: Layers },
+            { key: "portfolio" as const, label: "Portfolio", icon: Wallet },
+            { key: "bot" as const, label: "Bot", icon: Bot },
+          ]).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === tab.key
+                  ? "border-violet-500 text-gray-900"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5" />
+              {tab.label}
+              {tab.key === "analysis" && analysisLog.length > 0 && (
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
+              )}
+              {tab.key === "bot" && botRunning && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ============ LIVE SCANNER TAB ============ */}
+        {activeTab === "scanner" && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+                <h2 className="text-sm font-semibold text-gray-900">Opportunity Stream</h2>
+                <span className="text-xs text-gray-400">
+                  {opportunities.length > 0 ? `${opportunities.length} signals` : "Waiting for scan..."}
+                </span>
+              </div>
+              <button
+                onClick={runScan}
+                disabled={scanLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-50 text-violet-600 hover:bg-violet-100 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw className={`w-3 h-3 ${scanLoading ? "animate-spin" : ""}`} />
+                {scanLoading ? "Scanning..." : "Scan Now"}
+              </button>
+            </div>
+            <div ref={streamRef} className="divide-y divide-gray-50 max-h-[520px] overflow-y-auto">
+              {opportunities.length > 0 ? opportunities.map((opp) => {
+                const colors = strategyColors[opp.strategy] || strategyColors.weather_arb;
+                return (
+                  <div key={opp.id} className="px-5 py-3.5 hover:bg-gray-50/50 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${colors.badge}`}>
+                            {strategyLabels[opp.strategy] || opp.strategy}
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                              opp.side === "BUY" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500"
+                            }`}
+                          >
+                            {opp.side}
+                          </span>
+                          <span className="text-[10px] text-gray-400">{opp.timestamp}</span>
+                        </div>
+                        <p className="text-sm text-gray-900 font-medium truncate">{opp.market}</p>
+                        <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{opp.reason}</p>
+                      </div>
+                      <div className="text-right ml-4 flex-shrink-0">
+                        <p className="text-base font-bold text-emerald-600 tabular-nums">
+                          {(opp.edge * 100).toFixed(1)}%
+                        </p>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wider">Edge</p>
+                        <div className="flex items-center gap-1 mt-1 justify-end">
+                          <div className="w-14 h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-violet-400 rounded-full"
+                              style={{ width: `${opp.confidence * 100}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-gray-400 tabular-nums">
+                            {(opp.confidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="py-16 text-center">
+                  <Radio className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                  <p className="text-sm text-gray-500 font-medium">No signals yet</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {botRunning ? "Bot is scanning — signals will appear here" : "Start the bot or run a manual scan"}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ============ ANALYSIS TAB ============ */}
+        {activeTab === "analysis" && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+                <h2 className="text-sm font-semibold text-gray-900">Live Analysis</h2>
+                <span className="text-xs text-gray-400">Strategy rationales, scan results, and trade logic</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchBotOpportunities}
+                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
                 >
-                  {strategy.pnl >= 0 ? "+" : ""}${strategy.pnl.toFixed(2)}
+                  <RotateCw className="w-3 h-3" />
+                  Refresh
+                </button>
+                <button
+                  onClick={() => setAnalysisLog([])}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div ref={analysisRef} className="max-h-[600px] overflow-y-auto divide-y divide-gray-50">
+              {analysisLog.length > 0 ? analysisLog.map((entry) => {
+                const typeStyles: Record<string, { badge: string; label: string }> = {
+                  scan: { badge: "bg-blue-50 text-blue-600", label: "SCAN" },
+                  signal: { badge: "bg-emerald-50 text-emerald-600", label: "SIGNAL" },
+                  execute: { badge: "bg-violet-50 text-violet-600", label: "EXEC" },
+                  skip: { badge: "bg-gray-100 text-gray-500", label: "SKIP" },
+                  info: { badge: "bg-amber-50 text-amber-600", label: "INFO" },
+                };
+                const style = typeStyles[entry.type] || typeStyles.info;
+                const stratColors = entry.strategy ? strategyColors[entry.strategy] : null;
+                return (
+                  <div key={entry.id} className="px-5 py-2.5 hover:bg-gray-50/50 transition-colors">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-[10px] text-gray-400 tabular-nums whitespace-nowrap mt-0.5 w-16 flex-shrink-0">{entry.timestamp}</span>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md whitespace-nowrap ${style.badge}`}>
+                        {style.label}
+                      </span>
+                      {stratColors && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md whitespace-nowrap ${stratColors.badge}`}>
+                          {strategyLabels[entry.strategy!] || entry.strategy}
+                        </span>
+                      )}
+                      <p className="text-xs text-gray-600 leading-relaxed min-w-0">{entry.message}</p>
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="py-16 text-center">
+                  <Eye className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                  <p className="text-sm text-gray-500 font-medium">No analysis entries yet</p>
+                  <p className="text-xs text-gray-400 mt-1">Start scanning or enable the bot to see live rationales</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ============ BROWSE MARKETS TAB ============ */}
+        {activeTab === "markets" && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search markets..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-gray-50 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:bg-white border-0"
+                  />
+                </div>
+                <span className="text-xs font-medium px-2 py-1 rounded-md bg-purple-50 text-purple-600">
+                  {filteredMarkets.length} markets
                 </span>
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="flex items-center gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
-        {(["scanner", "analysis", "markets", "positions", "portfolio", "bot"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === tab
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {tab === "scanner" && "Live Scanner"}
-            {tab === "analysis" && (
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-                Analysis
-              </span>
-            )}
-            {tab === "markets" && "Browse Markets"}
-            {tab === "positions" && `Positions (${livePositions.length || totalPositions})`}
-            {tab === "portfolio" && "Portfolio"}
-            {tab === "bot" && (
-              <span className="flex items-center gap-1.5">
-                {botRunning && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
-                Bot
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
-      {activeTab === "scanner" && (
-        <div className="card overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-              <h2 className="font-semibold text-gray-900">Opportunity Stream</h2>
-              <span className="text-xs text-gray-400">Real-time signals from all active strategies</span>
-            </div>
-            <button
-              onClick={runScan}
-              disabled={scanLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${scanLoading ? "animate-spin" : ""}`} />
-              {scanLoading ? "Scanning..." : "Scan Now"}
-            </button>
-          </div>
-          <div ref={streamRef} className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
-            {opportunities.map((opp) => {
-              const colors = strategyColors[opp.strategy] || strategyColors.weather_arb;
-              return (
-                <div key={opp.id} className="p-5 hover:bg-gray-50/50 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${colors.badge}`}>
-                          {strategyLabels[opp.strategy]}
+            <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
+              {filteredMarkets.map((market) => (
+                <div key={market.id} className="px-5 py-3.5 hover:bg-gray-50/50 transition-colors">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500">
+                          {market.category}
                         </span>
+                        {market.endDate && (
+                          <span className="text-[10px] text-gray-400">
+                            Ends {new Date(market.endDate).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm font-medium text-gray-900">{market.question}</p>
+                    </div>
+                    <div className="text-right ml-4 flex-shrink-0 text-[10px] text-gray-400">
+                      <p>Vol: ${(market.volume / 1000).toFixed(0)}K</p>
+                      {market.liquidity > 0 && <p>Liq: ${(market.liquidity / 1000).toFixed(0)}K</p>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {market.outcomes.map((outcome, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-100"
+                      >
+                        <span className="text-xs text-gray-600">{outcome.label}</span>
                         <span
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                            opp.side === "BUY"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-red-100 text-red-700"
+                          className={`text-xs font-bold tabular-nums ${
+                            outcome.price >= 0.5 ? "text-emerald-600" : "text-gray-900"
                           }`}
                         >
-                          {opp.side}
+                          {(outcome.price * 100).toFixed(0)}c
                         </span>
-                        <span className="text-xs text-gray-400">{opp.timestamp}</span>
-                      </div>
-                      <p className="text-sm font-medium text-gray-900 mb-1">{opp.market}</p>
-                      <p className="text-xs text-gray-500">{opp.reason}</p>
-                    </div>
-                    <div className="text-right ml-4 flex-shrink-0">
-                      <p className="text-lg font-bold text-emerald-600 tabular-nums">
-                        {(opp.edge * 100).toFixed(1)}%
-                      </p>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wider">Edge</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="w-10 h-1 bg-gray-200 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-violet-500 rounded-full"
-                            style={{ width: `${opp.confidence * 100}%` }}
+                            className={`h-full rounded-full ${outcome.price >= 0.5 ? "bg-emerald-400" : "bg-gray-400"}`}
+                            style={{ width: `${outcome.price * 100}%` }}
                           />
                         </div>
-                        <span className="text-[10px] text-gray-400 tabular-nums">
-                          {(opp.confidence * 100).toFixed(0)}%
-                        </span>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {activeTab === "markets" && (
-        <div className="card overflow-hidden">
-          <div className="p-5 border-b border-gray-100">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search markets... (weather, crypto, politics, sports)"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="input-field pl-10"
-                />
-              </div>
-              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-purple-100 text-purple-700">Polymarket</span>
-            </div>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {filteredMarkets.map((market) => (
-              <div key={market.id} className="p-5 hover:bg-gray-50/50 transition-colors">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                        Poly
-                      </span>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                        {market.category}
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        {market.endDate ? `Ends ${new Date(market.endDate).toLocaleDateString()}` : ""}
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-gray-900">{market.question}</p>
-                  </div>
-                  <div className="text-right ml-4 flex-shrink-0">
-                    <p className="text-xs text-gray-400">Vol: ${(market.volume / 1000).toFixed(0)}K</p>
-                    {market.liquidity > 0 && (
-                      <p className="text-xs text-gray-400">Liq: ${(market.liquidity / 1000).toFixed(0)}K</p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {market.outcomes.map((outcome, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100"
-                    >
-                      <span className="text-xs text-gray-600">{outcome.label}</span>
-                      <span
-                        className={`text-sm font-bold tabular-nums ${
-                          outcome.price >= 0.5 ? "text-emerald-600" : "text-gray-900"
-                        }`}
-                      >
-                        {(outcome.price * 100).toFixed(0)}c
-                      </span>
-                      {/* Probability bar */}
-                      <div className="w-12 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            outcome.price >= 0.5 ? "bg-emerald-500" : "bg-gray-400"
-                          }`}
-                          style={{ width: `${outcome.price * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeTab === "positions" && (
-        <div className="card overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900">Open Positions</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">
-                Unrealized P&L:
-              </span>
-              <span className="text-sm font-bold text-emerald-600 tabular-nums">
-                {livePositions.length > 0 ? `+$${livePositions.reduce((s, p) => s + p.pnl, 0).toFixed(2)}` : "$0.00"}
-              </span>
-            </div>
-          </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Market</th>
-                <th>Strategy</th>
-                <th>Side</th>
-                <th>Entry</th>
-                <th>Current</th>
-                <th>Size</th>
-                <th>P&L</th>
-                <th>Opened</th>
-              </tr>
-            </thead>
-            <tbody>
-              {livePositions.map((pos) => {
-                const colors = strategyColors[pos.strategy] || strategyColors.weather_arb;
-                return (
-                  <tr key={pos.id}>
-                    <td>
-                      <p className="text-sm font-medium text-gray-900">{pos.market}</p>
-                      <p className="text-xs text-gray-400">{pos.outcome}</p>
-                    </td>
-                    <td>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${colors.badge}`}>
-                        {strategyLabels[pos.strategy]}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`text-xs font-semibold ${
-                          pos.side === "BUY" ? "text-emerald-600" : "text-red-500"
-                        }`}
-                      >
-                        {pos.side}
-                      </span>
-                    </td>
-                    <td className="tabular-nums text-sm">${pos.entryPrice.toFixed(2)}</td>
-                    <td className="tabular-nums text-sm">${pos.currentPrice.toFixed(2)}</td>
-                    <td className="tabular-nums text-sm">${pos.size.toFixed(2)}</td>
-                    <td>
-                      <span
-                        className={`text-sm font-semibold tabular-nums ${
-                          pos.pnl >= 0 ? "text-emerald-600" : "text-red-500"
-                        }`}
-                      >
-                        {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}
-                      </span>
-                    </td>
-                    <td className="text-xs text-gray-400">{pos.openedAt}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Portfolio / Equity Curve Tab */}
-      {activeTab === "portfolio" && (
-        <div className="space-y-6">
-          {/* Portfolio Summary Cards */}
-          <div className="grid grid-cols-4 gap-4">
-            <div className="card p-5">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Value</span>
-              <p className="text-2xl font-bold tabular-nums text-gray-900 mt-1">
-                ${portfolioSummary?.total_exposure?.toFixed(2) || "0.00"}
-              </p>
-            </div>
-            <div className="card p-5">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total P&L</span>
-              <p className={`text-2xl font-bold tabular-nums mt-1 ${(portfolioSummary?.total_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                {(portfolioSummary?.total_pnl || 0) >= 0 ? "+" : ""}${(portfolioSummary?.total_pnl || 0).toFixed(2)}
-              </p>
-            </div>
-            <div className="card p-5">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Fees</span>
-              <p className="text-2xl font-bold tabular-nums text-gray-900 mt-1">
-                ${portfolioSummary?.total_fees?.toFixed(2) || "0.00"}
-              </p>
-            </div>
-            <div className="card p-5">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Orders</span>
-              <p className="text-2xl font-bold tabular-nums text-gray-900 mt-1">
-                {portfolioSummary?.total_orders || 0}
-              </p>
-            </div>
-          </div>
-
-          {/* Equity Curve */}
-          <div className="card p-5">
-            <h2 className="font-semibold text-gray-900 mb-4">Equity Curve</h2>
-            {equityCurve.length > 0 ? (
-              <div className="h-64 flex items-end gap-px">
-                {equityCurve.map((s: any, i: number) => {
-                  const maxVal = Math.max(...equityCurve.map((x: any) => x.total_value_usd || 100));
-                  const minVal = Math.min(...equityCurve.map((x: any) => x.total_value_usd || 100));
-                  const range = maxVal - minVal || 1;
-                  const height = ((s.total_value_usd - minVal) / range) * 100;
-                  const isPositive = (s.unrealized_pnl + s.realized_pnl) >= 0;
-                  return (
-                    <div
-                      key={i}
-                      className={`flex-1 rounded-t ${isPositive ? "bg-emerald-400" : "bg-red-400"}`}
-                      style={{ height: `${Math.max(height, 2)}%` }}
-                      title={`$${s.total_value_usd?.toFixed(2)} | ${new Date(s.snapshot_at).toLocaleString()}`}
-                    />
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
-                No snapshots yet. Start the bot to build an equity curve.
-              </div>
-            )}
-          </div>
-
-          {/* Polymarket Exposure */}
-          {equityCurve.length > 0 && (
-            <div className="card p-5">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Polymarket Exposure</span>
-              <p className="text-xl font-bold tabular-nums text-purple-600 mt-1">
-                ${equityCurve[equityCurve.length - 1]?.polymarket_value?.toFixed(2) || "0.00"}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Analysis Stream Tab */}
-      {activeTab === "analysis" && (
-        <div className="card overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-              <h2 className="font-semibold text-gray-900">Live Analysis</h2>
-              <span className="text-xs text-gray-400">Strategy rationales, scan results, and trade logic</span>
-            </div>
-            <button
-              onClick={() => setAnalysisLog([])}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              Clear
-            </button>
-          </div>
-          <div ref={analysisRef} className="max-h-[700px] overflow-y-auto divide-y divide-gray-50">
-            {analysisLog.length > 0 ? analysisLog.map((entry) => {
-              const typeStyles: Record<string, { badge: string; label: string }> = {
-                scan: { badge: "bg-blue-100 text-blue-700", label: "SCAN" },
-                signal: { badge: "bg-emerald-100 text-emerald-700", label: "SIGNAL" },
-                execute: { badge: "bg-violet-100 text-violet-700", label: "EXEC" },
-                skip: { badge: "bg-gray-100 text-gray-600", label: "SKIP" },
-                info: { badge: "bg-amber-100 text-amber-700", label: "INFO" },
-              };
-              const style = typeStyles[entry.type] || typeStyles.info;
-              const stratColors = entry.strategy ? strategyColors[entry.strategy] : null;
-              return (
-                <div key={entry.id} className="px-5 py-3 hover:bg-gray-50/50 transition-colors">
-                  <div className="flex items-start gap-3">
-                    <span className="text-[10px] text-gray-400 tabular-nums whitespace-nowrap mt-0.5">{entry.timestamp}</span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${style.badge}`}>
-                      {style.label}
-                    </span>
-                    {stratColors && (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${stratColors.badge}`}>
-                        {strategyLabels[entry.strategy!]}
-                      </span>
-                    )}
-                    <p className="text-sm text-gray-700 leading-relaxed">{entry.message}</p>
-                  </div>
-                </div>
-              );
-            }) : (
-              <div className="p-12 text-center">
-                <p className="text-gray-400 text-sm mb-2">No analysis entries yet.</p>
-                <p className="text-gray-400 text-xs">Start scanning or enable the bot to see live rationales here.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Bot Control Tab */}
-      {activeTab === "bot" && (
-        <div className="space-y-6">
-          {/* Bot Control Panel */}
-          <div className="card p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Trading Bot</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Automated scan → Kelly size → execute → persist loop
-                </p>
-              </div>
-              <button
-                onClick={toggleBot}
-                className={`px-6 py-3 rounded-xl font-semibold text-sm transition-all ${
-                  botRunning
-                    ? "bg-red-100 text-red-700 hover:bg-red-200"
-                    : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                }`}
-              >
-                {botRunning ? "Stop Bot" : "Start Bot"}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Status</span>
-                <div className="flex items-center gap-2 mt-2">
-                  <div className={`w-3 h-3 rounded-full ${botRunning ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
-                  <span className="text-sm font-semibold text-gray-900">
-                    {botRunning ? "Running" : "Stopped"}
-                  </span>
-                </div>
-              </div>
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Scans</span>
-                <p className="text-xl font-bold tabular-nums text-gray-900 mt-2">
-                  {botStatus?.total_scans || 0}
-                </p>
-              </div>
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Executions</span>
-                <p className="text-xl font-bold tabular-nums text-gray-900 mt-2">
-                  {botStatus?.total_executions || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Risk Manager Status */}
-          <div className="card p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Risk Manager</h2>
-            <div className="grid grid-cols-4 gap-4">
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase">Daily P&L</span>
-                <p className={`text-lg font-bold tabular-nums mt-1 ${
-                  (botStatus?.risk_manager?.daily_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"
-                }`}>
-                  ${(botStatus?.risk_manager?.daily_pnl || 0).toFixed(2)}
-                </p>
-              </div>
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase">Circuit Breaker</span>
-                <p className="text-sm font-semibold mt-2">
-                  {botStatus?.risk_manager?.circuit_breaker_active ? (
-                    <span className="text-red-600">ACTIVE</span>
-                  ) : (
-                    <span className="text-emerald-600">OK</span>
-                  )}
-                </p>
-              </div>
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase">Orders/min</span>
-                <p className="text-lg font-bold tabular-nums text-gray-900 mt-1">
-                  {botStatus?.risk_manager?.orders_last_minute || 0}
-                  <span className="text-sm font-normal text-gray-400">
-                    /{botStatus?.risk_manager?.max_orders_per_minute || 10}
-                  </span>
-                </p>
-              </div>
-              <div className="p-4 rounded-xl bg-gray-50">
-                <span className="text-xs font-medium text-gray-500 uppercase">Max Positions</span>
-                <p className="text-lg font-bold tabular-nums text-gray-900 mt-1">
-                  {botStatus?.portfolio?.total_positions || 0}
-                  <span className="text-sm font-normal text-gray-400">
-                    /{botStatus?.risk_manager?.max_total_positions || 50}
-                  </span>
-                </p>
-              </div>
-            </div>
-
-            {/* Disabled strategies */}
-            {botStatus?.risk_manager?.disabled_strategies?.length > 0 && (
-              <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200">
-                <span className="text-xs font-semibold text-red-700 uppercase">Disabled Strategies</span>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {botStatus.risk_manager.disabled_strategies.map((s: string) => (
-                    <span key={s} className="text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-700">
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Kelly Config */}
-          <div className="card p-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Kelly Sizing</h2>
-            <div className="grid grid-cols-5 gap-4">
-              {[
-                { label: "Fractional Kelly", value: botStatus?.kelly_config?.fractional_kelly || 0.25 },
-                { label: "Min Bet", value: `$${botStatus?.kelly_config?.min_bet_usd || 1}` },
-                { label: "Max Bet", value: `$${botStatus?.kelly_config?.max_bet_usd || 50}` },
-                { label: "Min Edge", value: `${((botStatus?.kelly_config?.min_edge || 0.03) * 100).toFixed(0)}%` },
-                { label: "Min Confidence", value: `${((botStatus?.kelly_config?.min_confidence || 0.6) * 100).toFixed(0)}%` },
-              ].map((item) => (
-                <div key={item.label} className="p-3 rounded-xl bg-gray-50 text-center">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">{item.label}</span>
-                  <p className="text-sm font-bold tabular-nums text-gray-900 mt-1">{item.value}</p>
                 </div>
               ))}
             </div>
           </div>
+        )}
 
-          {/* Manual Scan Button */}
-          <button
-            onClick={async () => {
-              try {
-                const res = await fetch("/api/prediction-markets/bot/scan-now", { method: "POST" });
-                if (res.ok) {
-                  const data = await res.json();
-                  alert(`Scan complete: ${data.opportunities || 0} opportunities → ${data.executed || 0} executed`);
-                  fetchBotStatus();
-                  fetchPositions();
-                }
-              } catch {}
-            }}
-            className="w-full py-3 rounded-xl bg-violet-100 text-violet-700 font-semibold text-sm hover:bg-violet-200 transition-colors"
-          >
-            Run Manual Scan + Execute
-          </button>
+        {/* ============ POSITIONS TAB ============ */}
+        {activeTab === "positions" && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-900">Open Positions</h2>
+                <span className="text-xs text-gray-400">{positionCount} positions</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500">Unrealized P&L:</span>
+                <span className={`text-sm font-bold tabular-nums ${
+                  livePositions.reduce((s, p) => s + p.pnl, 0) >= 0 ? "text-emerald-600" : "text-red-500"
+                }`}>
+                  {livePositions.length > 0
+                    ? `${livePositions.reduce((s, p) => s + p.pnl, 0) >= 0 ? "+" : ""}$${livePositions.reduce((s, p) => s + p.pnl, 0).toFixed(2)}`
+                    : "$0.00"}
+                </span>
+              </div>
+            </div>
+            {livePositions.length > 0 ? (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Market</th>
+                    <th>Strategy</th>
+                    <th>Side</th>
+                    <th>Entry</th>
+                    <th>Current</th>
+                    <th>Size</th>
+                    <th>P&L</th>
+                    <th>Opened</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {livePositions.map((pos) => {
+                    const colors = strategyColors[pos.strategy] || strategyColors.weather_arb;
+                    return (
+                      <tr key={pos.id}>
+                        <td>
+                          <p className="text-sm font-medium text-gray-900 truncate max-w-xs">{pos.market}</p>
+                          <p className="text-[10px] text-gray-400">{pos.outcome}</p>
+                        </td>
+                        <td>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${colors.badge}`}>
+                            {strategyLabels[pos.strategy] || pos.strategy}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`text-xs font-semibold ${pos.side === "BUY" ? "text-emerald-600" : "text-red-500"}`}>
+                            {pos.side}
+                          </span>
+                        </td>
+                        <td className="tabular-nums text-sm">${pos.entryPrice.toFixed(2)}</td>
+                        <td className="tabular-nums text-sm">${pos.currentPrice.toFixed(2)}</td>
+                        <td className="tabular-nums text-sm">${pos.size.toFixed(2)}</td>
+                        <td>
+                          <span className={`text-sm font-semibold tabular-nums ${pos.pnl >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                            {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="text-xs text-gray-400">{pos.openedAt}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="py-16 text-center">
+                <Layers className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+                <p className="text-sm text-gray-500 font-medium">No open positions</p>
+                <p className="text-xs text-gray-400 mt-1">Positions will appear here when the bot executes trades</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============ PORTFOLIO TAB ============ */}
+        {activeTab === "portfolio" && (
+          <div className="space-y-4">
+            {/* Portfolio Summary */}
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: "Total Value", value: `$${portfolioSummary?.total_exposure?.toFixed(2) || "0.00"}`, color: "text-gray-900" },
+                { label: "Total P&L", value: `${(portfolioSummary?.total_pnl || 0) >= 0 ? "+" : ""}$${(portfolioSummary?.total_pnl || 0).toFixed(2)}`, color: (portfolioSummary?.total_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500" },
+                { label: "Total Fees", value: `$${portfolioSummary?.total_fees?.toFixed(2) || "0.00"}`, color: "text-gray-900" },
+                { label: "Orders", value: String(portfolioSummary?.total_orders || 0), color: "text-gray-900" },
+              ].map((item) => (
+                <div key={item.label} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+                  <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">{item.label}</span>
+                  <p className={`text-xl font-semibold tabular-nums mt-1 ${item.color}`}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Equity Curve */}
+            <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-900 mb-4">Equity Curve</h2>
+              {equityCurve.length > 0 ? (
+                <div className="h-48 flex items-end gap-px">
+                  {equityCurve.map((s: any, i: number) => {
+                    const maxVal = Math.max(...equityCurve.map((x: any) => x.total_value_usd || 100));
+                    const minVal = Math.min(...equityCurve.map((x: any) => x.total_value_usd || 100));
+                    const range = maxVal - minVal || 1;
+                    const height = ((s.total_value_usd - minVal) / range) * 100;
+                    const isPositive = (s.unrealized_pnl + s.realized_pnl) >= 0;
+                    return (
+                      <div
+                        key={i}
+                        className={`flex-1 rounded-t transition-all ${isPositive ? "bg-emerald-400/80" : "bg-red-400/80"} hover:opacity-80`}
+                        style={{ height: `${Math.max(height, 2)}%` }}
+                        title={`$${s.total_value_usd?.toFixed(2)} | ${new Date(s.snapshot_at).toLocaleString()}`}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="h-48 flex items-center justify-center">
+                  <div className="text-center">
+                    <BarChart3 className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400">No snapshots yet. Start the bot to build an equity curve.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Polymarket Exposure */}
+            {equityCurve.length > 0 && (
+              <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+                <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Polymarket Exposure</span>
+                <p className="text-lg font-semibold tabular-nums text-purple-600 mt-1">
+                  ${equityCurve[equityCurve.length - 1]?.polymarket_value?.toFixed(2) || "0.00"}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============ BOT TAB ============ */}
+        {activeTab === "bot" && (
+          <div className="space-y-4">
+            {/* Bot Control */}
+            <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">Trading Bot</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Automated scan → Kelly size → execute → persist</p>
+                </div>
+                <button
+                  onClick={toggleBot}
+                  className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all ${
+                    botRunning
+                      ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200/60"
+                      : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60"
+                  }`}
+                >
+                  {botRunning ? "Stop Bot" : "Start Bot"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Status</span>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <div className={`w-2.5 h-2.5 rounded-full ${botRunning ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
+                    <span className="text-sm font-semibold text-gray-900">{botRunning ? "Running" : "Stopped"}</span>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Scans</span>
+                  <p className="text-lg font-bold tabular-nums text-gray-900 mt-1.5">{botStatus?.total_scans || 0}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Executions</span>
+                  <p className="text-lg font-bold tabular-nums text-gray-900 mt-1.5">{botStatus?.total_executions || 0}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Risk Manager */}
+            <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-900 mb-3">Risk Manager</h2>
+              <div className="grid grid-cols-4 gap-3">
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase">Daily P&L</span>
+                  <p className={`text-base font-bold tabular-nums mt-1 ${(botStatus?.risk_manager?.daily_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                    ${(botStatus?.risk_manager?.daily_pnl || 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase">Circuit Breaker</span>
+                  <p className="text-sm font-semibold mt-1.5">
+                    {botStatus?.risk_manager?.circuit_breaker_active ? (
+                      <span className="text-red-600">ACTIVE</span>
+                    ) : (
+                      <span className="text-emerald-600">OK</span>
+                    )}
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase">Orders/min</span>
+                  <p className="text-base font-bold tabular-nums text-gray-900 mt-1">
+                    {botStatus?.risk_manager?.orders_last_minute || 0}
+                    <span className="text-xs font-normal text-gray-400">/{botStatus?.risk_manager?.max_orders_per_minute || 10}</span>
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-gray-50">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase">Positions</span>
+                  <p className="text-base font-bold tabular-nums text-gray-900 mt-1">
+                    {botStatus?.portfolio?.total_positions || positionCount}
+                    <span className="text-xs font-normal text-gray-400">/{botStatus?.risk_manager?.max_total_positions || 50}</span>
+                  </p>
+                </div>
+              </div>
+
+              {botStatus?.risk_manager?.disabled_strategies?.length > 0 && (
+                <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-100">
+                  <span className="text-[10px] font-semibold text-red-600 uppercase">Disabled Strategies</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {botStatus.risk_manager.disabled_strategies.map((s: string) => (
+                      <span key={s} className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-red-100 text-red-600">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Kelly Config */}
+            <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-900 mb-3">Kelly Sizing</h2>
+              <div className="grid grid-cols-5 gap-2">
+                {[
+                  { label: "Fractional Kelly", value: botStatus?.kelly_config?.fractional_kelly || 0.25 },
+                  { label: "Min Bet", value: `$${botStatus?.kelly_config?.min_bet_usd || 1}` },
+                  { label: "Max Bet", value: `$${botStatus?.kelly_config?.max_bet_usd || 50}` },
+                  { label: "Min Edge", value: `${((botStatus?.kelly_config?.min_edge || 0.03) * 100).toFixed(0)}%` },
+                  { label: "Min Confidence", value: `${((botStatus?.kelly_config?.min_confidence || 0.6) * 100).toFixed(0)}%` },
+                ].map((item) => (
+                  <div key={item.label} className="p-2.5 rounded-lg bg-gray-50 text-center">
+                    <span className="text-[10px] font-medium text-gray-500 uppercase">{item.label}</span>
+                    <p className="text-sm font-bold tabular-nums text-gray-900 mt-1">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Manual Scan Button */}
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/prediction-markets/bot/scan-now", { method: "POST" });
+                  if (res.ok) {
+                    const data = await res.json();
+                    addLog("scan", `Manual scan: ${data.opportunities || 0} opportunities → ${data.executed || 0} executed`);
+                    fetchBotStatus();
+                    fetchPositions();
+                    fetchStrategies();
+                  }
+                } catch {}
+              }}
+              className="w-full py-2.5 rounded-xl bg-violet-50 text-violet-600 font-semibold text-sm hover:bg-violet-100 border border-violet-200/60 transition-colors"
+            >
+              Run Manual Scan + Execute
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ============ FOOTER ============ */}
+      <div className="max-w-[1440px] mx-auto px-6 py-4">
+        <div className="flex items-center gap-2 text-[11px] text-gray-400">
+          <Shield className="w-3 h-3" />
+          <span>
+            Paper trading mode (dry_run=true). {isLive ? "Connected to Polymarket API." : "API offline — start backend: uvicorn backend.app.api.main:app --port 8000"}
+          </span>
         </div>
-      )}
-
-      {/* Footer note */}
-      <div className="mt-6 flex items-center gap-2 text-xs text-gray-400">
-        <Shield className="w-3.5 h-3.5" />
-        <span>
-          Paper trading mode (dry_run=true). {isLive ? "Connected to Polymarket API." : "API offline — showing demo data. Start backend: uvicorn backend.app.api.main:app --port 8000"}
-        </span>
       </div>
     </div>
   );
