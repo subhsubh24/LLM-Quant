@@ -153,7 +153,11 @@ class PolymarketClient:
             return resp.json()
         except requests.RequestException as e:
             status = getattr(getattr(e, 'response', None), 'status_code', None)
-            logger.error(f"Polymarket API error: {e} (status={status}, url={url})")
+            # 404s are expected for old/delisted token IDs — log at debug, not error
+            if status == 404:
+                logger.debug(f"Polymarket API 404: {url}")
+            else:
+                logger.error(f"Polymarket API error: {e} (status={status}, url={url})")
             return None
 
     # ================================================================
