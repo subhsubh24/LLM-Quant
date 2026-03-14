@@ -18,13 +18,13 @@ export default function RootLayout({
       <body className="min-h-screen bg-background font-sans antialiased">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >
-          <div className="min-h-screen">
+          <div className="min-h-screen flex">
             <TabNav />
-            <main className="min-h-screen overflow-auto bg-gray-50">
+            <main className="flex-1 ml-[var(--sidebar-width)] min-h-screen overflow-auto">
               {children}
             </main>
           </div>
