@@ -69,9 +69,9 @@ body {
   background: hsl(0 0% 0% / 0.25);
 }
 
-/* Smooth transitions */
-* {
-  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+/* Smooth transitions — only on interactive elements, not globally */
+button, a, input, select, [role="button"] {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
   transition-duration: 150ms;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -204,7 +204,7 @@ body {
 }
 
 .data-table td {
-  @apply py-4 px-4 border-b border-gray-50;
+  @apply py-3 px-4 border-b border-gray-50;
 }
 
 .data-table tr:hover {
