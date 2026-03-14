@@ -1300,7 +1300,7 @@ class HorizonBucket:
             # Conservative defaults until enough data accumulates
             self.mean_return = 0.0
             self.std_return = 0.10  # Assume 10% std
-            self.threshold = 0.20   # Conservative 20% threshold
+            self.threshold = 0.05   # Conservative 5% threshold until data
             return
 
         self.mean_return = sum(self.returns) / self.sample_count
@@ -1359,7 +1359,7 @@ class AdaptiveBuySignalThreshold(BaseStrategy):
         config: StrategyConfig,
         min_observations: int = 10,   # Min data points before trusting stats
         sigma_multiplier: float = 2.0,  # Number of std devs above mean
-        default_threshold: float = 0.20,  # Default until enough data
+        default_threshold: float = 0.05,  # Default until enough data
         buckets: Optional[List[HorizonBucket]] = None,
     ):
         super().__init__(client, config)
@@ -1521,6 +1521,11 @@ class AdaptiveBuySignalThreshold(BaseStrategy):
             threshold = self.get_threshold(hours_left)
 
             if candidate.edge >= threshold:
+                logger.info(
+                    f"[adaptive_threshold] PASS {candidate.strategy}: "
+                    f"edge={candidate.edge:.1%} >= threshold={threshold:.1%} | "
+                    f"{candidate.market.question[:50]}"
+                )
                 # Rewrite strategy name to show it passed adaptive filtering
                 results.append(ScanResult(
                     market=candidate.market,
@@ -1540,6 +1545,11 @@ class AdaptiveBuySignalThreshold(BaseStrategy):
                 ))
                 passed += 1
             else:
+                logger.debug(
+                    f"[adaptive_threshold] SKIP {candidate.strategy}: "
+                    f"edge={candidate.edge:.1%} < threshold={threshold:.1%} | "
+                    f"{candidate.market.question[:50]}"
+                )
                 filtered += 1
 
         logger.info(

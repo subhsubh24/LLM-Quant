@@ -823,20 +823,18 @@ def _build_default_scanner() -> PredictionMarketScanner:
     config = StrategyConfig(dry_run=True)
     scanner = PredictionMarketScanner(client)
 
-    # Register all strategies
-    scanner.add_strategy(NearCertaintyStrategy(client, config))
+    # Register standalone strategies (not wrapped by adaptive)
     scanner.add_strategy(SameMarketArbitrageStrategy(client, config))
-    scanner.add_strategy(CrossMarketArbitrageStrategy(client, config))
     scanner.add_strategy(MarketMakingStrategy(client, config))
     scanner.add_strategy(FlashCrashStrategy(client, config))
     scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
 
-    # Advanced strategies
-    scanner.add_strategy(NOPositionScanner(client, config))
+    # Advanced standalone strategies
     scanner.add_strategy(LogicalImplicationDetector(client, config))
     scanner.add_strategy(WalletBehaviorDivergence(client, config))
 
-    # Adaptive threshold wraps the other strategies for per-horizon filtering
+    # Adaptive threshold wraps edge-based strategies for per-horizon filtering.
+    # These are NOT registered directly to avoid duplicate signals.
     adaptive = AdaptiveBuySignalThreshold(client, config)
     adaptive.add_inner_strategy(NearCertaintyStrategy(client, config))
     adaptive.add_inner_strategy(CrossMarketArbitrageStrategy(client, config))
