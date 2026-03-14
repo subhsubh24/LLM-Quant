@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Target } from "lucide-react";
+import { BarChart3, Target, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/predictions", label: "Predictions", icon: Target },
+  { href: "/bot", label: "Quant Bot", icon: Sparkles },
 ];
 
 export function TabNav() {
