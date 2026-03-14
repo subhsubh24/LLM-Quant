@@ -91,6 +91,8 @@ class RiskManager:
 
         # Category exposure tracking
         self._category_exposure: Dict[str, float] = defaultdict(float)
+        # Map market_id -> category so _get_category_exposure can filter positions
+        self._market_categories: Dict[str, str] = {}
 
     def check_opportunity(
         self,
@@ -153,6 +155,8 @@ class RiskManager:
 
         # 6. Category exposure limit
         category = opportunity.market.category or "General"
+        # Record this market's category so _get_category_exposure can filter accurately
+        self._market_categories[opportunity.market.id] = category
         cat_exposure = self._get_category_exposure(category, executor)
         estimated_add = opportunity.entry_price * 10  # Rough estimate
         if cat_exposure + estimated_add > self.config.max_category_exposure_usd:
@@ -268,8 +272,7 @@ class RiskManager:
         """Calculate total exposure for a category."""
         return sum(
             p.market_value for p in executor.positions.values()
-            # We'd need category stored on positions for perfect tracking;
-            # for now approximate from market_question content
+            if (self._market_categories.get(p.market_id, "General") == category)
         )
 
     def _calculate_risk_score(
