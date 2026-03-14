@@ -13,14 +13,11 @@ import {
   Activity,
   BarChart3,
   Globe,
-  Pause,
-  Play,
   ArrowLeftRight,
   Users,
   Radio,
   Eye,
   Layers,
-  Wallet,
   Bot,
   RotateCw,
   TrendingUp,
@@ -94,7 +91,7 @@ export default function PredictionsPage() {
   const [markets, setMarkets] = useState<PredictionMarket[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [livePositions, setLivePositions] = useState<Position[]>([]);
-  const [activeTab, setActiveTab] = useState<"scanner" | "analysis" | "markets" | "positions" | "portfolio" | "bot">("scanner");
+  const [activeTab, setActiveTab] = useState<"scanner" | "analysis" | "markets" | "positions" | "portfolio">("scanner");
   const [scanning, setScanning] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
   const [scanCount, setScanCount] = useState(0);
@@ -323,7 +320,6 @@ export default function PredictionsPage() {
 
   useEffect(() => {
     if (activeTab === "portfolio") { fetchPositions(); fetchEquityCurve(); }
-    else if (activeTab === "bot") fetchBotStatus();
     else if (activeTab === "positions") { fetchPositions(); fetchStrategies(); }
     else if (activeTab === "analysis" || activeTab === "scanner") fetchBotOpportunities();
   }, [activeTab]);
@@ -516,12 +512,11 @@ export default function PredictionsPage() {
         {/* ============ TABS ============ */}
         <div className="flex items-center gap-0.5 mb-5 border-b border-gray-200">
           {([
-            { key: "scanner" as const, label: "Scanner" },
+            { key: "scanner" as const, label: "Scanner", dot: botRunning },
             { key: "analysis" as const, label: "Analysis", dot: analysisLog.length > 0 },
             { key: "markets" as const, label: "Markets" },
             { key: "positions" as const, label: positionCount > 0 ? `Positions (${positionCount})` : "Positions" },
             { key: "portfolio" as const, label: "Portfolio" },
-            { key: "bot" as const, label: "Bot", dot: botRunning },
           ]).map((tab) => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`px-4 py-2.5 text-[13px] font-medium border-b-2 -mb-px ${
@@ -536,68 +531,102 @@ export default function PredictionsPage() {
 
         {/* ============ SCANNER ============ */}
         {activeTab === "scanner" && (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-                <span className="text-[13px] font-semibold text-gray-900">Opportunity Stream</span>
-                {opportunities.length > 0 && (
-                  <span className="text-[11px] text-gray-400 tabular-nums">{opportunities.length} signals</span>
-                )}
-              </div>
-              <button onClick={runScan} disabled={scanLoading}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-violet-600 hover:bg-violet-50 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3 h-3 ${scanLoading ? "animate-spin" : ""}`} />
-                Scan Now
-              </button>
-            </div>
-            <div ref={streamRef} className="divide-y divide-gray-50 max-h-[520px] overflow-y-auto">
-              {opportunities.length > 0 ? opportunities.map((opp) => {
-                const c = strategyColors[opp.strategy] || strategyColors.weather_arb;
-                return (
-                  <div key={opp.id} className="px-5 py-3 hover:bg-gray-50/50">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${c.badge}`}>
-                            {strategyLabels[opp.strategy] || opp.strategy}
+          <div className="space-y-4">
+            {/* Bot status strip — only when running */}
+            {botRunning && botStatus && (
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="flex items-center gap-6 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[11px] font-semibold text-gray-900">Bot Running</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-[11px] tabular-nums">
+                    <span className="text-gray-500">Scans <span className="font-semibold text-gray-900">{botStatus.total_scans || 0}</span></span>
+                    <span className="text-gray-500">Executions <span className="font-semibold text-gray-900">{botStatus.total_executions || 0}</span></span>
+                    <span className="text-gray-500">Positions <span className="font-semibold text-gray-900">{botStatus.portfolio?.total_positions || positionCount}</span></span>
+                    {botStatus.risk_manager && (
+                      <>
+                        <span className="text-gray-500">Daily P&L{" "}
+                          <span className={`font-semibold ${(botStatus.risk_manager.daily_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                            ${(botStatus.risk_manager.daily_pnl || 0).toFixed(2)}
                           </span>
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                            opp.side === "BUY" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500"
-                          }`}>{opp.side}</span>
-                          <span className="text-[10px] text-gray-400 tabular-nums">{opp.timestamp}</span>
-                        </div>
-                        <p className="text-[13px] text-gray-900 font-medium truncate">{opp.market}</p>
-                        <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{opp.reason}</p>
-                      </div>
-                      <div className="text-right flex-shrink-0 w-20">
-                        <p className="text-lg font-bold text-emerald-600 tabular-nums leading-tight">
-                          {(opp.edge * 100).toFixed(1)}%
-                        </p>
-                        <div className="flex items-center gap-1 mt-1 justify-end">
-                          <div className="w-12 h-1 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-violet-400 rounded-full" style={{ width: `${opp.confidence * 100}%` }} />
+                        </span>
+                        <span className="text-gray-500">Circuit{" "}
+                          <span className={`font-semibold ${botStatus.risk_manager.circuit_breaker_active ? "text-red-600" : "text-emerald-600"}`}>
+                            {botStatus.risk_manager.circuit_breaker_active ? "TRIPPED" : "OK"}
+                          </span>
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Opportunity stream */}
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+                  <span className="text-[13px] font-semibold text-gray-900">Opportunity Stream</span>
+                  {opportunities.length > 0 && (
+                    <span className="text-[11px] text-gray-400 tabular-nums">{opportunities.length} signals</span>
+                  )}
+                </div>
+                <button onClick={runScan} disabled={scanLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${scanLoading ? "animate-spin" : ""}`} />
+                  {scanLoading ? "Scanning..." : "Scan + Execute"}
+                </button>
+              </div>
+              <div ref={streamRef} className="divide-y divide-gray-50 max-h-[520px] overflow-y-auto">
+                {opportunities.length > 0 ? opportunities.map((opp) => {
+                  const c = strategyColors[opp.strategy] || strategyColors.weather_arb;
+                  return (
+                    <div key={opp.id} className="px-5 py-3 hover:bg-gray-50/50">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${c.badge}`}>
+                              {strategyLabels[opp.strategy] || opp.strategy}
+                            </span>
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                              opp.side === "BUY" ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500"
+                            }`}>{opp.side}</span>
+                            <span className="text-[10px] text-gray-400 tabular-nums">{opp.timestamp}</span>
                           </div>
-                          <span className="text-[10px] text-gray-400 tabular-nums">{(opp.confidence * 100).toFixed(0)}%</span>
+                          <p className="text-[13px] text-gray-900 font-medium truncate">{opp.market}</p>
+                          <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">{opp.reason}</p>
+                        </div>
+                        <div className="text-right flex-shrink-0 w-20">
+                          <p className="text-lg font-bold text-emerald-600 tabular-nums leading-tight">
+                            {(opp.edge * 100).toFixed(1)}%
+                          </p>
+                          <div className="flex items-center gap-1 mt-1 justify-end">
+                            <div className="w-12 h-1 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-violet-400 rounded-full" style={{ width: `${opp.confidence * 100}%` }} />
+                            </div>
+                            <span className="text-[10px] text-gray-400 tabular-nums">{(opp.confidence * 100).toFixed(0)}%</span>
+                          </div>
                         </div>
                       </div>
                     </div>
+                  );
+                }) : (
+                  <div className="py-20 text-center">
+                    <Radio className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                    <p className="text-[13px] text-gray-500 font-medium">No signals yet</p>
+                    <p className="text-[11px] text-gray-400 mt-1 mb-4">Run a scan to find and execute opportunities across Polymarket</p>
+                    <button onClick={runScan} disabled={scanLoading}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${scanLoading ? "animate-spin" : ""}`} />
+                      {scanLoading ? "Scanning..." : "Scan + Execute"}
+                    </button>
                   </div>
-                );
-              }) : (
-                <div className="py-20 text-center">
-                  <Radio className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-                  <p className="text-[13px] text-gray-500 font-medium">No signals yet</p>
-                  <p className="text-[11px] text-gray-400 mt-1 mb-4">Run a scan to find opportunities across Polymarket</p>
-                  <button onClick={runScan} disabled={scanLoading}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${scanLoading ? "animate-spin" : ""}`} />
-                    {scanLoading ? "Scanning..." : "Run First Scan"}
-                  </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -792,105 +821,6 @@ export default function PredictionsPage() {
           </div>
         )}
 
-        {/* ============ BOT ============ */}
-        {activeTab === "bot" && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl p-5 border border-gray-100">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-[13px] font-semibold text-gray-900">Trading Bot</h2>
-                  <p className="text-[11px] text-gray-500 mt-0.5">Scan → Kelly size → execute → persist loop</p>
-                </div>
-                <button onClick={toggleBot}
-                  className={`px-4 py-2 rounded-lg text-[12px] font-semibold border ${
-                    botRunning ? "bg-red-50 text-red-600 border-red-200 hover:bg-red-100" : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                  }`}
-                >{botRunning ? "Stop Bot" : "Start Bot"}</button>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Status</span>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className={`w-2 h-2 rounded-full ${botRunning ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
-                    <span className="text-[13px] font-semibold text-gray-900">{botRunning ? "Running" : "Stopped"}</span>
-                  </div>
-                </div>
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Scans</span>
-                  <p className="text-lg font-bold tabular-nums text-gray-900 mt-1">{botStatus?.total_scans || 0}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Executions</span>
-                  <p className="text-lg font-bold tabular-nums text-gray-900 mt-1">{botStatus?.total_executions || 0}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-5 border border-gray-100">
-              <h2 className="text-[13px] font-semibold text-gray-900 mb-3">Risk Manager</h2>
-              <div className="grid grid-cols-4 gap-3">
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Daily P&L</span>
-                  <p className={`text-[15px] font-bold tabular-nums mt-1 ${(botStatus?.risk_manager?.daily_pnl || 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                    ${(botStatus?.risk_manager?.daily_pnl || 0).toFixed(2)}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Circuit Breaker</span>
-                  <p className="text-[13px] font-semibold mt-1.5">
-                    {botStatus?.risk_manager?.circuit_breaker_active ? <span className="text-red-600">ACTIVE</span> : <span className="text-emerald-600">OK</span>}
-                  </p>
-                </div>
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Orders/min</span>
-                  <p className="text-[15px] font-bold tabular-nums text-gray-900 mt-1">
-                    {botStatus?.risk_manager?.orders_last_minute || 0}<span className="text-[11px] font-normal text-gray-400">/{botStatus?.risk_manager?.max_orders_per_minute || 10}</span>
-                  </p>
-                </div>
-                <div className="p-3 rounded-lg bg-gray-50">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase">Positions</span>
-                  <p className="text-[15px] font-bold tabular-nums text-gray-900 mt-1">
-                    {botStatus?.portfolio?.total_positions || positionCount}<span className="text-[11px] font-normal text-gray-400">/{botStatus?.risk_manager?.max_total_positions || 50}</span>
-                  </p>
-                </div>
-              </div>
-              {botStatus?.risk_manager?.disabled_strategies?.length > 0 && (
-                <div className="mt-3 p-2.5 rounded-lg bg-red-50 border border-red-100">
-                  <span className="text-[10px] font-semibold text-red-600 uppercase">Disabled</span>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {botStatus.risk_manager.disabled_strategies.map((s: string) => (
-                      <span key={s} className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-600">{s}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl p-5 border border-gray-100">
-              <h2 className="text-[13px] font-semibold text-gray-900 mb-3">Kelly Sizing</h2>
-              <div className="grid grid-cols-5 gap-2">
-                {[
-                  { l: "Fractional", v: botStatus?.kelly_config?.fractional_kelly || 0.25 },
-                  { l: "Min Bet", v: `$${botStatus?.kelly_config?.min_bet_usd || 1}` },
-                  { l: "Max Bet", v: `$${botStatus?.kelly_config?.max_bet_usd || 50}` },
-                  { l: "Min Edge", v: `${((botStatus?.kelly_config?.min_edge || 0.03) * 100).toFixed(0)}%` },
-                  { l: "Min Conf", v: `${((botStatus?.kelly_config?.min_confidence || 0.6) * 100).toFixed(0)}%` },
-                ].map((i) => (
-                  <div key={i.l} className="p-2.5 rounded-lg bg-gray-50 text-center">
-                    <span className="text-[10px] font-medium text-gray-500 uppercase">{i.l}</span>
-                    <p className="text-[13px] font-bold tabular-nums text-gray-900 mt-1">{i.v}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <button onClick={runScan} disabled={scanLoading}
-              className="w-full py-2.5 rounded-xl bg-violet-600 text-white font-semibold text-[13px] hover:bg-violet-700 disabled:opacity-60 flex items-center justify-center gap-2"
-            >
-              <RefreshCw className={`w-4 h-4 ${scanLoading ? "animate-spin" : ""}`} />
-              {scanLoading ? "Scanning..." : "Run Manual Scan + Execute"}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* ============ FOOTER ============ */}
