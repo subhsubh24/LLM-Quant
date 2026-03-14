@@ -4295,11 +4295,14 @@ _orchestrator_instance = None
 def _get_orchestrator():
     global _orchestrator_instance
     if _orchestrator_instance is None:
-        from ..prediction_markets.orchestrator import PredictionMarketOrchestrator
-        _orchestrator_instance = PredictionMarketOrchestrator(
-            scanner=_get_prediction_scanner(),
-            executor=_get_prediction_executor(),
-        )
+        from ..prediction_markets.orchestrator import get_orchestrator
+        _orchestrator_instance = get_orchestrator()
+        # Ensure scanner and executor are wired up
+        if _orchestrator_instance.scanner is None:
+            _orchestrator_instance.scanner = _get_prediction_scanner()
+        if _orchestrator_instance.executor is None:
+            from ..prediction_markets.execution import get_executor
+            _orchestrator_instance.executor = get_executor(dry_run=True)
     return _orchestrator_instance
 
 

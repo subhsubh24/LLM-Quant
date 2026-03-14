@@ -854,13 +854,13 @@ def get_orchestrator() -> PredictionMarketOrchestrator:
     return _orchestrator
 
 
-async def start_orchestrator(
+def init_orchestrator(
     scanner: Optional[PredictionMarketScanner] = None,
     scan_interval_sec: int = 120,
 ):
-    """Start the orchestrator (called from routes or app lifespan).
+    """Initialize the orchestrator without starting scan loops.
 
-    If no scanner is provided, auto-configures one with all strategies.
+    The user can start scanning from the UI via bot/start or bot/scan-now.
     """
     global _orchestrator
     if scanner is None:
@@ -873,6 +873,20 @@ async def start_orchestrator(
         scanner=scanner,
         scan_interval_sec=scan_interval_sec,
     )
+    return _orchestrator
+
+
+async def start_orchestrator(
+    scanner: Optional[PredictionMarketScanner] = None,
+    scan_interval_sec: int = 120,
+):
+    """Start the orchestrator with scan loops (called from bot/start).
+
+    If no scanner is provided, auto-configures one with all strategies.
+    """
+    global _orchestrator
+    if _orchestrator is None:
+        init_orchestrator(scanner, scan_interval_sec)
     await _orchestrator.start()
 
 

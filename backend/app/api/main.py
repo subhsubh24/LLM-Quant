@@ -14,7 +14,7 @@ from ..config import get_settings
 from ..db.database import init_db
 from ..data.crypto_ws import start_crypto_ws, stop_crypto_ws
 from ..prediction_markets.websocket_feeds import start_prediction_feeds, stop_prediction_feeds
-from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator
+from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator, init_orchestrator
 from .routes import router
 
 
@@ -61,12 +61,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Portfolio bootstrap skipped: {e}")
 
-    # Start prediction market orchestrator (dry-run, scan every 120s)
+    # Initialize prediction market orchestrator (but don't start scanning)
+    # User can start the bot from the Predictions UI or trigger manual scans
     try:
-        await start_orchestrator(scan_interval_sec=120)
-        logger.info("Prediction market orchestrator started (dry-run)")
+        from ..prediction_markets.orchestrator import init_orchestrator
+        init_orchestrator(scan_interval_sec=120)
+        logger.info("Prediction market orchestrator initialized (idle — start from UI)")
     except Exception as e:
-        logger.warning(f"Prediction market orchestrator start failed (degraded): {e}")
+        logger.warning(f"Prediction market orchestrator init failed (degraded): {e}")
 
     # Auto-initialize live brokers from config
     settings = get_settings()
