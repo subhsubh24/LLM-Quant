@@ -337,31 +337,36 @@ export default function PredictionsPage() {
     } catch {}
   };
 
-  // Run scanner via API
+  // Run scanner via orchestrator (bot/scan-now) — single source of truth
   const runScan = async () => {
     setScanLoading(true);
-    addLog("scan", `Starting scan #${scanCount + 1} across all enabled strategies...`);
+    addLog("scan", `Starting scan across all enabled strategies...`);
     try {
-      const res = await fetch("/api/prediction-markets/scan", { method: "POST" });
+      const res = await fetch("/api/prediction-markets/bot/scan-now", { method: "POST" });
       if (!res.ok) throw new Error("Scan failed");
       const data = await res.json();
-      const num = data.scan_number || scanCount + 1;
+      const num = data.scan || scanCount + 1;
       setScanCount(num);
       setLastScan("Just now");
       setIsLive(true);
-      if (data.opportunities && data.opportunities.length > 0) {
-        setOpportunities(data.opportunities.map(mapOpportunity));
-        addLog("scan", `Scan #${num} complete: ${data.opportunities.length} opportunities found across ${data.markets_scanned || "?"} markets`);
-        data.opportunities.slice(0, 5).forEach((opp: any) => {
-          addLog("signal", `${opp.reason}`, opp.strategy);
-        });
-      } else {
-        addLog("scan", `Scan #${num} complete: no opportunities (${data.markets_scanned || 0} markets checked)`);
-      }
+      addLog("scan", `Scan #${num} complete: ${data.opportunities || 0} opps → ${data.executed || 0} executed, ${data.skipped || 0} skipped`);
+      // Refresh all data after scan
+      await Promise.all([fetchBotOpportunities(), fetchPositions(), fetchStrategies()]);
     } catch {
-      setScanCount((c) => c + 1);
-      setLastScan("Just now");
-      addLog("info", "Scan ran locally (API unavailable)");
+      // Fallback: try the standalone scan endpoint
+      try {
+        const res = await fetch("/api/prediction-markets/scan", { method: "POST" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.opportunities?.length > 0) {
+            setOpportunities(data.opportunities.map(mapOpportunity));
+          }
+          setScanCount(data.scan_number || scanCount + 1);
+          setLastScan("Just now");
+        }
+      } catch {
+        addLog("info", "Scan failed (API unavailable)");
+      }
     } finally {
       setScanLoading(false);
     }
@@ -439,13 +444,13 @@ export default function PredictionsPage() {
     } catch {}
   };
 
-  // Fetch latest opportunities from bot activity
+  // Fetch latest opportunities and activity from bot/orchestrator
   const fetchBotOpportunities = async () => {
     try {
       const res = await fetch("/api/prediction-markets/bot/activity?limit=50");
       if (res.ok) {
         const data = await res.json();
-        // Merge activity entries
+        // Merge activity entries into analysis log
         if (data.entries && data.entries.length > 0) {
           setAnalysisLog((prev) => {
             const existingIds = new Set(prev.map((e: any) => e.id));
@@ -461,7 +466,16 @@ export default function PredictionsPage() {
             return [...newEntries, ...prev].slice(0, 200);
           });
         }
+        // Update scan count from orchestrator (source of truth)
         if (data.total_scans) setScanCount(data.total_scans);
+        // Populate scanner with last scan's opportunities
+        if (data.opportunities && data.opportunities.length > 0) {
+          setOpportunities(data.opportunities.map(mapOpportunity));
+          setIsLive(true);
+          if (data.total_scans) {
+            setLastScan(new Date().toLocaleTimeString());
+          }
+        }
       }
     } catch {}
   };
@@ -537,13 +551,20 @@ export default function PredictionsPage() {
     } catch {}
   };
 
-  // On mount: check connection and fetch data
+  // On mount: check connection, fetch data, and load existing scan results
   useEffect(() => {
-    checkPolymarketConnection();
-    fetchMarkets();
-    fetchStrategies();
-    fetchBotStatus();
-    fetchPositions();
+    const init = async () => {
+      await Promise.all([
+        checkPolymarketConnection(),
+        fetchMarkets(),
+        fetchStrategies(),
+        fetchBotStatus(),
+        fetchPositions(),
+      ]);
+      // Fetch orchestrator activity (includes opportunities from startup scans)
+      await fetchBotOpportunities();
+    };
+    init();
   }, []);
 
   // Refresh data when tabs change
@@ -602,9 +623,9 @@ export default function PredictionsPage() {
   const positionCount = livePositions.length;
   const totalPnl = portfolioSummary?.total_pnl ?? strategies.reduce((sum, s) => sum + s.pnl, 0);
   const enabledCount = strategies.filter((s) => s.enabled).length;
-  const marketsScanned = botStatus?.last_scan_result?.opportunities
-    ? scanCount * 12
-    : scanCount * 12;
+  // Use orchestrator's total_scans from bot status as source of truth
+  const effectiveScanCount = botStatus?.total_scans || scanCount;
+  const lastScanOpps = botStatus?.last_scan_opportunities || 0;
 
   const filteredMarkets = markets.filter(
     (m) =>
@@ -656,14 +677,6 @@ export default function PredictionsPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Bot status indicator */}
-              {botRunning && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200/60">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs font-medium text-emerald-700">Bot Active</span>
-                  <span className="text-[10px] text-emerald-500 tabular-nums">#{scanCount}</span>
-                </div>
-              )}
               <button
                 onClick={resetPortfolio}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
@@ -671,16 +684,36 @@ export default function PredictionsPage() {
                 Reset
               </button>
               <div className="w-px h-5 bg-gray-200" />
+              {/* Scan Now button */}
               <button
-                onClick={() => setScanning(!scanning)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  scanning
-                    ? "bg-violet-100 text-violet-700 shadow-sm shadow-violet-500/10"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                onClick={runScan}
+                disabled={scanLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-50 text-violet-600 hover:bg-violet-100 disabled:opacity-50 transition-colors border border-violet-200/60"
+              >
+                <RefreshCw className={`w-3 h-3 ${scanLoading ? "animate-spin" : ""}`} />
+                {scanLoading ? "Scanning..." : "Scan + Execute"}
+              </button>
+              {/* Bot toggle */}
+              <button
+                onClick={toggleBot}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                  botRunning
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/60"
+                    : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
                 }`}
               >
-                {scanning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                {scanning ? "Scanning" : "Auto-Scan"}
+                {botRunning ? (
+                  <>
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Bot Running
+                    <span className="text-[10px] text-emerald-500 tabular-nums">#{effectiveScanCount}</span>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="w-3 h-3" />
+                    Start Bot
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -714,11 +747,12 @@ export default function PredictionsPage() {
               sub: botRunning ? "Bot running" : "Bot stopped",
             },
             {
-              label: "Scans Completed",
-              value: String(scanCount),
+              label: "Scans / Executions",
+              value: String(effectiveScanCount),
+              valueSuffix: ` / ${botStatus?.total_executions || 0}`,
               color: "text-gray-900",
               icon: BarChart3,
-              sub: lastScan !== "Never" ? `Last: ${lastScan}` : null,
+              sub: lastScanOpps > 0 ? `Last scan: ${lastScanOpps} opportunities` : (lastScan !== "Never" ? `Last: ${lastScan}` : null),
             },
           ].map((stat) => (
             <div key={stat.label} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
@@ -1258,21 +1292,12 @@ export default function PredictionsPage() {
 
             {/* Manual Scan Button */}
             <button
-              onClick={async () => {
-                try {
-                  const res = await fetch("/api/prediction-markets/bot/scan-now", { method: "POST" });
-                  if (res.ok) {
-                    const data = await res.json();
-                    addLog("scan", `Manual scan: ${data.opportunities || 0} opportunities → ${data.executed || 0} executed`);
-                    fetchBotStatus();
-                    fetchPositions();
-                    fetchStrategies();
-                  }
-                } catch {}
-              }}
-              className="w-full py-2.5 rounded-xl bg-violet-50 text-violet-600 font-semibold text-sm hover:bg-violet-100 border border-violet-200/60 transition-colors"
+              onClick={runScan}
+              disabled={scanLoading}
+              className="w-full py-2.5 rounded-xl bg-violet-50 text-violet-600 font-semibold text-sm hover:bg-violet-100 border border-violet-200/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              Run Manual Scan + Execute
+              <RefreshCw className={`w-4 h-4 ${scanLoading ? "animate-spin" : ""}`} />
+              {scanLoading ? "Scanning..." : "Run Manual Scan + Execute"}
             </button>
           </div>
         )}

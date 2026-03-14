@@ -4355,13 +4355,14 @@ async def get_prediction_bot_status():
 
 @router.get("/prediction-markets/bot/activity")
 async def get_prediction_activity_log(limit: int = 50):
-    """Get recent activity log entries from the orchestrator."""
+    """Get recent activity log entries and last scan opportunities from the orchestrator."""
     orchestrator = _get_orchestrator()
     return {
         "entries": orchestrator.activity_log[:limit],
         "total_scans": orchestrator.total_scans,
         "total_executions": orchestrator.total_executions,
         "last_scan_result": orchestrator.last_scan_result,
+        "opportunities": orchestrator.last_scan_opportunities_raw,
     }
 
 

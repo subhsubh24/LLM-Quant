@@ -412,6 +412,7 @@ class PredictionMarketOrchestrator:
         self.last_scan_opportunities: int = 0
         self.activity_log: List[dict] = []  # Recent activity entries for frontend
         self.last_scan_result: Optional[dict] = None  # Last scan summary
+        self.last_scan_opportunities_raw: List[dict] = []  # Raw opportunities for frontend scanner
 
     def _add_activity(self, type: str, message: str, strategy: str = None):
         """Add an entry to the activity log (kept in memory, max 200)."""
@@ -486,6 +487,28 @@ class PredictionMarketOrchestrator:
         self._add_activity("scan", f"Scan #{self.total_scans} starting across all strategies...")
         opportunities = self.scanner.scan(market_limit=200)
         self.last_scan_opportunities = len(opportunities)
+
+        # Store raw opportunities for frontend scanner tab
+        self.last_scan_opportunities_raw = [
+            {
+                "id": f"{opp.strategy}-{self.total_scans}-{i}",
+                "strategy": opp.strategy,
+                "market": opp.market.question,
+                "market_id": opp.market.id,
+                "outcome": (
+                    opp.market.outcomes[opp.outcome_idx].label
+                    if 0 <= opp.outcome_idx < len(opp.market.outcomes)
+                    else "Both"
+                ),
+                "side": opp.side,
+                "entry_price": opp.entry_price,
+                "edge": opp.edge,
+                "confidence": opp.confidence,
+                "reason": opp.reason,
+                "timestamp": opp.timestamp.isoformat() if hasattr(opp, 'timestamp') and opp.timestamp else datetime.now(timezone.utc).isoformat(),
+            }
+            for i, opp in enumerate(opportunities)
+        ]
 
         if not opportunities:
             self._add_activity("scan", f"Scan #{self.total_scans} complete: 0 opportunities found")
