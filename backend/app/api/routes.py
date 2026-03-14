@@ -4371,15 +4371,39 @@ async def get_prediction_activity_log(limit: int = 50):
 
 @router.post("/prediction-markets/bot/scan-now")
 async def trigger_scan_and_execute():
-    """Manually trigger one scan-and-execute cycle."""
+    """Manually trigger one scan-and-execute cycle.
+
+    Runs scan as a background asyncio task to avoid blocking the request
+    and causing ECONNRESET on the frontend proxy.  Also auto-starts the
+    bot loop so subsequent scans happen automatically without manual clicks.
+    """
+    import asyncio
+
     orchestrator = _get_orchestrator()
     if not orchestrator.scanner:
         orchestrator.scanner = _get_prediction_scanner()
     if not orchestrator.executor:
         orchestrator.executor = _get_prediction_executor()
 
-    result = await orchestrator.scan_and_execute()
-    return result
+    # Fire-and-forget: run the heavy scan in the background
+    async def _bg_scan():
+        try:
+            await orchestrator.scan_and_execute()
+        except Exception as e:
+            logger.error(f"Background scan failed: {e}")
+
+    asyncio.create_task(_bg_scan())
+
+    # Auto-start the bot loop so future scans are fully automated
+    if not orchestrator._running:
+        await orchestrator.start()
+
+    return {
+        "status": "scan_queued",
+        "bot_running": orchestrator._running,
+        "total_scans": orchestrator.total_scans,
+        "message": "Scan triggered in background. Bot loop auto-started.",
+    }
 
 
 # ============ Prediction Markets — Risk Manager ============

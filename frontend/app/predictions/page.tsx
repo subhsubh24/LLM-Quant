@@ -164,12 +164,19 @@ export default function PredictionsPage() {
       const res = await fetch("/api/prediction-markets/bot/scan-now", { method: "POST" });
       if (!res.ok) throw new Error("Scan failed");
       const data = await res.json();
-      const num = data.scan || scanCount + 1;
-      setScanCount(num);
+      // Backend now runs scan in background and auto-starts the bot loop
+      if (data.bot_running) {
+        setBotRunning(true);
+        addLog("info", "Bot loop auto-started — scans will repeat automatically");
+      }
+      setScanCount(data.total_scans || scanCount + 1);
       setLastScan(new Date().toLocaleTimeString());
       setIsLive(true);
-      addLog("scan", `Scan #${num}: ${data.opportunities || 0} opps → ${data.executed || 0} executed, ${data.skipped || 0} skipped`);
-      await Promise.all([fetchBotOpportunities(), fetchPositions(), fetchStrategies()]);
+      addLog("scan", `Scan queued (background). Bot running: ${data.bot_running}`);
+      // Fetch updated data after a short delay to let the background scan complete
+      setTimeout(async () => {
+        try { await Promise.all([fetchBotOpportunities(), fetchPositions(), fetchStrategies()]); } catch {}
+      }, 3000);
     } catch {
       try {
         const res = await fetch("/api/prediction-markets/scan", { method: "POST" });
@@ -287,8 +294,11 @@ export default function PredictionsPage() {
         await fetch("/api/prediction-markets/bot/stop", { method: "POST" });
         setBotRunning(false); addLog("info", "Bot stopped");
       } else {
-        await fetch("/api/prediction-markets/bot/start", { method: "POST" });
-        setBotRunning(true); addLog("info", "Bot started — automated scanning enabled");
+        const res = await fetch("/api/prediction-markets/bot/start", { method: "POST" });
+        if (res.ok) {
+          setBotRunning(true);
+          addLog("info", "Bot started — automated scan → execute loop running every 120s");
+        }
       }
       await fetchBotStatus();
     } catch {}
@@ -320,22 +330,26 @@ export default function PredictionsPage() {
 
   useEffect(() => {
     if (!isLive) return;
+    // Poll for updates — sequential calls with generous interval to avoid
+    // overwhelming the backend and causing ECONNRESET proxy errors.
     const interval = setInterval(async () => {
       try {
         await fetchBotStatus();
-        await fetchPositions();
-        if (activeTab === "analysis" || activeTab === "scanner") await fetchBotOpportunities();
       } catch {}
-    }, 30000);
+      try {
+        await fetchPositions();
+      } catch {}
+      if (activeTab === "analysis" || activeTab === "scanner") {
+        try { await fetchBotOpportunities(); } catch {}
+      }
+    }, 45000);
     return () => clearInterval(interval);
   }, [activeTab, isLive]);
 
-  useEffect(() => {
-    if (!scanning) return;
-    runScan();
-    const interval = setInterval(runScan, 120000);
-    return () => clearInterval(interval);
-  }, [scanning]);
+  // The backend bot loop handles periodic scanning automatically.
+  // No need for frontend-driven scan intervals — the bot auto-starts
+  // on the first "Scan + Execute" click.
+  // The polling interval below fetches updated results from the backend.
 
   const toggleStrategy = (id: string) => {
     setStrategies((prev) => prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
