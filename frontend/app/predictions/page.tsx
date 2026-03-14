@@ -551,18 +551,18 @@ export default function PredictionsPage() {
     } catch {}
   };
 
-  // On mount: check connection, fetch data, and load existing scan results
+  // On mount: check connection, then fetch data sequentially to avoid overwhelming backend
   useEffect(() => {
     const init = async () => {
-      await Promise.all([
-        checkPolymarketConnection(),
-        fetchMarkets(),
-        fetchStrategies(),
-        fetchBotStatus(),
-        fetchPositions(),
-      ]);
-      // Fetch orchestrator activity (includes opportunities from startup scans)
+      // Priority 1: check connection + get bot status (lightweight)
+      await checkPolymarketConnection();
+      await fetchBotStatus();
+      // Priority 2: get positions and orchestrator activity (includes scan results)
+      await fetchPositions();
       await fetchBotOpportunities();
+      // Priority 3: fetch markets catalog and strategy details
+      await fetchMarkets();
+      await fetchStrategies();
     };
     init();
   }, []);
@@ -585,18 +585,24 @@ export default function PredictionsPage() {
     }
   }, [activeTab]);
 
-  // Auto-poll: refresh bot data and positions every 10s when bot is running
+  // Auto-poll: refresh data every 30s (only when backend is reachable)
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchBotStatus();
-      fetchPositions();
-      fetchStrategies();
-      if (activeTab === "analysis" || activeTab === "scanner") {
-        fetchBotOpportunities();
+    if (!isLive) return; // Don't poll if backend hasn't been reached yet
+    const interval = setInterval(async () => {
+      try {
+        // Single lightweight check first
+        await fetchBotStatus();
+        // Only fetch heavier data if bot status succeeded
+        await fetchPositions();
+        if (activeTab === "analysis" || activeTab === "scanner") {
+          await fetchBotOpportunities();
+        }
+      } catch {
+        // Backend unreachable — skip this cycle silently
       }
-    }, 10000);
+    }, 30000);
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, [activeTab, isLive]);
 
   // Auto-scan every 2 minutes when manual scanning is enabled
   useEffect(() => {
