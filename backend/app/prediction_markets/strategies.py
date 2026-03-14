@@ -284,7 +284,8 @@ class NearCertaintyStrategy(BaseStrategy):
                     # Assume ~2% chance of reversal (conservative)
                     reversal_risk = 0.02
                     expected_value = (1.0 - reversal_risk) * profit_per_share - reversal_risk * price
-                    edge = expected_value / price
+                    # Cap edge to avoid astronomical values at micro-prices
+                    edge = min(expected_value / price, 2.0)
 
                     if edge > 0 and self.can_open_position():
                         time_info = f"{hours_left:.0f}h to resolution" if hours_left is not None else "no end date"
@@ -602,6 +603,14 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                     if m1.is_binary and m2.is_binary:
                         p1 = m1.outcomes[0].price
                         p2 = m2.outcomes[0].price
+
+                        # Skip pairs where either price is near 0 or 1 — these are
+                        # likely different questions that share keywords (e.g.,
+                        # "Fed decrease 50bps" at 0.1% vs "no change" at 99.6%).
+                        # Real arb opportunities exist in the mid-range.
+                        if p1 < 0.05 or p1 > 0.95 or p2 < 0.05 or p2 > 0.95:
+                            continue
+
                         gap = abs(p1 - p2)
 
                         if gap >= self.min_inconsistency:

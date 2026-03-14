@@ -149,7 +149,9 @@ class NOPositionScanner(BaseStrategy):
         # Edge = P(win) * payout_ratio - P(lose)
         if no_price > 0:
             payout_ratio = (1.0 / no_price) - 1.0
-            edge = adjusted_rate * payout_ratio - (1.0 - adjusted_rate)
+            # Cap edge at 200% — at micro-prices the formula blows up but the
+            # actual opportunity is bounded by liquidity and execution risk.
+            edge = min(adjusted_rate * payout_ratio - (1.0 - adjusted_rate), 2.0)
         else:
             edge = 0.0
             payout_ratio = 0.0

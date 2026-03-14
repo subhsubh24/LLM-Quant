@@ -13,7 +13,7 @@ settings = get_settings()
 # Create engine with SQLite optimizations
 engine = create_engine(
     settings.database_url,
-    echo=settings.debug,
+    echo=False,  # Set True temporarily to debug SQL; off by default to reduce log noise
     connect_args={"check_same_thread": False}  # Required for SQLite with FastAPI
 )
 
