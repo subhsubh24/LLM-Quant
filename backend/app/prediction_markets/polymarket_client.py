@@ -167,6 +167,8 @@ class PolymarketClient:
         active: bool = True,
         closed: bool = False,
         tag: Optional[str] = None,
+        order: str = "volume24hr",
+        ascending: bool = False,
     ) -> List[Market]:
         """
         Fetch markets from Gamma API.
@@ -177,6 +179,8 @@ class PolymarketClient:
             active: Only active markets
             closed: Include closed markets
             tag: Filter by category tag (e.g., "weather", "politics", "crypto")
+            order: Sort field (e.g., "volume24hr", "liquidity", "startDate")
+            ascending: Sort direction (False = highest first)
         """
         params = {"limit": limit, "offset": offset}
         if active:
@@ -185,6 +189,11 @@ class PolymarketClient:
             params["closed"] = "true"
         if tag:
             params["tag"] = tag
+        # Sort by volume/liquidity so we get the most active markets first,
+        # not stale resolved markets from years ago.
+        if order:
+            params["order"] = order
+            params["ascending"] = "true" if ascending else "false"
 
         data = self._get(f"{GAMMA_API}/markets", params)
         if not data:
@@ -216,6 +225,32 @@ class PolymarketClient:
         if parse_errors > 3:
             logger.warning(f"[POLYMARKET] {parse_errors} total parse errors")
         logger.info(f"[POLYMARKET] Fetched {len(markets)} markets (offset={offset}, raw={len(data)}, errors={parse_errors})")
+
+        # Filter out stale/dead markets:
+        # - end_date in the past (already resolved)
+        # - all outcome prices are 0 (market is dead)
+        # - no CLOB token IDs (can't trade)
+        now = datetime.now(timezone.utc)
+        pre_filter = len(markets)
+        filtered = []
+        for m in markets:
+            # Skip markets whose end date has passed
+            if m.end_date and m.end_date < now:
+                continue
+            # Skip markets where all prices are 0 (dead/settled)
+            if m.outcomes and all(o.price == 0.0 for o in m.outcomes):
+                continue
+            # Skip markets with no CLOB token IDs (can't price or trade)
+            if m.outcomes and all(not o.token_id for o in m.outcomes):
+                continue
+            filtered.append(m)
+        markets = filtered
+        if pre_filter > len(markets):
+            logger.info(
+                f"[POLYMARKET] Filtered {pre_filter - len(markets)} stale markets "
+                f"(end_date past, all prices 0, or no token IDs) — "
+                f"{len(markets)} remaining"
+            )
 
         # Diagnostic: warn if most markets have zero volume/liquidity (likely API schema change)
         if markets:
@@ -359,6 +394,9 @@ class PolymarketClient:
         errors = 0
 
         for market in markets[:max_markets]:
+            # Skip markets with all-zero prices (settled/dead) to avoid 404s
+            if all(o.price == 0.0 for o in market.outcomes):
+                continue
             for outcome in market.outcomes:
                 if not outcome.token_id:
                     continue
