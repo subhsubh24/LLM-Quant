@@ -689,6 +689,7 @@ class PredictionMarketOrchestrator:
             poly_value = sum(
                 p.market_value for p in positions if p.exchange == Exchange.POLYMARKET
             )
+            kalshi_value = 0.0  # Kalshi not yet integrated
             total_exposure = sum(p.market_value for p in positions)
             total_unrealized = sum(p.unrealized_pnl for p in positions)
             total_realized = sum(p.realized_pnl for p in positions)
@@ -712,6 +713,7 @@ class PredictionMarketOrchestrator:
                     total_fees=self.executor.total_fees,
                     num_positions=len(positions),
                     polymarket_value=poly_value,
+                    kalshi_value=kalshi_value,
                     strategy_breakdown_json=json.dumps(strategy_values),
                 )
                 session.add(snapshot)
