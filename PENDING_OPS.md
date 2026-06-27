@@ -5,6 +5,15 @@ loop builds and validates everything in paper; **only the owner** funds, sets li
 keys, flips the switch, and raises caps. Full step-by-step detail lives in
 [`docs/growth/LIVE_RUNBOOK.md`](docs/growth/LIVE_RUNBOOK.md).
 
+> **Do I need to wire up API keys to run it?** For **paper trading (the default):
+> NO venue keys are required.** The bot reads Polymarket's *public* market data and
+> simulates fills — zero credentials. `GEMINI_API_KEY` is **optional** (LLM analysis;
+> falls back to templates without it). The venue credentials below (OA-5) are needed
+> **only when you choose to go live.** As the factory adds a new venue (e.g. Kalshi),
+> it will append a new owner-action here naming exactly what to set (FACTORY_STANDARD
+> §13), and the dashboard surfaces these via `OWNER_ACTIONS` + `GROWTH_STATUS`
+> (`venues_connected` / `awaiting_connect`).
+
 <!-- OWNER_ACTIONS
 items:
   - id: OA-1
@@ -32,11 +41,11 @@ items:
     why: "Bankroll for live trading. Owner-only."
     how: "Transfer funds per LIVE_RUNBOOK §3. Start small."
   - id: OA-5
-    title: "Set venue LIVE API keys in server env"
+    title: "Set venue LIVE API keys in server env (prediction markets) — LIVE-ONLY, not needed for paper"
     priority: high
     status: pending
-    why: "Live order placement requires authenticated venue keys, server-side only, never committed."
-    how: "Set venue live keys in env (never in git). See LIVE_RUNBOOK §5."
+    why: "Paper needs NO venue keys (public data + simulated fills). Live order placement on Polymarket requires authenticated venue creds + a funded Polygon wallet, server-side only, never committed."
+    how: "Set on the backend host (Railway), never in git: POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE, POLYMARKET_PRIVATE_KEY (Polygon wallet key), POLYMARKET_FUNDER (funder address). Kalshi (only once that adapter exists): the venue's live key/secret. See LIVE_RUNBOOK §5."
   - id: OA-6
     title: "Flip LIVE_TRADING_ENABLED on (owner-only)"
     priority: high
@@ -77,7 +86,7 @@ items:
 | OA-2 | Confirm venue ToS + jurisdiction | 🔴 critical | pending |
 | OA-3 | Venue account + KYC | 🟠 high | pending |
 | OA-4 | Deposit/transfer real funds | 🟠 high | pending |
-| OA-5 | Set venue LIVE API keys | 🟠 high | pending |
+| OA-5 | Set Polymarket LIVE API keys (LIVE-only; paper needs none) | 🟠 high | pending |
 | OA-6 | Flip `LIVE_TRADING_ENABLED` | 🟠 high | pending |
 | OA-9 | Keep Neon `DATABASE_URL` private (no Data API lockdown needed) | 🟡 medium | pending |
 | OA-10 | Move raw-sqlite audit log to Postgres (optional) | ⚪ low | pending |
