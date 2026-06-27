@@ -115,16 +115,28 @@ app = FastAPI(
 )
 
 # CORS configuration
+# Local dev origins are always allowed. Deployed frontends (e.g. the Vercel domain)
+# are added via the CORS_ALLOW_ORIGINS env var (comma-separated, exact origins —
+# scheme + host, no trailing slash), since allow_credentials=True forbids a wildcard.
+_default_cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+]
+_extra_cors = [
+    o.strip()
+    for o in (get_settings().cors_allow_origins or "").split(",")
+    if o.strip()
+]
+_allow_origins = _default_cors_origins + _extra_cors
+logger.info(f"CORS allowed origins: {_allow_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-    ],
+    allow_origins=_allow_origins,
     allow_credentials=True,
     # BUG FIX #43: Restrict to safe HTTP methods (not TRACE, CONNECT)
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
