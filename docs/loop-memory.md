@@ -2,6 +2,25 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-27 — Canonical sync: FACTORY_STANDARD gains visual verification
+
+- Synced `FACTORY_STANDARD.md` to the new canonical (still **byte-identical** across
+  every factory repo): added **visual verification** so a page can't pass while
+  rendering blank/broken/unstyled/"vibe-coded".
+  - §6: the journey suite **captures a screenshot** of every page + key state
+    (empty/loading/error, authed + logged-out) and commits them; a screenshot only
+    counts if something JUDGES it.
+  - §7 (Gate 2) + §10 (deep-audit lens): the readiness gate and the design/taste
+    lens **VISUALLY REVIEW** those screenshots on a vision-capable model against the
+    VISION design bar — a blank/broken/overlapping/unstyled/off-brand page is a
+    release-blocking FAIL / design BUG, even if DOM assertions pass. Bounded: judge in
+    the deep audit + at the readiness gate, not on every micro-change.
+- This was a **canonical sync** (the only way FACTORY_STANDARD.md may change), not loop
+  work. Treat the file as a read-only stable anchor again.
+- LLM-Quant implication: the monitoring panel (dashboard / predictions / bot / login)
+  needs screenshot capture in its journey suite + visual review at the gate — folds
+  into ROADMAP F3 (BUILDS≠WORKS runtime harness) when that's built.
+
 ## 2026-06-27 — Adopted the shared FACTORY_STANDARD
 
 - Added `FACTORY_STANDARD.md` at the repo root — the **byte-identical, product-agnostic**
