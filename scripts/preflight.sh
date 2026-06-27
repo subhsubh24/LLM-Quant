@@ -42,17 +42,20 @@ fi
 [ "$FAIL" = 0 ] || die "code import smoke"
 
 # ---------------------------------------------------------------------------
-say "2. Code gate — tests"
+say "2. Code gate — prediction-market tests"
+# Target the prediction-market test module specifically. We deliberately do NOT
+# glob test_*risk* — those are the heavy ML risk/backtest suites (pandas/sklearn)
+# outside the gate's light dependency surface. The prediction-markets risk manager
+# is covered inside test_prediction_markets.py.
 if "$PY" -c "import pytest" 2>/dev/null; then
-  # Run the prediction-market + risk tests if present; fall back to full suite.
-  if ls backend/tests/test_*risk* >/dev/null 2>&1 || ls backend/tests/test_*prediction* >/dev/null 2>&1; then
-    if "$PY" -m pytest -q backend/tests/test_*risk* backend/tests/test_*prediction* 2>/dev/null; then
-      ok "prediction-market + risk tests pass"
+  if ls backend/tests/test_prediction_markets.py >/dev/null 2>&1; then
+    if "$PY" -m pytest -q backend/tests/test_prediction_markets.py 2>/dev/null; then
+      ok "prediction-market tests pass"
     else
-      bad "prediction-market/risk tests failed"
+      bad "prediction-market tests failed"
     fi
   else
-    warn "no targeted risk/prediction tests found; skipping (add ROADMAP F1 coverage)"
+    warn "test_prediction_markets.py not found; skipping (add ROADMAP F1 coverage)"
   fi
 else
   warn "pytest not installed; skipping tests"
