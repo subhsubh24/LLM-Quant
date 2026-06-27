@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   BarChart3,
   Target,
@@ -14,6 +15,7 @@ import {
   WifiOff,
   ChevronLeft,
   ChevronRight,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "next-themes";
@@ -43,6 +45,7 @@ const tabs = [
 
 export function TabNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [apiStatus, setApiStatus] = useState<"online" | "offline" | "checking">("checking");
@@ -51,6 +54,17 @@ export function TabNav() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {}
+    router.replace("/login");
+    router.refresh();
+  }, [router]);
+
+  // The login page is a full-screen overlay — don't render the sidebar there.
+  if (pathname === "/login") return null;
 
   const checkApi = useCallback(async () => {
     try {
@@ -185,6 +199,18 @@ export function TabNav() {
         >
           {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
           {!collapsed && <span className="font-medium">Collapse</span>}
+        </button>
+
+        {/* Logout */}
+        <button
+          onClick={logout}
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10 w-full",
+            collapsed && "justify-center"
+          )}
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          {!collapsed && <span className="font-medium">Sign out</span>}
         </button>
       </div>
     </nav>
