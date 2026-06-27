@@ -72,13 +72,18 @@ Then **verify the kill switch actually halts trading**:
 
 ## §5. Set venue LIVE API keys in server env  (OA-5)
 
-1. Generate **live** API credentials on the venue.
-2. Set them **server-side only**, never in git:
-   - Polymarket (example names — confirm against the client in
-     `backend/app/prediction_markets/polymarket_client.py`): `POLYMARKET_API_KEY`,
-     `POLYMARKET_API_SECRET`, `POLYMARKET_PASSPHRASE`, `POLYMARKET_WALLET_*` as
-     applicable.
-   - Kalshi (if used): the venue's live key/secret env vars.
+> **Paper needs none of this.** These are required only for **live** order placement.
+
+1. Generate **live** API credentials on the venue + have a funded Polygon wallet.
+2. Set them **server-side only** (on the backend host, e.g. Railway), never in git.
+   The code reads these exact names (`backend/app/prediction_markets/execution.py`,
+   `get_executor`):
+   - `POLYMARKET_API_KEY`
+   - `POLYMARKET_API_SECRET`
+   - `POLYMARKET_PASSPHRASE`
+   - `POLYMARKET_PRIVATE_KEY` — your Polygon wallet private key
+   - `POLYMARKET_FUNDER` — the funder address
+   - Kalshi: only once that adapter exists (ROADMAP A3) — the venue's live key/secret.
 3. Confirm `.env` is gitignored (it is) and that keys are not echoed into logs.
 
 ---
