@@ -1,7 +1,7 @@
 # DEPLOYMENT — LLM-Quant
 
 How to deploy the monitoring panel + backend. Three pieces:
-**Supabase** (DB) → **backend host** (FastAPI) → **Vercel** (frontend).
+**Neon** (DB) → **backend host** (FastAPI) → **Vercel** (frontend).
 
 ---
 
@@ -46,23 +46,26 @@ two of their stated limits disqualify *this* app today:
    function timeouts confirm it's request-scoped.
 
 **Future path (not now):** if the bot is trimmed to prediction-markets-only (drops
-torch/xgboost → fits 500MB) AND refactored to be stateless (state in Supabase,
+torch/xgboost → fits 500MB) AND refactored to be stateless (state in Postgres,
 scanning via Vercel Cron, no WebSocket-server feeds), the request-serving API could
 live on Vercel — but you'd still need a persistent worker for the scan loop, so it
 adds a moving part rather than removing one. Until then: persistent host.
 
 ---
 
-## 1. Supabase (database)
+## 1. Neon (database)
 
-1. Create a project; set a strong DB password.
-2. **Project Settings → Database → Connection string → Session pooler** (port 5432,
-   IPv4-friendly). It looks like:
+1. Create a project in the [Neon Console](https://console.neon.tech).
+2. **Connection Details → copy the connection string.** Use the **Pooled** string
+   (host contains `-pooler`) — it handles Neon's autosuspend/reconnect well for a
+   persistent backend. It already includes `?sslmode=require`; keep it:
    ```
-   postgresql://postgres.[REF]:[PASSWORD]@aws-[REGION].pooler.supabase.com:5432/postgres
+   postgresql://[USER]:[PASSWORD]@ep-xxxx-pooler.[REGION].aws.neon.tech/[DB]?sslmode=require
    ```
-   (Use the **Direct** string only if your backend host has IPv6.)
-3. Lock down the Data API **after** the backend's first boot — see §4.
+   (The direct/non-pooled endpoint also works. Any Postgres URL is fine — the engine
+   is dialect-aware.)
+3. Nothing else to configure — Neon is reachable **only** with this connection
+   string (no public Data API). Keep it server-side; never commit it. See §4.
 
 ---
 
@@ -92,7 +95,7 @@ Railway → **New Project → Deploy from repo**. In the service settings set
 ### Backend env vars
 | Var | Value |
 |---|---|
-| `DATABASE_URL` | Supabase session-pooler string from §1 |
+| `DATABASE_URL` | Neon pooled connection string from §1 |
 | `CORS_ALLOW_ORIGINS` | your Vercel origin, e.g. `https://llm-quant.vercel.app` (exact: scheme+host, no trailing slash; set after §3) |
 | `LIVE_TRADING_ENABLED` | leave **`false`** (owner-only; never enable at deploy) |
 | `DEMO_MODE` | `true` |
@@ -122,26 +125,18 @@ Tables auto-create on first boot.
 
 ---
 
-## 4. Lock down the Supabase Data API (OA-9 — sensitive data)
+## 4. Database access — keep the connection string private (OA-9)
 
-After the backend's first boot (so the tables exist), run this in the **Supabase SQL
-Editor**. The backend connects as a privileged user and **bypasses RLS**, so the app
-keeps working — this only blocks the public anon / Data API from reading your money
-data:
+**Neon has no public Data API** (no PostgREST, no anon key). Your tables are reachable
+**only** with the `DATABASE_URL` connection string, so there's no public-exposure
+lockdown to run — this is simpler than Supabase. Just:
 
-```sql
-do $$
-declare r record;
-begin
-  for r in select tablename from pg_tables where schemaname = 'public'
-  loop
-    execute format('alter table public.%I enable row level security;', r.tablename);
-  end loop;
-end $$;
-```
+- Keep `DATABASE_URL` **server-side only** (the backend host's env). Never commit it,
+  never put it in the frontend or any `NEXT_PUBLIC_*` var.
+- If it ever leaks, **rotate the password** in the Neon Console.
 
-Re-run it if the backend adds new tables later. **Never** put the Supabase
-`service_role` key in the frontend.
+(There is no RLS / Data API step to run on Neon. The earlier Supabase-specific
+RLS lockdown does not apply.)
 
 ---
 
