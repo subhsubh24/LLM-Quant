@@ -1,0 +1,43 @@
+# Render blueprint — one-click backend deploy.
+#
+# The FastAPI backend is a STATEFUL, ALWAYS-ON service (continuous scan loop, live
+# WebSocket feeds, in-memory positions/risk state) — NOT serverless. It belongs on a
+# persistent host like this. See docs/DEPLOYMENT.md for the architecture decision.
+#
+# Usage: in Render -> New -> Blueprint -> point at this repo. Then set the secret
+# env vars (marked sync:false) in the dashboard. The frontend goes on Vercel
+# (see docs/DEPLOYMENT.md); to run it here too, add a second web service.
+#
+# NOTE: the backend bundles heavy ML deps (torch/xgboost/lightgbm) used by the
+# stock/crypto side, so it needs ~1GB+ RAM — the free tier will OOM. `starter` is
+# the safe minimum until those deps are trimmed (ROADMAP A1, prediction-markets-only).
+
+services:
+  - type: web
+    name: llm-quant-backend
+    runtime: python
+    plan: starter            # >= 1GB RAM; free tier OOMs on torch. ~$7/mo.
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.api.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # --- Safe defaults (real money stays OFF) ---
+      - key: LIVE_TRADING_ENABLED
+        value: "false"        # owner-only master gate; never enable here
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEBUG
+        value: "false"
+      - key: AUTO_CONNECT_BROKERS
+        value: "false"
+      # --- Secrets / per-deploy (set these in the Render dashboard) ---
+      - key: DATABASE_URL       # Supabase session-pooler string (port 5432)
+        sync: false
+      - key: CORS_ALLOW_ORIGINS # your Vercel origin, e.g. https://llm-quant.vercel.app
+        sync: false
+      - key: ANTHROPIC_API_KEY  # optional (LLM features)
+        sync: false
+      - key: FRED_API_KEY       # optional (market data)
+        sync: false
