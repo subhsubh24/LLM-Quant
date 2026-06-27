@@ -69,8 +69,6 @@ def test_lstm_classifier():
     lstm2.set_weights(weights)
     print(f"[OK] set_weights() works correctly")
 
-    return True
-
 
 def test_trainable_transformer():
     """Test Transformer with proper gradient descent."""
@@ -119,8 +117,6 @@ def test_trainable_transformer():
     # Test weights
     weights = transformer.get_weights()
     print(f"[OK] get_weights() returns {len(weights)} weight matrices")
-
-    return True
 
 
 def test_trainable_vae():
@@ -173,8 +169,6 @@ def test_trainable_vae():
     recon_error = np.mean((recon - X[0:1]) ** 2)
     print(f"[OK] Reconstruction MSE: {recon_error:.4f}")
 
-    return True
-
 
 def test_model_pretrainer():
     """Test the full pre-training pipeline."""
@@ -212,8 +206,6 @@ def test_model_pretrainer():
     # Test prediction
     pred = pretrainer.predict(features[0])
     print(f"[OK] Ensemble prediction: action={pred['action']}, confidence={pred['confidence']:.3f}")
-
-    return True
 
 
 def test_checkpoint_save_load():
@@ -261,8 +253,6 @@ def test_checkpoint_save_load():
     else:
         print(f"[WARN] No checkpoint to load")
 
-    return True
-
 
 @pytest.mark.asyncio
 async def test_alpha_sources():
@@ -297,8 +287,6 @@ async def test_alpha_sources():
     # Test combined alpha
     combined = await alpha.get_combined_alpha("BTC")
     print(f"[OK] Combined alpha: signal={combined['combined_signal']}, recommendation={combined['recommendation']}")
-
-    return True
 
 
 def run_all_tests():

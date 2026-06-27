@@ -56,7 +56,7 @@ def test_bug2_pnl_recalculated_after_trailing_stop():
     # pnl_pct = (current_price - entry_price) / entry_price
 
     # Trailing stop section
-    assert "current_price = low_price  # Exit at the triggered price" in content
+    assert "current_price = low_price" in content
     assert "pnl_pct = (current_price - entry_price) / entry_price" in content
 
     # Should have multiple recalculations

@@ -1135,21 +1135,12 @@ class MasterQuantBot:
         self.models_trained = False
         self.training_required = True  # Require training before live trading
 
-        # Try to load pre-trained models
-        if self.model_pretrainer.load_checkpoints():
-            meets_req, reason = self.model_pretrainer.meets_training_requirements()
-            self.models_trained = meets_req
-            if meets_req:
-                logger.info("✅ Pre-trained models loaded successfully!")
-                # CRITICAL FIX: DON'T copy stale epsilon from checkpoint
-                # Epsilon should always start at 1.0 when models are loaded for live trading
-                # (it will decay during live trading as DQN explores)
-                # self.analytics.dqn.epsilon = self.model_pretrainer.dqn.epsilon  # REMOVED
-                self.analytics.dqn.epsilon = 1.0  # Fresh exploration for live trading
-            else:
-                logger.warning(f"⚠️ Models loaded but: {reason}")
-        else:
-            logger.warning("⚠️ No pre-trained models found - training required before trading")
+        # DO NOT auto-load checkpoints on server startup.
+        # Stale checkpoints pollute model state with old weights and log confusing
+        # messages.  Checkpoints are only loaded when explicitly resuming training
+        # (inside the training pipeline).  On normal boot the models start fresh
+        # and training_required=True blocks live trading until training completes.
+        logger.info("Models initialized untrained - run training before live trading")
 
         # Initialize with some synthetic price history for models
         self._initialize_price_history()
@@ -2028,7 +2019,9 @@ class MasterQuantBot:
             logger.debug(f"Skipping {symbol} - no live price available")
             return None
 
-        iv = 0.65 + np.random.uniform(-0.1, 0.2)
+        # Use a fixed assumed IV for crypto options (no real-time IV source available)
+        # Crypto IV typically ranges 55-85%; 0.65 is a reasonable central estimate.
+        iv = 0.65
 
         if iv > 0.70:
             strategy = f"Sell {base_asset} {option_type.title()}"
@@ -2043,7 +2036,7 @@ class MasterQuantBot:
             probability = 0.40
             max_profit = price * 0.20
             max_loss = price * 0.03
-            rationale = f"Lower crypto IV ({iv*100:.0f}%) - directional"
+            rationale = f"Crypto IV ({iv*100:.0f}%) - directional"
 
         risk_reward = max_profit / max_loss if max_loss > 0 else 0
 

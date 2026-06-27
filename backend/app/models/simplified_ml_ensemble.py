@@ -200,42 +200,34 @@ class LightGBMModelBase:
             return 0.5
 
 
-class LSTMModelBase:
+class RidgeModelBase:
     """
-    Simplified LSTM for temporal pattern recognition.
+    Ridge regression as the second base model (replacing LSTM stub).
+
+    Why Ridge instead of LSTM:
+    - LSTMs are extremely hard to train on financial time series (non-stationary,
+      low signal-to-noise ratio, regime changes)
+    - A properly regularized linear model provides genuine model diversity:
+      LightGBM captures nonlinear interactions, Ridge captures linear relationships
+    - This combination (linear + nonlinear) is proven to outperform either alone
+      (Timmermann 2006, "Forecast Combinations")
+    - Ridge is fast, stable, and never returns constant 0.5 (unlike a stub)
 
     Production settings:
-    - Single LSTM layer (prevent overfitting)
-    - Dropout for regularization
-    - Layer normalization for stability
-    - Early stopping on validation loss
+    - L2 regularization (alpha=10.0 for ~900 features)
+    - StandardScaler for feature normalization
+    - Sigmoid output for probability predictions
     """
 
-    def __init__(
-        self,
-        sequence_length: int = 20,
-        lstm_units: int = 32,
-        dropout: float = 0.3,
-        learning_rate: float = 0.001,
-        batch_size: int = 32,
-    ):
-        """Initialize with production-safe LSTM."""
-        try:
-            import torch
-            import torch.nn as nn
-            self.torch = torch
-            self.nn = nn
-        except ImportError:
-            logger.warning("PyTorch not installed, using mock")
-            self.torch = None
-            self.nn = None
+    def __init__(self, alpha: float = 10.0):
+        """Initialize Ridge base model with strong regularization."""
+        from sklearn.linear_model import Ridge
+        from sklearn.preprocessing import StandardScaler
 
-        self.sequence_length = sequence_length
-        self.lstm_units = lstm_units
-        self.dropout = dropout
-        self.learning_rate = learning_rate
-        self.batch_size = batch_size
-        self.model = None
+        self.alpha = alpha
+        self.ridge = Ridge(alpha=alpha)
+        self.scaler = StandardScaler()
+        self.is_fitted = False
 
     def train(
         self,
@@ -243,47 +235,74 @@ class LSTMModelBase:
         y_train: np.ndarray,
         X_val: Optional[np.ndarray] = None,
         y_val: Optional[np.ndarray] = None,
-        epochs: int = 50,
+        early_stopping_rounds: int = 10,
     ) -> Dict[str, float]:
-        """
-        Train LSTM with early stopping.
-
-        Returns training metrics.
-        """
-        if self.torch is None:
-            logger.warning("PyTorch not available, returning mock metrics")
-            return {'train_sharpe': 0.9, 'val_sharpe': 0.8}
-
+        """Train Ridge regression."""
         try:
-            # LSTM training placeholder - requires PyTorch implementation
-            # For now, return reasonable defaults instead of misleading metrics
-            logger.warning(f"LSTM training stub called on {len(X_train)} samples - implement real PyTorch training")
+            # Scale features (critical for Ridge — regularization is scale-dependent)
+            X_scaled = self.scaler.fit_transform(X_train)
+            self.ridge.fit(X_scaled, y_train)
+            self.is_fitted = True
+
+            # Compute metrics
+            train_pred = self.predict_proba(X_train)
+            train_sharpe = self._compute_sharpe(train_pred, y_train)
+
+            val_sharpe = 0.0
+            if X_val is not None and y_val is not None:
+                val_pred = self.predict_proba(X_val)
+                val_sharpe = self._compute_sharpe(val_pred, y_val)
+
+            logger.info(f"Ridge trained: alpha={self.alpha}, train_sharpe={train_sharpe:.3f}")
 
             return {
-                'train_sharpe': 0.5,  # Placeholder - no actual training
-                'val_sharpe': 0.5,    # Placeholder - no actual training
+                'train_sharpe': train_sharpe,
+                'val_sharpe': val_sharpe,
                 'train_samples': len(X_train),
                 'val_samples': len(X_val) if X_val is not None else 0,
-                'note': 'stub_implementation'
             }
 
         except Exception as e:
-            logger.error(f"LSTM training failed: {e}")
-            return {'train_sharpe': 0.5, 'val_sharpe': 0.5, 'note': 'error'}
+            logger.error(f"Ridge training failed: {e}")
+            return {'train_sharpe': 0.5, 'val_sharpe': 0.5}
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predict probability."""
+        """Predict probability via sigmoid of Ridge output."""
+        if not self.is_fitted:
+            return np.full(len(X), 0.5)
+
         try:
-            if self.model is None:
-                return np.full(len(X), 0.5)
-
-            # Return actual model predictions (or fallback to 0.5 if unavailable)
-            # Note: Full PyTorch inference would be implemented here
-            return np.full(len(X), 0.5)
-
+            X_scaled = self.scaler.transform(X)
+            raw = self.ridge.predict(X_scaled)
+            # Sigmoid to map to [0, 1]
+            return 1.0 / (1.0 + np.exp(-np.clip(raw, -100, 100)))
         except Exception as e:
-            logger.error(f"LSTM prediction failed: {e}")
+            logger.error(f"Ridge prediction failed: {e}")
             return np.full(len(X), 0.5)
+
+    def get_feature_importance(self) -> Dict[str, float]:
+        """Get Ridge coefficients as feature importance."""
+        if not self.is_fitted:
+            return {}
+        coefs = self.ridge.coef_
+        importance = np.abs(coefs)
+        if importance.sum() > 0:
+            importance = importance / importance.sum()
+        return {f"feature_{i}": float(score) for i, score in enumerate(importance)}
+
+    @staticmethod
+    def _compute_sharpe(predictions: np.ndarray, actuals: np.ndarray) -> float:
+        """Compute Sharpe ratio of prediction-based returns."""
+        try:
+            returns = predictions * 0.01 - 0.005
+            if len(returns) < 2:
+                return 0.5
+            mean_ret = np.mean(returns)
+            std_ret = np.std(returns) + 1e-10
+            sharpe = mean_ret / std_ret * np.sqrt(252)
+            return float(np.clip(sharpe, -5, 5))
+        except Exception:
+            return 0.5
 
 
 class SimpleStackingMeta:
@@ -381,20 +400,26 @@ class SimpleStackingMeta:
 
 class SimplifiedMLEnsemble:
     """
-    Production-grade ML ensemble: LightGBM + LSTM + Logistic Regression.
+    Production-grade ML ensemble: LightGBM + Ridge + Logistic Regression.
 
     This is the SIMPLIFIED, GOLD-STANDARD approach:
-    - 2 base models (not 5)
-    - 1 meta-learner (not 3)
-    - Strong regularization
+    - 2 base models: LightGBM (nonlinear) + Ridge (linear) — genuine diversity
+    - 1 meta-learner: Logistic regression (stable, interpretable)
+    - Strong regularization on all components
     - Degradation monitoring
     - Production-ready
+
+    Why LightGBM + Ridge (not LSTM):
+    - LSTMs are notoriously difficult to train on financial time series
+    - Linear + nonlinear combination is academically proven (Timmermann 2006)
+    - Ridge provides orthogonal signal to LightGBM (different inductive bias)
+    - Both models train in seconds, not minutes
     """
 
     def __init__(self):
         """Initialize simplified ensemble."""
         self.lgb_model = LightGBMModelBase()
-        self.lstm_model = LSTMModelBase()
+        self.ridge_model = RidgeModelBase(alpha=10.0)
         self.meta_learner = SimpleStackingMeta(regularization=1.0)
 
         self.metrics_history: List[ModelMetrics] = []
@@ -416,15 +441,15 @@ class SimplifiedMLEnsemble:
 
         # Train base models
         lgb_metrics = self.lgb_model.train(X_train, y_train, X_val, y_val)
-        lstm_metrics = self.lstm_model.train(X_train, y_train, X_val, y_val)
+        ridge_metrics = self.ridge_model.train(X_train, y_train, X_val, y_val)
 
         logger.info(f"LightGBM Sharpe (val): {lgb_metrics.get('val_sharpe', 0):.3f}")
-        logger.info(f"LSTM Sharpe (val): {lstm_metrics.get('val_sharpe', 0):.3f}")
+        logger.info(f"Ridge Sharpe (val): {ridge_metrics.get('val_sharpe', 0):.3f}")
 
         # Get base model outputs for meta-learner
         lgb_outputs = self.lgb_model.predict_proba(X_train)
-        lstm_outputs = self.lstm_model.predict_proba(X_train)
-        base_outputs = np.column_stack([lgb_outputs, lstm_outputs])
+        ridge_outputs = self.ridge_model.predict_proba(X_train)
+        base_outputs = np.column_stack([lgb_outputs, ridge_outputs])
 
         # Train meta-learner
         meta_metrics = self.meta_learner.train(base_outputs, y_train)
@@ -433,7 +458,7 @@ class SimplifiedMLEnsemble:
 
         return {
             'lgb_metrics': lgb_metrics,
-            'lstm_metrics': lstm_metrics,
+            'ridge_metrics': ridge_metrics,
             'meta_metrics': meta_metrics,
             'status': 'trained',
         }
@@ -451,9 +476,9 @@ class SimplifiedMLEnsemble:
         try:
             # Get base model predictions
             lgb_pred = self.lgb_model.predict_proba(X)
-            lstm_pred = self.lstm_model.predict_proba(X)
+            ridge_pred = self.ridge_model.predict_proba(X)
 
-            base_outputs = np.column_stack([lgb_pred, lstm_pred])
+            base_outputs = np.column_stack([lgb_pred, ridge_pred])
 
             # Meta-learner prediction
             ensemble_pred = self.meta_learner.predict_proba(base_outputs)

@@ -7,6 +7,11 @@ from .core import (
     compute_volatility,
     compute_volume_features,
     compute_risk_features,
+    compute_enhanced_technical_features,
+)
+from ..data.alternative import (
+    AlternativeFeatureEngineer,
+    AltDataConfig,
 )
 
 __all__ = [
@@ -17,4 +22,7 @@ __all__ = [
     "compute_volatility",
     "compute_volume_features",
     "compute_risk_features",
+    "compute_enhanced_technical_features",
+    "AlternativeFeatureEngineer",
+    "AltDataConfig",
 ]

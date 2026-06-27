@@ -13,6 +13,8 @@ from .. import __version__, DISCLAIMER
 from ..config import get_settings
 from ..db.database import init_db
 from ..data.crypto_ws import start_crypto_ws, stop_crypto_ws
+from ..prediction_markets.websocket_feeds import start_prediction_feeds, stop_prediction_feeds
+from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator, init_orchestrator
 from .routes import router
 
 
@@ -28,6 +30,45 @@ async def lifespan(app: FastAPI):
     # Tries: Coinbase -> Kraken -> Binance.US -> Binance Global
     await start_crypto_ws()
     logger.info("Crypto WebSocket started - LIVE prices enabled")
+
+    # Start prediction market WebSocket feeds (Polymarket)
+    try:
+        await start_prediction_feeds()
+        logger.info("Prediction market WebSocket feeds started")
+    except Exception as e:
+        logger.warning(f"Prediction market feeds start failed (degraded): {e}")
+
+    # Bootstrap default prediction market portfolio (ensures FK target exists)
+    try:
+        from ..prediction_markets.models import PredictionPortfolio
+        from ..db.database import get_session
+        from sqlmodel import select
+        with get_session() as session:
+            existing = session.exec(
+                select(PredictionPortfolio).where(PredictionPortfolio.id == 1)
+            ).first()
+            if not existing:
+                session.add(PredictionPortfolio(
+                    name="default",
+                    exchange="all",
+                    initial_capital_usd=100.0,
+                    current_cash_usd=100.0,
+                    total_deposited_usd=100.0,
+                    total_value_usd=100.0,
+                    dry_run=True,
+                ))
+                logger.info("Created default prediction market portfolio")
+    except Exception as e:
+        logger.warning(f"Portfolio bootstrap skipped: {e}")
+
+    # Initialize prediction market orchestrator (but don't start scanning)
+    # User can start the bot from the Predictions UI or trigger manual scans
+    try:
+        from ..prediction_markets.orchestrator import init_orchestrator
+        init_orchestrator(scan_interval_sec=120)
+        logger.info("Prediction market orchestrator initialized (idle — start from UI)")
+    except Exception as e:
+        logger.warning(f"Prediction market orchestrator init failed (degraded): {e}")
 
     # Auto-initialize live brokers from config
     settings = get_settings()
@@ -46,6 +87,8 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down QuantLab API...")
+    await stop_orchestrator()
+    await stop_prediction_feeds()
     await stop_crypto_ws()
 
     # Disconnect brokers

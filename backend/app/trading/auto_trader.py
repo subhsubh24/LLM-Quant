@@ -20,6 +20,8 @@ import pandas as pd
 import logging
 
 from ..signals.engine import SignalEngine, PortfolioSignals, StockSignal, get_signal_engine
+from ..signals.hybrid_signal_engine import HybridSignalEngine, HybridSignalConfig, get_hybrid_signal_engine
+from .leap_options_engine import LEAPPortfolioManager, LEAPConfig, get_leap_portfolio_manager
 
 logger = logging.getLogger(__name__)
 from .orders import OrderManager, Order, OrderSide, OrderType, BracketOrder, get_order_manager
@@ -174,6 +176,10 @@ class AutoTrader:
         self.last_signals: Optional[PortfolioSignals] = None
         self.last_rebalance: Optional[datetime] = None
 
+        # Hybrid signal engine (ML + Rules combined)
+        self.hybrid_engine = None  # Initialized lazily when both ML and rules are available
+        self.leap_manager = get_leap_portfolio_manager()
+
         # Automation state
         self.auto_trading_enabled = False
         self.paper_mode = True  # Always true - no real trading
@@ -192,6 +198,27 @@ class AutoTrader:
         """Generate signals for the universe."""
         self.last_signals = self.signal_engine.generate_signals(prices)
         return self.last_signals
+
+    def generate_hybrid_signals(self, prices: pd.DataFrame, features: Optional[pd.DataFrame] = None) -> PortfolioSignals:
+        """Generate signals using hybrid ML+Rules engine if available, else fallback to standard."""
+        hybrid = get_hybrid_signal_engine()
+        if hybrid is not None:
+            try:
+                self.last_signals = hybrid.generate_hybrid_signals(prices, features=features)
+                return self.last_signals
+            except Exception as e:
+                logger.warning(f"Hybrid signal generation failed, falling back to standard: {e}")
+        # Fallback to standard signal engine
+        return self.generate_signals(prices)
+
+    def evaluate_leap_opportunities(self, signals: PortfolioSignals) -> List[Dict]:
+        """Evaluate which signals warrant LEAP options positions."""
+        opportunities = []
+        for signal in signals.signals:
+            result = self.leap_manager.evaluate_signal_for_leaps(signal)
+            if result is not None:
+                opportunities.append(result)
+        return opportunities
 
     def update_prices(self, current_prices: Dict[str, float]):
         """Update portfolio with current prices."""
@@ -317,6 +344,16 @@ class AutoTrader:
                         notes="Rebalance buy",
                     )
                     orders.append(order)
+
+        # Evaluate LEAP opportunities from signals
+        leap_opportunities = self.evaluate_leap_opportunities(signals)
+        if leap_opportunities:
+            logger.info(
+                f"Found {len(leap_opportunities)} LEAP opportunities: "
+                f"{[opp.get('symbol', '?') for opp in leap_opportunities]}"
+            )
+            for opp in leap_opportunities:
+                logger.info(f"  LEAP {opp.get('action')}: {opp.get('symbol')} - {opp.get('reason', '')}")
 
         self.last_rebalance = datetime.now()
         logger.info(f"Rebalance complete: {len(orders)} orders created")

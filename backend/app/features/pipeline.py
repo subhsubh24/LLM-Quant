@@ -27,8 +27,10 @@ from .core import (
     compute_volume_features,
     compute_risk_features,
     compute_technical_features,
+    compute_enhanced_technical_features,
     standardize_features,
 )
+from ..data.alternative import AlternativeFeatureEngineer, AltDataConfig
 
 
 @dataclass
@@ -56,6 +58,7 @@ class FeatureConfig:
 
     # Technical features
     include_technical: bool = True
+    include_enhanced_technical: bool = True
 
     # Standardization
     standardize_method: str = "cross_sectional"  # cross_sectional, time_series, or none
@@ -64,8 +67,12 @@ class FeatureConfig:
     # Feature selection
     enabled_features: List[str] = field(default_factory=lambda: [
         "returns", "momentum", "volatility", "drawdown",
-        "volume", "risk", "technical"
+        "volume", "risk", "technical", "enhanced_technical"
     ])
+
+    # Alternative data configuration
+    include_alternative_data: bool = True
+    alt_data_config: Optional["AltDataConfig"] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for hashing/storage."""
@@ -80,9 +87,12 @@ class FeatureConfig:
             "risk_windows": self.risk_windows,
             "market_proxy_ticker": self.market_proxy_ticker,
             "include_technical": self.include_technical,
+            "include_enhanced_technical": self.include_enhanced_technical,
             "standardize_method": self.standardize_method,
             "clip_outliers": self.clip_outliers,
             "enabled_features": self.enabled_features,
+            "include_alternative_data": self.include_alternative_data,
+            "alt_data_config": self.alt_data_config.to_dict() if self.alt_data_config else None,
         }
 
     def compute_hash(self) -> str:
@@ -106,6 +116,12 @@ class FeaturePipeline:
         self.config = config or FeatureConfig()
         self.feature_names: List[str] = []
         self._market_proxy_data: Optional[pd.Series] = None
+        self._alt_engineer: Optional[AlternativeFeatureEngineer] = None
+
+        # Initialize alternative data engineer if configured
+        if self.config.include_alternative_data:
+            alt_config = self.config.alt_data_config or AltDataConfig()
+            self._alt_engineer = AlternativeFeatureEngineer(alt_config)
 
     def compute_features(
         self,
@@ -202,6 +218,44 @@ class FeaturePipeline:
             tech_features = compute_technical_features(prices, highs, lows)
             all_features.append(tech_features)
 
+        # 8. Enhanced technical features (MACD, Stochastic, ADX, OBV, Fibonacci, BB, VWAP)
+        if "enhanced_technical" in self.config.enabled_features and self.config.include_enhanced_technical:
+            logger.debug("Computing enhanced technical features")
+            if highs is None:
+                highs = prices
+            if lows is None:
+                lows = prices
+            enhanced_tech_features = compute_enhanced_technical_features(
+                prices, highs, lows, volumes=volumes
+            )
+            all_features.append(enhanced_tech_features)
+
+        # 9. Alternative data features (macro, cross-asset, sentiment)
+        if self.config.include_alternative_data and self._alt_engineer is not None:
+            logger.debug("Computing alternative data features")
+            try:
+                # Determine date range from price index
+                idx_min = prices.index.min()
+                idx_max = prices.index.max()
+                start_date = idx_min.date() if hasattr(idx_min, 'date') else idx_min
+                end_date = idx_max.date() if hasattr(idx_max, 'date') else idx_max
+
+                alt_features = self._alt_engineer.compute_features(
+                    start_date=start_date,
+                    end_date=end_date,
+                    price_index=prices.index,
+                )
+
+                if not alt_features.empty:
+                    all_features.append(alt_features)
+                    logger.info(
+                        f"Added {len(alt_features.columns)} alternative data features"
+                    )
+                else:
+                    logger.warning("Alternative data returned empty - continuing without it")
+            except Exception as e:
+                logger.warning(f"Alternative data failed (continuing without it): {e}")
+
         # Combine all features
         if not all_features:
             raise ValueError("No features computed - check enabled_features config")
@@ -211,14 +265,33 @@ class FeaturePipeline:
         # Store feature names
         self.feature_names = features.columns.tolist()
 
-        # Standardize if configured
+        # Standardize if configured -- but SKIP alt data features that are already
+        # standardized (z-scored, percentile-ranked, or binary 0/1). Standardizing
+        # them again distorts their meaning (e.g. binary calendar flags become ~-0.3/+2.1).
+        _ALT_PREFIXES = (
+            "cal_", "regime_", "pol_", "econ_", "fred_", "xasset_", "sent_",
+            "opt_", "edgar_", "news_", "gtrends_", "weather_", "short_",
+            "dark_", "crypto_", "sector_", "bond_", "interact_",
+            "micro_", "vol_", "earn_", "factor_", "composite_", "corr_", "turb_",
+        )
         if self.config.standardize_method != "none":
             logger.debug(f"Standardizing features using {self.config.standardize_method}")
-            features = standardize_features(
-                features,
-                method=self.config.standardize_method,
-                clip_outliers=self.config.clip_outliers
-            )
+            # Separate alt data columns from price-based columns
+            alt_cols = [c for c in features.columns
+                        if any(c.startswith(p) for p in _ALT_PREFIXES)]
+            price_cols = [c for c in features.columns if c not in alt_cols]
+
+            if price_cols:
+                price_features = standardize_features(
+                    features[price_cols],
+                    method=self.config.standardize_method,
+                    clip_outliers=self.config.clip_outliers
+                )
+                if alt_cols:
+                    features = pd.concat([price_features, features[alt_cols]], axis=1)
+                else:
+                    features = price_features
+            # If only alt cols, skip standardization entirely
 
         # Validate no leakage
         self._validate_no_leakage(features, prices)
@@ -268,6 +341,7 @@ class FeaturePipeline:
         Returns dict mapping feature type -> list of feature names.
         """
         groups = {
+            # Traditional price/volume features
             "returns": [],
             "momentum": [],
             "volatility": [],
@@ -275,10 +349,92 @@ class FeaturePipeline:
             "volume": [],
             "risk": [],
             "technical": [],
+            "enhanced_technical": [],
+            # Alternative data features
+            "macro": [],
+            "cross_asset": [],
+            "sentiment": [],
+            "calendar": [],
+            "options": [],
+            "edgar": [],
+            "news": [],
+            "gtrends": [],
+            "weather": [],
+            "short_volume": [],
+            "crypto": [],
+            "congressional": [],
+            "econ_surprise": [],
+            "sector_rotation": [],
+            "bond_stress": [],
+            "microstructure": [],
+            "vol_surface": [],
+            "earnings_seasonality": [],
+            "factor_momentum": [],
+            "correlation_regime": [],
+            "turbulence": [],
+            "composites": [],
+            "alt_interactions": [],
+            "alt_regimes": [],
         }
 
+        # Enhanced technical feature identifiers
+        _enhanced_tech_keys = (
+            "macd_", "stoch_", "adx", "plus_di", "minus_di",
+            "obv_", "fib_dist_", "bb_pct_b", "bb_bandwidth", "vwap_ratio",
+        )
+
         for name in self.feature_names:
-            if "_ret_" in name:
+            # Alternative data features (check first - more specific prefixes)
+            if name.startswith("fred_"):
+                groups["macro"].append(name)
+            elif name.startswith("xasset_"):
+                groups["cross_asset"].append(name)
+            elif name.startswith("sent_"):
+                groups["sentiment"].append(name)
+            elif name.startswith("cal_"):
+                groups["calendar"].append(name)
+            elif name.startswith("opt_"):
+                groups["options"].append(name)
+            elif name.startswith("edgar_"):
+                groups["edgar"].append(name)
+            elif name.startswith("news_"):
+                groups["news"].append(name)
+            elif name.startswith("gtrends_"):
+                groups["gtrends"].append(name)
+            elif name.startswith("weather_"):
+                groups["weather"].append(name)
+            elif name.startswith("short_") or name.startswith("dark_"):
+                groups["short_volume"].append(name)
+            elif name.startswith("crypto_"):
+                groups["crypto"].append(name)
+            elif name.startswith("pol_"):
+                groups["congressional"].append(name)
+            elif name.startswith("econ_"):
+                groups["econ_surprise"].append(name)
+            elif name.startswith("sector_"):
+                groups["sector_rotation"].append(name)
+            elif name.startswith("bond_"):
+                groups["bond_stress"].append(name)
+            elif name.startswith("micro_"):
+                groups["microstructure"].append(name)
+            elif name.startswith("vol_"):
+                groups["vol_surface"].append(name)
+            elif name.startswith("earn_"):
+                groups["earnings_seasonality"].append(name)
+            elif name.startswith("factor_"):
+                groups["factor_momentum"].append(name)
+            elif name.startswith("corr_"):
+                groups["correlation_regime"].append(name)
+            elif name.startswith("turb_"):
+                groups["turbulence"].append(name)
+            elif name.startswith("composite_"):
+                groups["composites"].append(name)
+            elif name.startswith("interact_"):
+                groups["alt_interactions"].append(name)
+            elif name.startswith("regime_"):
+                groups["alt_regimes"].append(name)
+            # Traditional price/volume features
+            elif "_ret_" in name:
                 groups["returns"].append(name)
             elif "_mom_" in name:
                 groups["momentum"].append(name)
@@ -290,6 +446,8 @@ class FeaturePipeline:
                 groups["volume"].append(name)
             elif "beta" in name or "corr" in name or "idio" in name:
                 groups["risk"].append(name)
+            elif any(key in name for key in _enhanced_tech_keys):
+                groups["enhanced_technical"].append(name)
             elif "rsi" in name or "atr" in name or "ma_" in name:
                 groups["technical"].append(name)
 

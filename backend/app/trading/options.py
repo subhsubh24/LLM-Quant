@@ -449,56 +449,109 @@ class OptionsManager:
         self.contracts[contract_id] = contract
         return contract
 
-    def generate_options_chain(
+    # ================== Real Market Data ==================
+
+    def generate_real_options_chain(
         self,
         symbol: str,
-        underlying_price: float,
-        expiration: date,
-        volatility: float = 0.30,
-        num_strikes: int = 11,
-        strike_interval: Optional[float] = None,
-    ) -> Dict[str, List[OptionContract]]:
-        """Generate a full options chain."""
-        if strike_interval is None:
-            # Auto-calculate strike interval
-            strike_interval = underlying_price * 0.025  # 2.5% intervals
-            # Round to nice numbers
-            if strike_interval >= 10:
-                strike_interval = round(strike_interval / 5) * 5
-            elif strike_interval >= 1:
-                strike_interval = round(strike_interval)
-            else:
-                strike_interval = round(strike_interval, 1)
+        expiration: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate options chain using REAL market data from yfinance.
 
-        # Generate strikes around ATM
-        atm_strike = round(underlying_price / strike_interval) * strike_interval
-        half_range = (num_strikes // 2) * strike_interval
+        Returns None if real data is unavailable. Never falls back to synthetic
+        data -- callers should handle None explicitly rather than silently
+        consuming fabricated prices.
+        """
+        from ..data.options_data_provider import get_options_data_provider
 
-        strikes = np.arange(
-            atm_strike - half_range,
-            atm_strike + half_range + strike_interval,
-            strike_interval
-        )
+        provider = get_options_data_provider()
+        real_chain = provider.get_options_chain(symbol, expiration)
 
+        if real_chain is None:
+            logger.warning(f"Real options data unavailable for {symbol} - no synthetic fallback")
+            return None
+
+        # Convert real data to our OptionContract format
         calls = []
         puts = []
 
-        for strike in strikes:
-            call = self.price_option(
-                symbol, underlying_price, strike, expiration, volatility, OptionType.CALL
+        # Determine expiration date from the chain
+        if expiration:
+            exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+        elif real_chain.expiration_dates:
+            exp_date = real_chain.expiration_dates[0]
+        else:
+            exp_date = date.today()
+
+        for _, row in real_chain.calls.iterrows():
+            contract = self._real_row_to_contract(
+                symbol, row, real_chain.underlying_price,
+                OptionType.CALL, exp_date
             )
-            put = self.price_option(
-                symbol, underlying_price, strike, expiration, volatility, OptionType.PUT
+            if contract:
+                calls.append(contract)
+
+        for _, row in real_chain.puts.iterrows():
+            contract = self._real_row_to_contract(
+                symbol, row, real_chain.underlying_price,
+                OptionType.PUT, exp_date
             )
-            calls.append(call)
-            puts.append(put)
+            if contract:
+                puts.append(contract)
 
         return {
             "calls": calls,
             "puts": puts,
-            "underlying_price": underlying_price,
-            "expiration": expiration.isoformat(),
+            "underlying_price": real_chain.underlying_price,
+            "data_source": "yfinance_real",
+            "fetch_time": real_chain.fetch_time.isoformat(),
         }
+
+    def _real_row_to_contract(self, symbol, row, underlying_price, option_type, expiration):
+        """Convert a yfinance options row to our OptionContract."""
+        try:
+            strike = float(row.get('strike', 0))
+            if strike <= 0:
+                return None
+
+            T = max(0, (expiration - date.today()).days) / 365.0
+            iv = float(row.get('impliedVolatility', 0.3) or 0.3)
+
+            # Use real market prices
+            bid = float(row.get('bid', 0) or 0)
+            ask = float(row.get('ask', 0) or 0)
+            last = float(row.get('lastPrice', 0) or 0)
+            premium = last if last > 0 else (bid + ask) / 2
+
+            # Calculate Greeks using real IV
+            greeks = BlackScholes.greeks(
+                underlying_price, strike, T, self.DEFAULT_RISK_FREE_RATE, iv, option_type
+            )
+
+            contract_id = f"{symbol}_{option_type.value}_{strike}_{expiration}_real"
+            contract = OptionContract(
+                id=contract_id,
+                symbol=symbol,
+                option_type=option_type,
+                strike=strike,
+                expiration=expiration,
+                underlying_price=underlying_price,
+                premium=premium,
+                bid=bid,
+                ask=ask,
+                last_price=last,
+                implied_volatility=iv,
+                greeks=greeks,
+                open_interest=int(row.get('openInterest', 0) or 0),
+                volume=int(row.get('volume', 0) or 0),
+            )
+
+            self.contracts[contract_id] = contract
+            return contract
+        except Exception as e:
+            logger.debug(f"Failed to convert options row: {e}")
+            return None
 
     # ================== Common Strategies ==================
 

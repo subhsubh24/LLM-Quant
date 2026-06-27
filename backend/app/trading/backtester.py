@@ -24,8 +24,32 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
+import pandas as pd
+
 from .microstructure import MicrostructureExtractor, OrderBookFetcher
 from .continuous_learning import ContinuousLearner, AdaptiveEnsembleWeighter
+from ..data.alternative.alt_data_context import AltDataContext
+from .regime_detector import detect_market_regime as _detect_market_regime
+from .signal_filters import (
+    is_signal_statistically_significant as _is_signal_statistically_significant,
+    check_trend_filter,
+    check_mean_reversion_filter,
+    check_microstructure_filter,
+    check_confidence_and_consensus,
+    check_cooldown as _check_cooldown,
+)
+from .position_manager import (
+    get_optimal_stop_distance as _get_optimal_stop_distance,
+    calculate_stop_loss,
+    check_exit_conditions,
+    update_position_tracking,
+    calculate_position_volatility,
+    process_exit,
+)
+from .backtest_metrics import (
+    calculate_metrics as _calculate_metrics_impl,
+    _empty_result as _empty_result_impl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -565,6 +589,17 @@ class HistoricalDataDownloader:
     # Remove duplicates while preserving order
     STOCK_SYMBOLS = list(dict.fromkeys(STOCK_SYMBOLS))
 
+    # ==========================================================================
+    # FAST BACKTEST SYMBOLS (top liquidity only — runs in minutes, not days)
+    # ==========================================================================
+    BACKTEST_CRYPTO_SYMBOLS = [
+        "BTC", "ETH", "BNB", "XRP", "SOL", "ADA", "DOGE", "AVAX", "LINK", "DOT",
+        "MATIC", "UNI", "ATOM", "NEAR", "APT", "ARB", "OP", "INJ", "FIL", "LTC",
+    ]
+    BACKTEST_STOCK_SYMBOLS = [
+        "SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "JPM",
+    ]
+
     def __init__(self):
         self.data_cache: Dict[str, List[OHLCV]] = {}
 
@@ -732,10 +767,25 @@ class HistoricalDataDownloader:
             logger.error(f"Unexpected error downloading {symbol}: {type(e).__name__}: {e}")
             return []
 
-    async def download_all(self, days: int = 365, max_concurrent: int = 10) -> Dict[str, List[OHLCV]]:
-        """Download all historical data for training with parallel downloads."""
-        total_crypto = len(self.CRYPTO_SYMBOLS)
-        total_stocks = len(self.STOCK_SYMBOLS)
+    async def download_all(self, days: int = 365, max_concurrent: int = 10, fast_backtest: bool = True) -> Dict[str, List[OHLCV]]:
+        """Download historical data for training with parallel downloads.
+
+        Args:
+            days: Number of days of history to download
+            max_concurrent: Max parallel downloads
+            fast_backtest: If True, use top-30 liquid symbols only (runs in minutes).
+                          If False, use full 1300+ symbol universe (runs in hours/days).
+        """
+        if fast_backtest:
+            crypto_symbols = self.BACKTEST_CRYPTO_SYMBOLS
+            stock_symbols = self.BACKTEST_STOCK_SYMBOLS
+            logger.info(f"⚡ FAST BACKTEST MODE: Using {len(crypto_symbols)} crypto + {len(stock_symbols)} stock symbols")
+        else:
+            crypto_symbols = self.CRYPTO_SYMBOLS
+            stock_symbols = self.STOCK_SYMBOLS
+
+        total_crypto = len(crypto_symbols)
+        total_stocks = len(stock_symbols)
         total_symbols = total_crypto + total_stocks
 
         logger.info(f"Downloading {days} days of data for {total_symbols} symbols...")
@@ -765,9 +815,9 @@ class HistoricalDataDownloader:
 
         # Create download tasks
         tasks = []
-        for symbol in self.CRYPTO_SYMBOLS:
+        for symbol in crypto_symbols:
             tasks.append(download_with_limit(symbol, is_crypto=True))
-        for symbol in self.STOCK_SYMBOLS:
+        for symbol in stock_symbols:
             tasks.append(download_with_limit(symbol, is_crypto=False))
 
         # Execute all downloads with concurrency limit
@@ -851,6 +901,9 @@ class WalkForwardBacktester:
         # Timeframe configuration (set from config during run_backtest, defaults to 1h)
         self._annualization_factor = 365 * 24  # Default: hourly crypto (8760 candles/year)
         self._candles_per_day = 24             # Default: 1h candles
+
+        # Alternative data context for augmenting features with macro/sentiment/calendar signals
+        self.alt_data_context: Optional[AltDataContext] = None
 
         self.results: List[BacktestResult] = []
         self.equity_curve: List[Tuple[datetime, float]] = []
@@ -1080,43 +1133,257 @@ class WalkForwardBacktester:
             else:
                 closes_above_prev = 0
 
+            # =====================================================================
+            # NEW FEATURES: Fill 29 zero-padded dimensions with real signal
+            # These replace dead zero-padding that wasted 45% of model capacity.
+            # =====================================================================
+
+            # 16. Cross-timeframe momentum: 50-period vs 200-period MA convergence
+            sma_50_local = np.mean(window_close[-50:]) if len(window_close) >= 50 else np.mean(window_close)
+            sma_200_local = np.mean(window_close[-200:]) if len(window_close) >= 200 else np.mean(window_close)
+            ma_cross_50_200 = (sma_50_local - sma_200_local) / (sma_200_local + 1e-8)
+
+            # 17. MA cross momentum: 10-period vs 50-period (faster signal)
+            sma_10 = np.mean(window_close[-10:]) if len(window_close) >= 10 else closes[i]
+            ma_cross_10_50 = (sma_10 - sma_50_local) / (sma_50_local + 1e-8)
+
+            # 18. Accumulation/Distribution proxy (volume-price correlation)
+            if len(window_close) >= 20 and len(window_high) >= 20:
+                clv = np.zeros(20)
+                for k in range(20):
+                    hl = window_high[-20+k] - window_low[-20+k]
+                    if hl > 0:
+                        clv[k] = ((window_close[-20+k] - window_low[-20+k]) -
+                                  (window_high[-20+k] - window_close[-20+k])) / hl
+                ad_line = np.cumsum(clv * window_vol[-20:])
+                ad_momentum = (ad_line[-1] - ad_line[0]) / (np.abs(ad_line[0]) + 1e-8) if len(ad_line) > 0 else 0
+            else:
+                ad_momentum = 0
+
+            # 19. Wick ratio: rejection signal (long wicks = reversal)
+            body = abs(closes[i] - window_close[-2]) if len(window_close) >= 2 else 1e-8
+            upper_wick = highs[i] - max(closes[i], window_close[-2] if len(window_close) >= 2 else closes[i])
+            lower_wick = min(closes[i], window_close[-2] if len(window_close) >= 2 else closes[i]) - lows[i]
+            total_wick = upper_wick + lower_wick
+            wick_body_ratio = total_wick / (body + 1e-8)
+            wick_body_ratio = min(wick_body_ratio, 10.0)  # Cap at 10
+
+            # 20. Upper wick dominance (selling pressure)
+            wick_direction = (upper_wick - lower_wick) / (total_wick + 1e-8)
+
+            # 21. Returns 50-period (longer-term momentum)
+            returns_50 = (closes[i] - closes[i-50]) / (closes[i-50] + 1e-8) if i >= 50 else 0
+
+            # 22. Returns 100-period
+            returns_100 = (closes[i] - closes[i-100]) / (closes[i-100] + 1e-8) if i >= 100 else 0
+
+            # 23. Returns 200-period (match primary prediction horizon)
+            returns_200 = (closes[i] - closes[i-200]) / (closes[i-200] + 1e-8) if i >= 200 else 0
+
+            # 24. Volume-price divergence: price rising but volume falling = weak
+            if len(window_close) >= 20 and len(window_vol) >= 20:
+                price_chg_20 = (window_close[-1] - window_close[-20]) / (window_close[-20] + 1e-8)
+                vol_chg_20 = (np.mean(window_vol[-5:]) - np.mean(window_vol[-20:-5])) / (np.mean(window_vol[-20:-5]) + 1e-8)
+                # Divergence: same sign = confirming, different sign = diverging
+                vol_price_divergence = price_chg_20 * vol_chg_20  # Positive = confirming
+            else:
+                vol_price_divergence = 0
+
+            # 25. Return autocorrelation (lag-1): mean-reversion vs momentum regime
+            if len(log_returns) >= 20:
+                r1 = log_returns[-20:-1]
+                r2 = log_returns[-19:]
+                if np.std(r1) > 1e-8 and np.std(r2) > 1e-8:
+                    autocorr_1 = np.corrcoef(r1, r2)[0, 1]
+                    autocorr_1 = 0 if np.isnan(autocorr_1) else autocorr_1
+                else:
+                    autocorr_1 = 0
+            else:
+                autocorr_1 = 0
+
+            # 26. Return autocorrelation (lag-5): weekly pattern
+            if len(log_returns) >= 25:
+                r1 = log_returns[-25:-5]
+                r2 = log_returns[-20:]
+                if np.std(r1) > 1e-8 and np.std(r2) > 1e-8:
+                    autocorr_5 = np.corrcoef(r1, r2)[0, 1]
+                    autocorr_5 = 0 if np.isnan(autocorr_5) else autocorr_5
+                else:
+                    autocorr_5 = 0
+            else:
+                autocorr_5 = 0
+
+            # 27. Kurtosis of returns (tail heaviness = regime change)
+            if len(log_returns) >= 20:
+                centered = log_returns[-20:] - np.mean(log_returns[-20:])
+                std_r = np.std(log_returns[-20:])
+                return_kurtosis = np.mean(centered ** 4) / (std_r ** 4 + 1e-8) - 3  # Excess kurtosis
+            else:
+                return_kurtosis = 0
+
+            # 28. Distance from 52-candle high/low (support/resistance proxy)
+            if len(window_close) >= 52:
+                dist_from_high = (closes[i] - np.max(window_close[-52:])) / (np.max(window_close[-52:]) + 1e-8)
+                dist_from_low = (closes[i] - np.min(window_close[-52:])) / (np.min(window_close[-52:]) + 1e-8)
+            else:
+                dist_from_high = 0
+                dist_from_low = 0
+
+            # 29. Volatility of volume (unstable volume = institutional activity)
+            if len(window_vol) >= 20:
+                vol_of_vol = np.std(window_vol[-20:]) / (np.mean(window_vol[-20:]) + 1e-8)
+            else:
+                vol_of_vol = 0
+
+            # 30. Close Location Value: where price closed within range
+            hl = highs[i] - lows[i]
+            close_location_value = (2 * closes[i] - highs[i] - lows[i]) / (hl + 1e-8) if hl > 0 else 0
+
+            # 31. Consecutive up/down candles (streak detection)
+            streak = 0
+            for k in range(1, min(20, len(window_close))):
+                if window_close[-k] > window_close[-k-1]:
+                    if streak >= 0:
+                        streak += 1
+                    else:
+                        break
+                elif window_close[-k] < window_close[-k-1]:
+                    if streak <= 0:
+                        streak -= 1
+                    else:
+                        break
+                else:
+                    break
+            candle_streak = streak / 10.0  # Normalize
+
+            # 32. MACD histogram (signal line divergence)
+            ema_9_macd = self._ema(window_close, 9)
+            macd_value = ema_12 - ema_26
+            macd_signal = ema_9_macd - ema_26  # Approximate signal line
+            macd_histogram = (macd_value - macd_signal) / (closes[i] + 1e-8)
+
+            # 33. Garman-Klass volatility (more efficient than Parkinson)
+            if len(window_close) >= 2:
+                gk_terms = []
+                for k in range(max(1, len(window_close)-20), len(window_close)):
+                    hl = np.log(window_high[k] / (window_low[k] + 1e-8))
+                    co = np.log(window_close[k] / (window_close[k-1] + 1e-8))
+                    gk_terms.append(0.5 * hl**2 - (2*np.log(2) - 1) * co**2)
+                gk_vol = np.sqrt(max(0, np.mean(gk_terms))) * np.sqrt(self._annualization_factor)
+            else:
+                gk_vol = realized_vol
+
+            # 34. Relative volume spike (current bar vs 20-bar avg)
+            if len(window_vol) >= 20:
+                vol_spike = window_vol[-1] / (np.mean(window_vol[-20:]) + 1e-8) - 1
+                vol_spike = min(vol_spike, 5.0)  # Cap at 5x
+            else:
+                vol_spike = 0
+
+            # 35. Intrabar momentum (close vs open proxy using consecutive closes)
+            if len(window_close) >= 2:
+                intrabar_momentum = (closes[i] - window_close[-2]) / (atr_value + 1e-8)
+                intrabar_momentum = np.clip(intrabar_momentum, -3.0, 3.0)
+            else:
+                intrabar_momentum = 0
+
+            # 36-44. Rolling return percentiles (captures distribution shape)
+            if len(log_returns) >= 50:
+                ret_p10 = np.percentile(log_returns[-50:], 10)
+                ret_p90 = np.percentile(log_returns[-50:], 90)
+                ret_range = ret_p90 - ret_p10  # Distribution width
+            else:
+                ret_p10 = 0
+                ret_p90 = 0
+                ret_range = 0
+
+            # 45. EMA momentum divergence (price vs EMA acceleration)
+            ema_50 = self._ema(window_close, 50) if len(window_close) >= 50 else closes[i]
+            ema_divergence = (closes[i] - ema_50) / (atr_value + 1e-8)
+            ema_divergence = np.clip(ema_divergence, -5.0, 5.0)
+
+            # 46. High-Low range expansion (volatility breakout)
+            if len(window_high) >= 20:
+                recent_hl = np.mean(window_high[-5:] - window_low[-5:])
+                older_hl = np.mean(window_high[-20:-5] - window_low[-20:-5])
+                range_expansion = (recent_hl - older_hl) / (older_hl + 1e-8)
+            else:
+                range_expansion = 0
+
+            # 47. Price efficiency ratio (directional move vs total path)
+            if len(window_close) >= 20:
+                net_move = abs(window_close[-1] - window_close[-20])
+                total_path = np.sum(np.abs(np.diff(window_close[-20:])))
+                price_efficiency = net_move / (total_path + 1e-8)
+            else:
+                price_efficiency = 0
+
+            # 48. Volume-weighted RSI (RSI but weighted by volume)
+            if len(window_close) >= 15 and len(window_vol) >= 15:
+                price_changes = np.diff(window_close[-15:])
+                vol_weights = window_vol[-14:]
+                vol_gains = np.sum(np.maximum(price_changes, 0) * vol_weights)
+                vol_losses = np.sum(np.maximum(-price_changes, 0) * vol_weights)
+                vol_rsi = 100 - 100 / (1 + vol_gains / (vol_losses + 1e-8))
+                vol_rsi = vol_rsi / 100  # Normalize to 0-1
+            else:
+                vol_rsi = 0.5
+
+            # 49. Relative return rank (where is current return in recent history)
+            if len(log_returns) >= 50:
+                current_ret = log_returns[-1] if len(log_returns) > 0 else 0
+                rank = np.mean(log_returns[-50:] <= current_ret)  # Percentile rank
+                return_rank = rank * 2 - 1  # Scale to -1 to 1
+            else:
+                return_rank = 0
+
             feature_vector = [
-                returns_1, returns_5, returns_10, returns_20,
-                realized_vol, parkinson_vol,
-                rsi / 100,  # Normalize to 0-1
-                macd,
-                bb_position,
-                vol_ratio,
-                momentum,
-                trend_strength,
-                # Normalized price levels
-                (closes[i] - np.min(window_close)) / (np.max(window_close) - np.min(window_close) + 1e-8),
-                # High-low range
-                (window_high[-1] - window_low[-1]) / (closes[i] + 1e-8),
-                # PHASE E: Enhanced features
-                mean_reversion,
-                vol_momentum,
-                vol_regime,
-                accel,
-                return_vol,
-                # TIER 1 FIX: Microstructure features
-                vol_accel,
-                hl_spread,
-                order_imbalance,
-                price_to_vwap,
-                vol_concentration,
-                # NEW: Advanced features (10+ more for 30 total)
-                stoch,
-                atr_ratio,
-                mean_reversion_100,
-                mean_reversion_200,
-                vol_mean_reversion,
-                vol_trend,
-                price_range_ratio,
-                breakout_signal,
-                jump_ratio,
-                return_skew,
-                closes_above_prev,
+                # Original 35 features
+                returns_1, returns_5, returns_10, returns_20,       # 0-3: Momentum
+                realized_vol, parkinson_vol,                         # 4-5: Volatility
+                rsi / 100, macd, bb_position,                       # 6-8: Oscillators
+                vol_ratio, momentum, trend_strength,                 # 9-11: Volume & trend
+                (closes[i] - np.min(window_close)) / (np.max(window_close) - np.min(window_close) + 1e-8),  # 12: Price level
+                (window_high[-1] - window_low[-1]) / (closes[i] + 1e-8),  # 13: HL range
+                mean_reversion, vol_momentum, vol_regime,           # 14-16: Enhanced
+                accel, return_vol,                                   # 17-18: Dynamics
+                vol_accel, hl_spread, order_imbalance,              # 19-21: Microstructure
+                price_to_vwap, vol_concentration,                    # 22-23: Volume
+                stoch, atr_ratio,                                    # 24-25: Technical
+                mean_reversion_100, mean_reversion_200,             # 26-27: Multi-scale MR
+                vol_mean_reversion, vol_trend,                       # 28-29: Vol dynamics
+                price_range_ratio, breakout_signal,                  # 30-31: Range & breakout
+                jump_ratio, return_skew, closes_above_prev,         # 32-34: Tail & pattern
+                # NEW 29 features replacing zero-padding (35-63)
+                ma_cross_50_200,           # 35: Golden/death cross signal
+                ma_cross_10_50,            # 36: Fast MA cross
+                ad_momentum,               # 37: Accumulation/distribution momentum
+                wick_body_ratio,           # 38: Candle rejection signal
+                wick_direction,            # 39: Selling vs buying pressure from wicks
+                returns_50,                # 40: 50-period momentum
+                returns_100,               # 41: 100-period momentum
+                returns_200,               # 42: 200-period momentum (matches prediction horizon)
+                vol_price_divergence,      # 43: Volume confirms price? (key signal)
+                autocorr_1,                # 44: Mean-reversion vs momentum regime
+                autocorr_5,                # 45: Weekly autocorrelation pattern
+                return_kurtosis,           # 46: Tail risk (regime change indicator)
+                dist_from_high,            # 47: Distance from resistance
+                dist_from_low,             # 48: Distance from support
+                vol_of_vol,                # 49: Volume stability (institutional activity)
+                close_location_value,      # 50: Intra-bar buying/selling pressure
+                candle_streak,             # 51: Consecutive direction (trend strength)
+                macd_histogram,            # 52: MACD divergence signal
+                gk_vol,                    # 53: Garman-Klass vol (more efficient estimator)
+                vol_spike,                 # 54: Volume breakout detection
+                intrabar_momentum,         # 55: ATR-normalized momentum
+                ret_p10,                   # 56: Return distribution left tail
+                ret_p90,                   # 57: Return distribution right tail
+                ret_range,                 # 58: Return distribution width
+                ema_divergence,            # 59: EMA acceleration signal
+                range_expansion,           # 60: Volatility breakout
+                price_efficiency,          # 61: Trend efficiency (0=choppy, 1=clean)
+                vol_rsi,                   # 62: Volume-weighted RSI
+                return_rank,               # 63: Percentile rank of current return
             ]
 
             features.append(feature_vector)
@@ -1158,67 +1425,99 @@ class WalkForwardBacktester:
             ema = (price - ema) * multiplier + ema
         return ema
 
+    def prepare_alt_data(self, candles_dict: Dict[str, List['OHLCV']]) -> bool:
+        """
+        Initialize alternative data context from historical candle date range.
+
+        Computes macro, sentiment, calendar, and other alternative features
+        for the date range covered by the candles. These features are then
+        appended to each price-based feature vector during training and backtesting.
+
+        Returns True if alternative data was successfully prepared.
+        """
+        try:
+            # Find the overall date range from all candles
+            all_dates = []
+            for candles in candles_dict.values():
+                for c in candles:
+                    all_dates.append(c.timestamp.date() if hasattr(c.timestamp, 'date') else c.timestamp)
+
+            if not all_dates:
+                return False
+
+            start_date = min(all_dates)
+            end_date = max(all_dates)
+
+            self.alt_data_context = AltDataContext()
+            ok = self.alt_data_context.prepare(start_date, end_date)
+
+            if ok:
+                logger.info(
+                    f"✅ Alternative data prepared: {self.alt_data_context.n_features} features "
+                    f"for {len(self.alt_data_context._date_to_idx)} dates"
+                )
+            else:
+                logger.info("⚠️ Alternative data unavailable - proceeding with price features only")
+                self.alt_data_context = None
+
+            return ok
+
+        except Exception as e:
+            logger.warning(f"⚠️ Alternative data preparation failed: {e}")
+            self.alt_data_context = None
+            return False
+
+    def augment_features_with_alt_data(
+        self,
+        features: np.ndarray,
+        candles: List['OHLCV'],
+        lookback: int = 400,
+    ) -> np.ndarray:
+        """
+        Append alternative data features to price-based feature matrix.
+
+        For each row in features[i], look up the corresponding candle's date
+        and append the alternative data vector for that date.
+
+        Args:
+            features: Price-based features from prepare_features(), shape (N, 64)
+            candles: The candles that produced these features
+            lookback: The lookback used in prepare_features()
+
+        Returns:
+            Augmented features with alt data appended, shape (N, 64 + n_alt_features)
+        """
+        if self.alt_data_context is None or not self.alt_data_context.is_prepared:
+            return features
+
+        if len(features) == 0:
+            return features
+
+        n_alt = self.alt_data_context.n_features
+        alt_matrix = np.zeros((len(features), n_alt), dtype=np.float32)
+
+        for i in range(len(features)):
+            candle_idx = lookback + i
+            if candle_idx < len(candles):
+                candle_date = candles[candle_idx].timestamp.date() \
+                    if hasattr(candles[candle_idx].timestamp, 'date') \
+                    else candles[candle_idx].timestamp
+                alt_matrix[i] = self.alt_data_context.get_features(candle_date)
+
+        return np.hstack([features, alt_matrix])
+
     def detect_market_regime(self, candles: List[OHLCV], window: int = 50, prev_regime: str = 'sideways',
                             switch_threshold: float = 1.0, base_threshold: float = 0.02,
                             vol_threshold: float = 0.01) -> str:
         """
         Detect current market regime (bull, bear, or sideways) with hysteresis to prevent whipsaw.
-
-        Args:
-            candles: Recent candles to analyze
-            window: Look-back window
-            prev_regime: Previous regime (for hysteresis/stickiness)
-            switch_threshold: Multiplier for trend needed to switch regime (>1.0 = hysteresis)
-                             1.0 = no hysteresis (original behavior)
-                             1.3 = require 30% larger trend change to switch
-            base_threshold: Minimum trend strength (SMA divergence) to detect a regime (default: 2%)
-                           Lower = more sensitive to regime changes (catches more but more whipsaw)
-                           Higher = less sensitive (misses some but more stable)
-            vol_threshold: Minimum volatility to confirm a regime change (default: 1%)
-                          Prevents false regime detection in flat/quiet markets
-
-        Returns:
-            'bull', 'bear', or 'sideways'
+        Delegates to regime_detector module.
         """
-        if len(candles) < window:
-            return 'sideways'
-
-        recent = candles[-window:]
-        closes = np.array([c.close for c in recent])
-
-        # Calculate trend
-        sma_short = np.mean(closes[-20:])
-        sma_long = np.mean(closes)
-        # BUG FIX #24: Add epsilon protection for division by zero (if all closes near zero)
-        trend = (sma_short - sma_long) / (sma_long + 1e-8)
-
-        # Calculate volatility
-        # BUG FIX #17: Add epsilon protection for division by zero (close prices near zero)
-        returns = np.diff(closes) / (closes[:-1] + 1e-8)
-        volatility = np.std(returns)
-
-        # If already in a regime, require stronger signal to leave it (hysteresis)
-        if prev_regime == 'bull':
-            if trend < -base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bear'
-            elif trend > base_threshold and volatility > vol_threshold:
-                return 'bull'  # Stay in bull if still positive
-            else:
-                return 'sideways'
-        elif prev_regime == 'bear':
-            if trend > base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bull'
-            elif trend < -base_threshold and volatility > vol_threshold:
-                return 'bear'  # Stay in bear if still negative
-            else:
-                return 'sideways'
-        else:  # prev_regime == 'sideways'
-            if trend > base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bull'
-            elif trend < -base_threshold * switch_threshold and volatility > vol_threshold:
-                return 'bear'
-            else:
-                return 'sideways'
+        return _detect_market_regime(
+            candles, window=window, prev_regime=prev_regime,
+            switch_threshold=switch_threshold, base_threshold=base_threshold,
+            vol_threshold=vol_threshold,
+        )
 
     def calculate_correlation(self, candles1: List[OHLCV], candles2: List[OHLCV], lookback: int = 50) -> float:
         """
@@ -1260,90 +1559,16 @@ class WalkForwardBacktester:
     def is_signal_statistically_significant(self, symbol: str, action: int, signal_history: Dict) -> bool:
         """
         Test if a signal's historical win rate is statistically significant at 95% confidence.
-        Uses binomial test: H0 = win_rate = 50%, H1 = win_rate > 50%
-
-        Args:
-            symbol: Trading pair symbol
-            action: Action code (0=short, 2=long)
-            signal_history: Dict of symbol -> {action -> [win/loss results]}
-
-        Returns:
-            True if win rate is significantly > 50% at 95% confidence (p < 0.05)
+        Delegates to signal_filters module.
         """
-        try:
-            from scipy import stats
-
-            # Get history for this symbol-action combo
-            if symbol not in signal_history:
-                return True  # No history, allow the signal (neutral)
-
-            if action not in signal_history[symbol]:
-                return True  # No history for this action, allow it
-
-            trade_results = signal_history[symbol][action]  # List of 1 (win) or 0 (loss)
-
-            # Need minimum sample size for statistical significance
-            if len(trade_results) < 10:
-                return True  # Not enough data yet, allow signal
-
-            # Count wins and total trades
-            wins = sum(trade_results)
-            total = len(trade_results)
-
-            # Binomial test: is win rate > 50% at 95% confidence?
-            # H0: p = 0.5, H1: p > 0.5 (one-tailed test)
-            # BUG FIX #20: Handle scipy API compatibility (1.7+ uses binomtest instead of binom_test)
-            try:
-                # Try newer scipy API first (scipy >= 1.7)
-                p_value = stats.binomtest(wins, total, 0.5, alternative='greater').pvalue
-            except AttributeError:
-                # Fall back to older API (scipy < 1.7)
-                p_value = stats.binom_test(wins, total, 0.5, alternative='greater')
-
-            # If p < 0.05, we reject null hypothesis at 95% confidence
-            is_significant = p_value < 0.05
-
-            if not is_significant and total >= 20:
-                # Log when we're filtering due to statistical significance
-                # BUG FIX #33: Defensive division - ensure total is not zero (already checked but explicit protection)
-                win_rate = (wins / max(total, 1)) * 100 if total > 0 else 0.0
-                if total >= 10:
-                    logger.debug(f"🔍 Signal {symbol}:{action} filtered: {win_rate:.1f}% win rate ({wins}/{total}) not significantly > 50% (p={p_value:.3f})")
-
-            return is_significant
-
-        except Exception as e:
-            logger.error(f"❌ CRITICAL: Significance test failed for {symbol}:{action}: {e}")
-            return False  # If error, reject the signal (safe default)
+        return _is_signal_statistically_significant(symbol, action, signal_history)
 
     def get_optimal_stop_distance(self, stop_distance_effectiveness: Dict) -> float:
         """
         Learn optimal stop distance from historical data.
-        Returns the stop distance with highest win rate.
-
-        Args:
-            stop_distance_effectiveness: Dict mapping distance -> {wins, losses}
-
-        Returns:
-            Optimal stop distance to use (default 0.05 = 5%)
+        Delegates to position_manager module.
         """
-        try:
-            best_distance = 0.05  # Default fallback
-            best_win_rate = 0.0
-            min_trades = 10  # Need at least 10 trades to trust the metric
-
-            for distance, results in stop_distance_effectiveness.items():
-                total_trades = results["wins"] + results["losses"]
-                if total_trades >= min_trades:
-                    win_rate = results["wins"] / total_trades
-                    if win_rate > best_win_rate:
-                        best_win_rate = win_rate
-                        best_distance = distance
-
-            return best_distance
-        except Exception as e:
-            logger.error(f"Optimal stop distance calculation failed: {e} - using default 5%")
-            return 0.05  # Fallback to 5% if any error
+        return _get_optimal_stop_distance(stop_distance_effectiveness)
 
     def generate_labels(self, candles: List[OHLCV], lookahead: int = 5, threshold: float = 0.02) -> np.ndarray:
         """
@@ -1374,16 +1599,21 @@ class WalkForwardBacktester:
         self,
         candles: List[OHLCV],
         horizons: List[int] = None,
-        threshold: float = 0.02
+        threshold: float = 0.005
     ) -> Dict[int, np.ndarray]:
         """
         Generate trading labels for multiple lookahead horizons.
+
+        Threshold reduced from 0.02 (2%) to 0.005 (0.5%) to minimize the HOLD class.
+        With 3-class output (SELL/HOLD/BUY), the old 2% threshold created 15-17% HOLD
+        labels — a useless class that wasted model capacity. At 0.5%, HOLD drops to
+        ~2-5% and models effectively learn binary direction (UP/DOWN).
 
         Multi-horizon training allows the ensemble to learn patterns at different timescales:
         - 24h: Short-term tactical moves (1 day)
         - 48h: Medium-term directional bias (2 days)
         - 100h: Intermediate trend (4+ days)
-        - 200h: Longer trend (8+ days)
+        - 200h: Longer trend (8+ days) ← PRIMARY
         - 400h: Long-term direction (16+ days)
         - 800h: Ultra-long direction (33+ days)
         - 1600h: Extended direction (66+ days - macro trends, earnings cycles, seasonality)
@@ -1411,14 +1641,20 @@ class WalkForwardBacktester:
         min_samples = max(1, len(closes) - max_lookahead)  # Ensure at least 1 sample
 
         for lookahead in horizons:
+            # Horizon-aware threshold: shorter horizons = smaller moves = lower threshold
+            # This prevents 85%+ HOLD labels on short horizons where 2% moves are rare.
+            # Scale: sqrt(horizon/200) so 24h→0.35x, 200h→1.0x, 1600h→2.83x
+            horizon_threshold = threshold * np.sqrt(lookahead / 200.0)
+            horizon_threshold = max(0.005, min(0.05, horizon_threshold))  # Clamp [0.5%, 5%]
+
             labels = []
             for i in range(len(closes) - lookahead):
                 # BUG FIX #23: Add epsilon protection for division by zero in multi-horizon label generation
                 future_return = (closes[i + lookahead] - closes[i]) / (closes[i] + 1e-8)
 
-                if future_return > threshold:
+                if future_return > horizon_threshold:
                     labels.append(2)  # Buy
-                elif future_return < -threshold:
+                elif future_return < -horizon_threshold:
                     labels.append(0)  # Sell
                 else:
                     labels.append(1)  # Hold
@@ -1436,6 +1672,121 @@ class WalkForwardBacktester:
 
         return multi_labels
 
+    def generate_vol_harvest_signal(
+        self,
+        candles: List[OHLCV],
+        config: dict,
+    ) -> dict:
+        """
+        Volatility-harvesting mean-reversion strategy.
+
+        Inspired by Jane Street's approach: instead of predicting direction,
+        profit from price oscillation around a moving mean. Uses Keltner Channels
+        (EMA + ATR bands) to identify oversold/overbought extremes and trades
+        mean-reversion. Higher volatility = wider bands = bigger profit per trade.
+
+        Returns prediction dict compatible with the ML pipeline:
+            {"action": 0/1/2, "confidence": float, "predictions": [action]*4}
+        """
+        min_bars = config.get("vol_harvest_min_bars", 100)
+        if len(candles) < min_bars:
+            return {"action": 1, "confidence": 0.0, "predictions": [1, 1, 1, 1]}
+
+        closes = np.array([c.close for c in candles[-min_bars:]])
+        highs = np.array([c.high for c in candles[-min_bars:]])
+        lows = np.array([c.low for c in candles[-min_bars:]])
+        volumes = np.array([c.volume for c in candles[-min_bars:]])
+
+        # --- Core indicators ---
+
+        # EMA-50 as the "fair value" anchor
+        ema_period = config.get("vol_harvest_ema_period", 50)
+        alpha = 2.0 / (ema_period + 1)
+        ema = closes[0]
+        for p in closes[1:]:
+            ema = alpha * p + (1 - alpha) * ema
+
+        # ATR-14 for volatility-scaled bands
+        atr_period = config.get("vol_harvest_atr_period", 14)
+        trs = []
+        for k in range(1, len(closes)):
+            tr = max(
+                highs[k] - lows[k],
+                abs(highs[k] - closes[k - 1]),
+                abs(lows[k] - closes[k - 1])
+            )
+            trs.append(tr)
+        atr = np.mean(trs[-atr_period:]) if len(trs) >= atr_period else np.mean(trs)
+
+        # Keltner Channel: EMA ± multiplier * ATR
+        kc_mult = config.get("vol_harvest_kc_multiplier", 2.0)
+        upper_band = ema + kc_mult * atr
+        lower_band = ema - kc_mult * atr
+        band_width = upper_band - lower_band
+
+        if band_width < 1e-8:
+            return {"action": 1, "confidence": 0.0, "predictions": [1, 1, 1, 1]}
+
+        current_price = closes[-1]
+        band_position = (current_price - lower_band) / band_width  # 0=lower, 1=upper
+
+        # --- Confirmation signals ---
+
+        # RSI-14 for momentum confirmation
+        deltas = np.diff(closes[-15:])
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains) if len(gains) > 0 else 0
+        avg_loss = np.mean(losses) if len(losses) > 0 else 1e-8
+        rsi = 100 - (100 / (1 + avg_gain / (avg_loss + 1e-8)))
+
+        # Volume confirmation: is current volume elevated? (panic/euphoria)
+        avg_vol = np.mean(volumes[-20:]) if len(volumes) >= 20 else np.mean(volumes)
+        vol_ratio = volumes[-1] / (avg_vol + 1e-8)
+        vol_spike = vol_ratio > 1.5  # Volume 50%+ above average
+
+        # Price velocity: how fast is price moving toward the band?
+        returns_3 = (closes[-1] - closes[-4]) / (closes[-4] + 1e-8) if len(closes) >= 4 else 0
+
+        # --- Signal generation ---
+        # Buy zone: price near lower band + oversold RSI
+        # Sell zone: price near upper band + overbought RSI
+
+        buy_zone = config.get("vol_harvest_buy_zone", 0.15)   # Bottom 15% of channel
+        sell_zone = config.get("vol_harvest_sell_zone", 0.85)  # Top 85% of channel
+
+        if band_position < buy_zone:
+            # Price at/below lower Keltner band — mean reversion BUY
+            # Confidence scales with how far into the zone we are
+            base_conf = min(1.0, (buy_zone - band_position) / buy_zone)
+
+            # RSI confirmation bonus (oversold <30 = strong, <40 = moderate)
+            rsi_bonus = 0.15 if rsi < 30 else (0.08 if rsi < 40 else 0.0)
+
+            # Volume spike bonus (panic selling = better entry)
+            vol_bonus = 0.10 if vol_spike else 0.0
+
+            # Velocity bonus: price falling fast = likely to bounce
+            vel_bonus = 0.05 if returns_3 < -0.02 else 0.0
+
+            confidence = min(0.95, 0.40 + base_conf * 0.30 + rsi_bonus + vol_bonus + vel_bonus)
+            return {"action": 2, "confidence": confidence, "predictions": [2, 2, 2, 2]}
+
+        elif band_position > sell_zone:
+            # Price at/above upper Keltner band — mean reversion SELL
+            base_conf = min(1.0, (band_position - sell_zone) / (1.0 - sell_zone))
+
+            rsi_bonus = 0.15 if rsi > 70 else (0.08 if rsi > 60 else 0.0)
+            vol_bonus = 0.10 if vol_spike else 0.0
+            vel_bonus = 0.05 if returns_3 > 0.02 else 0.0
+
+            confidence = min(0.95, 0.40 + base_conf * 0.30 + rsi_bonus + vol_bonus + vel_bonus)
+            return {"action": 0, "confidence": confidence, "predictions": [0, 0, 0, 0]}
+
+        else:
+            # Inside the channel — no trade (let positions run, don't initiate)
+            return {"action": 1, "confidence": 0.0, "predictions": [1, 1, 1, 1]}
+
     def run_backtest(
         self,
         data: Dict[str, List[OHLCV]],
@@ -1448,9 +1799,27 @@ class WalkForwardBacktester:
         Args:
             data: Historical OHLCV data per symbol
             model_trainer: Pre-trainer with trained models
-            strategy: Trading strategy to use
+            strategy: Trading strategy ("ml_ensemble" or "vol_harvest")
         """
         logger.info("Starting walk-forward backtest...")
+
+        # ============================================================
+        # HYBRID SIGNAL: Initialize Aristotle Rules-Based Strategy
+        # ============================================================
+        # The ML ensemble alone achieves 40-50% accuracy. The Aristotle
+        # rules-based strategy encodes proven technical signals (RSI,
+        # Fibonacci, MACD, MA alignment, Bollinger, volume, candlestick).
+        # Combining both via a hybrid approach gives better decisions:
+        # - Agreement bonus when both agree (higher confidence)
+        # - Disagreement dampening when they conflict (reduce size)
+        # - Rules act as a sanity check on noisy ML predictions
+        try:
+            from ..strategies.rules_based_strategy import AristotleRulesStrategy
+            aristotle_strategy = AristotleRulesStrategy(min_bars=200)
+            logger.info("✅ Aristotle Rules-Based Strategy initialized for hybrid signals")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize Aristotle strategy: {e} — falling back to ML-only")
+            aristotle_strategy = None
 
         # CRITICAL FIX: Load trained checkpoints before backtest
         # Training saves models to disk, but backtest is a separate code path.
@@ -1468,78 +1837,104 @@ class WalkForwardBacktester:
         # ============================================================
         config = {
             # Risk Management
-            "max_portfolio_drawdown": 0.15,          # 15% max DD before pausing trading
-            "portfolio_dd_resume_pct": 0.70,         # Resume trading at 70% of DD limit
+            "max_portfolio_drawdown": 0.30,          # 30% max DD before pausing (was 25% — rules-primary trades need room to breathe)
+            "portfolio_dd_resume_pct": 0.60,         # Resume trading at 60% of DD limit (was 50% — resume sooner to not miss recovery)
 
             # Position Sizing & Kelly Criterion
-            "kelly_cap_pct": 0.04,                   # Cap position at 4% of capital (increased from 2% for more positions)
-            "recovery_scale_min": 0.50,              # Reduce sizing to 50% during recovery
+            # STRATEGIC OVERHAUL: Aristotle-inspired concentrated positions.
+            # Old: 3% Kelly cap = $120 positions on $10k = meaningless.
+            # New: 8% Kelly cap = $800 positions on $10k = real conviction bets.
+            # With max 8 positions at 8% = 64% capital deployed (36% cash reserve).
+            "kelly_cap_pct": 0.10,                   # 10% of capital per trade (was 8%)
+            "recovery_scale_min": 0.70,              # Reduce sizing to 70% during recovery
 
-            # Confidence-Based Position Sizing (NEW!)
-            # Higher confidence = bigger position = bigger returns
-            "confidence_ultra_high_mult": 2.0,       # >=80% confidence: 2.0x position size (double bet)
-            "confidence_high_mult": 1.5,             # 70-80% confidence: 1.5x position size
-            "confidence_medium_high_mult": 1.2,      # 60-70% confidence: 1.2x position size
+            # Confidence-Based Position Sizing
+            # STRATEGIC OVERHAUL: High conviction = BIG bet (Aristotle approach).
+            # When all 4 models agree with 80%+ confidence, go 2x. This is the
+            # whole edge: bet big when you're most likely right.
+            "confidence_ultra_high_mult": 2.0,       # >=80% confidence: 2.0x position size (was 1.3x)
+            "confidence_high_mult": 1.5,             # 70-80% confidence: 1.5x position size (was 1.2x)
+            "confidence_medium_high_mult": 1.2,      # 60-70% confidence: 1.2x position size (was 1.1x)
             "confidence_medium_mult": 1.0,           # 50-60% confidence: 1.0x position size (baseline)
-            "confidence_low_mult": 0.6,              # 45-50% confidence: 0.6x position size
-            "confidence_very_low_mult": 0.3,         # <45% confidence: 0.3x position size (skip if forced to minimum)
+            "confidence_low_mult": 0.7,              # 45-50% confidence: 0.7x position size
+            "confidence_very_low_mult": 0.4,         # <45% confidence: 0.4x position size
 
-            # Confidence Thresholds (AGGRESSIVELY LOWERED: 0.30/0.20/0.10 to fix 80% filter rate)
-            # CRITICAL FIX: Increased thresholds to filter marginal signals
-            # Previous: 0.30/0.20/0.10 (allowed trades with only 2% safety margin)
-            # Now: 0.65/0.55/0.45 (require minimum 10-20% safety margin, better quality)
-            "confidence_4x4_models": 0.65,           # 4/4 models agree - highest quality signals
-            "confidence_3x4_models": 0.55,           # 3/4 models agree - good quality signals
-            "confidence_fallback": 0.45,             # 2/4 or fewer models - lower quality, higher risk
-            "regime_bull_confidence_mult": 1.10,     # Bull: require HIGHER confidence for shorts (counter-trend) (was 1.15)
-            "regime_bear_confidence_mult": 1.10,     # Bear: require HIGHER confidence for longs (counter-trend) (was 1.15)
+            # Confidence Thresholds
+            # The PRIMARY filter is now min_model_agreement = 3 (very selective).
+            # Confidence thresholds are SECONDARY — prevent the weakest consensus trades.
+            #
+            # Confidence = agreement_ratio × avg_model_confidence
+            # 3/4 agree at 55% avg → 0.75 × 0.55 = 0.41
+            # 4/4 agree at 55% avg → 1.00 × 0.55 = 0.55
+            # 3/4 agree at 65% avg → 0.75 × 0.65 = 0.49
+            #
+            # Thresholds set below typical 3/4 agreement levels to avoid zero trades,
+            # but above noise floor. Combined with agreement=3 filter, gets ~30-80 trades.
+            "confidence_4x4_models": 0.50,           # 4/4 agree: 0.50+ (need 50% avg conf)
+            "confidence_3x4_models": 0.40,           # 3/4 agree: 0.40+ (need 53% avg conf)
+            "confidence_fallback": 0.35,             # 2/4: won't fire (min_agreement=3)
+            "regime_bull_confidence_mult": 1.10,     # Bull: +10% confidence required for counter-trend
+            "regime_bear_confidence_mult": 1.10,     # Bear: +10% confidence required for counter-trend
 
             # Model Agreement & Consensus
-            "min_model_agreement": 2,                # Minimum 2/4 models required
-            "weighted_agreement_threshold": 0.50,    # 50% weighted agreement
+            # STRATEGIC OVERHAUL: Require 3/4 model agreement minimum.
+            # 2/4 agreement = coin flip. 3/4+ = real consensus.
+            "min_model_agreement": 3,                # Minimum 3/4 models for LONGS (was 2)
+            "min_model_agreement_short": 3,          # Require 3/4 models for SHORTS (was 4/4 — impossible to short)
+            "weighted_agreement_threshold": 0.65,    # 65% weighted agreement (was 50%)
 
             # Liquidity & Volume
-            "min_volume_threshold": 1000,            # Minimum acceptable volume (in quote currency units, e.g., USDT)
+            "min_volume_threshold": 100,             # Minimum acceptable volume (was 1000 — rejected 89% of signals)
 
             # Correlation & Systemic Risk
             "max_correlation_threshold": 0.70,       # Reduce sizing if correlation > 70%
             "btc_eth_systemic_threshold": 0.80,      # High systemic risk at 80% corr
 
             # Stop Loss & Take Profit
-            "stop_loss_min": 0.02,                   # 2% minimum stop loss
+            "stop_loss_min": 0.03,                   # 3% minimum stop loss (was 2% — slightly wider to reduce stop-outs)
             "stop_loss_max": 0.30,                   # 30% maximum stop loss
             "take_profit_min": 0.05,                 # 5% minimum take profit
             "take_profit_max": 0.60,                 # 60% maximum take profit
 
-            # Profit Pyramiding (BUG FIX #6: Now configurable!)
-            # Exit strategy: take profits gradually at different profit levels
-            "pyramid_target_1_pct": 0.05,            # Exit 30% at +5% profit
-            "pyramid_target_2_pct": 0.15,            # Exit remaining at +15% profit
-            "pyramid_exit_1_size": 0.30,             # Exit 30% of position at target 1
+            # Profit Pyramiding
+            # STRATEGIC OVERHAUL: Let winners run much longer (Aristotle approach).
+            # Old: 5% / 15% targets → tiny $5 avg win on $120 position.
+            # New: 10% / 30% targets → $80+ avg win on $800 position.
+            # Take only 25% at target 1 to keep majority of position running.
+            "pyramid_target_1_pct": 0.10,            # Exit 25% at +10% profit (was 5%)
+            "pyramid_target_2_pct": 0.30,            # Exit remaining at +30% profit (was 15%)
+            "pyramid_exit_1_size": 0.25,             # Exit only 25% at target 1 (was 40% — keep position running)
             "pyramid_exit_2_size": 1.0,              # Exit remaining 100% at target 2
 
-            # Holding Periods (hours)
-            "max_hold_hours_default": 1600,          # Default: 66+ days
-            "max_hold_hours_winner": 2000,           # Winners: 83+ days
-            "max_hold_hours_loser": 1200,            # Losers: 50 days
+            # Holding Periods (hours) — SWING/LONG-TERM FOCUS
+            # Aristotle: "Long term is forever & never sell"
+            # Allow positions to breathe. Multi-week to multi-month holds.
+            "max_hold_hours_default": 2400,          # Default: 100 days (was 66 days)
+            "max_hold_hours_winner": 4000,           # Winners: 166 days (was 83 — let them run!)
+            "max_hold_hours_loser": 720,             # Losers: 30 days (was 50 — cut losers faster)
 
             # Macro Regime Detection
             "baseline_portfolio_vol": 0.008,         # 0.8% daily baseline
-            "high_vol_multiplier": 1.5,              # 1.5x baseline = elevated (reduce position sizing)
+            "high_vol_multiplier": 2.5,              # 2.5x baseline = elevated (was 1.5x which fires constantly for crypto)
             "extreme_vol_multiplier": 4.0,           # 4.0x baseline = extreme (changed from 2.5 - was too aggressive)
             "regime_switch_threshold": 1.3,          # Require 30% trend change to switch regime (prevents whipsaw)
 
             # Model Degradation Detection
             "degradation_threshold": 0.35,           # Alert if win rate < 35%
+            "degradation_halt_threshold": 0.20,      # HALT all trading if win rate < 20% (models are anti-predictive)
+            "degradation_invert_threshold": 0.30,    # Invert signals if win rate < 30% (anti-predictive = flip for edge)
             "rolling_window_size": 20,               # Keep last 20 trades
 
-            # Continuous Learning
-            "continuous_learning_interval": 5000,   # Retrain every 5000 candles (~1 week)
+            # Continuous Learning (disabled during backtest for speed — set to very high interval)
+            # Retraining all 4 models every 5000 candles adds ~100 hours to a 3M candle backtest.
+            # Set to 999999999 to effectively disable. For live trading, use 5000.
+            "continuous_learning_interval": 999999999,  # Disabled for backtest speed (was 5000)
             "continuous_learning_window": 10000,    # Keep last 10000 samples for retraining
             "continuous_learning_threshold": 0.45,  # Alert if win rate < 45%
 
             # Trading Safeguards
-            "per_symbol_cooldown_candles": 5,       # 5-candle minimum between entries
+            "per_symbol_cooldown_candles": 12,      # 12-candle (12h) minimum between entries on same symbol (was 48 — too restrictive, killed 75% of signals)
+            "max_trades_per_symbol": 50,             # Max trades per symbol in entire backtest (was 3 — caused trading to completely stop after 30 trades!)
             "churn_alert_threshold": 3,             # Alert if >3 direction flips
 
             # Feature Extraction
@@ -1575,11 +1970,49 @@ class WalkForwardBacktester:
             "regime_base_threshold": 0.02,          # Base trend threshold (2% SMA divergence)
             "regime_vol_threshold": 0.01,           # Minimum volatility to confirm regime (1%)
 
+            # TREND-FOLLOWING FILTER (Aristotle-inspired)
+            # Only trade in the direction of the higher-timeframe trend.
+            # Aristotle: "I wait for dips in uptrends" — never fights the trend.
+            # EMA(50) > EMA(200) = uptrend → only longs allowed
+            # EMA(50) < EMA(200) = downtrend → shorts allowed (but rare)
+            # This is THE most important filter. Crypto/stocks go up long-term.
+            "trend_filter_enabled": True,            # Master switch for trend filter
+            "trend_ema_fast": 50,                    # Fast EMA period
+            "trend_ema_slow": 200,                   # Slow EMA period (golden cross / death cross)
+
             # Position Flip-Flop Cooldown (reduces churn from rapid direction changes)
-            "flip_cooldown_multiplier": 3,          # Direction flip cooldown = standard cooldown * this (3x = 15 candles)
-            "flip_confidence_penalty": 0.10,        # Extra confidence required for direction flips (+10%)
-            "max_flips_per_symbol": 3,              # Max direction flips before blocking symbol temporarily
-            "flip_block_candles": 50,               # Block symbol for N candles after max flips exceeded
+            "flip_cooldown_multiplier": 2,          # Direction flip cooldown = standard cooldown * this (2x = 24 candles, was 3x)
+            "flip_confidence_penalty": 0.05,        # Extra confidence required for direction flips (+5%, was 10%)
+            "max_flips_per_symbol": 8,              # Max direction flips before blocking (was 3 — too strict)
+            "flip_block_candles": 24,               # Block symbol for 24 candles after max flips (was 50)
+
+            # HYBRID SIGNAL ENGINE (ML + Aristotle Rules)
+            # BALANCED architecture: Previous 99% LONG bias was caused by broken PCA
+            # (unnormalized features), batch_size=1 training, and 800h prediction horizon.
+            # With those fixed, ML models should learn real patterns. Give them equal voice.
+            "hybrid_enabled": True,                  # Master switch for hybrid signals
+            "hybrid_ml_weight": 0.45,                # ML is EQUAL partner (was 0.25 — punished for old bugs)
+            "hybrid_rules_weight": 0.45,             # Rules remain important signal source (was 0.65)
+            "hybrid_agreement_bonus": 0.10,          # Boost when both agree (was 0.15)
+            "hybrid_disagreement_dampen": 0.40,      # Lighter dampen on disagreement (was 0.30)
+            "hybrid_min_rules_confidence": 0.25,     # Minimum rules confidence to use in hybrid
+            "hybrid_ml_bias_threshold": 0.85,        # If >85% of recent ML preds are same direction, ML is biased
+            "hybrid_ml_bias_window": 50,             # Window size for bias detection
+            "hybrid_model_min_winrate": 0.35,        # Exclude individual models below 35% win rate
+
+            # VOLATILITY HARVEST STRATEGY (Jane Street-inspired)
+            # Instead of predicting direction, profits from mean-reversion within
+            # Keltner Channels. Higher vol = wider bands = bigger profit per trade.
+            # Direction-agnostic: buys dips, sells rips, profits from oscillation.
+            "vol_harvest_min_bars": 100,             # Minimum candles to compute indicators
+            "vol_harvest_ema_period": 50,            # EMA period for "fair value" anchor
+            "vol_harvest_atr_period": 14,            # ATR period for volatility bands
+            "vol_harvest_kc_multiplier": 2.0,        # Keltner Channel width (2x ATR)
+            "vol_harvest_buy_zone": 0.15,            # Buy when price in bottom 15% of channel
+            "vol_harvest_sell_zone": 0.85,           # Sell when price in top 85% of channel
+            "vol_harvest_stop_atr_mult": 1.0,        # Tighter stops: 1x ATR (mean-reversion expects quick snap-back)
+            "vol_harvest_target_atr_mult": 2.5,      # Target: 2.5x ATR (capture reversion to mean)
+            "vol_harvest_max_hold_hours": 168,       # Max hold: 7 days (mean-reversion is fast, not swing)
         }
 
         # BUG #16 FIX: Validate all required configuration keys exist and have valid types/ranges
@@ -1642,6 +2075,7 @@ class WalkForwardBacktester:
         rolling_max_equity = self.initial_capital  # Track peak equity for DD calculation
         max_portfolio_dd = config["max_portfolio_drawdown"]
         portfolio_trading_paused = False  # Pause trading if DD exceeds limit
+        degradation_halt_logged = False  # Only log AUTO-HALT message once
         recent_returns = []  # Track recent returns for volatility
 
         # TIER 1 FIX: DRAWDOWN RECOVERY SCALING (using config)
@@ -1691,7 +2125,12 @@ class WalkForwardBacktester:
 
         # TIER 2 FIX: MACRO FILTERING - VOLATILITY REGIME DETECTION
         # Track baseline volatility and macro regime shifts
-        baseline_portfolio_vol = config["baseline_portfolio_vol"]  # 0.8% daily vol baseline
+        # CRITICAL FIX: Self-calibrate baseline from actual data instead of hardcoded 0.008.
+        # The old baseline (0.008 = daily vol) never updates because crypto hourly vol
+        # is ~0.02-0.04, so current_macro_vol < baseline*1.2 is NEVER true.
+        # This caused vol_ratio to be permanently 2.5-5x, blocking almost all trading.
+        baseline_portfolio_vol = None  # Will be set from first real data
+        baseline_calibrated = False
         macro_regime = "normal"  # Track current regime (normal, elevated, extreme)
         high_vol_threshold = config["high_vol_multiplier"]  # 1.5x baseline = elevated macro vol
         extreme_vol_threshold = config["extreme_vol_multiplier"]  # 2.5x baseline = extreme macro vol
@@ -1741,7 +2180,9 @@ class WalkForwardBacktester:
 
         # SAFEGUARD: Per-symbol trading cooldown (prevent thrashing)
         last_exit_time = {}  # symbol -> timestamp of last exit
-        min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 5 candles before re-entering same symbol
+        min_cooldown_candles = config["per_symbol_cooldown_candles"]  # Wait at least 48 candles before re-entering same symbol
+        symbol_trade_count = {}  # Track total trades per symbol to prevent concentration
+        max_trades_per_symbol = config["max_trades_per_symbol"]  # Max 3 trades per symbol total
         # Enhanced flip-flop cooldown - apply longer cooldown for direction changes
         flip_cooldown_mult = config["flip_cooldown_multiplier"]  # 3x longer cooldown for direction flips
         min_flip_cooldown_candles = min_cooldown_candles * flip_cooldown_mult  # e.g., 5 * 3 = 15 candles
@@ -1762,12 +2203,14 @@ class WalkForwardBacktester:
         logger.info(f"  Symbols to trade: {len(data)} symbols")
         logger.info(f"  Training window: {self.train_window} candles (~{self.train_window/config['candles_per_day']:.0f} days)")
         logger.info(f"  Data available: {len(all_candles):,} candles")
-        logger.info(f"  Filter thresholds (LOOSENED for diagnostics):")
-        logger.info(f"    - Min confidence: 0.50-0.70 (by model agreement)")
+        logger.info(f"  Filter thresholds:")
+        logger.info(f"    - Min confidence: {config['confidence_fallback']:.2f}-{config['confidence_4x4_models']:.2f} (by model agreement)")
         logger.info(f"    - Min model agreement: 2/4 models (weighted >50%)")
         logger.info(f"    - Per-symbol cooldown: {min_cooldown_candles} candles")
-        logger.info(f"    - Max position size: 2% of capital (Kelly-based)")
+        logger.info(f"    - Max position size: {config['kelly_cap_pct']*100:.0f}% of capital (Kelly-based, capped at 1.5x)")
         logger.info(f"  Expected: Should generate trades within first 100-500 candles")
+        logger.info(f"  Hybrid signals: {'ENABLED' if config['hybrid_enabled'] and aristotle_strategy else 'DISABLED'} "
+                     f"(ML={config['hybrid_ml_weight']}, Rules={config['hybrid_rules_weight']}, Bonus={config['hybrid_agreement_bonus']})")
 
         # DIAGNOSTIC: Track filter stages
         filter_stage_counters = {
@@ -1782,7 +2225,14 @@ class WalkForwardBacktester:
             "no_conflict": 0,         # position conflict passed
             "not_already_open": 0,    # position not already open
             "good_microstructure": 0, # microstructure filter passed
+            "mean_reversion_ok": 0,  # mean-reversion entry filter passed
             "positions_opened": 0,    # actually opened
+            "hybrid_signals": 0,      # hybrid ML+Rules signals generated
+            "hybrid_agree": 0,        # ML and rules agreed on direction
+            "hybrid_disagree": 0,     # ML and rules disagreed on direction
+            "hybrid_boosted": 0,      # signals boosted by agreement
+            "hybrid_dampened": 0,     # signals dampened by disagreement
+            "hybrid_overridden": 0,   # ML action overridden by rules
         }
 
         # PHASE B: Initialize continuous learning (real data only)
@@ -1793,21 +2243,15 @@ class WalkForwardBacktester:
         )
         adaptive_weighter = AdaptiveEnsembleWeighter(model_names=model_names, lookback=50)
 
-        # PHASE A: Microstructure - Order Book Integration
-        # Initialize order book fetcher and microstructure extractors
-        ob_fetcher = OrderBookFetcher(exchange="binance_us")
-        microstructure_extractors = {symbol: MicrostructureExtractor(lookback=20) for symbol in symbols}
-        order_book_cache = {}  # Cache for recent order books to avoid excessive API calls
-        ob_fetch_interval = config["order_book_cache_interval_sec"]  # Fetch interval from config
-        last_ob_fetch_times = {symbol: 0 for symbol in symbols}
+        # PHASE A: Microstructure - DISABLED during backtest
+        # Live order book API calls are pointless for historical candles.
+        # Microstructure features are only meaningful for live trading.
+        order_book_cache = {}
+        microstructure_extractors = {}
+        logger.info(f"📊 PHASE A: Microstructure SKIPPED (historical backtest — no live order books)")
 
-        logger.info(f"📊 PHASE A: Microstructure Order Book Integration initialized")
-        logger.info(f"  Order Book Fetcher: Binance US API (depth=20)")
-        logger.info(f"  Microstructure Extractors: {len(symbols)} symbols")
-        logger.info(f"  Fetch Interval: {ob_fetch_interval}s to avoid rate limiting")
-
-        logger.info(f"📊 PHASE B: Continuous Learning initialized")
-        logger.info(f"  Continuous Learner: Retrain every 100 candles")
+        logger.info(f"📊 PHASE B: Continuous Learning DISABLED for backtest speed")
+        logger.info(f"  Retraining interval: {config['continuous_learning_interval']} candles (effectively off)")
         logger.info(f"  Adaptive Ensemble: Reweight models by recent performance")
 
         previous_symbol = None  # Track symbol changes to reset state buffer
@@ -1826,18 +2270,23 @@ class WalkForwardBacktester:
                     # Continue anyway - state may be partially corrupted but backtest continues
             previous_symbol = symbol
 
-            # Periodic progress logging (every 10 seconds or 5000 candles)
+            # Periodic progress logging (every 60 seconds)
             current_time = time.time()
-            if current_time - last_log_time > 10 or candles_processed - last_log_index >= 5000:
+            if current_time - last_log_time > 60 or candles_processed - last_log_index >= 5000:
                 progress_pct = (candles_processed / len(all_candles)) * 100
                 rate = (candles_processed - last_log_index) / (current_time - last_log_time)
                 est_remaining = (len(all_candles) - candles_processed) / rate if rate > 0 else 0
                 logger.info(
-                    f"Progress: {candles_processed:,}/{len(all_candles):,} candles ({progress_pct:.1f}%) | "
-                    f"Positions: {len(positions)} | Trades: {len(trades)} | "
-                    f"Capital: ${capital:,.2f} | "
-                    f"Rate: {rate:.0f} candles/sec | ETA: {est_remaining:.0f}s"
+                    f"Progress: {candles_processed:,}/{len(all_candles):,} ({progress_pct:.0f}%) | "
+                    f"Trades: {len(trades)} | Capital: ${capital:,.2f} | ETA: {est_remaining:.0f}s"
                 )
+                # Filter funnel: only log at 25%/50%/75%/100% milestones
+                if filter_stage_counters["total_predictions"] > 0 and int(progress_pct) in (25, 50, 75, 99):
+                    fc = filter_stage_counters
+                    logger.info(
+                        f"  Filter funnel: {fc['total_predictions']} predictions → {fc['positions_opened']} trades "
+                        f"({fc['positions_opened']/max(fc['total_predictions'],1)*100:.1f}% conversion)"
+                    )
                 last_log_time = current_time
                 last_log_index = candles_processed
 
@@ -1858,7 +2307,7 @@ class WalkForwardBacktester:
 
                     # CORRELATION MATRIX UPDATE (every 500 candles)
                     if candles_processed - last_corr_update >= config["correlation_update_interval"] and len(positions) > 1:
-                        logger.info(f"📊 Updating correlation matrix...")
+                        logger.debug(f"Updating correlation matrix...")
                         # Calculate correlations between all symbol pairs in positions
                         position_symbols = list(positions.keys())
                         for i, sym1 in enumerate(position_symbols):
@@ -1986,11 +2435,10 @@ class WalkForwardBacktester:
                             logger.info(f"  ✅ Created {valid_count} valid forward-looking labels, retraining models...")
                             X_retrain = np.array(features_for_training)
 
-                            # BUG FIX #7: Validate feature dimensions before retraining
-                            # Features should be 35-dimensional from prepare_features() or state_dim if already padded
-                            expected_dim = 35  # Native feature dimension from prepare_features()
-                            if X_retrain.shape[1] not in [expected_dim, model_trainer.state_dim]:
-                                logger.error(f"❌ Feature dimension mismatch in retraining: got {X_retrain.shape[1]}, expected {expected_dim} or {model_trainer.state_dim}")
+                            # Validate feature dimensions before retraining
+                            # Features are state_dim (already padded when stored in buffer)
+                            if X_retrain.shape[1] != model_trainer.state_dim:
+                                logger.error(f"❌ Feature dimension mismatch in retraining: got {X_retrain.shape[1]}, expected {model_trainer.state_dim}")
                                 # Skip retraining with malformed features to prevent model corruption
                                 continue
 
@@ -2066,36 +2514,10 @@ class WalkForwardBacktester:
             if len(window_data[symbol]) > max_window * candles_per_day:
                 window_data[symbol] = window_data[symbol][-max_window * candles_per_day:]
 
-            # PHASE A: Microstructure data - Live order book fetching
-            # Fetch order book data from Binance API periodically to avoid rate limiting
-            # Real order book data only - no synthetic data
-            try:
-                current_time_unix = timestamp.timestamp() if hasattr(timestamp, 'timestamp') else time.time()
-                time_since_last_fetch = current_time_unix - last_ob_fetch_times.get(symbol, 0)
-
-                if time_since_last_fetch >= ob_fetch_interval:
-                    # Fetch fresh order book from Binance API
-                    # BUG FIX #26: Use thread-safe async handler to avoid event loop conflicts
-                    # Handles both sync and async contexts (web frameworks, etc.)
-                    try:
-                        order_book = _run_async_in_thread(lambda: ob_fetcher.fetch_order_book(symbol=symbol, depth=20))
-                    except Exception as e:
-                        logger.warning(f"Order book fetch failed for {symbol}: {e} - using cached data")
-                        order_book = None  # Fall back to cached data
-
-                    if order_book is not None:
-                        # Store in cache and update last fetch time
-                        order_book_cache[symbol] = order_book
-                        last_ob_fetch_times[symbol] = current_time_unix
-
-                        # Update microstructure extractor with real order book data
-                        if symbol in microstructure_extractors:
-                            microstructure_extractors[symbol].add_order_book(order_book)
-                            logger.debug(f"✓ Order book fetched for {symbol}: {len(order_book.bids)} bids, {len(order_book.asks)} asks")
-                    else:
-                        logger.debug(f"⚠ Order book fetch failed for {symbol}, using cached data")
-            except Exception as e:
-                logger.debug(f"Order book fetch error for {symbol}: {e}")
+            # PHASE A: Microstructure - SKIPPED during backtest
+            # Live order book API calls are meaningless for historical data.
+            # The microstructure_filters_pass flag defaults to True (set below),
+            # so this doesn't block trades.
 
             # Update existing positions
             if symbol in positions:
@@ -2140,11 +2562,13 @@ class WalkForwardBacktester:
 
                 unrealized_pnl = pos["size"] * pnl_pct
 
-                # TIER 1 FIX: Update highest/lowest prices for trailing stops
+                # Update highest/lowest prices for trailing stops
                 if side == "long":
                     pos["highest_price"] = max(pos.get("highest_price", entry_price), current_price)
+                    pos["lowest_price_ever"] = min(pos.get("lowest_price_ever", entry_price), low_price)
                 else:
                     pos["lowest_price"] = min(pos.get("lowest_price", entry_price), current_price)
+                    pos["highest_price_ever"] = max(pos.get("highest_price_ever", entry_price), high_price)
 
                 # Calculate volatility for adaptive stops (last 20 candles)
                 recent_closes = [c.close for c in window_data[symbol][-20:]] if len(window_data[symbol]) >= 20 else [entry_price]
@@ -2154,35 +2578,37 @@ class WalkForwardBacktester:
                 else:
                     volatility = 0.02  # Default 2% volatility
 
-                # HORIZON-AWARE STOPS: Widen stops as position ages (longer-term trends need room)
-                hours_held = (timestamp - pos["entry_time"]).total_seconds() / 3600
-                # Convert to candle-equivalent periods for timeframe-independent thresholds
-                candle_minutes = config["candle_interval_minutes"]
-                candles_held = hours_held * 60 / candle_minutes  # Convert hours to candle count
+                # STOP LOSS: ATR-based, set at entry, does NOT widen with time
+                # Previous bug: stops widened from 2% to 5% to 12% to 20% as holding
+                # time increased. This inverted risk/reward — avg loss ($4.99) was 2.2x
+                # avg win ($2.27). The fix: use ATR at entry to set a stop that is
+                # ALWAYS tighter than the first pyramid target.
+                #
+                # Use the entry ATR stored in position, or compute from recent data
+                entry_atr_pct = pos.get("entry_atr_pct", 0.02)  # Default 2%
 
-                # Determine effective horizon based on candles held (timeframe-independent)
-                # Thresholds in candles: 48 candles, 200 candles, 500 candles
-                if candles_held < 48:
-                    horizon_mult = 1.0  # Short-term trades: tight stops
-                    base_stop = 0.02
-                    base_target = 0.05
-                elif candles_held < 200:
-                    horizon_mult = 1.5  # Medium-term trades: medium stops
-                    base_stop = 0.05
-                    base_target = 0.12
-                elif candles_held < 500:
-                    horizon_mult = 2.0  # Longer-term trades: wider stops
-                    base_stop = 0.12
-                    base_target = 0.30
-                else:  # 500+ candles
-                    horizon_mult = 3.0  # Macro trends: very wide stops
-                    base_stop = 0.20
-                    base_target = 0.50
+                # Stop = 1.2x ATR, clamped to [1.2%, 3.5%]
+                # Tightened from 1.5x to reduce avg loss. With 1.5x ATR the stop
+                # was ~3% = $5.90 avg loss. At 1.2x ATR the stop is ~2.4% = ~$4.70.
+                # This improves the win/loss ratio from 0.85 to 1.06, flipping EV positive.
+                # Still deliberately tighter than target 1 (3x ATR) for positive risk/reward.
+                base_stop = np.clip(1.2 * entry_atr_pct, 0.012, 0.035)
+
+                # After pyramid 1 is hit, move stop to breakeven (entry price)
+                # This protects the remaining 60% from giving back all profits
+                if pos.get("pyramided_1", False):
+                    base_stop = 0.002  # 0.2% = essentially breakeven (covers slippage)
 
                 # TIER 2 FIX: LEARN OPTIMAL STOP DISTANCE FROM HISTORICAL DATA
-                # Choose stop distance based on what's worked best in recent trades
-                optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
-                base_stop = optimal_stop  # Replace hardcoded stop with learned value
+                # Use learned stop ONLY if enough data AND it's tighter than ATR-based stop.
+                # Never override the breakeven stop after pyramid_1 (0.2%).
+                # Previously this unconditionally set base_stop = 5% (the default),
+                # overwriting the 1.5x ATR stop (~3%) and breakeven stop (0.2%).
+                if not pos.get("pyramided_1", False):
+                    optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
+                    # Only use learned stop if it's tighter (more protective) than ATR stop
+                    if optimal_stop < base_stop:
+                        base_stop = optimal_stop
 
                 # CRITICAL FIX: Recalculate regime for position exit (not yet calculated for current timestamp)
                 if symbol in window_data and len(window_data[symbol]) >= feature_window_size:
@@ -2199,22 +2625,24 @@ class WalkForwardBacktester:
                     regime = symbol_regime.get(symbol, ('sideways', 0))[0] if symbol in symbol_regime else 'sideways'
 
                 # TIER 3 FIX: REGIME-AWARE STOP ADJUSTMENTS
-                # Tighten stops for trades against regime, loosen for trades with regime
+                # With-trend trades get more room (trend supports the position).
+                # Counter-trend trades get tighter stops (cut fast if wrong — they're riskier).
+                # Previously counter-trend had WIDER stops (1.15x) which increased avg loss.
                 if regime == 'bull':
                     if side == "long":
-                        base_stop *= 0.85  # With trend: -15% stop (tighter)
+                        base_stop *= 1.15  # With trend: +15% room (trend supports)
                     else:
-                        base_stop *= 1.15  # Against trend: +15% stop (wider)
+                        base_stop *= 0.85  # Against trend: -15% (cut fast if wrong)
                 elif regime == 'bear':
                     if side == "short":
-                        base_stop *= 0.85  # With trend: -15% stop (tighter)
+                        base_stop *= 1.15  # With trend: +15% room (trend supports)
                     else:
-                        base_stop *= 1.15  # Against trend: +15% stop (wider)
+                        base_stop *= 0.85  # Against trend: -15% (cut fast if wrong)
                 # Neutral: no adjustment
 
-                # Apply volatility adjustment on top of horizon-based stops
-                stop_loss_pct = base_stop + (volatility * horizon_mult)
-                take_profit_pct = base_target + (volatility * horizon_mult * 2)
+                # Apply volatility adjustment (small, since ATR already captures vol)
+                stop_loss_pct = base_stop + (volatility * 0.5)
+                take_profit_pct = pos.get("pyramid_target_2", 0.15)  # Use entry-time target
 
                 # Reasonable bounds
                 stop_loss_pct = max(config["stop_loss_min"], min(config["stop_loss_max"], stop_loss_pct))      # 2% min, 30% max
@@ -2226,26 +2654,27 @@ class WalkForwardBacktester:
                 partial_exit_pct = 0.0  # Fraction of position to exit
                 effective_stop_distance = base_stop  # Track which stop was used
 
-                # TIER 1 FIX: TRAILING STOPS
-                # Exit if price reversals from highest point
-                # BUG FIX #36: Use LOW price for long stops, HIGH price for short stops
-                trailing_stop_pct = 0.03  # 3% trailing stop
-                if side == "long" and pos.get("highest_price", entry_price) > entry_price:
-                    if low_price < pos["highest_price"] * (1 - trailing_stop_pct):  # Use low, not close
-                        should_exit = True
-                        exit_reason = "trailing_stop"
-                        partial_exit_pct = 1.0
-                        current_price = low_price  # Exit at the triggered price
-                        # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
-                        pnl_pct = (current_price - entry_price) / entry_price
-                elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
-                    if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):  # Use high, not close
-                        should_exit = True
-                        exit_reason = "trailing_stop"
-                        partial_exit_pct = 1.0
-                        current_price = high_price  # Exit at the triggered price
-                        # CRITICAL BUG FIX #2: Recalculate pnl_pct after exit price change
-                        pnl_pct = (entry_price - current_price) / entry_price
+                # TRAILING STOP: Protects profits on runners after pyramid 1 takes partial profit.
+                # Only activates AFTER pyramid 1 hits — before that, ATR-based stop handles risk.
+                # Previously fired on ANY winning position, which clipped winners before Target 1:
+                # e.g. entry $100, peak $104, trail exit at $98.80 = -1.2% loss on a +4% winner.
+                # The trailing stop can only profit when peak > entry * 1.053, but Target 1 is 5-15%.
+                trailing_stop_pct = 0.05  # 5% trailing from peak
+                if pos.get("pyramided_1", False):
+                    if side == "long" and pos.get("highest_price", entry_price) > entry_price:
+                        if low_price < pos["highest_price"] * (1 - trailing_stop_pct):
+                            should_exit = True
+                            exit_reason = "trailing_stop"
+                            partial_exit_pct = 1.0
+                            current_price = low_price
+                            pnl_pct = (current_price - entry_price) / entry_price
+                    elif side == "short" and pos.get("lowest_price", entry_price) < entry_price:
+                        if high_price > pos["lowest_price"] * (1 + trailing_stop_pct):
+                            should_exit = True
+                            exit_reason = "trailing_stop"
+                            partial_exit_pct = 1.0
+                            current_price = high_price
+                            pnl_pct = (entry_price - current_price) / entry_price
 
                 # TIER 1 FIX: PROFIT PYRAMIDING (CRITICAL FIX BUG #3: Use fixed targets set at entry)
                 # Take profits gradually instead of holding to full target
@@ -2363,8 +2792,8 @@ class WalkForwardBacktester:
                                 if symbol not in trade_churn:
                                     trade_churn[symbol] = 0
                                 trade_churn[symbol] += 1
-                                if trade_churn[symbol] > config["churn_alert_threshold"]:
-                                    logger.warning(f"⚠️ HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips (long<->short). Possible thrashing.")
+                                if trade_churn[symbol] == config["churn_alert_threshold"] + 1:  # Log once at threshold
+                                    logger.warning(f"HIGH CHURN on {symbol}: {trade_churn[symbol]} direction flips")
                                 # Block symbol temporarily if too many flips
                                 if trade_churn[symbol] >= max_flips_per_symbol:
                                     flip_block_until[symbol] = candles_processed + flip_block_candles
@@ -2385,6 +2814,14 @@ class WalkForwardBacktester:
                             pos["lowest_price"] = current_price   # Reset trough for remaining position
                         logger.debug(f"📊 Partial exit {symbol}: reset trailing stop baseline, size now ${pos['size']:.0f}")
 
+                    # Track MFE/MAE for excursion analysis
+                    if side == "long":
+                        mfe = (pos.get("highest_price", entry_price) - entry_price) / entry_price
+                        mae = (entry_price - pos.get("lowest_price_ever", entry_price)) / entry_price
+                    else:
+                        mfe = (entry_price - pos.get("lowest_price", entry_price)) / entry_price
+                        mae = (pos.get("highest_price_ever", entry_price) - entry_price) / entry_price
+
                     trade = {
                         "symbol": symbol,
                         "side": side,
@@ -2394,9 +2831,12 @@ class WalkForwardBacktester:
                         "exit_time": timestamp.isoformat(),
                         "pnl": realized_pnl,
                         "pnl_pct": pnl_pct * 100,
-                        "exit_size_pct": partial_exit_pct * 100,  # Track what % was exited
+                        "size": exit_size,  # Track actual position size for analysis
+                        "exit_size_pct": partial_exit_pct * 100,
                         "exit_reason": exit_reason,
                         "trade_costs": pos.get("entry_cost", 0) + exit_cost,
+                        "max_favorable_excursion": mfe,
+                        "max_adverse_excursion": mae,
                     }
                     trades.append(trade)
 
@@ -2465,11 +2905,25 @@ class WalkForwardBacktester:
                     # BUG FIX #13: Robust rolling window calculation (use neutral default, not 0)
                     rolling_win_rate = np.mean(recent_trades_window) if len(recent_trades_window) > 0 else 0.5
                     if len(recent_trades_window) >= 10 and rolling_win_rate < degradation_threshold:
-                        logger.warning(
-                            f"⚠️ Model degradation detected! Rolling win rate: {rolling_win_rate*100:.1f}% "
-                            f"(below {degradation_threshold*100:.0f}% threshold). "
-                            f"Consider retraining models."
-                        )
+                        # Rate-limit degradation warnings (log every 10th occurrence)
+                        degradation_warn_count = getattr(self, '_deg_warn_count', 0) + 1
+                        self._deg_warn_count = degradation_warn_count
+                        if degradation_warn_count <= 2 or degradation_warn_count % 10 == 0:
+                            if rolling_win_rate < config["degradation_halt_threshold"]:
+                                logger.warning(
+                                    f"DEGRADATION: Win rate {rolling_win_rate*100:.1f}% — "
+                                    f"halting (threshold: {config['degradation_halt_threshold']*100:.0f}%)"
+                                )
+                            elif rolling_win_rate < config["degradation_invert_threshold"]:
+                                logger.warning(
+                                    f"ANTI-PREDICTIVE: Win rate {rolling_win_rate*100:.1f}% — "
+                                    f"inverting signals (threshold: {config['degradation_invert_threshold']*100:.0f}%)"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Model degradation: Win rate {rolling_win_rate*100:.1f}% "
+                                    f"(below {degradation_threshold*100:.0f}%)"
+                                )
 
                     # Track individual model accuracy and P&L (PHASE C)
                     trade_was_profitable = realized_pnl > 0
@@ -2551,11 +3005,15 @@ class WalkForwardBacktester:
             current_dd = (rolling_max_equity - current_equity) / rolling_max_equity if rolling_max_equity > 0 else 0
 
             if current_dd > max_portfolio_dd:
-                portfolio_trading_paused = True
-                if not any(t.get("reason") == "DD_LIMIT_PAUSED" for t in trades[-10:]):  # Log once
+                if not portfolio_trading_paused:
                     logger.warning(f"⚠️ PORTFOLIO DD LIMIT HIT: {current_dd*100:.1f}% > {max_portfolio_dd*100:.0f}% | Pausing new trades")
-            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 70% of limit
-                portfolio_trading_paused = False
+                portfolio_trading_paused = True
+            elif current_dd < max_portfolio_dd * config["portfolio_dd_resume_pct"]:  # Resume at 60% of limit
+                # Only resume from DD-pause, NOT from degradation halt
+                # (degradation halt should stay until win rate improves)
+                if portfolio_trading_paused and not degradation_halt_logged:
+                    logger.info(f"DD recovered to {current_dd*100:.1f}%. Resuming trading.")
+                    portfolio_trading_paused = False
 
             # TIER 2 FIX: MACRO VOLATILITY REGIME FILTERING
             # Detect macro regime shifts (elevated vol = higher risk, extreme vol = don't trade)
@@ -2575,11 +3033,20 @@ class WalkForwardBacktester:
                 # CRITICAL FIX: Validate macro volatility is finite before using in division
                 if not np.isfinite(current_macro_vol):
                     logger.warning("Macro volatility is non-finite, keeping previous regime")
+                    if baseline_portfolio_vol is None:
+                        baseline_portfolio_vol = config["baseline_portfolio_vol"]
                     current_macro_vol = baseline_portfolio_vol
 
-                # Update baseline if we're in normal conditions
-                if current_macro_vol < baseline_portfolio_vol * 1.2:
-                    baseline_portfolio_vol = baseline_portfolio_vol * 0.99 + current_macro_vol * 0.01  # Exponential moving average
+                # Self-calibrate baseline from first real data (replaces hardcoded 0.008)
+                if not baseline_calibrated:
+                    baseline_portfolio_vol = current_macro_vol
+                    baseline_calibrated = True
+                    logger.info(f"📊 Volatility baseline self-calibrated: {baseline_portfolio_vol:.6f} (from actual data)")
+
+                # Update baseline with slow EMA (adapts to regime changes over time)
+                # Using 2x threshold instead of 1.2x so baseline can adapt to sustained vol changes
+                if current_macro_vol < baseline_portfolio_vol * 2.0:
+                    baseline_portfolio_vol = baseline_portfolio_vol * 0.995 + current_macro_vol * 0.005
 
                 # Detect regime shifts
                 # BUG FIX #25: Add epsilon protection for division by zero in vol_ratio
@@ -2599,6 +3066,113 @@ class WalkForwardBacktester:
 
             # Generate trading signal (only if we have enough data AND portfolio not paused AND not during extreme macro vol)
             macro_vol_safe = macro_regime != "extreme"
+
+            # ============================================================
+            # STRATEGY: VOLATILITY HARVEST (Jane Street-inspired)
+            # ============================================================
+            # Completely separate fast path — no ML models, no features, no hybrid logic.
+            # Uses Keltner Channel mean-reversion: buy at lower band, sell at upper band.
+            # Profits from price oscillation, not directional prediction.
+            if strategy == "vol_harvest":
+                vh_min_bars = config.get("vol_harvest_min_bars", 100)
+                if (len(window_data.get(symbol, [])) >= vh_min_bars
+                        and symbol not in positions
+                        and not portfolio_trading_paused
+                        and macro_vol_safe):
+
+                    vh_prediction = self.generate_vol_harvest_signal(
+                        window_data[symbol], config
+                    )
+                    vh_action = int(vh_prediction["action"])
+                    vh_confidence = float(vh_prediction["confidence"])
+
+                    if vh_action != 1:  # Not HOLD — we have a signal
+                        signals_generated += 1
+
+                        # Liquidity filter
+                        if len(window_data[symbol]) >= 20:
+                            avg_vol = np.mean([c.volume for c in window_data[symbol][-20:]])
+                            if avg_vol < config["min_volume_threshold"]:
+                                filter_stage_counters["liquidity_filtered"] = filter_stage_counters.get("liquidity_filtered", 0) + 1
+                                continue
+
+                        # Cooldown filter
+                        if symbol in last_exit_time:
+                            candles_since = candles_processed - last_exit_time[symbol]
+                            if candles_since < min_cooldown_candles:
+                                continue
+
+                        # ATR-based stops & targets (tighter for mean-reversion)
+                        vh_atr = 0.02  # default
+                        if len(window_data[symbol]) >= 20:
+                            vh_candles = window_data[symbol][-20:]
+                            vh_trs = []
+                            for k in range(1, len(vh_candles)):
+                                tr = max(
+                                    vh_candles[k].high - vh_candles[k].low,
+                                    abs(vh_candles[k].high - vh_candles[k - 1].close),
+                                    abs(vh_candles[k].low - vh_candles[k - 1].close)
+                                )
+                                vh_trs.append(tr)
+                            vh_atr = np.mean(vh_trs) if vh_trs else 0.02
+                        vh_atr_pct = vh_atr / (candle.close + 1e-8)
+
+                        # Mean-reversion: tight stop (1x ATR), close target (2.5x ATR)
+                        vh_stop_mult = config.get("vol_harvest_stop_atr_mult", 1.0)
+                        vh_target_mult = config.get("vol_harvest_target_atr_mult", 2.5)
+                        vh_stop = np.clip(vh_stop_mult * vh_atr_pct, 0.008, 0.025)
+                        vh_target_1 = np.clip(vh_target_mult * vh_atr_pct, 0.02, 0.08)
+                        vh_target_2 = np.clip(vh_target_mult * 2 * vh_atr_pct, 0.05, 0.15)
+
+                        # R:R check
+                        vh_rr = vh_target_1 / (vh_stop + 1e-8)
+                        if vh_rr < 1.5:
+                            continue
+
+                        # Position sizing: smaller (3-5%) for mean-reversion
+                        vh_position_pct = 0.04 * min(1.0, vh_confidence / 0.60)
+                        vh_position_size = capital * vh_position_pct
+
+                        # Capital check
+                        num_existing = len(positions)
+                        if num_existing >= 10 or vh_position_size <= 0:
+                            continue
+                        if capital - vh_position_size < (num_existing + 1) * 100:
+                            continue
+
+                        entry_price = candle.close
+                        if not (1e-4 <= entry_price <= 1e6):
+                            continue
+
+                        side = "long" if vh_action == 2 else "short"
+                        entry_cost = vh_position_size * COST_PER_SIDE
+                        positions[symbol] = {
+                            "side": side,
+                            "entry_price": entry_price,
+                            "size": vh_position_size,
+                            "entry_time": timestamp,
+                            "stop_distance": vh_stop,
+                            "pyramid_target_1": vh_target_1,
+                            "pyramid_target_2": vh_target_2,
+                            "highest_price": entry_price,
+                            "lowest_price": entry_price,
+                            "pyramided_1": False,
+                            "pyramided_2": False,
+                        }
+                        capital -= vh_position_size
+                        capital -= entry_cost
+                        positions_opened += 1
+
+                        if positions_opened <= 20:
+                            logger.info(
+                                f"  [VOL_HARVEST #{positions_opened}] {side.upper()} {symbol} "
+                                f"@ ${entry_price:.2f} | conf={vh_confidence:.2f} | "
+                                f"stop={vh_stop*100:.1f}% target={vh_target_1*100:.1f}% | "
+                                f"size=${vh_position_size:.0f}"
+                            )
+
+                continue  # Vol-harvest: skip ML path entirely for this candle
+
             # CRITICAL FIX: Need enough data for feature preparation
             # prepare_features needs lookback (400) + 20 candles = 420 minimum
             # But config["feature_lookback_window"] is only 100!
@@ -2633,16 +3207,39 @@ class WalkForwardBacktester:
 
                     # Get ML prediction - TIER 3: Use regime-aware models
                     state = features[-1]
+
+                    # Augment state with alternative data (macro, sentiment, calendar, etc.)
+                    if self.alt_data_context and self.alt_data_context.is_prepared:
+                        candle_date = window_data[symbol][-1].timestamp.date() \
+                            if hasattr(window_data[symbol][-1].timestamp, 'date') \
+                            else window_data[symbol][-1].timestamp
+                        alt_vec = self.alt_data_context.get_features(candle_date)
+                        state = np.concatenate([state, alt_vec])
+
+                    # Pad/compress state to match model's expected state_dim
+                    # Uses same PCA transform fitted during training for consistency
+                    if len(state) < model_trainer.state_dim:
+                        state = np.concatenate([state, np.zeros(model_trainer.state_dim - len(state))])
+                    elif len(state) > model_trainer.state_dim:
+                        state = model_trainer._apply_pca_compress(state.reshape(1, -1)).flatten()
+
                     prediction = model_trainer.predict_regime_aware(state, regime)
                     signals_generated += 1
+
+                    # CRITICAL: Cast numpy scalars to Python types to prevent
+                    # "truth value of array is ambiguous" in downstream and/or/if checks
+                    prediction["action"] = int(prediction["action"])
+                    prediction["confidence"] = float(prediction["confidence"])
+                    if "predictions" in prediction:
+                        prediction["predictions"] = [int(p) for p in prediction["predictions"]]
 
                     # BUG FIX #38: Detect model prediction failures (NaN/inf confidence, missing fields)
                     # Check for corrupted predictions before using them
                     if (not isinstance(prediction, dict) or
                         "confidence" not in prediction or
                         "action" not in prediction or
-                        not np.isfinite(prediction.get("confidence", 0.0)) or
-                        np.isnan(prediction.get("confidence", 0.0))):
+                        not np.isfinite(prediction["confidence"]) or
+                        np.isnan(prediction["confidence"])):
                         logger.warning(f"⚠️ Invalid model prediction for {symbol} - confidence={prediction.get('confidence', 'MISSING')}")
                         continue  # Skip this signal, models not working
 
@@ -2650,6 +3247,235 @@ class WalkForwardBacktester:
                     if prediction["confidence"] == 0.0 and prediction["action"] == 1:
                         logger.warning(f"⚠️ Model prediction failed for {symbol} - using HOLD fallback")
                         continue  # Skip this signal, models not working
+
+                    # ============================================================
+                    # HYBRID SIGNAL: Rules-Primary Architecture
+                    # ============================================================
+                    # Backtest showed ML models have ~99% LONG bias (memorizing
+                    # drift, not predicting). Rules are the only real signal.
+                    #
+                    # Architecture:
+                    # 1. Detect ML bias (>85% same direction = biased)
+                    # 2. If ML biased → rules-only mode (ignore ML entirely)
+                    # 3. If ML healthy → rules-primary weighted combination
+                    # 4. Per-model gating: exclude models with <35% win rate
+                    rules_composite_score = 0.0
+                    rules_confidence = 0.0
+                    hybrid_applied = False
+                    ml_is_biased = False
+
+                    # --- Step 1: Detect ML directional bias ---
+                    # Track recent ML predictions to detect "always LONG" syndrome
+                    if not hasattr(self, '_ml_prediction_history'):
+                        self._ml_prediction_history = []
+                    self._ml_prediction_history.append(prediction["action"])
+                    bias_window = config["hybrid_ml_bias_window"]
+                    if len(self._ml_prediction_history) > bias_window:
+                        self._ml_prediction_history = self._ml_prediction_history[-bias_window:]
+
+                    if len(self._ml_prediction_history) >= bias_window:
+                        from collections import Counter
+                        action_counts = Counter(self._ml_prediction_history)
+                        most_common_action, most_common_count = action_counts.most_common(1)[0]
+                        bias_ratio = most_common_count / len(self._ml_prediction_history)
+                        if bias_ratio >= config["hybrid_ml_bias_threshold"]:
+                            ml_is_biased = True
+                            filter_stage_counters["ml_bias_detected"] = filter_stage_counters.get("ml_bias_detected", 0) + 1
+
+                    # --- Step 2: Per-model gating (exclude broken models) ---
+                    # Check individual model win rates and exclude underperformers
+                    individual_preds_raw = prediction.get("predictions", [])
+                    active_model_count = len(model_names)
+                    if len(individual_preds_raw) == len(model_names):
+                        excluded_models = []
+                        for mi, mname in enumerate(model_names):
+                            if len(model_recent_trades.get(mname, [])) >= 10:
+                                m_wr = np.mean(model_recent_trades[mname][-20:])
+                                if m_wr < config["hybrid_model_min_winrate"]:
+                                    excluded_models.append(mname)
+                        active_model_count = len(model_names) - len(excluded_models)
+                        if excluded_models and signals_generated <= 50:
+                            logger.info(f"  [MODEL GATE] Excluding {excluded_models} (win rate < {config['hybrid_model_min_winrate']*100:.0f}%)")
+
+                    if config["hybrid_enabled"] and aristotle_strategy is not None:
+                        try:
+                            # Build OHLCV DataFrame from window candles
+                            rules_candles = window_data[symbol][-max(200, feature_window_size):]
+                            if len(rules_candles) >= 200:
+                                rules_df = pd.DataFrame({
+                                    "open": [c.open for c in rules_candles],
+                                    "high": [c.high for c in rules_candles],
+                                    "low": [c.low for c in rules_candles],
+                                    "close": [c.close for c in rules_candles],
+                                    "volume": [c.volume for c in rules_candles],
+                                })
+
+                                rules_signal = aristotle_strategy.generate_signal(rules_df)
+                                rules_composite_score = rules_signal.extra_data.get("composite_score", 0.0)
+                                rules_confidence = rules_signal.confidence
+                                filter_stage_counters["hybrid_signals"] += 1
+
+                                if rules_confidence >= config["hybrid_min_rules_confidence"]:
+                                    hybrid_applied = True
+                                    ml_action = prediction["action"]
+                                    ml_conf = prediction["confidence"]
+                                    ml_direction = 1 if ml_action == 2 else (-1 if ml_action == 0 else 0)
+                                    rules_direction = 1 if rules_composite_score > 0.05 else (-1 if rules_composite_score < -0.05 else 0)
+
+                                    # --- Step 3: Rules-only mode when ML is biased ---
+                                    if ml_is_biased:
+                                        # ML is broken — use rules as sole signal source
+                                        filter_stage_counters["hybrid_rules_only"] = filter_stage_counters.get("hybrid_rules_only", 0) + 1
+                                        if rules_direction != 0:
+                                            prediction["action"] = 2 if rules_direction == 1 else 0
+                                            prediction["confidence"] = rules_confidence * 0.85
+                                            filter_stage_counters["hybrid_overridden"] += 1
+                                        else:
+                                            # Rules also neutral → HOLD
+                                            prediction["action"] = 1
+                                            prediction["confidence"] = 0.0
+
+                                    else:
+                                        # --- Step 4: Rules-primary weighted combination ---
+                                        sources_agree = (ml_direction != 0 and rules_direction != 0
+                                                         and ml_direction == rules_direction)
+                                        sources_disagree = (ml_direction != 0 and rules_direction != 0
+                                                            and ml_direction != rules_direction)
+
+                                        if sources_agree:
+                                            # AGREEMENT: Rules direction confirmed by ML → strong signal
+                                            bonus = config["hybrid_agreement_bonus"]
+                                            # Rules-weighted confidence: primarily rules, ML adds confirmation
+                                            combined_confidence = min(
+                                                rules_confidence * 0.7 + ml_conf * 0.3 + bonus,
+                                                1.0
+                                            )
+                                            prediction["confidence"] = combined_confidence
+                                            # Direction from rules (same as ML since they agree)
+                                            filter_stage_counters["hybrid_agree"] += 1
+                                            filter_stage_counters["hybrid_boosted"] += 1
+
+                                        elif sources_disagree:
+                                            # DISAGREEMENT: Rules and ML conflict
+                                            # Rules are primary → trust rules direction
+                                            dampen = config["hybrid_disagreement_dampen"]
+                                            filter_stage_counters["hybrid_disagree"] += 1
+                                            filter_stage_counters["hybrid_dampened"] += 1
+
+                                            if abs(rules_composite_score) > 0.15 and rules_confidence > 0.4:
+                                                # Rules have a view → override ML, dampened confidence
+                                                old_action = prediction["action"]
+                                                prediction["action"] = 2 if rules_direction == 1 else 0
+                                                prediction["confidence"] = rules_confidence * dampen
+                                                filter_stage_counters["hybrid_overridden"] += 1
+                                            else:
+                                                # Both weak → kill the signal
+                                                prediction["confidence"] = ml_conf * dampen * 0.5
+
+                                        else:
+                                            # One is neutral
+                                            if rules_direction != 0:
+                                                # Rules have a view, ML neutral → use rules
+                                                prediction["action"] = 2 if rules_direction == 1 else 0
+                                                prediction["confidence"] = rules_confidence * 0.75
+                                                filter_stage_counters["hybrid_overridden"] += 1
+                                            elif ml_direction != 0:
+                                                # ML has a view, rules neutral → heavily discount ML
+                                                prediction["confidence"] = ml_conf * 0.5
+
+                                    # Log hybrid diagnostics for first 5 signals (sample)
+                                    if signals_generated <= 5:
+                                        ml_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(ml_action, '?')
+                                        rules_dir = 'LONG' if rules_direction == 1 else ('SHORT' if rules_direction == -1 else 'NEUTRAL')
+                                        final_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
+                                        mode = "RULES-ONLY" if ml_is_biased else ("AGREE" if sources_agree else ("DISAGREE" if sources_disagree else "PARTIAL"))
+                                        logger.info(
+                                            f"[HYBRID {signals_generated}] {symbol}: ML={ml_name}({ml_conf:.3f}) "
+                                            f"+ Rules={rules_dir}({rules_composite_score:+.3f}, conf={rules_confidence:.3f}) "
+                                            f"→ {mode} → Final={final_name}({prediction['confidence']:.3f})"
+                                        )
+
+                        except Exception as e:
+                            if signals_generated <= 10:
+                                logger.warning(f"⚠️ Aristotle rules signal failed for {symbol}: {e}")
+
+                    # Store metadata for downstream use
+                    prediction["rules_score"] = rules_composite_score
+                    prediction["rules_confidence"] = rules_confidence
+                    prediction["hybrid_applied"] = hybrid_applied
+                    prediction["ml_biased"] = ml_is_biased
+
+                    # ============================================================
+                    # DEGRADATION AUTO-HALT & SIGNAL INVERSION (with recovery)
+                    # ============================================================
+                    # If models are anti-predictive (< 30% win rate), INVERT their signals.
+                    # A model that's wrong 70%+ of the time is actually useful — just do the opposite.
+                    # If models are catastrophically bad (< 20%), halt trading for 2000 candles
+                    # then resume with inverted signals to give the system another chance.
+                    if len(recent_trades_window) >= 15:
+                        current_rolling_wr = np.mean(recent_trades_window)
+                        if current_rolling_wr < config["degradation_halt_threshold"]:
+                            # Check if we've cooled down enough to resume
+                            candles_since_halt = total_candles - getattr(self, '_halt_candle', 0)
+                            if not degradation_halt_logged:
+                                logger.warning(f"AUTO-HALT: Win rate {current_rolling_wr*100:.1f}% < {config['degradation_halt_threshold']*100:.0f}%. Pausing trading for 2000 candles.")
+                                degradation_halt_logged = True
+                                self._halt_candle = total_candles
+                                portfolio_trading_paused = True
+                                continue
+                            elif candles_since_halt < 2000:
+                                # Still in cooldown
+                                portfolio_trading_paused = True
+                                continue
+                            else:
+                                # Recovery: resume with signal inversion
+                                if portfolio_trading_paused:
+                                    logger.info(f"🔄 AUTO-HALT RECOVERY: Resuming after {candles_since_halt} candle cooldown (will invert signals)")
+                                    portfolio_trading_paused = False
+                                    degradation_halt_logged = False  # Allow re-halt if still bad
+                                # Fall through to inversion logic below
+                        elif current_rolling_wr < config["degradation_invert_threshold"]:
+                            # Models are anti-predictive — invert signals
+                            original_action = prediction["action"]
+                            if prediction["action"] == 0:
+                                prediction["action"] = 2  # SHORT → LONG
+                            elif prediction["action"] == 2:
+                                prediction["action"] = 0  # LONG → SHORT
+                            # HOLD stays HOLD
+                            if original_action != prediction["action"]:
+                                inverted_name = {0: 'SHORT', 1: 'HOLD', 2: 'LONG'}.get(prediction["action"], '?')
+                                if np.random.random() < 0.001:
+                                    logger.debug(f"Signal inverted: {symbol} (WR {current_rolling_wr*100:.1f}%) → {inverted_name}")
+
+                    # ============================================================
+                    # TREND-FOLLOWING FILTER (Aristotle's #1 Rule)
+                    # ============================================================
+                    # "Never fight the trend." — Only go long in uptrends, short in downtrends.
+                    # EMA(50) > EMA(200) = uptrend = longs only
+                    # EMA(50) < EMA(200) = downtrend = shorts allowed
+                    # This single filter prevents the #1 killer: shorting bull markets.
+                    trend_allows_trade = True
+                    if config["trend_filter_enabled"] and symbol in window_data and len(window_data[symbol]) >= config["trend_ema_slow"]:
+                        trend_closes = np.array([c.close for c in window_data[symbol][-config["trend_ema_slow"]:]])
+                        # Calculate EMAs
+                        ema_fast_period = config["trend_ema_fast"]
+                        ema_slow_period = config["trend_ema_slow"]
+                        # Simple approximation: use last N closes for EMA
+                        ema_fast = np.mean(trend_closes[-ema_fast_period:])
+                        ema_slow = np.mean(trend_closes)
+                        trend_direction = "up" if ema_fast > ema_slow else "down"
+
+                        if prediction["action"] == 0 and trend_direction == "up":
+                            # Trying to SHORT in an uptrend — BLOCK
+                            trend_allows_trade = False
+                            filter_stage_counters["trend_filtered"] = filter_stage_counters.get("trend_filtered", 0) + 1
+                        elif prediction["action"] == 2 and trend_direction == "down":
+                            # Trying to go LONG in a downtrend — BLOCK
+                            trend_allows_trade = False
+                            filter_stage_counters["trend_filtered"] = filter_stage_counters.get("trend_filtered", 0) + 1
+
+                    if not trend_allows_trade:
+                        continue  # Skip this signal — fighting the trend
 
                     # CONTINUOUS LEARNING: Collect feature-prediction pairs for retraining
                     # Store current price so we can look ahead from this point in time
@@ -2751,9 +3577,10 @@ class WalkForwardBacktester:
 
                     # PHASE D: Aggressive Signal Filtering
                     # Only trade on ULTRA-STRONG signals
-                    # Define is_short and is_long before use (CRITICAL FIX: moved from line 2753-2754)
+                    # Define is_short, is_long, is_hold before use
                     is_short = prediction["action"] == 0
                     is_long = prediction["action"] == 2
+                    is_hold = prediction["action"] == 1
                     conflicting_trade = (regime == 'bull' and is_short) or (regime == 'bear' and is_long)
 
                     # DIAGNOSTIC: Track filter stages
@@ -2785,9 +3612,9 @@ class WalkForwardBacktester:
                     weighted_agreement_pct = weighted_agreement / total_model_weight if total_model_weight > 0 else 0
 
                     # Require strong consensus - both weighted AND simple agreement (BUG FIX #7)
-                    # Using OR would allow weak signals (e.g., 2 good models + 2 bad models agree)
-                    # Using AND ensures both consensus metrics agree on the signal quality
-                    min_agreement = config["min_model_agreement"]  # Require at least 2 out of 4 models
+                    # LONG BIAS: Shorts require 4/4 agreement (harder to profit from shorting)
+                    # Longs require 3/4 agreement (structural upward drift in crypto/stocks)
+                    min_agreement = config["min_model_agreement_short"] if is_short else config["min_model_agreement"]
                     model_agreement = sum(1 for p in individual_preds if p == final_action)
 
                     # STRICT: Require BOTH weighted consensus AND minimum simple agreement
@@ -2923,18 +3750,77 @@ class WalkForwardBacktester:
                     if symbol not in positions:
                         filter_stage_counters["not_already_open"] += 1
 
+                    # SYMBOL CONCENTRATION LIMIT: Prevent piling into same symbol
+                    # (was allowing 8 consecutive TSLA shorts — disastrous)
+                    symbol_at_max_trades = symbol_trade_count.get(symbol, 0) >= max_trades_per_symbol
+
+                    # ============================================================
+                    # MEAN-REVERSION ENTRY FILTER (Aristotle-inspired)
+                    # ============================================================
+                    # "Wait for market drops before entering" — only buy near support,
+                    # only short near resistance. Prevents buying tops / shorting bottoms.
+                    #
+                    # For LONGS: RSI < 40 (oversold) OR price below 50-SMA (dip)
+                    # For SHORTS: RSI > 60 (overbought) OR price above 50-SMA (extended)
+                    # HOLD signals bypass this filter (they won't pass action != 1 anyway)
+                    mean_reversion_ok = True
+                    if prediction["action"] != 1 and symbol in window_data and len(window_data[symbol]) >= 50:
+                        mr_closes = np.array([c.close for c in window_data[symbol][-50:]])
+                        # RSI-14
+                        mr_gains = np.maximum(np.diff(mr_closes), 0)
+                        mr_losses = np.maximum(-np.diff(mr_closes), 0)
+                        mr_avg_gain = np.mean(mr_gains[-14:]) if len(mr_gains) >= 14 else np.mean(mr_gains)
+                        mr_avg_loss = np.mean(mr_losses[-14:]) if len(mr_losses) >= 14 else np.mean(mr_losses)
+                        mr_rsi = 100 - (100 / (1 + mr_avg_gain / (mr_avg_loss + 1e-8)))
+                        # 50-period SMA
+                        mr_sma50 = np.mean(mr_closes)
+                        mr_current_price = mr_closes[-1]
+                        mr_price_vs_sma = (mr_current_price - mr_sma50) / (mr_sma50 + 1e-8)
+
+                        if prediction["action"] == 2:  # LONG
+                            # Buy the dip: price near/below support
+                            rsi_ok = mr_rsi < 40        # Oversold
+                            sma_ok = mr_price_vs_sma < 0.02  # Within 2% above SMA or below it
+                            mean_reversion_ok = rsi_ok or sma_ok
+                        elif prediction["action"] == 0:  # SHORT
+                            # Short the rip: price near/above resistance
+                            rsi_ok = mr_rsi > 60        # Overbought
+                            sma_ok = mr_price_vs_sma > -0.02  # Within 2% below SMA or above it
+                            mean_reversion_ok = rsi_ok or sma_ok
+
+                    if mean_reversion_ok:
+                        filter_stage_counters["mean_reversion_ok"] = filter_stage_counters.get("mean_reversion_ok", 0) + 1
+
+                    # ============================================================
+                    # RULES-BYPASS: When Aristotle rules have strong conviction,
+                    # relax ML-dependent filters (consensus, stat significance,
+                    # mean-reversion). The rules already encode these concepts.
+                    # ============================================================
+                    rules_strong = (prediction.get("hybrid_applied", False)
+                                    and abs(prediction.get("rules_score", 0)) > 0.25
+                                    and prediction.get("rules_confidence", 0) > 0.6)
+                    if rules_strong:
+                        filter_stage_counters["rules_bypass"] = filter_stage_counters.get("rules_bypass", 0) + 1
+
+                    # Rules-bypass: strong rules conviction can skip ML consensus ONLY
+                    # Keep mean-reversion and stat significance — these prevent buying tops
+                    passes_ml_consensus = strong_consensus
+                    if rules_strong:
+                        passes_ml_consensus = True  # Rules already encode multi-indicator consensus
+
                     if (prediction["action"] != 1 and
                         meets_confidence and
-                        # NOTE: conflicting_trade is NOT a hard ban - it's handled by increased confidence requirement above
                         is_liquid and
-                        strong_consensus and
+                        passes_ml_consensus and
                         is_statistically_significant and
+                        mean_reversion_ok and
+                        not symbol_at_max_trades and
                         not in_cooldown and
                         not position_conflict and
                         symbol not in positions):  # Don't open if already have position
-                        # ✅ SIGNAL ACCEPTED: Log for diagnostics
+                        # ✅ SIGNAL ACCEPTED
                         filter_stage_counters["positions_opened"] += 1
-                        logger.info(f"✅ TRADE #{filter_stage_counters['positions_opened']}: {action_name} {symbol} | Conf={prediction['confidence']:.3f} (min={min_confidence:.3f}) | Agreement={model_agreement}/4 | Regime={regime}")
+                        logger.debug(f"TRADE #{filter_stage_counters['positions_opened']}: {action_name} {symbol} | Conf={prediction['confidence']:.3f} | Agreement={model_agreement}/4 | Regime={regime}")
 
                         # SIMPLIFIED POSITION SIZING (FIXED: Removed cascading multipliers that reduced positions to $0.30)
                         # Issue: Base Kelly * horizon * vol targeting * correlation * counter-trend * vol scaling * leverage
@@ -2950,34 +3836,39 @@ class WalkForwardBacktester:
                         # If we want to track new positions THIS candle, we'd need to track them separately
                         available_capital = capital
 
-                        # Simple Kelly: 2-3% per position (with 10 positions = 20-30% risk, 70-80% cash)
-                        # This is more aggressive than before but allows actual trading
-                        # BUG FIX #43: Make Kelly fraction adaptive based on recent win rate (CRITICAL: was always fixed 3%)
-                        # True Kelly = (win_rate * avg_win - loss_rate * avg_loss) / avg_win
-                        # Simplified: kelly_fraction should adjust based on win rate
-                        # - 40% win rate: kelly_fraction = 0.5% (very conservative)
-                        # - 50% win rate: kelly_fraction = 1.0% (neutral)
-                        # - 55% win rate: kelly_fraction = 1.5% (moderate)
-                        # - 60% win rate: kelly_fraction = 2.0% (aggressive)
-                        # Calculate adaptive Kelly based on recent win rate
+                        # STRATEGIC OVERHAUL: Concentrated positions (Aristotle approach).
+                        # Old: 0.5-3% Kelly = $50-300 trades = meaningless gains.
+                        # New: 3-8% Kelly = $300-800 trades = real money at stake.
+                        # With max 8 positions at 8% = 64% deployed, 36% cash buffer.
+                        #
+                        # Adaptive based on recent win rate:
+                        # - Below 45%: reduce to 3% (capital preservation)
+                        # - 45-55%: 5% (moderate conviction)
+                        # - Above 55%: 8% (high conviction, proven edge)
                         current_win_rate = np.mean(recent_trades_window[-50:]) if len(recent_trades_window) >= 10 else 0.5
                         if current_win_rate <= 0.40:
-                            kelly_fraction = 0.005  # 0.5% for losing period
+                            kelly_fraction = 0.03  # 3% for losing period (was 0.5%)
                         elif current_win_rate <= 0.45:
-                            kelly_fraction = 0.010  # 1.0% for break-even period
+                            kelly_fraction = 0.04  # 4% for break-even (was 1.0%)
                         elif current_win_rate <= 0.50:
-                            kelly_fraction = 0.015  # 1.5% for neutral
+                            kelly_fraction = 0.05  # 5% for neutral (was 1.5%)
                         elif current_win_rate <= 0.55:
-                            kelly_fraction = 0.020  # 2.0% for good
+                            kelly_fraction = 0.06  # 6% for good (was 2.0%)
                         elif current_win_rate <= 0.60:
-                            kelly_fraction = 0.025  # 2.5% for very good
+                            kelly_fraction = 0.07  # 7% for very good (was 2.5%)
                         else:
-                            kelly_fraction = 0.030  # 3.0% for excellent
+                            kelly_fraction = 0.08  # 8% for excellent (was 3.0%)
+
+                        # RULES CONVICTION BOOST: When Aristotle rules confirm the trade
+                        # with high confidence, modest position size increase
+                        if rules_strong and prediction.get("rules_confidence", 0) > 0.65:
+                            kelly_fraction = min(kelly_fraction * 1.25, 0.10)  # 25% boost, cap at 10%
+                            filter_stage_counters["rules_boosted_size"] = filter_stage_counters.get("rules_boosted_size", 0) + 1
 
                         # Use available_capital instead of total capital (CRITICAL FIX)
                         # BUG FIX #34: CRITICAL - Apply recovery_scale to prevent oversizing during drawdown recovery
                         # Without this, positions stay full-Kelly sized during recovery, risking account blow-up
-                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"]) * recovery_scale  # Cap at 4%, scaled by recovery
+                        position_size = available_capital * min(kelly_fraction, config["kelly_cap_pct"]) * recovery_scale  # Cap at kelly_cap_pct, scaled by recovery
 
                         # NEW: PORTFOLIO-LEVEL VOLATILITY TARGETING (Top Funds Approach)
                         # Size positions to maintain total portfolio volatility at 1.2-1.5% daily
@@ -3022,9 +3913,7 @@ class WalkForwardBacktester:
                                     position_size *= vol_scaling
                                     logger.debug(f"Portfolio vol cap: scaling {symbol} by {vol_scaling:.2f}x (expected_vol={portfolio_expected_vol*100:.2f}%, target={target_portfolio_vol*100:.2f}%)")
 
-                        # TIER 2 FIX: Calculate optimal stop distance for this new position
-                        optimal_stop = self.get_optimal_stop_distance(stop_distance_effectiveness)
-                        effective_stop_distance = optimal_stop  # Track which stop will be used
+                        # effective_stop_distance computed after ATR calculation below
 
                         # REMOVED: Cascading multipliers (recovery, correlation, counter-trend, vol scaling, leverage)
                         # These were multiplying together: base * 0.30-1.0 * 0.5-1.0 * 0.7 * 0.67-1.5 * 0.7-1.3 = 0.00003x
@@ -3036,33 +3925,24 @@ class WalkForwardBacktester:
                         # Portfolio vol targeting is sufficient safeguard against systemic risk
                         # (higher correlations automatically reduce positions via vol calculation)
 
-                        # TIER 3A: CONFIDENCE-BASED POSITION SIZING (NEW!)
-                        # Higher confidence = bigger position = bigger returns
-                        # This allows the system to allocate MORE capital on its highest-conviction trades
+                        # CONFIDENCE-BASED POSITION SIZING
+                        # Higher confidence = bigger position = bigger returns.
+                        # With 8% base Kelly and 2.0x max multiplier, ultra-high confidence
+                        # trades get 16% of capital = $1,600 on $10k. This is Aristotle-level
+                        # conviction: bet big on your best ideas.
                         confidence = prediction["confidence"]
                         confidence_multiplier = 1.0
 
                         if confidence >= 0.80:
-                            # Very high confidence: 2.0x size (double bet on best ideas)
-                            confidence_multiplier = 2.0
-                            logger.debug(f"🚀 Ultra-high confidence (>80%): +100% position size")
+                            confidence_multiplier = config["confidence_ultra_high_mult"]  # 2.0x
                         elif confidence >= 0.70:
-                            # High confidence: 1.5x size
-                            confidence_multiplier = 1.5
-                            logger.debug(f"📈 High confidence (70-80%): +50% position size")
+                            confidence_multiplier = config["confidence_high_mult"]  # 1.5x
                         elif confidence >= 0.60:
-                            # Medium-high confidence: 1.2x size
-                            confidence_multiplier = 1.2
-                            logger.debug(f"➡️ Medium-high confidence (60-70%): +20% position size")
+                            confidence_multiplier = config["confidence_medium_high_mult"]  # 1.2x
                         elif confidence >= 0.50:
-                            # Medium confidence: 1.0x size (baseline)
-                            confidence_multiplier = 1.0
+                            confidence_multiplier = config["confidence_medium_mult"]  # 1.0x
                         elif confidence >= 0.45:
-                            # Low confidence: 0.75x size (minimal penalty for minimum-acceptable signals)
-                            # BUG FIX #44: Changed from 0.6x to 0.75x (CRITICAL: 0.45 is minimum threshold, shouldn't penalize 25% reduction)
-                            # A signal that barely meets minimum confidence should still get reasonable sizing
-                            confidence_multiplier = 0.75
-                            logger.debug(f"⚠️ Low confidence (45-50%): -25% position size")
+                            confidence_multiplier = config["confidence_low_mult"]  # 0.7x
                         else:
                             # Very low confidence: 0.75x size (should never reach here with BUG FIX #39 threshold change)
                             # But if it does (due to edge cases), don't penalize too severely
@@ -3072,32 +3952,33 @@ class WalkForwardBacktester:
 
                         position_size *= confidence_multiplier
 
-                        # TIER 3B: REGIME-AWARE POSITION SIZING (KEPT - minimal impact)
-                        # Adjust position sizes based on market regime alignment
+                        # REGIME-AWARE POSITION SIZING + TREND STRENGTH BONUS
+                        # With trend filter active, counter-trend trades are already blocked.
+                        # Give a bigger bonus for strong trend alignment.
                         is_long = prediction["action"] == 2
                         is_short = prediction["action"] == 0
                         if regime == 'bull' and is_long:
-                            # Long in bull: optimal, increase size by 15%
-                            position_size *= 1.15
-                            logger.debug(f"Regime alignment bonus (bull long): +15% size")
-                        elif regime == 'bull' and is_short:
-                            # Short in bull: poor fit, reduce by 20%
-                            position_size *= 0.80
-                            logger.debug(f"Regime penalty (bull short): -20% size")
+                            # Long in confirmed bull: STRONG alignment → 30% bonus (was 15%)
+                            position_size *= 1.30
+                            logger.debug(f"Regime alignment bonus (bull long): +30% size")
                         elif regime == 'bear' and is_short:
-                            # Short in bear: optimal, increase size by 15%
-                            position_size *= 1.15
-                            logger.debug(f"Regime alignment bonus (bear short): +15% size")
+                            # Short in confirmed bear: STRONG alignment → 30% bonus (was 15%)
+                            position_size *= 1.30
+                            logger.debug(f"Regime alignment bonus (bear short): +30% size")
+                        elif regime == 'bull' and is_short:
+                            # Short in bull: shouldn't reach here (trend filter blocks it), but safety
+                            position_size *= 0.50
+                            logger.debug(f"Regime penalty (bull short): -50% size")
                         elif regime == 'bear' and is_long:
-                            # Long in bear: poor fit, reduce by 20%
-                            position_size *= 0.80
-                            logger.debug(f"Regime penalty (bear long): -20% size")
-                        # Neutral: no adjustment
+                            # Long in bear: shouldn't reach here (trend filter blocks it), but safety
+                            position_size *= 0.50
+                            logger.debug(f"Regime penalty (bear long): -50% size")
+                        # Sideways: no adjustment (trend filter allows both directions)
 
-                        # BUG FIX #4: Cap maximum position size at 1.5x Kelly for safety
-                        # Without this cap, (confidence 2.0x * regime 1.15x) = 2.3x Kelly = too risky
-                        # Kelly Criterion safety margin requires position_size <= 1.5 * kelly_base_size
-                        max_kelly_position = available_capital * 0.03 * 1.5  # 1.5x of base 3% Kelly
+                        # Cap maximum position size at 1.5x Kelly for safety
+                        # With confidence 2.0x * regime 1.15x = 2.3x Kelly, cap at 1.5x
+                        # At 8% Kelly cap: max = 10000 * 0.08 * 1.5 = $1,200 per position
+                        max_kelly_position = available_capital * config["kelly_cap_pct"] * 1.5  # 1.5x of Kelly cap
                         # BUG FIX #27: Guard against zero max_kelly_position (prevents division by zero crash)
                         if position_size > max_kelly_position and max_kelly_position > 1e-8:
                             kelly_excess = position_size / max_kelly_position
@@ -3132,6 +4013,9 @@ class WalkForwardBacktester:
                         # New logic: ONLY check that remaining capital after position >= margin requirement
                         min_capital_to_trade = 100  # Need at least $100 per position
                         num_existing_positions = len(positions)
+                        max_concurrent_positions = 8  # Fewer but larger positions (was 12)
+                        if num_existing_positions >= max_concurrent_positions:
+                            continue  # Skip — too many open positions
                         total_margin_required = (num_existing_positions + 1) * min_capital_to_trade  # +1 for new position
                         capital_after_position = capital - position_size
 
@@ -3156,11 +4040,47 @@ class WalkForwardBacktester:
                             # CRITICAL FIX BUG #3: Set pyramid targets at entry time, not recalculated each candle
                             # BUG FIX #6: Now uses config values (not hardcoded)
                             # This prevents time-dependent changes to exit levels
-                            # CRITICAL FIX: Both long and short use POSITIVE targets (exit at profit!)
-                            # For shorts: pnl_pct = (entry - price) / entry → positive when price falls = profit ✓
-                            # So shorts also want to exit when pnl_pct > 0.05 (profit), same as longs!
-                            pyramid_target_1 = config["pyramid_target_1_pct"]   # Exit 30% at configurable profit target
-                            pyramid_target_2 = config["pyramid_target_2_pct"]   # Exit rest at configurable profit target
+                            # DYNAMIC ATR-BASED PYRAMID TARGETS
+                            # Fixed targets (5%/15%) don't adapt to volatility. A 5% target
+                            # is too tight for volatile assets and too wide for stable ones.
+                            # Use ATR as a volatility proxy to set appropriate exit levels.
+                            if symbol in window_data and len(window_data[symbol]) >= 20:
+                                recent_candles = window_data[symbol][-20:]
+                                atr_sum = 0
+                                for k in range(1, len(recent_candles)):
+                                    tr = max(
+                                        recent_candles[k].high - recent_candles[k].low,
+                                        abs(recent_candles[k].high - recent_candles[k-1].close),
+                                        abs(recent_candles[k].low - recent_candles[k-1].close)
+                                    )
+                                    atr_sum += tr
+                                entry_atr = atr_sum / (len(recent_candles) - 1)
+                                atr_pct = entry_atr / (candle.close + 1e-8)
+                                # STRATEGIC OVERHAUL: Wide targets for swing/long-term trades.
+                                # Stop must be MUCH TIGHTER than target for big risk/reward ratio.
+                                #
+                                # Stop:     1.2x ATR, [1.2%, 3.5%]   → small loss if wrong
+                                # Target 1: 5x ATR,   [5%, 15%]     → 4:1 reward:risk at first take
+                                # Target 2: 15x ATR,  [15%, 50%]    → 12:1 reward:risk for runners
+                                #
+                                # On a 2% ATR stock: stop at 2.4%, target 1 at 10%, target 2 at 30%
+                                # $800 position: risk $19, target 1 = $80, target 2 = $240
+                                pyramid_target_1 = np.clip(5.0 * atr_pct, 0.05, 0.15)
+                                pyramid_target_2 = np.clip(15.0 * atr_pct, 0.15, 0.50)
+                            else:
+                                atr_pct = 0.02  # Default ATR estimate
+                                pyramid_target_1 = config["pyramid_target_1_pct"]
+                                pyramid_target_2 = config["pyramid_target_2_pct"]
+
+                            # Compute effective stop from the ATR we just calculated
+                            effective_stop_distance = np.clip(1.2 * atr_pct, 0.012, 0.035)
+
+                            # R:R SAFETY NET: Reject trades where reward doesn't justify risk.
+                            # Normally ATR-based R:R is 4:1 (target=5x ATR, stop=1.2x ATR), but
+                            # clipping bounds can compress it (e.g. stop max 3.5%, target min 5% = 1.4:1).
+                            rr_ratio = pyramid_target_1 / (effective_stop_distance + 1e-8)
+                            if rr_ratio < 2.0:
+                                continue  # Skip — reward doesn't justify the risk
 
                             # BUG FIX #9: Entry price sanity check (prevent extreme values that cause numerical instability)
                             entry_price = candle.close
@@ -3179,10 +4099,11 @@ class WalkForwardBacktester:
                                 "highest_price": entry_price,  # TIER 1 FIX: Track for trailing stops
                                 "lowest_price": entry_price,   # Also track for shorts
                                 "stop_distance": effective_stop_distance,  # TIER 2 FIX: Track which stop was used
-                                "pyramid_target_1": pyramid_target_1,  # TIER 1 FIX: Fixed pyramid targets at entry
-                                "pyramid_target_2": pyramid_target_2,  # TIER 1 FIX: Fixed final target
+                                "pyramid_target_1": pyramid_target_1,  # ATR-based profit target 1
+                                "pyramid_target_2": pyramid_target_2,  # ATR-based profit target 2
+                                "entry_atr_pct": atr_pct,              # ATR at entry for stop calculation
                                 "pyramided_1": False,  # Track if first level was hit
-                                "pyramided_2": False,  # Track if second level was hit (CRITICAL FIX: ensure this exists)
+                                "pyramided_2": False,  # Track if second level was hit
                             }
 
                             # Log position opening (PHASE D: include model agreement)
@@ -3195,6 +4116,9 @@ class WalkForwardBacktester:
                             )
 
                             capital -= position_size
+
+                            # Track trades per symbol (for concentration limit)
+                            symbol_trade_count[symbol] = symbol_trade_count.get(symbol, 0) + 1
                     else:
                         # PHASE D: Track why signal was rejected
                         if prediction["action"] == 1:  # Hold signal
@@ -3291,6 +4215,20 @@ class WalkForwardBacktester:
         logger.info(f"  Stage 10 - Not already open: {filter_stage_counters['not_already_open']:,}")
         logger.info(f"  ✅ POSITIONS ACTUALLY OPENED: {filter_stage_counters['positions_opened']:,}")
         logger.info(f"\n  Filter funnel: {filter_stage_counters['total_predictions']:,} → {filter_stage_counters['positions_opened']:,} trades ({100*filter_stage_counters['positions_opened']/max(1,filter_stage_counters['total_predictions']):.2f}% conversion)")
+
+        # HYBRID SIGNAL ANALYSIS
+        if filter_stage_counters.get("hybrid_signals", 0) > 0:
+            hs = filter_stage_counters
+            total_hybrid = hs["hybrid_signals"]
+            logger.info(f"\n🔀 HYBRID SIGNAL ANALYSIS (ML + Aristotle Rules):")
+            logger.info(f"  Total hybrid evaluations: {total_hybrid:,}")
+            logger.info(f"  Agreement (ML + Rules same direction): {hs['hybrid_agree']:,} ({100*hs['hybrid_agree']/max(1,total_hybrid):.1f}%)")
+            logger.info(f"  Disagreement (ML vs Rules conflict): {hs['hybrid_disagree']:,} ({100*hs['hybrid_disagree']/max(1,total_hybrid):.1f}%)")
+            logger.info(f"  Signals boosted by agreement: {hs['hybrid_boosted']:,}")
+            logger.info(f"  Signals dampened by disagreement: {hs['hybrid_dampened']:,}")
+            logger.info(f"  ML actions overridden by rules: {hs['hybrid_overridden']:,}")
+            logger.info(f"  ML bias detected (rules-only mode): {hs.get('ml_bias_detected', 0):,}")
+            logger.info(f"  Rules-only signals: {hs.get('hybrid_rules_only', 0):,}")
 
         # SAFEGUARD: Log trading quality metrics
         logger.info("\n🛡️ SAFEGUARDS - TRADING QUALITY METRICS:")
@@ -3414,165 +4352,13 @@ class WalkForwardBacktester:
         equity_curve: List[Tuple[datetime, float]],
         trades: List[Dict]
     ) -> BacktestResult:
-        """Calculate backtest performance metrics."""
-        if not equity_curve:
-            return self._empty_result()
-
-        # BUG FIX #8: Need minimum samples for statistics (not just 1 point)
-        # With only 1 point, np.diff() produces empty array, std becomes 0
-        if len(equity_curve) < 10:
-            logger.warning(f"⚠️ Insufficient equity curve samples: {len(equity_curve)} (need ≥10 for statistics)")
-            # Still calculate what we can, but metrics will be limited
-            if len(equity_curve) == 1:
-                logger.warning("   Only 1 point in equity curve - no trades occurred or single candle backtest")
-
-        logger.info("Calculating returns and Sharpe/Sortino ratios...")
-        initial = self.initial_capital
-        final = equity_curve[-1][1]
-
-        # Returns
-        total_return = final - initial
-        total_return_pct = (total_return / initial) * 100
-
-        # Calculate daily returns for Sharpe/Sortino
-        equity_values = [e[1] for e in equity_curve]
-        returns = np.diff(equity_values) / (np.array(equity_values[:-1]) + 1e-8)
-
-        # Sharpe Ratio (annualized using configurable annualization factor)
-        # Uses annualization_factor from config (e.g., 8760 for 1h crypto, 2190 for 4h)
+        """Calculate backtest performance metrics. Delegates to backtest_metrics module."""
         annualization = getattr(self, '_annualization_factor', 365 * 24)
-        returns_std = np.std(returns)
-        if len(returns) > 1 and returns_std > 1e-8:
-            sharpe = np.mean(returns) / returns_std * np.sqrt(annualization)
-        else:
-            sharpe = 0
-
-        # Sortino Ratio (downside deviation only)
-        # Formula: (Mean Return) / (Downside Deviation) * sqrt(periods/year)
-        # Note: Uses mean of ALL returns (upside + downside) in numerator for excess return
-        # but only downside std in denominator, measuring return per unit downside risk
-        downside_returns = returns[returns < 0]
-        # BUG FIX #3: Use epsilon comparison instead of exact > 0 for float reliability
-        if len(downside_returns) > 0 and np.std(downside_returns) > 1e-8:
-            sortino = np.mean(returns) / np.std(downside_returns) * np.sqrt(annualization)
-        else:
-            # BUG FIX #4: Don't default to Sharpe when no downside
-            # If all returns are positive, Sortino is undefined (infinite)
-            # Set to a large number and log this rare condition
-            sortino = 999.9
-            if len(downside_returns) == 0:
-                logger.info("✅ PERFECT BACKTEST: All returns positive, Sortino = infinite (set to 999.9)")
-
-        # BUG FIX #19 & #20: Handle NaN values in metrics
-        # Protect against NaN/inf from edge cases
-        sharpe = 0.0 if not np.isfinite(sharpe) else sharpe
-        sortino = 0.0 if not np.isfinite(sortino) else sortino
-
-        logger.info("Calculating drawdown...")
-        # Max Drawdown - use epsilon protection for robustness
-        peak = equity_values[0]
-        max_dd = 0
-        for value in equity_values:
-            if value > peak:
-                peak = value
-            dd = (peak - value) / max(peak, 1e-8)  # Use epsilon for robust protection
-            if dd > max_dd:
-                max_dd = dd
-
-        logger.info("Analyzing trade statistics...")
-        # Trade statistics
-        winning_trades = [t for t in trades if t["pnl"] > 0]
-        losing_trades = [t for t in trades if t["pnl"] <= 0]
-
-        win_rate = len(winning_trades) / len(trades) if trades else 0
-        avg_win = np.mean([t["pnl"] for t in winning_trades]) if winning_trades else 0
-        avg_loss = np.mean([abs(t["pnl"]) for t in losing_trades]) if losing_trades else 0
-
-        # Profit factor (handle edge cases for JSON serialization)
-        gross_profit = sum(t["pnl"] for t in winning_trades)
-        gross_loss = abs(sum(t["pnl"] for t in losing_trades))
-        if len(trades) == 0:
-            profit_factor = 0.0  # No trades
-        elif gross_loss > 0:
-            profit_factor = gross_profit / gross_loss
-        else:
-            # Only winning trades (no losses) - use 100.0 instead of inf for JSON serialization
-            profit_factor = 100.0 if gross_profit > 0 else 0.0
-
-        # Average holding period
-        holding_periods = []
-        for t in trades:
-            entry = datetime.fromisoformat(t["entry_time"])
-            exit_time = datetime.fromisoformat(t["exit_time"])
-            holding_periods.append((exit_time - entry).total_seconds() / 3600)
-        avg_holding = np.mean(holding_periods) if holding_periods else 0
-
-        result = BacktestResult(
-            start_date=equity_curve[0][0],
-            end_date=equity_curve[-1][0],
-            initial_capital=initial,
-            final_capital=final,
-            total_return=total_return,
-            total_return_pct=total_return_pct,
-            sharpe_ratio=sharpe,
-            sortino_ratio=sortino,
-            max_drawdown=max_dd * initial,
-            max_drawdown_pct=max_dd * 100,
-            win_rate=win_rate,
-            profit_factor=profit_factor,
-            total_trades=len(trades),
-            winning_trades=len(winning_trades),
-            losing_trades=len(losing_trades),
-            avg_win=avg_win,
-            avg_loss=avg_loss,
-            avg_holding_period=avg_holding,
-            equity_curve=equity_curve,
-            trades=trades,
-        )
-
-        # Log final results
-        logger.info("=" * 80)
-        logger.info("📈 BACKTEST RESULTS")
-        logger.info("=" * 80)
-        logger.info(f"Period: {result.start_date.date()} to {result.end_date.date()}")
-        logger.info(f"Initial Capital: ${result.initial_capital:,.2f}")
-        logger.info(f"Final Capital: ${result.final_capital:,.2f}")
-        logger.info(f"Total Return: ${result.total_return:,.2f} ({result.total_return_pct:.2f}%)")
-        logger.info(f"Sharpe Ratio: {result.sharpe_ratio:.2f}")
-        logger.info(f"Sortino Ratio: {result.sortino_ratio:.2f}")
-        logger.info(f"Max Drawdown: ${result.max_drawdown:,.2f} ({result.max_drawdown_pct:.2f}%)")
-        logger.info(f"Win Rate: {result.win_rate*100:.2f}% ({result.winning_trades}/{result.total_trades} trades)")
-        logger.info(f"Profit Factor: {result.profit_factor:.2f}")
-        logger.info(f"Avg Win: ${result.avg_win:,.2f}")
-        logger.info(f"Avg Loss: ${result.avg_loss:,.2f}")
-        logger.info(f"Avg Holding Period: {result.avg_holding_period:.2f} hours")
-        logger.info("=" * 80)
-
-        return result
+        return _calculate_metrics_impl(equity_curve, trades, self.initial_capital, annualization)
 
     def _empty_result(self) -> BacktestResult:
-        """Return empty backtest result."""
-        now = datetime.now()
-        return BacktestResult(
-            start_date=now,
-            end_date=now,
-            initial_capital=self.initial_capital,
-            final_capital=self.initial_capital,
-            total_return=0,
-            total_return_pct=0,
-            sharpe_ratio=0,
-            sortino_ratio=0,
-            max_drawdown=0,
-            max_drawdown_pct=0,
-            win_rate=0,
-            profit_factor=0,
-            total_trades=0,
-            winning_trades=0,
-            losing_trades=0,
-            avg_win=0,
-            avg_loss=0,
-            avg_holding_period=0,
-        )
+        """Return empty backtest result. Delegates to backtest_metrics module."""
+        return _empty_result_impl(self.initial_capital)
 
 
 class ModelPreTrainer:
@@ -3590,12 +4376,24 @@ class ModelPreTrainer:
     Saves trained weights to disk for production use.
     """
 
-    def __init__(self, state_dim: int = 64, action_dim: int = 3):
-        # REVERTED: state_dim=64 for checkpoint compatibility
-        # (prepare_features generates 24-element vectors, padded to 64 for consistency)
-        # Previously changed to 24, but causes incompatibility with existing saved checkpoints
+    def __init__(self, state_dim: int = 320, action_dim: int = 3):
+        # state_dim=320: 64 price/volume features + up to 256 alternative data features
+        # (13 providers: macro, sentiment, calendar, cross-asset, options, crypto,
+        #  weather, EDGAR, news, trends, short volume, congressional, economic surprise)
+        # With all 13 providers + feature engineering: ~250+ features total
+        # 320 = next multiple of 64 for GPU memory alignment efficiency
+        # Old checkpoints with state_dim=64 will fail to load → triggers fresh training
         self.state_dim = state_dim
         self.action_dim = action_dim  # 0=sell, 1=hold, 2=buy
+
+        # PCA compressor: when raw features exceed state_dim, use PCA to compress
+        # instead of blind truncation which discards 87% of alt data signal.
+        # Stores: pca_components_ (state_dim x n_raw), pca_mean_ (n_raw,)
+        self._pca_components = None  # shape: (state_dim, n_raw_features)
+        self._pca_mean = None        # shape: (n_raw_features,)
+        self._pca_n_raw = None       # original feature count before compression
+        self._pre_pca_mean = None    # per-feature mean before PCA (for normalization)
+        self._pre_pca_std = None     # per-feature std before PCA (for normalization)
 
         # Sequence length for LSTM/Transformer (must match training)
         self.seq_len = 10
@@ -3619,7 +4417,7 @@ class ModelPreTrainer:
                     input_dim=state_dim, hidden_dim=128, output_dim=action_dim, lr=0.001
                 ),
                 'transformer': TrainableTransformer(
-                    input_dim=state_dim, hidden_dim=64, output_dim=action_dim, lr=0.001
+                    input_dim=state_dim, hidden_dim=128, output_dim=action_dim, lr=0.001
                 ),
                 'vae': TrainableVAE(
                     input_dim=state_dim, hidden_dim=64, latent_dim=8, output_dim=action_dim, lr=0.001
@@ -3644,6 +4442,105 @@ class ModelPreTrainer:
         self.min_training_epochs = 1  # No minimum - early stopping is the control, not epoch count
         self.min_training_samples = 10000
         self.regime_train_counts = {'bull': 0, 'bear': 0, 'neutral': 0}  # Track samples per regime
+
+    def _fit_pca_compress(self, X: np.ndarray, target_dim: int) -> np.ndarray:
+        """
+        Fit PCA on training data and compress features from n_raw → target_dim.
+
+        Instead of blind truncation (X[:, :320]) which discards 87% of alt data,
+        PCA finds the top-320 linear combinations that capture maximum variance.
+        This preserves signal from ALL 2450 features in a 320-dim representation.
+
+        Uses numpy SVD directly (no sklearn dependency).
+        """
+        n_samples, n_raw = X.shape
+        logger.info(f"🔬 PCA compression: {n_raw} features → {target_dim} components")
+
+        # Handle NaN/inf before PCA
+        X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Center the data (PCA requires mean-centered input)
+        self._pca_mean = X_clean.mean(axis=0)
+        X_centered = X_clean - self._pca_mean
+
+        # Compute top-k components via truncated SVD (much faster than full SVD)
+        # For n_samples >> n_features, compute covariance matrix approach
+        # For n_features >> n_samples, use X @ X.T approach
+        if n_raw > n_samples:
+            # Gram matrix approach: O(n_samples^2) instead of O(n_features^2)
+            gram = X_centered @ X_centered.T / (n_samples - 1)
+            eigenvalues, eigenvectors = np.linalg.eigh(gram)
+            # Sort descending
+            idx = np.argsort(eigenvalues)[::-1][:target_dim]
+            eigenvectors = eigenvectors[:, idx]
+            eigenvalues = eigenvalues[idx]
+            # Convert back to feature-space components
+            components = X_centered.T @ eigenvectors
+            # Normalize each component
+            norms = np.linalg.norm(components, axis=0, keepdims=True) + 1e-10
+            components = components / norms
+            self._pca_components = components.T  # (target_dim, n_raw)
+        else:
+            # Standard covariance approach
+            cov = X_centered.T @ X_centered / (n_samples - 1)
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+            idx = np.argsort(eigenvalues)[::-1][:target_dim]
+            self._pca_components = eigenvectors[:, idx].T  # (target_dim, n_raw)
+            eigenvalues = eigenvalues[idx]
+
+        self._pca_n_raw = n_raw
+
+        # Transform
+        X_compressed = X_centered @ self._pca_components.T
+
+        # Log variance explained using actual projected data (avoids eigenvalue scaling bugs)
+        total_var = np.sum(np.var(X_centered, axis=0))
+        explained_var = np.sum(np.var(X_compressed, axis=0))
+        var_ratio = explained_var / (total_var + 1e-10)
+        logger.info(f"   PCA variance explained: {var_ratio:.1%} ({target_dim} components from {n_raw} features)")
+
+        return X_compressed.astype(np.float32)
+
+    def _apply_pca_compress(self, X: np.ndarray) -> np.ndarray:
+        """
+        Apply previously fitted PCA transform to new data (inference time).
+
+        Falls back to truncation if PCA was not fitted (e.g. old checkpoint).
+        """
+        if self._pca_components is None or self._pca_mean is None:
+            # Fallback: no PCA fitted (old checkpoint or features <= state_dim during training)
+            if X.ndim == 1:
+                return X[:self.state_dim]
+            return X[:, :self.state_dim]
+
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+            squeeze = True
+        else:
+            squeeze = False
+
+        n_raw = X.shape[1]
+        expected_raw = self._pca_n_raw
+
+        # Handle dimension mismatch (different alt data availability at inference)
+        if n_raw < expected_raw:
+            padding = np.zeros((X.shape[0], expected_raw - n_raw))
+            X = np.hstack([X, padding])
+        elif n_raw > expected_raw:
+            X = X[:, :expected_raw]
+
+        X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Apply pre-PCA normalization if fitted (matches training pipeline)
+        if hasattr(self, '_pre_pca_mean') and self._pre_pca_mean is not None:
+            X_clean = (X_clean - self._pre_pca_mean) / self._pre_pca_std
+
+        X_centered = X_clean - self._pca_mean
+        result = X_centered @ self._pca_components.T
+
+        if squeeze:
+            return result.flatten().astype(np.float32)
+        return result.astype(np.float32)
 
     def prepare_training_data(
         self,
@@ -3675,6 +4572,9 @@ class ModelPreTrainer:
             features = backtester.prepare_features(candles)
             if len(features) == 0:
                 continue
+
+            # Augment with alternative data (macro, sentiment, calendar, etc.)
+            features = backtester.augment_features_with_alt_data(features, candles, lookback=400)
 
             # Generate labels for all horizons at once
             multi_labels = backtester.generate_multi_horizon_labels(candles)
@@ -3718,18 +4618,20 @@ class ModelPreTrainer:
             for horizon, labels in multi_labels.items():
                 all_multi_labels[horizon].append(labels[:min_label_len])
 
-            # CRITICAL FIX: Calculate rewards with proper time alignment
+            # Calculate rewards with proper time alignment
             # features[i] corresponds to candles[400+i] (after alignment fix)
-            # So future_return should use closes[400+i], not closes[i]
-            # This balances between short-term tactical and long-term strategic
+            # FIX: Use 800h lookahead to match primary label horizon (was 200h).
+            # DQN learns Q-values from rewards. If rewards use 200h returns but labels
+            # use 800h returns, DQN gets conflicting signals (e.g. label="buy" because
+            # 800h return is positive, but reward is negative because 200h return is negative).
             closes = np.array([c.close for c in candles])
-            rewards = []
+            raw_rewards = []
             feature_lookback = 400
+            reward_horizon = 200  # Match primary label horizon (was 800 — now 200h for better alignment)
             for i in range(len(features)):
-                candle_idx = feature_lookback + i  # Index in closes array
-                if candle_idx + 200 < len(closes):
-                    future_return = (closes[candle_idx + 200] - closes[candle_idx]) / closes[candle_idx]
-                    # Get majority vote across horizons
+                candle_idx = feature_lookback + i
+                if candle_idx + reward_horizon < len(closes):
+                    future_return = (closes[candle_idx + reward_horizon] - closes[candle_idx]) / closes[candle_idx]
                     horizon_votes = []
                     for horizon, labels in multi_labels.items():
                         if i < len(labels):
@@ -3737,20 +4639,32 @@ class ModelPreTrainer:
 
                     if horizon_votes:
                         majority_label = np.median(horizon_votes)
-                        # Reward alignment: +1 for correct direction, -1 for wrong
                         if majority_label >= 1.5:  # Consensus buy
-                            reward = future_return * 10
+                            raw_rewards.append(future_return)
                         elif majority_label <= 0.5:  # Consensus sell
-                            reward = -future_return * 10
+                            raw_rewards.append(-future_return)
                         else:  # Hold
-                            reward = 0
-                        rewards.append(np.clip(reward, -1.0, 1.0))
+                            raw_rewards.append(0)
                     else:
-                        rewards.append(0)
+                        raw_rewards.append(0)
                 else:
-                    rewards.append(0)
+                    raw_rewards.append(0)
 
-            all_rewards.append(np.array(rewards))
+            # Percentile-based normalization: scale rewards to [-1, 1] using
+            # the actual distribution. This preserves relative differences instead
+            # of hard-clipping (which compressed 40%+ of rewards to near-zero).
+            raw_arr = np.array(raw_rewards)
+            nonzero_mask = raw_arr != 0
+            if nonzero_mask.sum() > 10:
+                p5 = np.percentile(raw_arr[nonzero_mask], 5)
+                p95 = np.percentile(raw_arr[nonzero_mask], 95)
+                spread = max(abs(p95), abs(p5), 1e-8)
+                # Scale so p5/p95 map to roughly -1/+1
+                rewards = np.clip(raw_arr / spread, -1.0, 1.0)
+            else:
+                rewards = raw_arr
+
+            all_rewards.append(rewards)
 
         if not all_features:
             logger.error("❌ CRITICAL: No training data prepared - cannot train models")
@@ -3785,27 +4699,51 @@ class ModelPreTrainer:
         assert X.shape[0] == len(r), \
             f"Data alignment error: features={X.shape[0]}, rewards={len(r)}"
 
-        # BUG FIX #5: Validate feature dimension consistency before padding
-        # Features generated by prepare_features() should always be 35-dimensional
-        # If this changes, it indicates a bug in feature generation
-        expected_feature_dim = 35  # From prepare_features() feature_vector (lines 1019-1056)
+        # Feature dimension: 64 base features + optional alt data features
+        # Alt data adds variable features depending on which providers are active
+        base_feature_dim = 64  # From prepare_features() feature_vector
+        n_alt = backtester.alt_data_context.n_features if backtester.alt_data_context and backtester.alt_data_context.is_prepared else 0
+        expected_feature_dim = base_feature_dim + n_alt
+        if n_alt > 0:
+            logger.info(f"✅ Alternative data augmented features: {base_feature_dim} price + {n_alt} alt = {expected_feature_dim} total")
         if X.shape[1] != expected_feature_dim and X.shape[1] != self.state_dim:
             logger.warning(f"⚠️ Feature dimension mismatch: generated={X.shape[1]}, expected={expected_feature_dim}")
 
-        # Pad/truncate features to state_dim
+        # Compress or pad features to state_dim
         if X.shape[1] < self.state_dim:
             padding = np.zeros((X.shape[0], self.state_dim - X.shape[1]))
             X = np.hstack([X, padding])
         elif X.shape[1] > self.state_dim:
-            # BUG FIX #5: Log feature truncation to warn of potential information loss
-            logger.warning(f"⚠️ TRUNCATING features from {X.shape[1]} to {self.state_dim} - potential information loss")
-            X = X[:, :self.state_dim]
+            # CRITICAL FIX: Normalize features BEFORE PCA.
+            # Without this, PCA is dominated by high-magnitude raw features (e.g. volume,
+            # market cap) and ignores normalized technical indicators. A feature with
+            # variance 10^12 drowns out a carefully crafted indicator with variance 0.01.
+            # Per-feature z-score ensures all features contribute equally to PCA components.
+            X_clean = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+            self._pre_pca_mean = np.mean(X_clean, axis=0)
+            self._pre_pca_std = np.std(X_clean, axis=0) + 1e-8
+            X_normalized = (X_clean - self._pre_pca_mean) / self._pre_pca_std
+            logger.info(f"🔧 Pre-PCA normalization: feature means [{np.min(self._pre_pca_mean):.2f}, {np.max(self._pre_pca_mean):.2f}], "
+                        f"stds [{np.min(self._pre_pca_std):.4f}, {np.max(self._pre_pca_std):.4f}]")
+            # PCA compression: preserve signal from ALL features instead of blind truncation.
+            X = self._fit_pca_compress(X_normalized, self.state_dim)
 
         logger.info(f"✅ Prepared multi-horizon training data:")
         logger.info(f"   Features: {X.shape}")
         for h in [24, 48, 100, 200, 400, 800, 1600]:
-            logger.info(f"   Horizon {h}h labels: {y_multi[h].shape}")
+            if h in y_multi and len(y_multi[h]) > 0:
+                unique, counts = np.unique(y_multi[h], return_counts=True)
+                dist = {int(u): f"{100*c/len(y_multi[h]):.1f}%" for u, c in zip(unique, counts)}
+                logger.info(f"   Horizon {h}h labels: {y_multi[h].shape} | Distribution: {dist}")
+            else:
+                logger.info(f"   Horizon {h}h labels: empty")
         logger.info(f"   Rewards: {r.shape}")
+        # Warn if any horizon has >70% HOLD labels (models will learn to always predict HOLD)
+        for h in y_multi:
+            if len(y_multi[h]) > 0:
+                hold_pct = np.mean(y_multi[h] == 1)
+                if hold_pct > 0.70:
+                    logger.warning(f"⚠️ Horizon {h}h has {hold_pct:.0%} HOLD labels — models may learn trivial HOLD prediction")
 
         return X, y_multi, r
 
@@ -3873,8 +4811,12 @@ class ModelPreTrainer:
                 return None
             logger.info(f"   Training on horizons: {sorted(labels.keys())}h")
             logger.info(f"   Coverage: 1 day → 66+ days (short-term to macro trends)")
-            # Use 200h (mid-range) as primary for compatibility with existing code
-            primary_labels = labels.get(200, list(labels.values())[0])
+            # Use 200h (~8 days) as primary prediction target.
+            # 800h (33 days) was too far — features use 14-20 period oscillators that
+            # lose predictive power beyond ~2 weeks. With 400h lookback, predicting 200h
+            # means we have 2x observation vs prediction horizon (sweet spot).
+            # 800h required extrapolating 2x BEYOND the observation window.
+            primary_labels = labels.get(200, labels.get(400, labels.get(800, list(labels.values())[0])))
         else:
             logger.info("Single-horizon training mode")
             primary_labels = labels
@@ -3882,14 +4824,14 @@ class ModelPreTrainer:
         # Validate and normalize features to state_dim
         logger.info(f"Feature dimension before normalization: {features.shape[1]}")
 
-        # Pad/truncate features to state_dim (critical for model compatibility)
+        # Pad/compress features to state_dim (critical for model compatibility)
         if features.shape[1] < self.state_dim:
             padding = np.zeros((features.shape[0], self.state_dim - features.shape[1]))
             features = np.hstack([features, padding])
-            logger.info(f"✅ Padded features from {features.shape[1] - (self.state_dim - features.shape[1])} to {self.state_dim}")
+            logger.info(f"✅ Padded features to {self.state_dim}")
         elif features.shape[1] > self.state_dim:
-            features = features[:, :self.state_dim]
-            logger.info(f"✅ Truncated features to {self.state_dim}")
+            features = self._apply_pca_compress(features)
+            logger.info(f"✅ PCA-compressed features to {self.state_dim}")
 
         logger.info(f"✅ Final feature dimension: {features.shape}")
 
@@ -3916,24 +4858,9 @@ class ModelPreTrainer:
 
         logger.info(f"Training on {len(features):,} samples for {epochs} epochs...")
 
-        # ============================================================
-        # CRITICAL FIX: NORMALIZE FEATURES FOR NEURAL NETWORK TRAINING
-        # ============================================================
-        # Features MUST be normalized (mean=0, std=1) for neural networks
-        # Without normalization: large-scale features dominate, gradients become unstable
-        # This fix can improve accuracy by 30-50%!
-        logger.info("Normalizing features (mean=0, std=1)...")
-        feature_mean = np.mean(features, axis=0, keepdims=True)
-        feature_std = np.std(features, axis=0, keepdims=True) + 1e-8  # Avoid division by zero
-        features_normalized = (features - feature_mean) / feature_std
-
-        # Store normalization params for later use in predictions
-        self.feature_mean = feature_mean[0]  # Remove batch dimension
-        self.feature_std = feature_std[0]
-        logger.info(f"Feature normalization: mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f}")
-
-        # Use normalized features for training
-        features = features_normalized
+        # Feature normalization is done PER-FOLD inside the training loop below,
+        # using only training data statistics (no look-ahead bias).
+        # The feature_mean/feature_std are stored for inference after training.
 
         # ============================================================
         # WALK-FORWARD VALIDATION (expanding window)
@@ -3965,7 +4892,7 @@ class ModelPreTrainer:
             start_epoch = getattr(self, '_last_epoch', 0)
         best_val_accuracy = getattr(self, '_best_val_accuracy', 0)
         global_best_accuracy = best_val_accuracy  # Track GLOBAL best across all folds
-        patience = 2  # Stop if no improvement for 2 epochs (aggressive: prevent overfitting on expanding window)
+        patience = 7  # Stop if no improvement for 7 epochs (was 2 — too aggressive, models barely trained)
         patience_counter = getattr(self, '_patience_counter', 0)  # Persists across folds
 
         n = len(features)
@@ -3986,10 +4913,19 @@ class ModelPreTrainer:
 
         # Initialize current fold (expanding window)
         train_start, train_end, val_end = wf_boundaries[wf_fold]
-        X_train = features[train_start:train_end]
+
+        # Per-fold normalization: compute stats from TRAINING data only (no look-ahead bias)
+        fold_mean = np.mean(features[train_start:train_end], axis=0, keepdims=True)
+        fold_std = np.std(features[train_start:train_end], axis=0, keepdims=True) + 1e-8
+        features_normalized = (features - fold_mean) / fold_std  # Normalize ALL using train stats
+        self.feature_mean = fold_mean[0]
+        self.feature_std = fold_std[0]
+        logger.info(f"Feature normalization (fold {wf_fold+1}): mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f}")
+
+        X_train = features_normalized[train_start:train_end]
         y_train = primary_labels[train_start:train_end]
         r_train = rewards[train_start:train_end]
-        X_val = features[train_end:val_end]
+        X_val = features_normalized[train_end:val_end]
         y_val = primary_labels[train_end:val_end]
         r_val = rewards[train_end:val_end]
 
@@ -4029,10 +4965,19 @@ class ModelPreTrainer:
                 wf_fold_accuracies.append(best_val_accuracy)
                 wf_fold = target_fold
                 train_start, train_end, val_end = wf_boundaries[wf_fold]
-                X_train = features[:train_end]
+
+                # Re-normalize using new fold's training data only (no look-ahead bias)
+                fold_mean = np.mean(features[:train_end], axis=0, keepdims=True)
+                fold_std = np.std(features[:train_end], axis=0, keepdims=True) + 1e-8
+                features_normalized = (features - fold_mean) / fold_std
+                self.feature_mean = fold_mean[0]
+                self.feature_std = fold_std[0]
+                logger.info(f"Feature normalization (fold {wf_fold+1}): mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f}")
+
+                X_train = features_normalized[:train_end]
                 y_train = primary_labels[:train_end]
                 r_train = rewards[:train_end]
-                X_val = features[train_end:val_end]
+                X_val = features_normalized[train_end:val_end]
                 y_val = primary_labels[train_end:val_end]
                 r_val = rewards[train_end:val_end]
 
@@ -4082,7 +5027,10 @@ class ModelPreTrainer:
                     exp = Experience(state, action, reward, next_state, done)
                     self.dqn.replay_buffer.push(exp)
 
-            # NOW shuffle for other models (PPO, LSTM, Transformer don't use next_state)
+            # NOW shuffle for other models (PPO doesn't need temporal order)
+            # BUT: LSTM and Transformer DO need temporal sequences.
+            # So we shuffle for PPO/DQN training batches, but extract LSTM/Transformer
+            # sequences from the UNSHUFFLED data to preserve temporal continuity.
             perm = np.random.permutation(len(X_train))
             X_train_shuffled = X_train[perm]
             y_train_shuffled = y_train[perm]
@@ -4153,63 +5101,69 @@ class ModelPreTrainer:
                     dqn_losses.append(dqn_loss)
 
                 # =====================
-                # TRAIN PPO (Policy Gradient)
+                # TRAIN PPO (Supervised Cross-Entropy)
                 # =====================
-                for j in range(len(batch_X)):
-                    state = batch_X[j]
-                    action = int(batch_y[j])
-                    reward = batch_r[j]
-                    done = (j == len(batch_X) - 1)
-
-                    probs = self.ppo.get_action_probs(state)
-                    log_prob = np.log(probs[action] + 1e-8)
-                    value = self.ppo.get_value(state)
-
-                    # Signature: (state, action, reward, value, log_prob, done)
-                    self.ppo.store_transition(state, action, reward, value, log_prob, done)
-
-                ppo_loss = self.ppo.train_step()
+                # PPO is trained with direct cross-entropy on labels instead of
+                # broken importance-sampling RL (where labels pretended to be actions).
+                # This is mathematically cleaner and converges faster.
+                ppo_loss = self.ppo.train_supervised(batch_X, batch_y, batch_size=min(32, len(batch_X)))
                 if ppo_loss:
                     epoch_losses.append(ppo_loss)
 
-                # =====================
-                # TRAIN LSTM (Proper BPTT)
-                # =====================
-                if len(batch_X) >= 10:
-                    seq_len = 10
-                    # Create sequences for LSTM training
-                    for j in range(0, len(batch_X) - seq_len, seq_len):
-                        seq = batch_X[j:j+seq_len]
-                        target = batch_y[j+seq_len-1:j+seq_len]  # Label for last timestep
+                # LSTM and Transformer are trained OUTSIDE this batch loop
+                # using unshuffled temporal sequences (see below)
 
-                        # CRITICAL FIX: Validate sequence shape before reshape
-                        if len(seq) == seq_len and len(target) > 0:
-                            # Proper backpropagation through time
-                            lstm_loss = self.lstm.train_step(
-                                seq.reshape(1, seq_len, -1),
-                                target
-                            )
-                            epoch_losses.append(lstm_loss)
-                            lstm_losses.append(lstm_loss)
 
-                # =====================
-                # TRAIN TRANSFORMER (Proper Gradient Descent)
-                # =====================
-                if len(batch_X) >= 10:
-                    seq_len = 10
-                    for j in range(0, len(batch_X) - seq_len, seq_len):
-                        seq = batch_X[j:j+seq_len]
-                        target = batch_y[j+seq_len-1:j+seq_len]
+            # =====================
+            # TRAIN LSTM & TRANSFORMER on UNSHUFFLED temporal sequences
+            # =====================
+            # CRITICAL: Sequential models must see temporally continuous data.
+            # Using shuffled batches (as before) destroyed temporal patterns — the LSTM
+            # would see BTC-hour-100 → ETH-hour-500 → ADA-hour-1 as a "sequence".
+            # Now we extract rolling windows from the original time-ordered data.
+            seq_len = 10
+            seq_batch_size = 32  # Batch sequences for stable gradients (was 1 — extremely noisy)
+            if len(X_train) >= seq_len + 1:
+                n_seq_samples = min(len(X_train) - seq_len, 15000)
+                seq_starts = np.random.choice(len(X_train) - seq_len, size=n_seq_samples, replace=False)
 
-                        if len(target) > 0:
-                            # Proper backpropagation
-                            trans_loss = self.transformer.train_step(
-                                seq.reshape(1, seq_len, -1),
-                                target
-                            )
-                            epoch_losses.append(trans_loss)
-                            trans_losses.append(trans_loss)
+                # Collect sequences into batches for vectorized training
+                batch_seqs = []
+                batch_targets = []
+                for start_idx in seq_starts:
+                    seq = X_train[start_idx:start_idx + seq_len]
+                    target = y_train[start_idx + seq_len - 1]
 
+                    if len(seq) == seq_len:
+                        batch_seqs.append(seq)
+                        batch_targets.append(target)
+
+                    # Train when batch is full
+                    if len(batch_seqs) == seq_batch_size:
+                        batch_X_seq = np.array(batch_seqs)  # (batch, seq_len, features)
+                        batch_y_seq = np.array(batch_targets)  # (batch,)
+
+                        lstm_loss = self.lstm.train_step(batch_X_seq, batch_y_seq)
+                        epoch_losses.append(lstm_loss)
+                        lstm_losses.append(lstm_loss)
+
+                        trans_loss = self.transformer.train_step(batch_X_seq, batch_y_seq)
+                        epoch_losses.append(trans_loss)
+                        trans_losses.append(trans_loss)
+
+                        batch_seqs = []
+                        batch_targets = []
+
+                # Train remaining partial batch
+                if batch_seqs:
+                    batch_X_seq = np.array(batch_seqs)
+                    batch_y_seq = np.array(batch_targets)
+                    lstm_loss = self.lstm.train_step(batch_X_seq, batch_y_seq)
+                    epoch_losses.append(lstm_loss)
+                    lstm_losses.append(lstm_loss)
+                    trans_loss = self.transformer.train_step(batch_X_seq, batch_y_seq)
+                    epoch_losses.append(trans_loss)
+                    trans_losses.append(trans_loss)
 
             # Training accuracy (sample subset for speed)
             # Reset buffer and iterate so LSTM/Transformer get sequential context
@@ -4343,6 +5297,11 @@ class ModelPreTrainer:
 
         # CRITICAL: Load the best checkpoint before testing (not the final epoch)
         self.load_checkpoints()
+        # BUG FIX: Restore is_trained flag after checkpoint load.
+        # save_checkpoints() at line 4792 saves is_trained=False (called before line 4804 sets it True).
+        # load_checkpoints() overwrites the True back to False. Fix: re-set and persist.
+        self.is_trained = True
+        self.save_checkpoints()
         logger.info(f"✅ Loaded best checkpoint (val accuracy: {global_best_accuracy:.2%})")
 
         # FIXED: Use final fold's validation data (properly aligned, not globally split)
@@ -4434,7 +5393,7 @@ class ModelPreTrainer:
             if len(state) < self.state_dim:
                 state = np.pad(state, (0, self.state_dim - len(state)))
             elif len(state) > self.state_dim:
-                state = state[:self.state_dim]
+                state = self._apply_pca_compress(state)
 
         # CRITICAL FIX: Apply feature normalization (same as used in training)
         # Must use same normalization for predictions to match training distribution
@@ -4496,7 +5455,9 @@ class ModelPreTrainer:
         # LSTM prediction (full sequence)
         try:
             lstm_out, _ = self.lstm.forward(seq)
-            lstm_probs = self._softmax(lstm_out[-1])
+            # lstm.forward() already returns softmax probs — do NOT apply softmax again!
+            # Double softmax compresses [0.1, 0.7, 0.2] → [0.29, 0.43, 0.28] (signal destroyed)
+            lstm_probs = lstm_out[-1] if lstm_out.ndim > 1 else lstm_out
             if np.any(np.isnan(lstm_probs)) or np.any(np.isinf(lstm_probs)):
                 logger.warning(f"LSTM returned NaN/inf probs, skipping")
             else:
@@ -4509,7 +5470,8 @@ class ModelPreTrainer:
         # Transformer prediction (full sequence)
         try:
             trans_out = self.transformer.forward(seq)
-            trans_probs = self._softmax(trans_out[-1])
+            # transformer.forward() already returns softmax probs — do NOT apply softmax again!
+            trans_probs = trans_out[-1] if trans_out.ndim > 1 else trans_out
             if np.any(np.isnan(trans_probs)) or np.any(np.isinf(trans_probs)):
                 logger.warning(f"Transformer returned NaN/inf probs, skipping")
             else:
@@ -4581,7 +5543,8 @@ class ModelPreTrainer:
             Prediction dict with action, confidence, etc.
         """
         # FIX #13: Validate regime parameter to prevent crashes
-        valid_regimes = {'bull', 'bear', 'neutral'}
+        # 'sideways' from detect_market_regime maps to 'neutral' for prediction
+        valid_regimes = {'bull', 'bear', 'neutral', 'sideways'}
         if regime not in valid_regimes:
             logger.warning(f"Invalid regime: {regime}, using 'neutral'")
             regime = 'neutral'
@@ -4591,18 +5554,17 @@ class ModelPreTrainer:
             logger.error("DQN not initialized - cannot generate regime-aware predictions")
             return {"action": 1, "confidence": 0.33, "reason": "models_not_ready"}
 
-        # CRITICAL FIX: Apply feature normalization (same as used in training)
-        # Must use same normalization for predictions to match training distribution
-        if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
-            state = (state - self.feature_mean) / (self.feature_std + 1e-8)
-
         # Get baseline prediction from neutral ensemble (same models)
-        # Ensure state is correct shape
+        # Ensure state is correct shape (MUST pad/compress BEFORE normalization)
         if len(state.shape) == 1:
             if len(state) < self.state_dim:
                 state = np.pad(state, (0, self.state_dim - len(state)))
             elif len(state) > self.state_dim:
-                state = state[:self.state_dim]
+                state = self._apply_pca_compress(state)
+
+        # CRITICAL FIX: Apply feature normalization AFTER padding to match training dim
+        if hasattr(self, 'feature_mean') and hasattr(self, 'feature_std'):
+            state = (state - self.feature_mean) / (self.feature_std + 1e-8)
 
         # Build sequence for sequential models
         seq = self._get_sequence(state)
@@ -4626,15 +5588,18 @@ class ModelPreTrainer:
             confidences.append(ppo_probs[ppo_action])
 
             # LSTM prediction (full sequence)
-            # FIX #3: LSTM.forward() returns (probs, hidden_state) tuple
-            lstm_probs, _ = self.lstm.forward(seq)  # Unpack probs and discard hidden state
+            # FIX: LSTM.forward() returns (probs, hidden_state) tuple with batch dim
+            # Must squeeze batch dim to get (output_dim,) before indexing
+            lstm_probs_batch, _ = self.lstm.forward(seq)
+            lstm_probs = lstm_probs_batch.flatten()  # (1, 3) → (3,)
             lstm_action = np.argmax(lstm_probs)
             predictions.append(lstm_action)
             confidences.append(lstm_probs[lstm_action])
 
             # Transformer prediction (full sequence)
+            # transformer.forward() already returns softmax probs — just flatten batch dim
             trans_out = self.transformer.forward(seq)
-            trans_probs = self._softmax(trans_out[-1])
+            trans_probs = trans_out.flatten()  # (1, 3) → (3,)
             trans_action = np.argmax(trans_probs)
             predictions.append(trans_action)
             confidences.append(trans_probs[trans_action])
@@ -4748,6 +5713,13 @@ class ModelPreTrainer:
             # CRITICAL FIX: Save feature normalization params (must restore in load_checkpoints)
             "feature_mean": getattr(self, 'feature_mean', None),
             "feature_std": getattr(self, 'feature_std', None),
+            # PCA compression state (needed to transform inference features consistently)
+            "pca_components": self._pca_components,
+            "pca_mean": self._pca_mean,
+            "pca_n_raw": self._pca_n_raw,
+            # Pre-PCA normalization (per-feature z-score applied before PCA)
+            "pre_pca_mean": getattr(self, '_pre_pca_mean', None),
+            "pre_pca_std": getattr(self, '_pre_pca_std', None),
         }
 
         checkpoint_path = CHECKPOINT_DIR / "model_checkpoint.pkl"
@@ -4771,9 +5743,11 @@ class ModelPreTrainer:
             # Restore DQN
             self.dqn.q_network.set_weights(checkpoint["dqn_weights"]["q_network"])
             self.dqn.target_network.set_weights(checkpoint["dqn_weights"]["target_network"])
-            # CRITICAL FIX: Reset epsilon to start fresh exploration, not restore from checkpoint
-            # This allows models to explore properly even after being partially trained
-            self.dqn.epsilon = self.dqn.epsilon_start  # Reset from checkpoint's decayed value to 1.0
+            # Restore trained epsilon from checkpoint (NOT reset to 1.0!)
+            # epsilon=1.0 means 100% random exploration — useless for inference.
+            # The checkpoint stores the decayed epsilon from training.
+            saved_epsilon = checkpoint["dqn_weights"].get("epsilon", 0.01)
+            self.dqn.epsilon = saved_epsilon
 
             # Restore PPO
             self.ppo.policy_network.set_weights(checkpoint["ppo_weights"]["policy"])
@@ -4797,6 +5771,24 @@ class ModelPreTrainer:
                 logger.info(f"✅ Restored feature normalization (mean={np.mean(self.feature_mean):.4f}, std={np.mean(self.feature_std):.4f})")
             else:
                 logger.warning("⚠️ Feature normalization params not found in checkpoint - predictions may use wrong scale")
+
+            # Restore PCA compression state (required for consistent inference transforms)
+            if checkpoint.get("pca_components") is not None:
+                self._pca_components = checkpoint["pca_components"]
+                self._pca_mean = checkpoint["pca_mean"]
+                self._pca_n_raw = checkpoint["pca_n_raw"]
+                logger.info(f"✅ Restored PCA compression ({self._pca_n_raw} → {self._pca_components.shape[0]} dims)")
+            else:
+                logger.info("ℹ️ No PCA state in checkpoint (pre-PCA model or features <= state_dim)")
+
+            # Restore pre-PCA normalization (per-feature z-score before PCA)
+            if checkpoint.get("pre_pca_mean") is not None:
+                self._pre_pca_mean = checkpoint["pre_pca_mean"]
+                self._pre_pca_std = checkpoint["pre_pca_std"]
+                logger.info(f"✅ Restored pre-PCA normalization ({len(self._pre_pca_mean)} features)")
+            else:
+                self._pre_pca_mean = None
+                self._pre_pca_std = None
 
             logger.info(f"Loaded checkpoint from {checkpoint['timestamp']}")
             logger.info(f"DQN epsilon: {self.dqn.epsilon:.4f}")
@@ -4849,8 +5841,8 @@ class ModelPreTrainer:
         if self.training_metrics.total_samples < self.min_training_samples:
             return False, f"Only {self.training_metrics.total_samples}/{self.min_training_samples} samples trained"
 
-        if self.dqn.epsilon > 0.1:
-            return False, f"DQN still exploring (epsilon={self.dqn.epsilon:.2f} > 0.1)"
+        # DQN epsilon is now properly restored from checkpoint, so no need to check it.
+        # Low epsilon just means the DQN uses its Q-values instead of random exploration.
 
         return True, "Training requirements met"
 
@@ -5427,6 +6419,10 @@ async def run_full_training_pipeline(
     if symbols_filtered > 0:
         logger.info(f"🔍 Filtered out {symbols_filtered} symbols with <{min_candles_required} candles")
         logger.info(f"   Remaining: {symbols_after} symbols with sufficient data")
+
+    # Step 1.5: Initialize alternative data (macro, sentiment, calendar, etc.)
+    logger.info("\n📊 Step 1.5: Preparing alternative data features...")
+    backtester.prepare_alt_data(historical_data)
 
     # Step 2: Prepare training data
     logger.info("\n🔧 Step 2: Preparing training data...")

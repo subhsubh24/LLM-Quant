@@ -146,34 +146,54 @@ class ExpandingWindowValidator:
 
 
 class BootstrapValidator:
-    """Bootstrap aggregation for robustness testing."""
+    """Block bootstrap validator for time-series robustness testing.
 
-    def __init__(self, num_bootstrap_samples: int = 100):
-        """Initialize bootstrap validator.
+    Uses block resampling (contiguous blocks) instead of i.i.d. resampling
+    to preserve serial dependence in returns (autocorrelation, volatility
+    clustering). This produces realistic confidence intervals.
+
+    References:
+    - Politis & Romano (1994) "The Stationary Bootstrap"
+    - Ledoit & Wolf (2008) "Robust Performance Hypothesis Testing with the Sharpe Ratio"
+    """
+
+    def __init__(self, num_bootstrap_samples: int = 100, block_size: int = 21):
+        """Initialize block bootstrap validator.
 
         Args:
             num_bootstrap_samples: Number of bootstrap resamples
+            block_size: Size of contiguous blocks (21 ~ 1 month preserves
+                        autocorrelation and vol clustering)
         """
         self.num_samples = num_bootstrap_samples
+        self.block_size = block_size
 
     def bootstrap_resample(
         self,
         data: pd.DataFrame,
     ) -> List[pd.DataFrame]:
-        """Generate bootstrap resamples.
+        """Generate block bootstrap resamples.
+
+        Samples contiguous blocks of rows with replacement, preserving
+        the temporal structure within each block.
 
         Args:
-            data: Original data
+            data: Original time-series data
 
         Returns:
             List of bootstrapped datasets
         """
         resamples = []
         n = len(data)
+        block_size = min(self.block_size, max(n // 4, 1))
+        # Sample enough blocks to guarantee at least n indices after concatenation
+        n_blocks = (n + block_size - 1) // block_size  # ceil division
 
         for _ in range(self.num_samples):
-            # Random sampling with replacement
-            indices = np.random.choice(n, size=n, replace=True)
+            block_starts = np.random.randint(0, max(n - block_size + 1, 1), size=n_blocks)
+            indices = np.concatenate([
+                np.arange(start, start + block_size) for start in block_starts
+            ])[:n]  # Trim to exactly original length
             resample = data.iloc[indices].reset_index(drop=True)
             resamples.append(resample)
 
@@ -184,14 +204,14 @@ class BootstrapValidator:
         strategy_fn,
         data: pd.DataFrame,
     ) -> Dict:
-        """Validate strategy robustness via bootstrap.
+        """Validate strategy robustness via block bootstrap.
 
         Args:
             strategy_fn: Function that trains and predicts
             data: Original data
 
         Returns:
-            Bootstrap validation results
+            Block bootstrap validation results with CIs and p-value
         """
         resamples = self.bootstrap_resample(data)
 
@@ -220,12 +240,18 @@ class BootstrapValidator:
         sharpes = [r['sharpe'] for r in sample_results]
         max_dds = [r['max_dd'] for r in sample_results]
 
+        # P-value: fraction of bootstrap samples with Sharpe <= 0
+        p_value = float(np.mean(np.array(sharpes) <= 0))
+
         return {
             'samples': len(sample_results),
+            'block_size': self.block_size,
             'mean_sharpe': float(np.mean(sharpes)),
             'std_sharpe': float(np.std(sharpes)),
+            'sharpe_se': float(np.std(sharpes)),
             'percentile_5_sharpe': float(np.percentile(sharpes, 5)),
             'percentile_95_sharpe': float(np.percentile(sharpes, 95)),
+            'sharpe_p_value': p_value,
             'mean_max_dd': float(np.mean(max_dds)),
             'max_max_dd': float(np.max(max_dds)),
             'stability': 1.0 - float(np.std(sharpes) / max(np.mean(sharpes), 0.1)),
@@ -247,6 +273,64 @@ class BootstrapValidator:
         running_max = np.maximum.accumulate(cum_returns)
         drawdown = (cum_returns - running_max) / running_max
         return float(np.min(drawdown))
+
+    def permutation_test(
+        self,
+        returns: np.ndarray,
+        n_permutations: int = 1000,
+    ) -> Dict[str, float]:
+        """
+        Permutation test for Sharpe ratio significance.
+
+        Tests H0: strategy returns are no better than random by shuffling
+        the return series and computing Sharpe on each shuffle. The p-value
+        is the fraction of shuffled Sharpes that exceed the observed Sharpe.
+
+        This is the gold standard for significance testing because it makes
+        no distributional assumptions.
+
+        Args:
+            returns: Strategy daily returns
+            n_permutations: Number of random shuffles
+
+        Returns:
+            Dict with observed_sharpe, p_value, mean_null_sharpe, std_null_sharpe
+        """
+        if len(returns) < 63:
+            return {"observed_sharpe": 0.0, "p_value": 1.0, "n_permutations": 0}
+
+        # Observed Sharpe
+        mean_r = np.mean(returns)
+        std_r = np.std(returns)
+        observed_sharpe = (mean_r / std_r * np.sqrt(252)) if std_r > 1e-10 else 0.0
+
+        # Generate null distribution by randomly flipping return signs.
+        # Simple permutation preserves mean/std (same Sharpe). Sign-flipping
+        # destroys the directional signal while preserving magnitude distribution.
+        rng = np.random.RandomState(42)
+        null_sharpes = []
+        for _ in range(n_permutations):
+            signs = rng.choice([-1, 1], size=len(returns))
+            flipped = returns * signs
+            s_mean = np.mean(flipped)
+            s_std = np.std(flipped)
+            null_sharpe = (s_mean / s_std * np.sqrt(252)) if s_std > 1e-10 else 0.0
+            null_sharpes.append(null_sharpe)
+
+        null_sharpes = np.array(null_sharpes)
+
+        # P-value: fraction of null Sharpes >= observed
+        p_value = float(np.mean(null_sharpes >= observed_sharpe))
+
+        return {
+            "observed_sharpe": float(observed_sharpe),
+            "p_value": p_value,
+            "mean_null_sharpe": float(np.mean(null_sharpes)),
+            "std_null_sharpe": float(np.std(null_sharpes)),
+            "n_permutations": n_permutations,
+            "significant_at_05": p_value < 0.05,
+            "significant_at_01": p_value < 0.01,
+        }
 
 
 class GaussianCopulaStressTester:

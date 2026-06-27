@@ -5,7 +5,7 @@ from .engine import (
     BacktestEngine,
     BacktestResult,
 )
-from .metrics import PerformanceMetrics, compute_metrics
+from .metrics import PerformanceMetrics, compute_metrics, compute_regime_metrics
 from .attribution import AttributionAnalysis
 from .strategy_tester import (
     StrategyBacktester,
@@ -28,6 +28,7 @@ __all__ = [
     "BacktestResult",
     "PerformanceMetrics",
     "compute_metrics",
+    "compute_regime_metrics",
     "AttributionAnalysis",
     "StrategyBacktester",
     "StrategyConfig",

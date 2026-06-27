@@ -46,6 +46,7 @@ from .strategies.momentum import MomentumStrategy
 from .strategies.options_premium import OptionsPremiumStrategy
 from .strategies.perpetual import PerpetualStrategy
 from .strategies.funding_rate_arb import FundingRateArbStrategy
+from .strategies.aristotle_rules import AristotleRulesPipelineStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class PipelineOrchestrator:
             FundingRateArbStrategy(
                 get_price_fn=self.engine._get_crypto_price,
             ),
+            AristotleRulesPipelineStrategy(),
         ]
 
         # ── Market state (kept on orchestrator for API compat) ─

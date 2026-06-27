@@ -20,6 +20,24 @@ from .anomaly_detector import (
     CostAttributionEngine,
     ComprehensiveAnomalyMonitor,
 )
+from .drift_detector import (
+    DriftEvent,
+    StalenessReport,
+    DistributionDriftDetector,
+    ModelStalenessTracker,
+    PnLAttributionEngine,
+    ProductionMonitor,
+)
+from .notifications import (
+    Severity,
+    Notification,
+    NotificationChannel,
+    WebhookChannel,
+    SlackWebhookChannel,
+    EmailChannel,
+    LogChannel,
+    NotificationDispatcher,
+)
 
 __all__ = [
     # Enums
@@ -43,4 +61,20 @@ __all__ = [
     "FeatureImportanceTracker",
     "CostAttributionEngine",
     "ComprehensiveAnomalyMonitor",
+    # Production Monitoring - Drift & Staleness
+    "DriftEvent",
+    "StalenessReport",
+    "DistributionDriftDetector",
+    "ModelStalenessTracker",
+    "PnLAttributionEngine",
+    "ProductionMonitor",
+    # Notification System
+    "Severity",
+    "Notification",
+    "NotificationChannel",
+    "WebhookChannel",
+    "SlackWebhookChannel",
+    "EmailChannel",
+    "LogChannel",
+    "NotificationDispatcher",
 ]

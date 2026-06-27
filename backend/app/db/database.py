@@ -13,13 +13,16 @@ settings = get_settings()
 # Create engine with SQLite optimizations
 engine = create_engine(
     settings.database_url,
-    echo=settings.debug,
+    echo=False,  # Set True temporarily to debug SQL; off by default to reduce log noise
     connect_args={"check_same_thread": False}  # Required for SQLite with FastAPI
 )
 
 
 def init_db():
     """Initialize database and create all tables."""
+    # Import all model modules so SQLModel registers their tables
+    from ..db import models as _db_models  # noqa: F401 — equity/paper trading models
+    from ..prediction_markets import models as _pm_models  # noqa: F401 — prediction market models
     SQLModel.metadata.create_all(engine)
 
 

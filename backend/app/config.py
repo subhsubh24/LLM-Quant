@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 
 def find_env_file():
@@ -49,13 +49,21 @@ class Settings(BaseSettings):
 
     # Paper Trading
     initial_cash: float = 100_000.0
-    default_transaction_cost_bps: float = 10.0
-    default_slippage_bps: float = 5.0
+    # Realistic transaction costs (previously 10+5=15 bps, too optimistic):
+    # - Commission: ~2-5 bps (commission-free brokers still have payment-for-order-flow)
+    # - Bid-ask spread: ~3-8 bps for mid/large-cap
+    # - Market impact: ~2-5 bps per side
+    # Total: 10-20 bps per side, 20-30 bps round-trip
+    default_transaction_cost_bps: float = 15.0  # Per-side commission + spread
+    default_slippage_bps: float = 8.0  # Per-side market impact + execution delay
+    # Market impact model: cost increases with sqrt(participation rate)
+    # impact_bps = base_impact * sqrt(order_size / daily_volume)
+    market_impact_base_bps: float = 10.0  # Base impact for sqrt model
 
     # Risk Settings
     max_position_weight: float = 0.10
     target_volatility: float = 0.15
-    max_drawdown_limit: float = 0.20
+    max_drawdown_limit: float = 0.15  # Tightened from 0.20 — 15% max DD is institutional standard
 
     # Demo Mode - ENABLED BY DEFAULT for easy setup
     # Uses fallback data when external APIs unavailable
@@ -82,10 +90,21 @@ class Settings(BaseSettings):
     # Auto-connect to brokers on startup
     auto_connect_brokers: bool = True
 
-    class Config:
-        env_file = find_env_file()
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    # ============ Alternative Data Settings ============
+    # FRED API key (free from https://fred.stlouisfed.org/docs/api/api_key.html)
+    fred_api_key: str = ""
+
+    # Enable/disable alternative data sources
+    alt_data_enabled: bool = True          # Master switch for all alt data
+    alt_data_fred_enabled: bool = True     # Macroeconomic data from FRED
+    alt_data_cross_asset_enabled: bool = True  # Cross-asset signals (bonds, commodities, FX)
+    alt_data_sentiment_enabled: bool = True    # Sentiment indicators (VIX, breadth)
+
+    model_config = ConfigDict(
+        env_file=find_env_file(),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     @property
     def has_llm_key(self) -> bool:
@@ -111,6 +130,11 @@ class Settings(BaseSettings):
     def has_binance_keys(self) -> bool:
         """Check if Binance API keys are configured."""
         return bool(self.binance_api_key and self.binance_api_secret)
+
+    @property
+    def has_fred_key(self) -> bool:
+        """Check if FRED API key is configured."""
+        return bool(self.fred_api_key and len(self.fred_api_key) > 5)
 
 
 @lru_cache

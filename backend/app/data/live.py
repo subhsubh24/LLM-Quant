@@ -208,17 +208,13 @@ class LiveMarketService:
                         logger.debug(f"✓ LIVE price for {symbol}: ${quote.price} from Finnhub")
                         return quote
 
-            # Final fallback: use mock data so UI works
-            logger.warning(f"⚠️ Using MOCK data for {symbol} - API unavailable")
-            quote = self._get_mock_quote(symbol)
-            if quote:
-                self._set_cached(cache_key, quote)
-            return quote
+            # No data available from any real source
+            logger.warning(f"No real data available for {symbol} - all sources failed")
+            return None
 
         except Exception as e:
             logger.error(f"Error fetching quote for {symbol}: {e}")
-            # Return mock data on error
-            return self._get_mock_quote(symbol)
+            return None
 
     def _get_mock_quote(self, symbol: str) -> Optional[Quote]:
         """Generate mock quote for testing when APIs are unavailable."""

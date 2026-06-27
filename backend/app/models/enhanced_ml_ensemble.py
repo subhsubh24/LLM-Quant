@@ -128,7 +128,7 @@ class LightGBMEnhanced:
             Probability predictions (n_samples,) in [0, 1] range
         """
         if self.model is None:
-            return np.random.uniform(0, 1, len(X))
+            raise RuntimeError("Model is not fitted -- call fit() before predict_proba()")
 
         predictions = self.model.predict(X)
         # Normalize to [0, 1] range using sigmoid
@@ -236,7 +236,7 @@ class XGBoostEnhanced:
             Probability predictions (n_samples,) in [0, 1] range
         """
         if self.model is None:
-            return np.random.uniform(0, 1, len(X))
+            raise RuntimeError("Model is not fitted -- call fit() before predict_proba()")
 
         try:
             import xgboost as xgb
@@ -323,7 +323,7 @@ class RandomForestEnhanced:
             Probability predictions (n_samples,) in [0, 1] range
         """
         if self.model is None:
-            return np.random.uniform(0, 1, len(X))
+            raise RuntimeError("Model is not fitted -- call fit() before predict_proba()")
 
         predictions = self.model.predict(X)
         # Normalize to [0, 1] range using sigmoid
@@ -413,7 +413,7 @@ class LSTMEnhanced:
             Probability predictions (n_samples,) in [0, 1] range
         """
         if self.model is None:
-            return np.random.uniform(0, 1, len(X))
+            raise RuntimeError("Model is not fitted -- call fit() before predict_proba()")
 
         predictions = self.model.predict(X, verbose=0).flatten()
         # Normalize to [0, 1] range using sigmoid
@@ -434,13 +434,6 @@ class ExtraTreesEnhanced:
         self.max_depth = max_depth
         self.model = None
         self.feature_importance = None
-
-        # Initialize default parameters
-        self.params = {
-            'hidden_size': 64,
-            'num_layers': 2,
-            'dropout': 0.2,
-        }
 
         # Initialize default parameters
         self.params = {
@@ -502,7 +495,7 @@ class ExtraTreesEnhanced:
             Probability predictions (n_samples,) in [0, 1] range
         """
         if self.model is None:
-            return np.random.uniform(0, 1, len(X))
+            raise RuntimeError("Model is not fitted -- call fit() before predict_proba()")
 
         predictions = self.model.predict(X)
         # Normalize to [0, 1] range using sigmoid

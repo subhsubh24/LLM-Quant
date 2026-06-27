@@ -333,6 +333,207 @@ def compute_technical_features(
     return result
 
 
+def compute_enhanced_technical_features(
+    prices: pd.DataFrame,
+    highs: pd.DataFrame,
+    lows: pd.DataFrame,
+    volumes: Optional[pd.DataFrame] = None
+) -> pd.DataFrame:
+    """
+    Compute enhanced technical analysis features beyond basic RSI/ATR/MA.
+
+    Includes MACD, Stochastic Oscillator, ADX, OBV, Fibonacci retracement
+    levels, Bollinger Band features, and VWAP ratio.
+
+    Args:
+        prices: Close prices DataFrame with tickers as columns, dates as index
+        highs: High prices DataFrame (same structure)
+        lows: Low prices DataFrame (same structure)
+        volumes: Optional volume DataFrame (same structure)
+
+    Returns:
+        DataFrame with enhanced technical features, all lagged by 1 period
+        to prevent look-ahead bias.
+
+    Note: All features at time t use data available up to t-1 only.
+    """
+    eps = 1e-8
+    result = pd.DataFrame(index=prices.index)
+
+    for ticker in prices.columns:
+        close = prices[ticker]
+        high = highs[ticker] if ticker in highs.columns else close
+        low = lows[ticker] if ticker in lows.columns else close
+
+        # ---------------------------------------------------------------
+        # 1. MACD (12, 26, 9) - Moving Average Convergence Divergence
+        # ---------------------------------------------------------------
+        ema_12 = close.ewm(span=12, min_periods=12, adjust=False).mean()
+        ema_26 = close.ewm(span=26, min_periods=26, adjust=False).mean()
+        macd_line = ema_12 - ema_26
+        signal_line = macd_line.ewm(span=9, min_periods=9, adjust=False).mean()
+        macd_histogram = macd_line - signal_line
+
+        # Normalize by price for cross-asset comparability
+        result[f"{ticker}_macd_line"] = (macd_line / np.maximum(close, eps)).shift(1)
+        result[f"{ticker}_macd_signal"] = (signal_line / np.maximum(close, eps)).shift(1)
+        result[f"{ticker}_macd_histogram"] = (macd_histogram / np.maximum(close, eps)).shift(1)
+
+        # ---------------------------------------------------------------
+        # 2. Stochastic Oscillator (14, 3) - %K and %D
+        # ---------------------------------------------------------------
+        stoch_window = 14
+        stoch_smooth = 3
+
+        lowest_low = low.rolling(window=stoch_window, min_periods=stoch_window // 2).min()
+        highest_high = high.rolling(window=stoch_window, min_periods=stoch_window // 2).max()
+
+        # %K = (Close - Lowest Low) / (Highest High - Lowest Low) * 100
+        stoch_range = highest_high - lowest_low
+        pct_k = ((close - lowest_low) / np.maximum(stoch_range, eps)) * 100.0
+
+        # %D = 3-period SMA of %K
+        pct_d = pct_k.rolling(window=stoch_smooth, min_periods=1).mean()
+
+        result[f"{ticker}_stoch_k"] = pct_k.shift(1)
+        result[f"{ticker}_stoch_d"] = pct_d.shift(1)
+
+        # ---------------------------------------------------------------
+        # 3. ADX (Average Directional Index, 14-period)
+        # ---------------------------------------------------------------
+        adx_window = 14
+
+        # True Range components
+        tr1 = high - low
+        tr2 = (high - close.shift(1)).abs()
+        tr3 = (low - close.shift(1)).abs()
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        # Directional movement
+        up_move = high - high.shift(1)
+        down_move = low.shift(1) - low
+
+        # +DM: positive directional movement
+        plus_dm = pd.Series(0.0, index=close.index)
+        plus_dm_mask = (up_move > down_move) & (up_move > 0)
+        plus_dm[plus_dm_mask] = up_move[plus_dm_mask]
+
+        # -DM: negative directional movement
+        minus_dm = pd.Series(0.0, index=close.index)
+        minus_dm_mask = (down_move > up_move) & (down_move > 0)
+        minus_dm[minus_dm_mask] = down_move[minus_dm_mask]
+
+        # Smoothed TR, +DM, -DM using Wilder's smoothing (EMA with alpha=1/window)
+        atr_smooth = true_range.ewm(alpha=1.0 / adx_window, min_periods=adx_window, adjust=False).mean()
+        plus_dm_smooth = plus_dm.ewm(alpha=1.0 / adx_window, min_periods=adx_window, adjust=False).mean()
+        minus_dm_smooth = minus_dm.ewm(alpha=1.0 / adx_window, min_periods=adx_window, adjust=False).mean()
+
+        # +DI and -DI
+        plus_di = (plus_dm_smooth / np.maximum(atr_smooth, eps)) * 100.0
+        minus_di = (minus_dm_smooth / np.maximum(atr_smooth, eps)) * 100.0
+
+        # DX = |+DI - -DI| / (|+DI| + |-DI|)
+        di_sum = plus_di + minus_di
+        di_diff = (plus_di - minus_di).abs()
+        dx = (di_diff / np.maximum(di_sum, eps)) * 100.0
+
+        # ADX = smoothed DX
+        adx = dx.ewm(alpha=1.0 / adx_window, min_periods=adx_window, adjust=False).mean()
+
+        result[f"{ticker}_adx"] = adx.shift(1)
+        result[f"{ticker}_plus_di"] = plus_di.shift(1)
+        result[f"{ticker}_minus_di"] = minus_di.shift(1)
+
+        # ---------------------------------------------------------------
+        # 4. OBV (On Balance Volume)
+        # ---------------------------------------------------------------
+        if volumes is not None and ticker in volumes.columns:
+            volume = volumes[ticker]
+
+            # OBV: cumulative sum of signed volume
+            price_change = close.diff()
+            obv_sign = pd.Series(0.0, index=close.index)
+            obv_sign[price_change > 0] = 1.0
+            obv_sign[price_change < 0] = -1.0
+
+            obv = (obv_sign * volume).cumsum()
+
+            # Normalize OBV by rolling mean volume for comparability
+            rolling_vol_mean = volume.rolling(window=21, min_periods=10).mean()
+            obv_normalized = obv / np.maximum(rolling_vol_mean, eps)
+
+            # OBV momentum: rate of change of OBV over 14 periods
+            obv_mom = obv.diff(14) / np.maximum(rolling_vol_mean, eps)
+
+            result[f"{ticker}_obv_normalized"] = obv_normalized.shift(1)
+            result[f"{ticker}_obv_momentum"] = obv_mom.shift(1)
+
+        # ---------------------------------------------------------------
+        # 5. Fibonacci Retracement Levels (52-week high/low based)
+        # ---------------------------------------------------------------
+        fib_window = 252  # ~52 weeks of trading days
+        high_52w = high.rolling(window=fib_window, min_periods=fib_window // 2).max()
+        low_52w = low.rolling(window=fib_window, min_periods=fib_window // 2).min()
+
+        fib_range = high_52w - low_52w
+
+        # Key Fibonacci levels
+        fib_236 = high_52w - 0.236 * fib_range  # 23.6% retracement
+        fib_382 = high_52w - 0.382 * fib_range  # 38.2% retracement
+        fib_500 = high_52w - 0.500 * fib_range  # 50.0% retracement
+        fib_618 = high_52w - 0.618 * fib_range  # 61.8% retracement
+
+        # Distance from current price to each Fibonacci level (normalized)
+        result[f"{ticker}_fib_dist_236"] = ((close - fib_236) / np.maximum(fib_range, eps)).shift(1)
+        result[f"{ticker}_fib_dist_382"] = ((close - fib_382) / np.maximum(fib_range, eps)).shift(1)
+        result[f"{ticker}_fib_dist_500"] = ((close - fib_500) / np.maximum(fib_range, eps)).shift(1)
+        result[f"{ticker}_fib_dist_618"] = ((close - fib_618) / np.maximum(fib_range, eps)).shift(1)
+
+        # ---------------------------------------------------------------
+        # 6. Bollinger Band Features (20-period, 2 std)
+        # ---------------------------------------------------------------
+        bb_window = 20
+        bb_std_mult = 2.0
+
+        bb_ma = close.rolling(window=bb_window, min_periods=bb_window // 2).mean()
+        bb_std = close.rolling(window=bb_window, min_periods=bb_window // 2).std()
+
+        upper_band = bb_ma + bb_std_mult * bb_std
+        lower_band = bb_ma - bb_std_mult * bb_std
+
+        # %B = (Price - Lower Band) / (Upper Band - Lower Band)
+        bb_width = upper_band - lower_band
+        pct_b = (close - lower_band) / np.maximum(bb_width, eps)
+
+        # Bandwidth = (Upper - Lower) / Middle (squeeze indicator)
+        bandwidth = bb_width / np.maximum(bb_ma, eps)
+
+        result[f"{ticker}_bb_pct_b"] = pct_b.shift(1)
+        result[f"{ticker}_bb_bandwidth"] = bandwidth.shift(1)
+
+        # ---------------------------------------------------------------
+        # 7. VWAP Ratio (if volume available)
+        # ---------------------------------------------------------------
+        if volumes is not None and ticker in volumes.columns:
+            volume = volumes[ticker]
+
+            # Rolling VWAP: sum(price * volume) / sum(volume) over window
+            vwap_window = 20
+            typical_price = (high + low + close) / 3.0
+            tp_vol = typical_price * volume
+            rolling_tp_vol = tp_vol.rolling(window=vwap_window, min_periods=vwap_window // 2).sum()
+            rolling_vol = volume.rolling(window=vwap_window, min_periods=vwap_window // 2).sum()
+
+            vwap = rolling_tp_vol / np.maximum(rolling_vol, eps)
+
+            # VWAP ratio: close / VWAP
+            vwap_ratio = close / np.maximum(vwap, eps)
+
+            result[f"{ticker}_vwap_ratio"] = vwap_ratio.shift(1)
+
+    return result
+
+
 def standardize_features(
     features: pd.DataFrame,
     method: str = "cross_sectional",
