@@ -33,13 +33,17 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 ## TRACKS
 
 ### A — DATA & VENUES
-- [ ] A1. Retire stock + crypto data paths; keep asset-agnostic infra (backtest, validation, metrics, attribution, risk, execution abstractions).
+- [ ] A1. **Retire stock + crypto trading → prediction-markets-only (near-term priority).** Remove the equities/crypto paths — the `backend/app/trading/` master-bot + options/crypto engines, equity/crypto broker auto-connect, and the stock-focused frontend surfaces (the "Quant Bot" page, the stock dashboard/watchlist) — while **KEEPING the asset-agnostic infra** (backtest, validation, metrics, attribution, risk, execution abstractions) and the entire `backend/app/prediction_markets/` module. Bonus: drops the heavy ML deps (torch/xgboost/lightgbm) → a much leaner deploy (see `docs/DEPLOYMENT.md` — also reopens the Vercel-API option noted there). Do it **incrementally and coherently**; never break the prediction-markets pipeline, the monitoring panel, or the gate. This is the LOWEST incomplete item — advance it first.
 - [~] A2. Prediction-market data ingestion (Polymarket client exists: `backend/app/prediction_markets/polymarket_client.py`; websocket feeds in `websocket_feeds.py`).
 - [ ] A3. Second venue adapter (Kalshi or other), behind a common interface, within ToS + jurisdiction.
 - [~] A4. Event/market universe + resolution tracking (partial in `orchestrator.py` MTM/resolution check).
 - [ ] A5. Data-quality gates (staleness, completeness, price sanity) asserted in preflight.
 
 ### B — MODEL / ALPHA ENGINE
+> **Edge thesis (per VISION):** in a level-playing-field market, edge = **calibration
+> + reasoning + logical consistency + execution speed/cost + discipline**, NOT private
+> data. **Reject any alpha that depends on non-public signals** — that is the
+> stock/crypto trap. Optimize being *right and well-sized on the same public facts*.
 - [~] B1. Probability estimation + edge/EV calculation (strategies in `strategies.py`, `advanced_strategies.py`, `quant_models.py`).
 - [ ] B2. Calibration layer (Brier / reliability curve) with a passing eval.
 - [ ] B3. Alpha lifecycle: propose → backtest → paper → promote → retire, tracked in `docs/growth/RESEARCH_MEMORY.md`.

@@ -21,6 +21,29 @@ It is explicitly **NOT**:
 The TypeScript frontend is a **private monitoring/control panel** for the owner
 (paper + live PnL, strategies, calibration, the kill switch) — not a product surface.
 
+## Why prediction markets — the edge thesis (this directs WHAT we build)
+
+Prediction markets are a **level playing field**: every participant sees the same
+public information (the market, the question, the resolution source). There is no
+private data feed that confers a durable edge. That is *precisely why* this is the
+right domain — and it dictates **where the edge comes from**:
+
+- **Better calibration than the crowd** — systematic miscalibration (especially near
+  0/1, in low-liquidity or under-followed markets), measured against realized outcomes.
+- **Better reasoning on the same facts** — LLM + quantitative synthesis; **logical
+  consistency** across related/implied/mutually-exclusive markets that violate
+  probability axioms (net of fees).
+- **Faster, cheaper execution** — reacting to resolution-relevant public news;
+  spread/liquidity capture; minimizing fees/slippage/market-impact.
+- **Discipline** — fractional-Kelly sizing, hard risk limits, no tilt.
+
+The edge is **NEVER "data other people don't have."** Chasing secret/alternative
+signals is the **stock/crypto trap this project deliberately rejects** — in those
+markets you need non-public information to win; here you do not, and you must not rely
+on it. **Any proposed alpha that depends on non-public data is out of scope.** The
+research agent and the factory optimize calibration, reasoning, logical consistency,
+speed/cost, and discipline — not signal acquisition.
+
 ## The bar (definition of "working")
 
 Success is **consistent, VALIDATED, out-of-sample net profit** — never a pretty
