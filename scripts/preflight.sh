@@ -4,11 +4,20 @@
 # "the edge is real". At baseline this is EXPECTED to fail at the floor/DoD gate —
 # that honestly reflects "not go-live-eligible yet".
 #
-# Usage: bash scripts/preflight.sh
+# Usage:
+#   bash scripts/preflight.sh         # full gate (code + safety + profit-floor + DoD)
+#   bash scripts/preflight.sh code    # code+safety only (CI blocking gate; skips the
+#                                      #   profit-floor + DoD go-live gates)
+#   PREFLIGHT_SCOPE=code bash scripts/preflight.sh
+#
+# The full gate is EXPECTED to exit non-zero until a validated out-of-sample edge
+# exists (floor + DoD). The `code` scope is the always-must-pass correctness/safety
+# gate suitable as a required CI check.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 FAIL=0
+SCOPE="${1:-${PREFLIGHT_SCOPE:-full}}"
 
 say()  { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
@@ -164,6 +173,12 @@ else
   bad "scripts/runtime_harness.py missing"
 fi
 [ "$FAIL" = 0 ] || die "runtime harness"
+
+if [ "$SCOPE" = "code" ]; then
+  printf '\n\033[32mPREFLIGHT (code scope) GREEN — correctness + safety gates pass.\033[0m\n'
+  printf 'Skipped the profit-floor + DoD go-live gates (run the full gate for those).\n'
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 say "10. PROFIT FLOOR — validated out-of-sample weekly PnL >= floor"
