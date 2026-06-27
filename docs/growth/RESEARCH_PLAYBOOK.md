@@ -5,6 +5,23 @@ ONLY** — it **never trades, never touches real money or live keys, never touch
 kill switch.** It proposes; the factory builds + backtests; the owner funds + goes
 live.
 
+## Edge thesis — the boundary on what to propose (read first)
+
+Prediction markets are a **level playing field**: everyone has the same public data.
+So a real edge can ONLY come from being **better-calibrated, better-reasoned, more
+logically consistent, faster/cheaper to execute, or more disciplined** than the crowd
+on those same public facts. It can **NEVER** come from "data other people don't have."
+
+- **In scope:** crowd-miscalibration alphas; cross-market logical-consistency
+  arbitrage; resolution-timing / news-reaction speed; spread/liquidity capture; sizing
+  and risk discipline; better LLM+quant synthesis of public information.
+- **Out of scope (auto-reject):** any alpha whose edge depends on **non-public /
+  alternative / proprietary data** the crowd can't see. That is the stock/crypto trap
+  this project rejects — do not propose it, even if it backtests well.
+
+When you propose an alpha, name which **in-scope** edge source it exploits. If you
+can't name one (or it relies on private data), it does not clear the bar.
+
 ## Each run
 
 1. **ORIENT (read first).** Read [`RESEARCH_MEMORY.md`](RESEARCH_MEMORY.md) and this
