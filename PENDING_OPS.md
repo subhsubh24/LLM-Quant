@@ -52,9 +52,21 @@ items:
   - id: OA-8
     title: "Wire the gate harness into CI (workflow scope)"
     priority: medium
-    status: pending
+    status: done
     why: "The loop must not edit .github/; CI wiring is owner/maintainer scope."
-    how: "Add a workflow calling scripts/preflight.sh on PRs. See LIVE_RUNBOOK §7."
+    how: "DONE — .github/workflows/preflight.yml runs scripts/preflight.sh (blocking code scope + informational full gate) on PRs + pushes."
+  - id: OA-9
+    title: "Lock down Supabase Data API exposure for the backend tables"
+    priority: high
+    status: pending
+    why: "The backend connects to Supabase as a privileged DB user (SQLAlchemy), NOT via the Data API. But tables it creates in the public schema can be reachable through the Supabase Data API (PostgREST) with the anon/publishable key. This is sensitive financial data, so it must not be world-readable."
+    how: "In Supabase: either disable the Data API for these tables / use a non-exposed schema, OR enable RLS on every public table with deny-by-default (no anon/authenticated policies). The backend's privileged connection bypasses RLS, so this does not affect the app. Never put the Supabase service_role key in the frontend."
+  - id: OA-10
+    title: "Decide whether the raw-sqlite audit trail should move to Postgres"
+    priority: low
+    status: pending
+    why: "backend/app/trading/audit_store.py uses raw sqlite3 (a separate local file, not SQLAlchemy). On an ephemeral host it would lose the audit log; on a persistent-disk host it is fine. The main ORM DB now uses Supabase, but this audit log does not."
+    how: "If the backend runs on persistent disk, leave as-is. To centralize in Supabase, rewrite audit_store.py onto SQLModel/Postgres (tracked as ROADMAP G3 audit-log work)."
 -->
 
 ## Quick reference
@@ -67,6 +79,8 @@ items:
 | OA-4 | Deposit/transfer real funds | 🟠 high | pending |
 | OA-5 | Set venue LIVE API keys | 🟠 high | pending |
 | OA-6 | Flip `LIVE_TRADING_ENABLED` | 🟠 high | pending |
+| OA-9 | Lock down Supabase Data API exposure (RLS / unexposed schema) | 🟠 high | pending |
+| OA-10 | Move raw-sqlite audit log to Postgres (optional) | ⚪ low | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 
