@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./quantlab.db"
 
-    # LLM Integration - Anthropic Claude (primary)
-    anthropic_api_key: str = ""
+    # LLM Integration - Google Gemini (primary)
+    gemini_api_key: str = ""  # env: GEMINI_API_KEY
+    gemini_model: str = "gemini-2.5-flash"  # env: GEMINI_MODEL — override to a newer model without code changes
 
     # Market Data API Keys (optional but recommended for live data)
     finnhub_api_key: str = ""  # Free tier: 60 calls/min
@@ -126,7 +127,7 @@ class Settings(BaseSettings):
     @property
     def has_llm_key(self) -> bool:
         """Check if LLM API key is configured."""
-        return bool(self.anthropic_api_key and len(self.anthropic_api_key) > 10)
+        return bool(self.gemini_api_key and len(self.gemini_api_key) > 10)
 
     @property
     def transaction_cost_decimal(self) -> float:

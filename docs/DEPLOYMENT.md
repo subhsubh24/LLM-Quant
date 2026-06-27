@@ -100,7 +100,7 @@ Railway → **New Project → Deploy from repo**. In the service settings set
 | `LIVE_TRADING_ENABLED` | leave **`false`** (owner-only; never enable at deploy) |
 | `DEMO_MODE` | `true` |
 | `AUTO_CONNECT_BROKERS` | `false` |
-| `ANTHROPIC_API_KEY` | optional (LLM features) |
+| `GEMINI_API_KEY` | optional (LLM features); `GEMINI_MODEL` optional override (default `gemini-2.5-flash`) |
 | `FRED_API_KEY` | optional (market data) |
 | `ALPACA_*` / `BINANCE_*` | optional (paper defaults) |
 

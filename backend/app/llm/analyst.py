@@ -1,7 +1,7 @@
 """
 AI-powered market analyst for real-time insights and learning.
 Provides professional-grade analysis like a senior quant would deliver.
-Uses Anthropic Claude for AI capabilities.
+Uses Google Gemini for AI capabilities.
 """
 
 from dataclasses import dataclass
@@ -26,7 +26,7 @@ class AnalysisRequest:
 class QuantAnalyst:
     """
     AI-powered quant analyst providing institutional-grade insights.
-    Uses Claude for deep analysis and learning support.
+    Uses Gemini for deep analysis and learning support.
     """
 
     SYSTEM_PROMPT = """You are a senior quantitative researcher at a top hedge fund, now mentoring an aspiring quant.
@@ -53,33 +53,34 @@ Be concise but thorough. A busy trader should be able to scan and get key points
         self._client = None
 
     def _get_client(self):
-        """Lazy load Anthropic client."""
+        """Lazy load the Gemini client."""
         if self._client is None and self.settings.has_llm_key:
             try:
-                import anthropic
-                self._client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
+                from google import genai
+                self._client = genai.Client(api_key=self.settings.gemini_api_key)
             except Exception as e:
-                logger.warning(f"Failed to initialize Anthropic client: {e}")
+                logger.warning(f"Failed to initialize Gemini client: {e}")
         return self._client
 
-    def _call_claude(self, prompt: str, max_tokens: int = 1500) -> Optional[str]:
-        """Make a call to Claude API."""
+    def _call_llm(self, prompt: str, max_tokens: int = 1500) -> Optional[str]:
+        """Make a call to the Gemini API."""
         client = self._get_client()
         if not client:
             return None
 
         try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=max_tokens,
-                system=self.SYSTEM_PROMPT,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+            from google.genai import types
+            response = client.models.generate_content(
+                model=self.settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT,
+                    max_output_tokens=max_tokens,
+                ),
             )
-            return response.content[0].text
+            return response.text
         except Exception as e:
-            logger.error(f"Claude API call failed: {e}")
+            logger.error(f"Gemini API call failed: {e}")
             return None
 
     async def analyze_stock(
@@ -109,14 +110,14 @@ Provide analysis covering:
 
 Be specific with numbers. This is for education, not advice."""
 
-        response = self._call_claude(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500)
 
         if response:
             return {
                 "symbol": symbol,
                 "analysis": response,
                 "generated_at": datetime.now().isoformat(),
-                "model": "claude-sonnet-4"
+                "model": self.settings.gemini_model
             }
         return self._template_stock_analysis(symbol, quote)
 
@@ -148,7 +149,7 @@ Write a brief but insightful commentary covering:
 
 Write like you're briefing a trading desk at 7am. Concise, actionable."""
 
-        response = self._call_claude(prompt, max_tokens=1000)
+        response = self._call_llm(prompt, max_tokens=1000)
 
         if response:
             return {
@@ -181,7 +182,7 @@ As a senior quant, ruthlessly critique this:
 
 Be brutally honest. Better to kill a bad idea now than lose money later."""
 
-        response = self._call_claude(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500)
 
         if response:
             return {
@@ -226,7 +227,7 @@ Structure the path as:
 
 Be specific. No vague advice like "learn statistics" - instead say "Complete chapters 1-8 of Casella & Berger, focusing on MLE and hypothesis testing."""
 
-        response = self._call_claude(prompt, max_tokens=2000)
+        response = self._call_llm(prompt, max_tokens=2000)
 
         if response:
             return {
@@ -257,7 +258,7 @@ Cover:
 
 Make it rigorous enough for a quant interview, but clear enough for a motivated learner."""
 
-        response = self._call_claude(prompt, max_tokens=2000)
+        response = self._call_llm(prompt, max_tokens=2000)
 
         if response:
             return {
@@ -297,7 +298,7 @@ Provide institutional-grade analysis:
 
 Be specific with numbers and recommendations."""
 
-        response = self._call_claude(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500)
 
         if response:
             return {
@@ -333,14 +334,14 @@ Provide analysis covering:
 
 Be specific with numbers. This is for education, not advice."""
 
-        response = self._call_claude(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500)
 
         if response:
             return {
                 "symbol": symbol,
                 "analysis": response,
                 "generated_at": datetime.now().isoformat(),
-                "model": "claude-sonnet-4"
+                "model": self.settings.gemini_model
             }
         return {
             "symbol": symbol,
@@ -374,7 +375,7 @@ Write a brief market commentary covering:
 
 Be concise and actionable."""
 
-        response = self._call_claude(prompt, max_tokens=1000)
+        response = self._call_llm(prompt, max_tokens=1000)
 
         if response:
             return {
@@ -472,7 +473,7 @@ Key factors to consider:
 
 Write a brief, professional summary explaining why this trade was taken. Include the key factors (IV levels, technical setup, ML signals) in plain English. Keep it under 50 words."""
 
-        response = self._call_claude(prompt, max_tokens=150)
+        response = self._call_llm(prompt, max_tokens=150)
 
         if response:
             return response.strip()

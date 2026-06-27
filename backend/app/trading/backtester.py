@@ -5877,12 +5877,14 @@ class AlphaSourceManager:
             from ..config import get_settings
             settings = get_settings()
             self.finnhub_api_key = settings.finnhub_api_key
-            self.anthropic_api_key = settings.anthropic_api_key
+            self.gemini_api_key = settings.gemini_api_key
+            self.gemini_model = settings.gemini_model
         except Exception as e:
             # BUG FIX #9: Add exception logging for better diagnostics
             logger.debug(f"Failed to load API keys from settings: {type(e).__name__}: {e} - falling back to environment variables")
             self.finnhub_api_key = os.environ.get("FINNHUB_API_KEY", "")
-            self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            self.gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+            self.gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
     async def get_fear_greed_index(self) -> Dict:
         """Fetch Crypto Fear & Greed Index (free, no key needed)."""
@@ -6098,14 +6100,15 @@ class AlphaSourceManager:
             "source": "default",
         }
 
-        if not self.anthropic_api_key:
-            logger.debug("Anthropic API key not set for Claude alpha")
+        if not self.gemini_api_key:
+            logger.debug("Gemini API key not set for LLM alpha")
             return default_response
 
         try:
-            import anthropic
+            from google import genai
+            from google.genai import types
 
-            # Gather context for Claude
+            # Gather context for the LLM
             context_parts = [f"Symbol: {symbol}"]
 
             # Add Fear & Greed
@@ -6129,8 +6132,8 @@ class AlphaSourceManager:
 
             context = "\n".join(context_parts)
 
-            # Create Claude client
-            client = anthropic.Anthropic(api_key=self.anthropic_api_key)
+            # Create Gemini client
+            client = genai.Client(api_key=self.gemini_api_key)
 
             # Generate alpha signal
             prompt = f"""You are a quantitative trading analyst. Analyze this market data and provide a trading signal.
@@ -6153,14 +6156,16 @@ Be contrarian when sentiment is extreme. Consider:
 - High confidence requires multiple confirming signals
 - Default to 'hold' (signal near 0) when uncertain"""
 
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
+            response = client.models.generate_content(
+                model=self.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=500,
+                ),
             )
 
-            # Parse Claude's response
-            response_text = response.content[0].text.strip()
+            # Parse the LLM response
+            response_text = (response.text or "").strip()
 
             # Try to extract JSON from response
             try:
@@ -6181,7 +6186,7 @@ Be contrarian when sentiment is extreme. Consider:
                     "key_factors": analysis.get("key_factors", []),
                     "recommendation": analysis.get("recommendation", "hold"),
                     "reasoning": analysis.get("reasoning", ""),
-                    "source": "claude",
+                    "source": "gemini",
                 }
 
                 self.claude_cache[cache_key] = {
@@ -6189,19 +6194,19 @@ Be contrarian when sentiment is extreme. Consider:
                     "timestamp": datetime.now(),
                 }
 
-                logger.info(f"Claude alpha for {symbol}: signal={result['signal']:.2f}, conf={result['confidence']:.2f}")
+                logger.info(f"Gemini alpha for {symbol}: signal={result['signal']:.2f}, conf={result['confidence']:.2f}")
                 return result
 
             except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse Claude response: {e}")
+                logger.warning(f"Failed to parse LLM response: {e}")
                 # Try to extract signal from text
                 if "buy" in response_text.lower():
-                    return {**default_response, "signal": 0.3, "source": "claude_fallback"}
+                    return {**default_response, "signal": 0.3, "source": "gemini_fallback"}
                 elif "sell" in response_text.lower():
-                    return {**default_response, "signal": -0.3, "source": "claude_fallback"}
+                    return {**default_response, "signal": -0.3, "source": "gemini_fallback"}
 
         except Exception as e:
-            logger.warning(f"Claude alpha error for {symbol}: {e}")
+            logger.warning(f"Gemini alpha error for {symbol}: {e}")
 
         return default_response
 
