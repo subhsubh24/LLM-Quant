@@ -1,0 +1,71 @@
+# VISION — LLM-Quant
+
+> North star for a **personal** prediction-markets trading bot.
+> Not a product. Not marketed. No users. Its only job is to make the **owner** money,
+> honestly, with an edge that compounds as the model improves.
+
+## What this is
+
+LLM-Quant is a personal autonomous trading system for **prediction markets**
+(Polymarket / Kalshi / similar venues, within venue ToS and the owner's jurisdiction).
+It ingests markets, estimates probabilities, computes edge/EV, sizes positions,
+and trades — by default with **fake money (paper)**. The model continuously improves
+its **calibration, accuracy, and edge** through backtesting, paper trading,
+training/retraining, and self-directed research that generates new alphas.
+
+It is explicitly **NOT**:
+- a sellable or marketed product;
+- a multi-user SaaS;
+- a stock or crypto trading app (those paths are being retired — see ROADMAP item A).
+
+The TypeScript frontend is a **private monitoring/control panel** for the owner
+(paper + live PnL, strategies, calibration, the kill switch) — not a product surface.
+
+## The bar (definition of "working")
+
+Success is **consistent, VALIDATED, out-of-sample net profit** — never a pretty
+in-sample backtest.
+
+- **Go-live-eligible floor:** ≥ **$2,000–3,000 / week** net, in validated
+  out-of-sample paper trading, with realistic fees/slippage/liquidity/market-impact
+  and a sufficient sample. Annualized floor: **$104,000/yr** (≈ $2,000/wk × 52).
+- After eligibility, the target **climbs** ($4K → $5K → $6K/wk). The system
+  **never fully converges** — it perpetually improves accuracy and edge.
+- The owner — not the loop — decides to fund the account and flip to live.
+
+## Honesty is load-bearing
+
+A backtest that looks great but is **overfit, leaky (look-ahead),
+survivorship/selection-biased, p-hacked, cost-ignorant, or run on too small a sample
+is WORTHLESS** — a failure, and worse than a modest honest result. Non-negotiables:
+
+- out-of-sample + walk-forward validation;
+- realistic fees, slippage, liquidity, market impact;
+- sufficient sample size (N) and calibration (Brier / reliability);
+- deterministic, reproducible results;
+- **never fabricate a metric, a PnL, or an "edge."**
+
+## Standing engineering bar
+
+- **Monitoring UI:** clear, real-data-only, no slop, no stub/error screens. Every
+  number on screen is a real number from a real run, or it is explicitly absent.
+- **Research/strategy code:** rigorous, reproducible, no magic numbers, no
+  look-ahead, hypotheses falsifiable, costs always modeled.
+- **Safety first:** real money is gated behind an explicit owner-only switch, hard
+  loss caps, and a kill switch — all in code, default off.
+
+## The boundary that never moves (HUMAN-CORE)
+
+The autonomous loop **builds, backtests, and paper-trades**. It also **builds the
+complete live/real-money path** — but it **never**:
+- places a real-money trade,
+- funds or deposits,
+- flips paper → live,
+- raises a loss cap,
+- makes the legal/jurisdiction/eligibility call.
+
+Those are the **owner's** actions, documented exactly in
+[`docs/growth/LIVE_RUNBOOK.md`](docs/growth/LIVE_RUNBOOK.md).
+
+See [`ROADMAP.md`](ROADMAP.md) for the convergence anchor, standing standards,
+and the Definition of Done.
