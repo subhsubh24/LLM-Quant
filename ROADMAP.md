@@ -47,7 +47,11 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 - [~] B1. Probability estimation + edge/EV calculation (strategies in `strategies.py`, `advanced_strategies.py`, `quant_models.py`).
 - [ ] B2. Calibration layer (Brier / reliability curve) with a passing eval.
 - [ ] B3. Alpha lifecycle: propose → backtest → paper → promote → retire, tracked in `docs/growth/RESEARCH_MEMORY.md`.
-- [ ] B4. LLM-reasoning alpha generation wired into the research agent loop (informs, never commands).
+- [ ] B4. **Per-market deep research → sharper-than-crowd probabilities (the core thesis-aligned alpha).** An agent deep-researches a specific market's *underlying real-world question* from PUBLIC sources (news, base rates, expert forecasts, the resolution criteria) to form a better-calibrated probability than the crowd, then trade the gap. This is "win by reasoning on the same public facts," not secret data. Wired into the research-agent loop (informs, never commands). **Hard gates — do NOT build until these hold:**
+  - **Gated on B2:** the calibration eval must work first, so a researched probability can be *proven* better-calibrated than the market on out-of-sample resolutions — never scaled on faith.
+  - **Cost-modeled in the EV:** per-market LLM research has real cost (e.g. $0.30–1.00/market); subtract it in the edge/EV calc and respect `LLM_SPEND_CAP_USD`. Only pursue markets where size × crowd-mispricing clears the research cost (capacity-aware).
+  - **Bounded:** triggered by a market's expected edge, not run on every market; decayed/retired via the B3 lifecycle if it stops beating the crowd.
+- [ ] B5. Lower-cost reasoning alphas that need no per-market deep research (cross-market logical-consistency, miscalibration screens, news-reaction speed) — cheaper, so exhaust these before/alongside B4.
 
 ### C — BACKTEST + PAPER-TRADE HARNESS
 - [~] C1. Backtest engine exists (`backend/app/backtest/*`); confirm leakage-free + walk-forward for prediction markets specifically.
