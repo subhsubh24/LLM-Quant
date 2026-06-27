@@ -2,6 +2,26 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-27 — Deployment architecture decision (do NOT chase serverless)
+
+- **The backend is intentionally a PERSISTENT, always-on service — never serverless
+  (Vercel/Netlify functions).** It has a continuous scan loop (asyncio background
+  task), persistent WebSocket feeds, and in-memory positions/risk/activity state.
+  Serverless breaks all three. **Do not** spend runs porting the backend to
+  serverless — it's a large refactor that makes the bot worse. If "one platform" is
+  ever wanted, run BOTH frontend + backend on Railway/Render (not Vercel functions).
+- Deploy shape: **frontend → Vercel** (Next.js, `frontend/`), **backend → Railway /
+  Render / Fly** (persistent), **DB → Supabase Postgres** (`DATABASE_URL`). See
+  `docs/DEPLOYMENT.md` (the single source for deploy steps).
+- One-click configs shipped: `render.yaml` (root), `backend/railway.json`; the
+  `backend/Dockerfile` binds `${PORT:-8000}` for any host. Backend needs ~1GB+ RAM
+  (heavy ML deps: torch/xgboost/lightgbm) → free tiers OOM. Trimming those for a
+  prediction-markets-only build (ROADMAP A1) would let it run leaner.
+- CORS: all frontend calls are cross-origin direct calls; set `CORS_ALLOW_ORIGINS`
+  (env) to the Vercel origin or the backend rejects them.
+- Supabase Data API exposure is a real risk for the public tables (sensitive money
+  data) → enable RLS deny-by-default after first boot (OA-9; SQL in DEPLOYMENT.md).
+
 ## 2026-06-27 — Bootstrap
 
 - **What this repo is:** a *personal* prediction-markets profit bot, not a product.
