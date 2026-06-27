@@ -48,14 +48,18 @@ say "2. Code gate — prediction-market tests"
 # outside the gate's light dependency surface. The prediction-markets risk manager
 # is covered inside test_prediction_markets.py.
 if "$PY" -c "import pytest" 2>/dev/null; then
-  if ls backend/tests/test_prediction_markets.py >/dev/null 2>&1; then
-    if "$PY" -m pytest -q backend/tests/test_prediction_markets.py 2>/dev/null; then
-      ok "prediction-market tests pass"
+  _testfiles=""
+  for t in backend/tests/test_prediction_markets.py backend/tests/test_scorecard.py; do
+    [ -f "$t" ] && _testfiles="$_testfiles $t"
+  done
+  if [ -n "$_testfiles" ]; then
+    if "$PY" -m pytest -q $_testfiles 2>/dev/null; then
+      ok "prediction-market + scorecard-guard tests pass"
     else
-      bad "prediction-market tests failed"
+      bad "prediction-market/scorecard tests failed"
     fi
   else
-    warn "test_prediction_markets.py not found; skipping (add ROADMAP F1 coverage)"
+    warn "no targeted tests found; skipping (add ROADMAP F1 coverage)"
   fi
 else
   warn "pytest not installed; skipping tests"
@@ -177,9 +181,25 @@ else
 fi
 [ "$FAIL" = 0 ] || die "runtime harness"
 
+# ---------------------------------------------------------------------------
+say "9b. Quality scorecard — parse guard (a malformed scorecard cannot ship)"
+# maker != checker: the independent Quality Auditor OWNS docs/quality/*. We only
+# consume the grade. Absent scorecard = bootstrap (the auditor hasn't run yet) = OK
+# in code scope; a malformed scorecard (bad YAML / invalid grade) FAILS.
+if [ -f scripts/check_scorecard.py ]; then
+  if "$PY" scripts/check_scorecard.py parse; then
+    ok "scorecard parse guard"
+  else
+    bad "scorecard malformed (see above)"
+  fi
+else
+  bad "scripts/check_scorecard.py missing"
+fi
+[ "$FAIL" = 0 ] || die "scorecard parse guard"
+
 if [ "$SCOPE" = "code" ]; then
   printf '\n\033[32mPREFLIGHT (code scope) GREEN — correctness + safety gates pass.\033[0m\n'
-  printf 'Skipped the profit-floor + DoD go-live gates (run the full gate for those).\n'
+  printf 'Skipped the profit-floor + DoD + quality go-live gates (run the full gate for those).\n'
   exit 0
 fi
 
@@ -206,6 +226,15 @@ if [ "${UNCHECKED:-1}" = "0" ]; then
   ok "all DoD boxes checked"
 else
   bad "$UNCHECKED DoD box(es) still unchecked — NOT go-live-eligible (HONEST baseline state)"
+fi
+
+# ---------------------------------------------------------------------------
+say "12. QUALITY GRADE — ship-critical dims A/A+, others >= B (independent auditor)"
+# Consumes the independent Quality Auditor's grade. Absent or below-bar = not ready.
+if "$PY" scripts/check_scorecard.py gate; then
+  ok "quality grade meets the go-live bar"
+else
+  bad "quality grade below the go-live bar (or not yet graded) — NOT go-live-eligible"
 fi
 
 # ---------------------------------------------------------------------------
