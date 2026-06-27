@@ -69,10 +69,20 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 - [ ] D6. Full live path: venue LIVE API auth, real-order placement, balance/positions/funding hooks, reconciliation — same code paths run paper vs live via a mode flag.
 
 ### E — CONTINUOUS LEARNING / RESEARCH
+> **The learning loop (per VISION):** propose → **backtest-gate** → run a **stable
+> evaluation window** (~1 week or sufficient N) → measure realized PnL + calibration +
+> hit-rate → **attribute** what made/lost money → **reconcile realized vs
+> backtest-expected** (divergence = overfit) → next targeted change → repeat, forever.
+> Update on statistical **signal, not one noisy week of PnL** (calibration accumulates
+> evidence faster than PnL). Strategy changes apply at window **boundaries**;
+> infra/bug fixes ship anytime.
 - [~] E1. Training/retraining loop (training modules exist under `backend/app/trading/` and `models/`).
 - [ ] E2. Drift / regime detection feeding strategy retirement.
 - [ ] E3. Strategy + feature research loop (web research + model reasoning) → `docs/growth/RESEARCH_MEMORY.md`.
 - [ ] E4. Strategy A/B + decayed-alpha retirement.
+- [ ] E5. **Evaluation-window engine:** versioned strategy configs; per-window realized PnL / calibration / hit-rate / drawdown recorded; strategy changes batched to window boundaries so each window's evidence is clean (infra fixes exempt).
+- [ ] E6. **Per-window attribution + realized-vs-backtest reconciliation:** which strategies/markets/conditions drove PnL; flag overfit/leakage when paper diverges from the backtest's expectation; turn the result into the next change. Logged to `docs/growth/RESEARCH_MEMORY.md`.
+- [ ] E7. **Significance-weighted learning:** weight each update by sample size / statistical significance; prefer "insufficient data" over reacting to a single noisy week; lean on calibration (faster-accumulating evidence) as much as PnL.
 
 ### F — QUALITY & INTEGRITY
 - [~] F1. Test suite (41 test files under `backend/tests/`); ensure prediction-market-specific coverage. **Known integrity item:** `test_ignores_far_resolution` is `xfail` — the `NearCertaintyStrategy` docstring says "within 72h" but `max_hours_to_resolution` defaults to `720` (30 days). Decide 72h vs 720h **with the owner** (trading-behavior decision), then fix code+test together and un-xfail. Do not silently change strategy behavior to satisfy the test.

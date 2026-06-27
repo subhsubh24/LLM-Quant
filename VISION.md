@@ -44,6 +44,37 @@ on it. **Any proposed alpha that depends on non-public data is out of scope.** T
 research agent and the factory optimize calibration, reasoning, logical consistency,
 speed/cost, and discipline — not signal acquisition.
 
+## The learning loop — how the edge improves (this IS the operating principle)
+
+Yes: the bot is meant to **run, observe its own realized results, learn from them,
+change, and re-test — forever.** Made rigorous so it improves on real evidence and
+never fools itself:
+
+1. **Propose** a change, grounded in the current binding constraint (poor
+   calibration? a losing strategy? a cost/latency issue?).
+2. **Backtest first** (leakage-free, walk-forward, out-of-sample, realistic costs).
+   It only graduates to paper if it beats the current config in backtest — never burn
+   an evaluation window on something that already fails offline.
+3. **Run a fixed evaluation window** in paper: hold the strategy config **stable** for
+   ~**1 week, or until sufficient sample size (N)** — whichever is longer. Changing the
+   config mid-window contaminates the evidence, so strategy changes apply at window
+   **boundaries**; infrastructure/bug fixes may ship anytime.
+4. **At window close, measure + attribute:** realized PnL, calibration (Brier /
+   reliability), hit-rate, drawdown — and **attribute** them (which strategies,
+   markets, and conditions made or lost money, and *why*).
+5. **Reconcile realized vs backtest-expected.** If paper diverges materially from what
+   the backtest predicted, the **backtest is overfit/leaky** — that gap is itself a
+   top-priority learning signal; fix the backtest before trusting the strategy.
+6. **Learn → next targeted change** (or retire a decayed alpha). Log it to
+   `docs/growth/RESEARCH_MEMORY.md`. Then repeat.
+
+**The one thing to get right (or you'll fool yourself):** one week of PnL is a
+**noisy** signal. Do not over-update on variance. Weight learning by **statistical
+significance**, not raw weekly profit — and note that **calibration accumulates
+reliable evidence faster than PnL does**, so it is often the better thing to learn
+from week to week. Prefer "insufficient data" over chasing noise. This is honest,
+evidence-driven improvement — not curve-fitting to last week's luck.
+
 ## The bar (definition of "working")
 
 Success is **consistent, VALIDATED, out-of-sample net profit** — never a pretty
