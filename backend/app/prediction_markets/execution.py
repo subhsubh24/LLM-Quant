@@ -426,11 +426,24 @@ class PredictionMarketExecutor:
         dry_run: bool = True,
         max_position_usd: float = 50.0,
         max_portfolio_usd: float = 500.0,
+        live_enabled: Optional[bool] = None,
     ):
         self.polymarket = polymarket or PolymarketExecutor()
         self.dry_run = dry_run
         self.max_position_usd = max_position_usd
         self.max_portfolio_usd = max_portfolio_usd
+
+        # REAL-MONEY MASTER GATE (HUMAN-CORE). Default resolves from settings
+        # (LIVE_TRADING_ENABLED, default False). When False, no real order can be
+        # placed even if dry_run is False — the live branch is hard-blocked. The
+        # autonomous loop never sets this True; only the owner does, per LIVE_RUNBOOK.
+        if live_enabled is None:
+            try:
+                from ..config import get_settings
+                live_enabled = bool(get_settings().live_trading_enabled)
+            except Exception:
+                live_enabled = False
+        self.live_enabled = live_enabled
 
         # In-memory state
         self.positions: Dict[str, Position] = {}  # token_id -> Position
@@ -529,6 +542,26 @@ class PredictionMarketExecutor:
 
         if self.dry_run:
             result = self._simulate_fill(req)
+        elif not self.live_enabled:
+            # REAL-MONEY MASTER GATE: dry_run is off but the owner has not enabled
+            # live trading. Hard-block any real order. This is the load-bearing
+            # safety gate — paper is the default and the loop cannot bypass it.
+            logger.critical(
+                "[LIVE GATE] Real order BLOCKED: LIVE_TRADING_ENABLED is false. "
+                "Set it true (owner-only, see LIVE_RUNBOOK) to place real orders."
+            )
+            result = OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=req.exchange,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error="LIVE_TRADING_ENABLED is false — real orders are gated off (owner-only).",
+            )
         elif req.exchange == Exchange.POLYMARKET:
             result = self.polymarket.place_order(req)
         else:

@@ -75,6 +75,19 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
 
+    # ============ REAL-MONEY MASTER GATE (HUMAN-CORE) ============
+    # The autonomous loop NEVER sets these. Default is SAFE (paper-only).
+    # With live_trading_enabled False, no real order can be placed regardless of
+    # any other setting. The owner flips this only after the LIVE_RUNBOOK steps.
+    live_trading_enabled: bool = False  # env: LIVE_TRADING_ENABLED — owner-only master switch
+
+    # Hard loss / spend ceilings (USD). Conservative defaults; owner sets real values.
+    # These are enforced in code; a breach auto-trips the kill switch.
+    max_per_trade_usd: float = 5.0       # env: MAX_PER_TRADE_USD
+    max_daily_loss_usd: float = 25.0     # env: MAX_DAILY_LOSS_USD
+    max_total_loss_usd: float = 100.0    # env: MAX_TOTAL_LOSS_USD
+    llm_spend_cap_usd: float = 20.0      # env: LLM_SPEND_CAP_USD
+
     # ============ Live Broker Settings ============
     # Alpaca (US Stocks/ETFs) - Paper Trading
     alpaca_api_key: str = ""
