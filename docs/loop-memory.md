@@ -33,16 +33,21 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
   serverless — it's a large refactor that makes the bot worse. If "one platform" is
   ever wanted, run BOTH frontend + backend on Railway/Render (not Vercel functions).
 - Deploy shape: **frontend → Vercel** (Next.js, `frontend/`), **backend → Railway /
-  Render / Fly** (persistent), **DB → Supabase Postgres** (`DATABASE_URL`). See
+  Render / Fly** (persistent), **DB → Neon Postgres** (`DATABASE_URL`). See
   `docs/DEPLOYMENT.md` (the single source for deploy steps).
+- **DB = Neon** (switched from Supabase). The dialect-aware engine needs NO code
+  change — Neon is just Postgres; the pooled `-pooler` endpoint + `pool_pre_ping`
+  handle autosuspend/reconnect, and `?sslmode=require` rides in the URL. Use the
+  **pooled** connection string.
 - One-click configs shipped: `render.yaml` (root), `backend/railway.json`; the
   `backend/Dockerfile` binds `${PORT:-8000}` for any host. Backend needs ~1GB+ RAM
   (heavy ML deps: torch/xgboost/lightgbm) → free tiers OOM. Trimming those for a
   prediction-markets-only build (ROADMAP A1) would let it run leaner.
 - CORS: all frontend calls are cross-origin direct calls; set `CORS_ALLOW_ORIGINS`
   (env) to the Vercel origin or the backend rejects them.
-- Supabase Data API exposure is a real risk for the public tables (sensitive money
-  data) → enable RLS deny-by-default after first boot (OA-9; SQL in DEPLOYMENT.md).
+- **No Data API lockdown on Neon.** Neon has no PostgREST/anon Data API (unlike
+  Supabase), so the public-table exposure risk doesn't exist — the DB is reachable
+  only via `DATABASE_URL`. Just keep that string server-side (OA-9).
 
 ## 2026-06-27 — Bootstrap
 
