@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = True
 
+    # Extra CORS origins for deployed frontends (comma-separated exact origins, e.g.
+    # "https://llm-quant.vercel.app"). Localhost dev origins are always allowed.
+    cors_allow_origins: str = ""  # env: CORS_ALLOW_ORIGINS
+
     # ============ REAL-MONEY MASTER GATE (HUMAN-CORE) ============
     # The autonomous loop NEVER sets these. Default is SAFE (paper-only).
     # With live_trading_enabled False, no real order can be placed regardless of
