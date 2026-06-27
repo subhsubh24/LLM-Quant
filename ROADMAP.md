@@ -4,7 +4,29 @@
 > item**. A box ticks **only** with a verifiable artifact + the gate green this run —
 > never self-assessment. Un-tick any box whose proof later fails.
 
+> **Operating standard (read every run):** [`FACTORY_STANDARD.md`](FACTORY_STANDARD.md)
+> is the shared, product-agnostic discipline EVERY factory follows identically — the
+> loop, two-gate readiness, BUILDS≠WORKS, the independent QUALITY_SCORECARD, the
+> business-case strength loop-back, growth-data-as-signal, the model split, the value
+> bar, the disjoint rule, and the brakes. FOLLOW IT. This ROADMAP + `VISION.md` hold
+> the product-specific details (what to build, the security model, the ship target,
+> the stack) and win on any specific. Identical factories, different products.
+
 Status legend: `[ ]` not done · `[~]` in progress (proof partial) · `[x]` done (proof attached + gate green)
+
+---
+
+## STABLE ANCHORS (do not churn)
+
+These files are stable anchors — improve them only with deliberate intent, never as
+churn-for-its-own-sake (see FACTORY_STANDARD §14):
+
+- **`FACTORY_STANDARD.md`** — the shared cross-factory discipline, byte-identical
+  across every factory repo: **NEVER edit or paraphrase it to fit this product**
+  (product-specifics belong in ROADMAP/VISION); it changes ONLY by a deliberate
+  canonical sync, never as loop work.
+- **`VISION.md`** — the north star + design/quality bar.
+- The guard rules + guard tests + `scripts/preflight.sh` gate logic.
 
 ---
 

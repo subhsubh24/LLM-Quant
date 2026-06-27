@@ -2,6 +2,23 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-27 — Adopted the shared FACTORY_STANDARD
+
+- Added `FACTORY_STANDARD.md` at the repo root — the **byte-identical, product-agnostic**
+  cross-factory discipline (the loop, two-gate readiness, BUILDS≠WORKS, independent
+  QUALITY_SCORECARD, business-case strength loop-back, growth-data-as-signal, the
+  3-tier model split, the value bar, the disjoint rule, the brakes). **Read it every
+  run** alongside ROADMAP + VISION.
+- **It is a STABLE ANCHOR — treat it as read-only context.** NEVER edit, paraphrase,
+  trim, or adapt it to this product; product-specifics live in ROADMAP/VISION which
+  win on any specific. It changes ONLY by a deliberate canonical cross-factory sync,
+  never as loop work. Listed in ROADMAP's "STABLE ANCHORS (do not churn)".
+- Added the pointer near the top of ROADMAP.md and the stable-anchors entry.
+- Where the standard and this repo already align: the two-gate readiness +
+  preflight, the QUALITY_SCORECARD consume-don't-grade wiring (step 9b/12), the
+  Opus/Sonnet/Haiku split, the disjoint rule, and the real-money/human-core brakes
+  are all already in place. The standard formalizes them as the shared contract.
+
 ## 2026-06-27 — Wired the independent Quality Auditor grade into the gates
 
 - A **separate, independent Quality Auditor** routine grades the project A+→F and
