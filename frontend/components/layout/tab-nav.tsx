@@ -5,9 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  BarChart3,
   Target,
-  Sparkles,
   Sun,
   Moon,
   Activity,
@@ -22,24 +20,15 @@ import { useTheme } from "next-themes";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Prediction-markets-only (ROADMAP A1): the stock "Dashboard" and "Quant Bot"
+// surfaces were retired along with the stock/crypto backend. The Predictions panel
+// is the single monitoring/control surface for the owner.
 const tabs = [
-  {
-    href: "/dashboard",
-    label: "Dashboard",
-    icon: BarChart3,
-    description: "Market overview",
-  },
   {
     href: "/predictions",
     label: "Predictions",
     icon: Target,
     description: "Market scanner",
-  },
-  {
-    href: "/bot",
-    label: "Quant Bot",
-    icon: Sparkles,
-    description: "Automated trading",
   },
 ];
 
