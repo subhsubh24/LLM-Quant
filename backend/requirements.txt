@@ -8,17 +8,17 @@ pydantic-settings>=2.1.0
 # Data & Computation
 pandas>=2.1.0
 numpy>=1.26.0
-yfinance>=0.2.36
-pandas-datareader>=0.10.0
+yfinance>=0.2.36          # still imported by backtest/strategy_tester.py (asset-agnostic infra)
 requests>=2.31.0
 
 # Machine Learning
+# NOTE (ROADMAP A1): the heavy deep-learning / boosting stack (torch, torchvision,
+# xgboost, lightgbm, statsmodels, pandas-datareader) was dropped when the stock/crypto
+# ML modules (app/models, app/signals, app/data, app/features, app/strategies) were
+# retired — no remaining module imports them, so this trims ~2GB+ from the deploy image.
+# scikit-learn + cvxpy stay: still used (function-locally) by the kept asset-agnostic
+# portfolio optimizer + backtest attribution.
 scikit-learn>=1.4.0
-statsmodels>=0.14.0
-xgboost>=2.0.0
-lightgbm>=4.1.0
-torch>=2.1.0
-torchvision>=0.16.0
 
 # Portfolio Optimization
 cvxpy>=1.4.0
