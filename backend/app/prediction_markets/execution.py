@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from .cost_model import DEFAULT_FEE_RATE, DEFAULT_SLIPPAGE_RATE
 from .polymarket_client import (
     CLOB_API,
     Market,
@@ -673,16 +674,20 @@ class PredictionMarketExecutor:
         """Simulate a fill for dry-run / paper trading mode."""
         fill_price = req.price or 0.50
 
-        # Simulate realistic slippage: 0.5% for market orders
+        # Simulate realistic slippage for market orders. The rate is sourced from the
+        # cost_model single source of truth (DEFAULT_SLIPPAGE_RATE) so the paper fill,
+        # the backtest EV, and the Kelly sizer all subtract the SAME slippage — a
+        # divergence here would otherwise read as false overfit. Guarded by
+        # test_cost_model.test_effective_price_matches_executor_rates.
         if req.order_type == OrderType.MARKET:
-            slippage = 0.005
+            slippage = DEFAULT_SLIPPAGE_RATE
             if req.side == OrderSide.BUY:
                 fill_price = min(fill_price * (1 + slippage), 0.99)
             else:
                 fill_price = max(fill_price * (1 - slippage), 0.01)
 
-        # Simulate fees (Polymarket ~2%)
-        fees = req.size * fill_price * 0.02
+        # Simulate venue fees from the cost_model single source of truth (Polymarket ~2%).
+        fees = req.size * fill_price * DEFAULT_FEE_RATE
 
         return OrderResult(
             order_id=f"sim_{uuid.uuid4().hex[:12]}",

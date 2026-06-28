@@ -45,6 +45,44 @@ def test_effective_price_matches_executor_rates():
     assert DEFAULT_FEE_RATE == 0.02
 
 
+def test_executor_imports_cost_model_rates_no_drift():
+    """C2 unification: execution.py must SOURCE its paper-fill slippage + fee from the
+    cost_model single source of truth, not from duplicated literals. This binds the two
+    so a future edit to one can't silently diverge from the other (which would make the
+    backtest EV and realized PnL inconsistent and masquerade as overfit)."""
+    from backend.app.prediction_markets import execution as ex
+
+    # The constants are imported into execution's namespace and are the SAME values.
+    assert ex.DEFAULT_SLIPPAGE_RATE == DEFAULT_SLIPPAGE_RATE
+    assert ex.DEFAULT_FEE_RATE == DEFAULT_FEE_RATE
+
+    # And a simulated market BUY fill actually applies exactly those rates.
+    from backend.app.prediction_markets.execution import (
+        Exchange,
+        OrderRequest,
+        OrderSide,
+        OrderType,
+        PredictionMarketExecutor,
+    )
+
+    executor = PredictionMarketExecutor(dry_run=True)
+    req = OrderRequest(
+        exchange=Exchange.POLYMARKET,
+        market_id="m",
+        token_id="t",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        size=100.0,
+        price=0.50,
+    )
+    result = executor._simulate_fill(req)
+    expected_fill = min(0.50 * (1 + DEFAULT_SLIPPAGE_RATE), 0.99)
+    assert math.isclose(result.filled_price, expected_fill, rel_tol=1e-12)
+    assert math.isclose(
+        result.fees, 100.0 * expected_fill * DEFAULT_FEE_RATE, rel_tol=1e-12
+    )
+
+
 def test_effective_price_caps_at_one_no_optimism():
     cm = CostModel()
     # A near-certain contract whose all-in cost exceeds $1 caps at exactly 1.0
