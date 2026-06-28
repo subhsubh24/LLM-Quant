@@ -170,18 +170,23 @@ discipline) and acts on the named `top_gaps`.
   value-bar-clearing improvement remains, **converge**.
 
 **Scorecard contract the gate consumes** (the auditor produces this shape; we only
-read it) — an HTML-comment YAML block like the repo's other machine-readable blocks:
-```
-<!-- QUALITY_SCORECARD
-overall: B
-as_of: YYYY-MM-DD
-dimensions:
-  - name: backtest_integrity
-    grade: C            # one of A+,A,B,C,D,F,null
-    ship_critical: true
-    top_gaps: ["no walk-forward", "costs not modeled"]
--->
-```
+read it) — a **fenced YAML block** like the repo's other machine-readable blocks
+(GROWTH_STATUS / BUSINESS_CASE_SUMMARY / OWNER_ACTIONS), so the AutoFactory dashboard
+can read it too:
+
+    ```yaml
+    QUALITY_SCORECARD:
+      overall: B
+      as_of: YYYY-MM-DD
+      dimensions:
+        - name: backtest_integrity
+          grade: C            # one of A+,A,B,C,D,F,null
+          ship_critical: true
+          top_gaps: ["no walk-forward", "costs not modeled"]
+    ```
+
+(`scripts/check_scorecard.py` also still accepts a legacy `<!-- QUALITY_SCORECARD -->`
+comment, but the fenced form above is the standard.)
 
 ### PERFORMANCE HONESTY + WEAK-CASE LOOP-BACK
 Never curve-fit / p-hack / select on the test set / ignore costs. If the honest
