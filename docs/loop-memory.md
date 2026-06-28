@@ -2,6 +2,25 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Adopted deep-diagnosis discipline
+
+- Added [`docs/autonomous-loop/DEEP_DIAGNOSIS.md`](autonomous-loop/DEEP_DIAGNOSIS.md):
+  for any "builds/deploys but the user hits an error," **observe the real environment**
+  (Railway backend logs, Vercel function logs, query Neon directly via `psql
+  "$DATABASE_URL"` / Neon console, or reproduce the journey) BEFORE theorizing; separate
+  **code vs data vs config** with evidence; prove ONE hypothesis against the live system;
+  find the **uncaught throw**; verify the fix in the real data (not the build); fix the
+  ROOT cause + add a regression that fails LOUD; **peel the layers** until the journey
+  works end-to-end; stay honest.
+- Two hard rules: (a) every external/LLM/3rd-party call needs a **timeout** shorter than
+  the runtime budget (esp. Vercel functions; also Gemini/Polymarket on the backend);
+  (b) an `.optional()` env var a critical path actually requires is a latent outage —
+  make it **fail loud** (the password gate already fails closed; don't let `DATABASE_URL`
+  silently no-op).
+- Stack note: we're on **Neon (not Supabase)** — no Data API/MCP; query the DB directly.
+- Record each real incident here (symptom → layer → proof → root cause → loud regression
+  → end-to-end confirmation). The dashboard-0% fix (2026-06-27) is a worked example.
+
 ## 2026-06-28 — Side-effect integrity (a "success" the user can't verify is a LIE)
 
 - Canonical sync: FACTORY_STANDARD §6 now ends with the **SIDE-EFFECT INTEGRITY**
