@@ -427,11 +427,41 @@ class PredictionMarketExecutor:
         max_position_usd: float = 50.0,
         max_portfolio_usd: float = 500.0,
         live_enabled: Optional[bool] = None,
+        max_daily_loss_usd: Optional[float] = None,
+        max_total_loss_usd: Optional[float] = None,
     ):
         self.polymarket = polymarket or PolymarketExecutor()
         self.dry_run = dry_run
         self.max_position_usd = max_position_usd
         self.max_portfolio_usd = max_portfolio_usd
+
+        # HARD LOSS CAPS (ROADMAP D3/D4). Default from settings (MAX_DAILY_LOSS_USD /
+        # MAX_TOTAL_LOSS_USD); overridable for tests. Enforced at the execution gate
+        # (_check_risk) AND they AUTO-TRIP the kill switch on breach (D4) — not just a
+        # config value. Cap is on REALIZED loss (money actually lost): the safest hard
+        # stop. Raising a cap is HUMAN-CORE (owner-only) — the loop never raises it.
+        if max_daily_loss_usd is None or max_total_loss_usd is None:
+            try:
+                from ..config import get_settings
+                _s = get_settings()
+                if max_daily_loss_usd is None:
+                    max_daily_loss_usd = float(_s.max_daily_loss_usd)
+                if max_total_loss_usd is None:
+                    max_total_loss_usd = float(_s.max_total_loss_usd)
+            except Exception:
+                if max_daily_loss_usd is None:
+                    max_daily_loss_usd = 25.0
+                if max_total_loss_usd is None:
+                    max_total_loss_usd = 100.0
+        self.max_daily_loss_usd = max_daily_loss_usd
+        self.max_total_loss_usd = max_total_loss_usd
+
+        # Cumulative REALIZED PnL (negative = loss). Tracked at the executor level so it
+        # SURVIVES position close — total_pnl summed over open positions alone would drop
+        # a closed position's realized PnL. record_realized_pnl() feeds these counters.
+        self._realized_pnl_total: float = 0.0
+        self._realized_pnl_daily: float = 0.0
+        self._loss_cap_day = datetime.now(timezone.utc).date()
 
         # REAL-MONEY MASTER GATE (HUMAN-CORE). Default resolves from settings
         # (LIVE_TRADING_ENABLED, default False). When False, no real order can be
@@ -498,11 +528,64 @@ class PredictionMarketExecutor:
         self._kill_switch_reason = ""
         self._kill_switch_time = None
 
+    def _roll_daily_loss_window(self):
+        """Reset the daily realized-loss tally when the UTC day rolls over."""
+        today = datetime.now(timezone.utc).date()
+        if today != self._loss_cap_day:
+            self._loss_cap_day = today
+            self._realized_pnl_daily = 0.0
+
+    def record_realized_pnl(self, pnl: float):
+        """Record realized PnL from a closed/reduced position and AUTO-TRIP the kill
+        switch if a hard loss cap is breached (ROADMAP D3/D4).
+
+        Call this whenever PnL is realized (a position is reduced/closed, or a market
+        resolves). It accumulates the daily + total realized PnL the loss caps gate on,
+        then enforces them immediately so the kill switch trips on the very trade that
+        breaches the cap — not only on the next order attempt.
+        """
+        self._roll_daily_loss_window()
+        self._realized_pnl_total += pnl
+        self._realized_pnl_daily += pnl
+        self._enforce_loss_caps()
+
+    def _loss_cap_breach(self) -> Optional[str]:
+        """Return a reason string if a daily/total realized-loss cap is breached, else
+        None. Caps are on realized LOSS, so we compare the negative of realized PnL."""
+        self._roll_daily_loss_window()
+        if -self._realized_pnl_daily >= self.max_daily_loss_usd:
+            return (
+                f"DAILY loss cap: realized ${self._realized_pnl_daily:.2f} breaches "
+                f"-${self.max_daily_loss_usd:.2f}"
+            )
+        if -self._realized_pnl_total >= self.max_total_loss_usd:
+            return (
+                f"TOTAL loss cap: realized ${self._realized_pnl_total:.2f} breaches "
+                f"-${self.max_total_loss_usd:.2f}"
+            )
+        return None
+
+    def _enforce_loss_caps(self):
+        """Auto-trip the kill switch (D4) if a loss cap is breached (D3)."""
+        breach = self._loss_cap_breach()
+        if breach and not self._kill_switch_active:
+            self.activate_kill_switch(f"loss_cap: {breach}")
+
     def _check_risk(self, req: OrderRequest) -> Optional[str]:
         """Pre-trade risk checks. Returns error message or None if OK."""
         # Kill switch overrides everything
         if self._kill_switch_active:
             return f"KILL SWITCH ACTIVE: {self._kill_switch_reason}"
+
+        # HARD LOSS CAPS (D3) enforced AT THE GATE — defense-in-depth alongside the
+        # auto-trip on PnL realization. If realized losses already breach a cap, trip
+        # the kill switch (D4) and reject. Caps are config-derived but ENFORCED here,
+        # not merely declared.
+        loss_breach = self._loss_cap_breach()
+        if loss_breach:
+            if not self._kill_switch_active:
+                self.activate_kill_switch(f"loss_cap: {loss_breach}")
+            return f"LOSS CAP: {loss_breach}"
 
         notional = req.notional
 
@@ -632,6 +715,9 @@ class PredictionMarketExecutor:
                 # Reduce position
                 pnl = (result.filled_price - pos.avg_entry_price) * result.filled_size
                 pos.realized_pnl += pnl
+                # Feed the executor-level realized-PnL counters + auto-trip the kill
+                # switch if this realized loss breaches a hard cap (D3/D4).
+                self.record_realized_pnl(pnl)
                 pos.size -= result.filled_size
                 if pos.size <= 0.001:
                     # Position closed
