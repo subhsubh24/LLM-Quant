@@ -2,6 +2,55 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Real-data ingest + impact model + audit log (3-PR run); binding constraint is now ENVIRONMENTAL
+
+- **Shipped 3 file-disjoint code PRs (#45 fetcher, #46 cost-impact, #47 audit-log) + this
+  bookkeeping PR** from an 8-scout sweep. All merged to default; each PR's "code + safety gate
+  (blocking)" CI GREEN; integration (all 3 on one branch) preflight code GREEN + runtime harness
+  deterministic before the split. engine_pct 58→61. **No DoD/floor box ticked** (see below).
+- **THE headline finding — the binding constraint moved from CODE to NETWORK EGRESS.** The named
+  blocker for ALL OOS validation was "no fetcher for real resolved-Polymarket history." Built it
+  (`polymarket_history_fetcher.py`) using Polymarket's OWN public Gamma `closed=true` + CLOB
+  `prices-history` (no third-party key needed). BUT the autonomous env's egress policy returns
+  **403 at the proxy** for gamma-api.polymarket.com / clob.polymarket.com — confirmed via
+  `curl "$HTTPS_PROXY/__agentproxy/status"` (recentRelayFailures: connect_rejected). So the loop
+  CANNOT pull real data itself; the real-data OOS run is now human-core **OA-11** (run the fetcher
+  where Polymarket is reachable, or widen egress). **Lesson: when the binding constraint needs an
+  external network the env blocks, BUILD the capability leakage-correctly + fixture-test it offline
+  + hand the owner a precise OA, rather than faking data or ticking a box. Per the proxy README,
+  a 403 egress denial is reported, never routed around.**
+- **The anti-leakage core the auditors hammered:** a resolved market's `outcomePrices` settle to
+  ~[1,0]/[0,1] = THE ANSWER. Using that as the decision-time price = 100% look-ahead. The fetcher
+  takes `market_price` ONLY from a CLOB price-history tick at-or-before `decision_time` AND strictly
+  before `resolution_time`, and RAISES rather than fabricating if none exists. A fresh Opus auditor
+  confirmed CANNOT-BREAK-LEAKAGE but flagged a real honesty gap: the "unambiguously settled" filter
+  excludes contested/re-resolved markets → sample biased toward clean outcomes. **Lesson: a resolved
+  market's settled price is the answer — never let it become a decision input; and disclose the
+  survivorship bias of a "clean-resolution-only" filter or the eval will overstate crowd calibration.**
+- **CI integration bug the gate CAUGHT (not the unit tests):** the new `audit_log.PredictionAuditLog`
+  (`table=True`) crashed the whole prediction-markets test suite with `InvalidRequestError: Table
+  'prediction_audit_log' is already defined` — because the repo is imported under BOTH `app.*` (tests,
+  via conftest sys.path) and `backend.app.*` (production/relative), and the orchestrator's EAGER
+  top-level `from .audit_log import` registered the table twice. Fix: make the orchestrator import
+  LAZY (in `__init__`, matching the repo's lazy `from .models import` pattern) + add
+  `__table_args__ = {"extend_existing": True}` as a defensive guard. **Lesson: a new SQLModel
+  `table=True` class imported EAGERLY can double-register under the repo's dual import paths and take
+  down import — import table-bearing modules lazily like the existing `from .models` calls, and add
+  `extend_existing=True`. The per-PR unit run passed; only the FULL-suite gate exposed it — always
+  run the integrated gate, not just the per-module tests.**
+- **Reviewer A caught a determinism MUST-FIX:** `_seed_hash` omitted the new `impact_coeff`, so two
+  runs with different impact but identical data/seed shared a hash yet produced different PnL — a
+  reproducibility-fingerprint violation. Added it to the payload + a regression test (chose a
+  non-saturated depth=2000 so impact_coeff actually moves PnL; at a very thin book both coeffs
+  saturate at the 1.0 cap and PnL coincides, hiding the effect). **Lesson: when you add a config
+  field that affects PnL, add it to the determinism fingerprint IN THE SAME CHANGE, and test it in a
+  regime where it actually bites.**
+- **Process that worked:** 3 maker subagents (worktree-free, strict disjoint file ownership, no git)
+  built the 3 PRs in parallel; 2 Sonnet reviewers + 3 fresh Opus auditors reviewed the integrated
+  diff BEFORE splitting/pushing (so fixes landed once, not per-branch); then split base→3 branches via
+  `git checkout tmp/all-work -- <files>`, pushed, opened PRs, merged after CI green. Auto-merge is OFF
+  at the repo level — merge directly via the API once the blocking check is green.
+
 ## 2026-06-28 — Backtest/edge-integrity push: C3 engine + B2 calibration + A5 DQ + C5 metrics + C2 unify (5-PR run)
 
 - **Shipped 5 file-disjoint code PRs (#39-#43) + 1 bookkeeping PR** from an 8-scout sweep.
