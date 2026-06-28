@@ -2,6 +2,21 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-27 — Canonical sync: FACTORY_STANDARD §6b (design taste)
+
+- Synced FACTORY_STANDARD.md to the new canonical (still **byte-identical** across
+  factories): added **§6b "Design taste — ELIMINATE generic-AI frontend"** between §6
+  and §7. THE DESIGNER QUESTION ("Would an experienced product designer intentionally
+  make this decision?") runs on EVERY UI change; generated-AI slop is a release-blocking
+  FAIL; enforced by Reviewer B + the §10 deep-audit design lens + the §7 readiness
+  visual review (judging the §6 screenshots).
+- **Applies to LLM-Quant** — it HAS a user-facing surface: the monitoring/control
+  panel (dashboard, predictions, bot, login). Every UI change to that panel must clear
+  §6b; folds together with F5 (Playwright screenshot capture) so the visual lenses have
+  artifacts to judge. NOT N/A here.
+- Canonical sync only (the single way FACTORY_STANDARD.md changes) — treat as a
+  read-only stable anchor again afterward.
+
 ## 2026-06-28 — A1 Increment 1: deleted the stock/crypto trading engine
 
 - Advanced the LOWEST incomplete item (A1). Removed the entire `backend/app/trading/`
