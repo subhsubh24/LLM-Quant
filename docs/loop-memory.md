@@ -2,6 +2,28 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Side-effect integrity (a "success" the user can't verify is a LIE)
+
+- Canonical sync: FACTORY_STANDARD §6 now ends with the **SIDE-EFFECT INTEGRITY**
+  paragraph (byte-identical) — no fake success; verify the EFFECT end-to-end, not the
+  message. Read it every run.
+- ROADMAP: added the two rules to the BUILDS≠WORKS standard + **F4.1 side-effect
+  round-trip** (generalized to this trading bot: the effect = a paper order really
+  logged/filled; the runtime harness already proves that + that the live gate/kill
+  switch block real orders; the UI-never-shows-fake-success round-trip rides on F5).
+- **P0 FIXED** (real fake-success bugs in the predictions panel):
+  - `resetPortfolio` swallowed errors and unconditionally cleared the UI + showed
+    "Portfolio reset" even if the backend reset failed/was down → now only clears +
+    claims success when the reset API actually returns ok; error toast otherwise.
+  - `toggleBot` stop had no `res.ok` check → showed "Bot stopped" even if stop failed
+    (bot could still be running) → now contingent on ok; error toast otherwise; the
+    silent catch now surfaces an error.
+  - (start branch + runScan were already contingent; legacy bot/dashboard re-fetch real
+    state so they self-correct.) Frontend builds.
+- Going forward: any new "sent/saved/submitted/charged/executed/done" message MUST be
+  downstream of the real op succeeding; auditors + the deep-audit functional-reality
+  lens hunt for fake success.
+
 ## 2026-06-27 — Canonical sync: FACTORY_STANDARD §6b (design taste)
 
 - Synced FACTORY_STANDARD.md to the new canonical (still **byte-identical** across

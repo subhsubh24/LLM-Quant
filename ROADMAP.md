@@ -91,6 +91,7 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 - [ ] F2. Calibration eval holds; backtest **reproduces** bit-for-bit; **no leakage** eval.
 - [ ] F3. BUILDS ≠ WORKS runtime harness: full pipeline ingest → signal → size → (paper) execute → PnL runs end-to-end producing real reproducible results; live path exercised in mock/paper mode. (UI visual side = F5.)
 - [ ] F4. CI wiring of the gate (workflow scope — owner/maintainer action).
+- [~] F4.1. **Side-effect round-trip (verify the EFFECT, not the message).** Done in part: the runtime harness already proves the trading side-effect — a paper order is **really logged/filled**, the live gate + kill switch **really block** real orders, deterministically — so "order placed/executed" can't be a fake confirmation. Still to do: extend the F5 journey suite to assert the **UI never shows a success state unless the op truly succeeded** (e.g. trigger scan/reset/bot-toggle → assert the backend effect actually occurred, not just that a toast appeared), and assert the relevant API client was invoked with the right payload. (No email/SMS/payment in this product today; if any is ever added — e.g. alerting — it must round-trip via a capture/sandbox before any "sent" message ships, per FACTORY_STANDARD §6.) A flow that depends on an unverified side-effect may NOT be ticked done.
 - [ ] F5. **Visual verification for the monitoring panel (gives the §6/§7/§10 visual-review lenses artifacts to judge).** A **Playwright** journey suite that screenshots every page (dashboard, predictions, bot, login) in each key state (empty / loading / error; authed + logged-out) and commits them as artifacts; then wire the visual-review lenses (FACTORY_STANDARD §6 capture, §7 readiness gate, §10 deep audit) so the loops actually LOOK at the images against the VISION design bar — a blank/broken/overlapping/unstyled/off-brand page is a release-blocking FAIL even if DOM assertions pass. **Web-only** (the panel is a Next.js app — no mobile/component-snapshot path needed). Product/ROADMAP work, deliberately separate from the byte-identical `FACTORY_STANDARD.md`.
 
 ### G — SAFETY & SECRETS
@@ -140,6 +141,19 @@ The pipeline and every monitoring screen are validated **at runtime**, asserting
 reproduces**; the live path runs end-to-end in mock/paper mode; the UI shows real
 numbers, never a stub/error; the kill switch + loss caps **actually halt trading**
 when tripped. "It compiles / passes" ≠ "it works."
+
+**SIDE-EFFECT INTEGRITY (a "success" the user can't verify is a LIE):** (1) **No fake
+success** — every user-facing success state ("scan queued", "bot started", "order
+placed/executed", "reset", "saved") must be causally **downstream of the operation
+actually succeeding**: await the real result, check it, and surface failure honestly;
+a message fired optimistically (or while a provider is dry-run/unconfigured) is a
+correctness bug. (2) **Verify the EFFECT end-to-end** — for any side-effecting op
+(order placement, trade execution, DB write, outbound API/webhook, and — if ever added
+— email/SMS/payment) "works" means the effect is **observably produced in
+paper/sandbox**, not that the UI showed success. For this trading bot the effect = the
+gated/paper order is **really logged/filled** (the runtime harness already asserts
+this and that the live gate/kill switch block real orders) — never a fake confirmation.
+A critical-path flow that depends on an unverified side-effect is **not "done."**
 
 ### GO-LIVE-ELIGIBLE AUDIT GATE (two gates, maker ≠ checker)
 1. `preflight.sh` exits 0.

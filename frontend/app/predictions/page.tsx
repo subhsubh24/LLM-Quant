@@ -320,14 +320,23 @@ export default function PredictionsPage() {
 
   const resetPortfolio = async () => {
     if (!confirm("Reset all paper trading positions and P&L?")) return;
+    // SIDE-EFFECT INTEGRITY: only clear the UI + claim "reset" if the backend reset
+    // ACTUALLY succeeded. Never optimistically show success for an op we can't verify.
     try {
-      await fetch(`${API_BASE}/api/prediction-markets/portfolio/reset`, { method: "POST" });
-    } catch {}
+      const res = await fetch(`${API_BASE}/api/prediction-markets/portfolio/reset`, { method: "POST" });
+      if (!res.ok) throw new Error(`reset failed (${res.status})`);
+    } catch {
+      showToast("Reset failed — backend unreachable; nothing was reset", "error");
+      return; // do NOT wipe the UI or claim success when the effect didn't happen
+    }
+    // Reset truly succeeded — now reflect it.
     setStrategies(DEFAULT_STRATEGIES.map(s => ({ ...s, positions: 0, pnl: 0 })));
     setOpportunities([]); setLivePositions([]); setEquityCurve([]);
     setPortfolioSummary(null); setScanCount(0); setAnalysisLog([]);
     addLog("info", "Portfolio reset.");
-    showToast("Portfolio reset", "info");
+    showToast("Portfolio reset", "success");
+    // Re-pull from the backend so the panel reflects the real post-reset state.
+    try { await Promise.all([fetchPositions(), fetchStrategies()]); } catch {}
   };
 
   const checkPolymarketConnection = async () => {
@@ -338,22 +347,32 @@ export default function PredictionsPage() {
   };
 
   const toggleBot = async () => {
+    // SIDE-EFFECT INTEGRITY: only flip state + claim started/stopped if the request
+    // ACTUALLY succeeded. A failed stop must NOT show "Bot stopped" while it keeps running.
     try {
       if (botRunning) {
-        await fetch(`${API_BASE}/api/prediction-markets/bot/stop`, { method: "POST" });
-        setBotRunning(false);
-        addLog("info", "Bot stopped");
-        showToast("Bot stopped", "info");
+        const res = await fetch(`${API_BASE}/api/prediction-markets/bot/stop`, { method: "POST" });
+        if (res.ok) {
+          setBotRunning(false);
+          addLog("info", "Bot stopped");
+          showToast("Bot stopped", "info");
+        } else {
+          showToast("Failed to stop bot — it may still be running", "error");
+        }
       } else {
         const res = await fetch(`${API_BASE}/api/prediction-markets/bot/start`, { method: "POST" });
         if (res.ok) {
           setBotRunning(true);
           addLog("info", "Bot started — automated scan → execute loop running every 120s");
           showToast("Bot started", "success");
+        } else {
+          showToast("Failed to start bot", "error");
         }
       }
-      await fetchBotStatus();
-    } catch {}
+      await fetchBotStatus(); // re-sync to the real bot state regardless
+    } catch {
+      showToast("Bot action failed — backend unreachable", "error");
+    }
   };
 
   // ----------------------------------------------------------------
