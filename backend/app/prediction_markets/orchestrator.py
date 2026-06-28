@@ -44,6 +44,9 @@ from .execution import (
 from .strategies import PredictionMarketScanner, StrategyConfig
 from .risk_manager import RiskManager, RiskCheckResult
 from .cost_model import DEFAULT_COST_MODEL
+# NOTE: AuditLogger is imported lazily inside __init__ (see there) so the audit
+# table's table=True registration is deferred to orchestrator construction,
+# avoiding an eager dual-import-path collision in mixed test sessions.
 
 try:
     from .simulation_integration import EnhancedContractPricer, LiveProbabilityTracker
@@ -437,6 +440,33 @@ class PredictionMarketOrchestrator:
         self.last_scan_result: Optional[dict] = None  # Last scan summary
         self.last_scan_opportunities_raw: List[dict] = []  # Raw opportunities for frontend scanner
 
+        # Durable audit log (ROADMAP G3 / OA-10): persists every decision and
+        # would-be order so the history survives restarts (unlike activity_log).
+        # Construction is best-effort — fall back to a no-op so a bad audit
+        # setup can never break the orchestrator.
+        try:
+            # Imported lazily here (not at module top) so the audit table's
+            # ``table=True`` registration happens only when an orchestrator is
+            # actually constructed — mirroring the lazy ``from .models import``
+            # pattern used elsewhere in this file and avoiding an eager dual-path
+            # import collision in mixed test sessions.
+            from .audit_log import AuditLogger, _NoOpAuditLogger
+            self._audit = AuditLogger()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"[ORCHESTRATOR] AuditLogger init failed, using no-op: {e}")
+            try:
+                from .audit_log import _NoOpAuditLogger
+                self._audit = _NoOpAuditLogger()
+            except Exception:
+                # Even the no-op import failed (package badly broken) — use an inline
+                # shim so the hook call sites never hit an AttributeError on None.
+                import types
+                self._audit = types.SimpleNamespace(
+                    record_decision=lambda *a, **k: None,
+                    record_would_be_order=lambda *a, **k: None,
+                    recent=lambda *a, **k: [],
+                )
+
     def _add_activity(self, type: str, message: str, strategy: str = None):
         """Add an entry to the activity log (kept in memory, max 200)."""
         entry = {
@@ -555,6 +585,19 @@ class PredictionMarketOrchestrator:
                 )
                 skipped.append({"market": opp.market.question[:60], "reason": reason})
                 self.total_skipped += 1
+                try:
+                    self._audit.record_decision(
+                        "dq_reject",
+                        strategy=opp.strategy,
+                        market_id=opp.market.id,
+                        market_question=opp.market.question[:200],
+                        side=opp.side,
+                        edge=opp.edge,
+                        confidence=opp.confidence,
+                        reason=dq_result.reason,
+                    )
+                except Exception:
+                    pass
                 continue
 
             # Risk check
@@ -564,6 +607,19 @@ class PredictionMarketOrchestrator:
             if not risk_result.approved:
                 skipped.append({"market": opp.market.question[:60], "reason": risk_result.reason})
                 self.total_skipped += 1
+                try:
+                    self._audit.record_decision(
+                        "risk_reject",
+                        strategy=opp.strategy,
+                        market_id=opp.market.id,
+                        market_question=opp.market.question[:200],
+                        side=opp.side,
+                        edge=opp.edge,
+                        confidence=opp.confidence,
+                        reason=risk_result.reason,
+                    )
+                except Exception:
+                    pass
                 continue
 
             # Kelly sizing
@@ -572,6 +628,19 @@ class PredictionMarketOrchestrator:
             )
             if num_contracts <= 0:
                 skipped.append({"market": opp.market.question[:60], "reason": "Kelly size = 0"})
+                try:
+                    self._audit.record_decision(
+                        "kelly_skip",
+                        strategy=opp.strategy,
+                        market_id=opp.market.id,
+                        market_question=opp.market.question[:200],
+                        side=opp.side,
+                        edge=opp.edge,
+                        confidence=opp.confidence,
+                        reason="Kelly size = 0",
+                    )
+                except Exception:
+                    pass
                 continue
 
             # Determine token and labels
@@ -596,6 +665,22 @@ class PredictionMarketOrchestrator:
 
             # Execute
             result = self.executor.execute(order)
+
+            # Durable audit of the REAL would-be order (filled/rejected/gated).
+            # Reflects the actual OrderResult — never fabricates a success.
+            try:
+                self._audit.record_would_be_order(
+                    result,
+                    strategy=opp.strategy,
+                    market_question=opp.market.question[:200],
+                    edge=opp.edge,
+                    confidence=opp.confidence,
+                    is_dry_run=getattr(self.executor, "dry_run", None),
+                    live_enabled=getattr(self.executor, "live_enabled", None),
+                )
+            except Exception:
+                pass
+
             if result.is_success:
                 self.total_executions += 1
                 bankroll -= bet_usd  # Reduce available bankroll
