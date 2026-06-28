@@ -54,20 +54,21 @@ LOOP_HEALTH:
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
     recurring_failures: []       # nothing has failed >=2 runs. Egress wall resolved for data access last run; residual is scheduling only (OA-11).
-    harness_proposals_open: 1    # gh issue #51 — make the blocking gate a REQUIRED check (branch protection) + enable lint-at-zero. The META channel working as designed: a workflow-scope improvement the loop can't self-apply, raised + tracked (OA-12).
-  signal: improving              # 3rd datapoint: 44 merged / 0 reverts / 0 abandoned; staged the required-check correctly (verify-green-before-requiring) instead of red-blocking the gate, and routed the un-self-appliable part to the META channel. Converging.
+    harness_proposals_open: 0    # issue #51 RESOLVED same day: owner authorized + branch protection applied (OA-12 done). The META channel closed the loop — proposal raised AND actioned, not left hanging.
+  signal: improving              # 3rd datapoint: 44 merged / 0 reverts / 0 abandoned; required-check now ENFORCED (branch protected, blocking gate required) — broken changes can no longer auto-merge. Lint-at-zero still staged (F7). Converging.
 ```
 
 ## How to read the latest signal
 
-**2026-06-28 (3rd datapoint) — `improving`, first harness proposal open.** Staged the
-required-check + lint-at-zero work (`docs/ci/PROPOSED_CI.md`): the functional gate is already
-green, so the high-value step is the owner's one-time branch-protection toggle (OA-12) — raised
-as harness issue **#51** (`harness_proposals_open: 1`). Held lint-at-zero *off* (166 ruff
-findings in trading code) rather than red-block the required gate — exactly "verify green before
-requiring." This is the META channel doing its job: the loop builds + stages everything it can,
-and the one thing it cannot self-apply (admin/`.github/` scope) becomes a tracked proposal, not a
-silent wall.
+**2026-06-28 (3rd datapoint) — `improving`, first harness proposal raised AND resolved.** Staged
+the required-check + lint-at-zero work (`docs/ci/PROPOSED_CI.md`), raised harness issue **#51**
+for the one piece the loop can't self-apply (branch protection = admin scope) — and the owner
+authorized it the same day, so it was applied: the branch is now protected requiring
+`code + safety gate (blocking)`, so a change that regresses the live gate / kill switch /
+paper-pipeline reproduction **can no longer auto-merge** (OA-12 done, `harness_proposals_open`
+back to 0). Held lint-at-zero *off* (166 ruff findings in trading code) rather than red-block the
+now-required gate — exactly "verify green before requiring" (ratchet tracked as ROADMAP F7). The
+META channel did its full job: raise → action → close, not a silent wall and not a hanging issue.
 
 ### Earlier
 

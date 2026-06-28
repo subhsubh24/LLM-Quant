@@ -2,6 +2,20 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Branch protection APPLIED (owner-authorized): the required check is now enforced
+
+- Owner authorized the OA-12 toggle, so I applied it directly: `gh api -X PUT .../branches/<default>/protection`
+  requiring **only** `code + safety gate (blocking)`, `strict=true`, `enforce_admins=false`
+  (manual override retained). Verified `.protected == true`. The green gate is now **REQUIRED** —
+  a regression of the live gate / kill switch / paper-pipeline reproduction can no longer
+  auto-merge. Closed harness issue #51; OA-12 → done; `harness_proposals_open` → 0.
+- **Lesson / scope clarity:** a `gh api` branch-protection call is a **repo-settings** action, NOT
+  a `.github/` file edit — so it's inside what the loop may do *with owner authorization* (the
+  "never touch `.github/`" rule is about files/workflows that hang headless runs). I have admin on
+  this repo; I confirmed permission first, required ONLY the blocking job (never the honest-red
+  informational one), and left `enforce_admins=false` so the owner keeps an override. The check was
+  already proven green on every recent PR, so requiring it could not freeze merges.
+
 ## 2026-06-28 — Deploy automation: stage required-check + lint-at-zero; raise the FIRST harness proposal
 
 - **Why:** make the owner's recurring work ~zero — a change that builds but is broken-for-a-user
