@@ -1,0 +1,24 @@
+# Lint standard for LLM-Quant (ROADMAP F7 — "lint-at-zero" ratchet).
+#
+# This PINS what "clean" means; it does NOT by itself enforce anything. Enforcement
+# happens in scripts/preflight.sh step 3 (`ruff check backend/app`, which fails the
+# blocking gate) — but ONLY once `ruff` is added to backend/requirements-ci.txt. That
+# add is deliberately withheld until `ruff check backend/app` is clean, so a required
+# check is never flipped red (see docs/ci/PROPOSED_CI.md §A2).
+#
+# Keep the default rule selection (Pyflakes `F` + pycodestyle `E`/`W` essentials) so the
+# tracked finding count stays a stable, meaningful target.
+
+target-version = "py311"
+line-length = 100
+
+[lint]
+# Ruff defaults (E4/E7/E9 + F). Explicit so the standard is legible and stable.
+select = ["E4", "E7", "E9", "F", "W"]
+
+[lint.per-file-ignores]
+# Driver/CLI scripts legitimately set sys.path BEFORE importing the app package, so
+# module-level imports cannot all sit at the very top — E402 is expected there.
+"scripts/*.py" = ["E402"]
+# Tests may shadow/redefine fixtures and import for side effects.
+"backend/tests/*.py" = ["F811", "F401"]

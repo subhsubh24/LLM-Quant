@@ -83,6 +83,12 @@ OWNER_ACTIONS:
       status: in_progress
       why: "PARTLY DONE (2026-06-28): the fetcher was run from a network-permitted host and the pipeline is VALIDATED on REAL data — 54 leakage-safe records (data/polymarket_history_sample.json), walk-forward reproduces deterministically (seed_hash 8dc358439ffb5746). Findings in docs/autonomous-loop/OA11_REAL_DATA_VALIDATION.md: the crowd is very sharp on liquid near-resolution markets (Brier ~0.09, ~70% already price-pinned 2 days out), so NO edge exists at those points and the floor box correctly stays unticked. The binding constraint has MOVED from 'can't reach data' to 'need (a) markets sampled before they pin + (b) a real alpha model (ROADMAP track B)' — not an egress problem anymore. The autonomous build env STILL can't refresh the dataset (egress 403 at the proxy), so periodic real-data refresh remains owner/host scope."
       how: "Run scripts/fetch_polymarket_history.py (--order volumeNum) on a schedule where Polymarket's public Gamma + CLOB APIs are reachable — the backend host (a cron/worker) or a network-permitted CI job — to grow a real OOS corpus over time, OR widen the autonomous env's egress allowlist to gamma-api.polymarket.com + clob.polymarket.com so the loop can refresh it itself. No credentials needed (public read-only data). The EDGE work (a real model; sampling earlier-life markets) is loop-buildable and tracked under ROADMAP track B — it is NOT an owner action."
+    - id: OA-12
+      title: "Make the blocking CI gate a REQUIRED check (branch protection) so broken changes can't auto-merge"
+      priority: high
+      status: open
+      why: "The branch is currently UNPROTECTED, so the green 'code + safety gate (blocking)' job is advisory — a change that regresses the live gate / kill switch / paper-pipeline reproduction could still merge. Requiring the check is the one-time admin toggle the loop cannot do for itself (admin + .github/repo-settings scope). Build/verify already passes on every PR. See docs/ci/PROPOSED_CI.md §A3 and the harness-improvement-proposal issue."
+      how: "Run the gh-api branch-protection command in docs/ci/PROPOSED_CI.md §A3. Require ONLY the context 'code + safety gate (blocking)'. Do NOT require 'go-live readiness (informational)' (it is intentionally honest-red until a validated edge exists — requiring it blocks every merge forever). Leave enforce_admins=false for a manual override. Lint-at-zero (ROADMAP F7) will later ride inside this same job — no change to the required-checks list."
 ```
 
 ## Quick reference
@@ -98,6 +104,7 @@ OWNER_ACTIONS:
 | OA-9 | Keep Neon `DATABASE_URL` private (no Data API lockdown needed) | 🟡 medium | pending |
 | OA-10 | Audit log BUILT (G3); confirm `DATABASE_URL` is durable Neon | ⚪ low | in progress |
 | OA-11 | Real-data run DONE (pipeline validated); schedule periodic fetch on a permitted host | 🟡 medium | in progress |
+| OA-12 | Make `code + safety gate (blocking)` a REQUIRED check (branch protection) | 🟠 high | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 

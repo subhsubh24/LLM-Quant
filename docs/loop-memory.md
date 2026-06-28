@@ -2,6 +2,42 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Deploy automation: stage required-check + lint-at-zero; raise the FIRST harness proposal
+
+- **Why:** make the owner's recurring work ~zero — a change that builds but is broken-for-a-user
+  (or lint-dirty) must not auto-merge; and migrations shouldn't be a manual step.
+- **Diagnosis first (didn't assume):** (1) the branch is **NOT protected** — the green
+  `code + safety gate (blocking)` is advisory, nothing actually blocks a bad merge. (2) The
+  **functional gate already exists + is real**: `preflight.sh code` runs the deterministic
+  paper/backtest reproduction harness — exactly the gate the directive specifies for LLM-Quant
+  (no UI journeys). (3) **Lint is silently skipped in CI** (`ruff` not in `requirements-ci.txt`;
+  preflight runs it only `if command -v ruff`), and the tree has **166 ruff findings** in
+  runtime-sensitive code. (4) **No migration framework** — schema is `SQLModel.create_all`
+  (idempotent, already runs on deploy) → **Part B N/A**. (5) **No inbound rate limiter** (only
+  CORS) and the gate is **in-process** (no server) → `E2E_RATE_LIMIT_BYPASS` + trusted-host envs
+  are **N/A**; adding them would be unwired fake controls (DECISION COROLLARY).
+- **Shipped (one PR):** `docs/ci/PROPOSED_CI.md` (staged required-check config + the exact
+  branch-protection `gh api` command + gotchas + Part B skip rationale); `ruff.toml` (pins the
+  lint standard for the ratchet); ROADMAP F7; PENDING_OPS OA-12 (branch protection); LOOP_HEALTH
+  (`harness_proposals_open: 1`); this entry. **Raised gh issue #51** (label
+  `loop: harness improvement proposal`) — the FIRST use of the META channel.
+- **The key judgment — verify-green-before-requiring:** I did NOT add `ruff` to the CI deps now,
+  because the tree isn't clean → it would turn the **required** gate red and **block all
+  auto-merges**. And I did NOT bulk `ruff --fix` the trading path (removing an "unused" import on
+  a `table=True` model / strategy registry can silently break registration — cf. the SQLModel
+  double-registration incident). **Lesson: enabling a lint/required gate before the tree is green
+  is a self-inflicted merge freeze. Stage it, pin the standard, ratchet to zero module-by-module
+  with the gate green after each, THEN flip it on.**
+- **The META channel, first real use:** branch protection is admin/`.github/`-settings scope —
+  the loop genuinely cannot self-apply it. Rather than leave it as a silent wall, it became a
+  tracked proposal (#51) + OWNER_ACTION (OA-12) + LOOP_HEALTH counter. **Lesson: the loop builds
+  + stages + verifies everything it can; the irreducible human step (the one-time `.github/`
+  apply + repo settings) is raised through the ONE channel that improves the loop's own rules —
+  never silently dropped.**
+- **How to apply:** when a change needs `.github/`/admin/repo-settings, build + stage the exact
+  config in `docs/`, raise ONE harness-proposal issue with copy-paste owner steps, add an
+  OWNER_ACTION, bump `harness_proposals_open`. Never flip a required check red.
+
 ## 2026-06-28 — OA-11: actually RAN the fetcher on real Polymarket data (egress was env-specific)
 
 - **What/why:** owner asked me to "do OA-11" (the egress wall blocking real-data OOS validation).
