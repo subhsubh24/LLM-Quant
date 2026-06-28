@@ -2,6 +2,48 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Backtest/edge-integrity push: C3 engine + B2 calibration + A5 DQ + C5 metrics + C2 unify (5-PR run)
+
+- **Shipped 5 file-disjoint code PRs (#39-#43) + 1 bookkeeping PR** from an 8-scout sweep.
+  All merged to default; per-PR CI "code + safety gate" GREEN; integration branch (all 5
+  merged) preflight code GREEN before merge. engine_pct 52→58.
+- **The disjoint partition that worked:** each shared mutable file had exactly ONE owner —
+  orchestrator.py→A5, execution.py→C2, and the rest were new-file-only modules. Verified
+  truly disjoint before committing; all 5 auto-merged with zero conflicts.
+- **CI-package gotcha (cost a relocate):** `backend/app/backtest/__init__.py` eagerly
+  imports pandas/yfinance (stock residue), and pandas is NOT in `requirements-ci.txt` — so
+  ANY module placed under `backend/app/backtest/` is un-importable in the CI gate. Moved the
+  C3 + C5 modules into the CI-clean `prediction_markets/` package (where they belong anyway,
+  depending only on cost_model). **Lesson: before adding a module to a package, check that
+  package's `__init__` doesn't pull heavy deps absent from the CI surface.**
+- **ADVERSARIAL AUDITORS EARNED THEIR KEEP (2 verify cycles, real bugs each time):**
+  - **B2 calibration:** first cut used `passes = strategy_brier < baseline_brier` (raw point
+    comparison). A fresh Opus auditor MEASURED a ~21% false-positive rate on pure noise at
+    N=30 + showed a K-strategy selection attack passes near-certainly. Fixed with a
+    deterministic PAIRED BOOTSTRAP CI (must exclude 0); re-audit measured FP ≤1.2%.
+    **Lesson: a go-live gate that compares two point estimates with no significance test is
+    p-hackable theatre — require a CI/bootstrap, and prefer "insufficient data" over noise.**
+  - **C3 walk-forward:** first cut batch-settled per window → sized every candidate off the
+    STALE start-of-window bankroll with no free-cash cap → an auditor forced final bankroll
+    NEGATIVE (deploying cash it didn't have, inflating PnL). Rewrote to an event-driven cash
+    sim (open debits cash, resolution credits payout, budget hard-capped at free cash). A
+    SECOND re-audit then found the rewrite introduced a heap crash (comparing un-orderable
+    BacktestTrade on equal (resolution_time, market_id)), an over-claiming seed_hash (omitted
+    strategy/bankroll/costs), and intra-instant capital recycling on zero-duration markets.
+    Fixed all: unique-market_id + positive-duration required (fail loud), heap tie-break
+    counter, honest hash contract. **Lesson: a backtest must model that capital is TIED UP
+    until resolution — batch-settling a window is a silent over-deployment / free-lunch; and
+    a rewrite needs its own fresh audit (cycle 2 found 3 new bugs the cycle-1 fix introduced).**
+- **Honesty held:** NO DoD/floor box ticked. These are ENGINE pieces — the walk-forward
+  engine runs on SYNTHETIC data only (proves it's leakage-free + reproduces + recovers a
+  known edge; does NOT prove a real edge); B2 has no real resolved markets to pass on yet.
+  The binding constraint is unchanged: a VALIDATED OOS edge on REAL resolved-Polymarket data.
+- **A5 staleness was nearly shipped as a no-op:** an auditor proved `check_staleness` always
+  returned [] in production because `Market` carries no fetch timestamp and the orchestrator
+  passed none. Fixed by adding an `end_date`-expiry check that fires with the data Market
+  actually has. **Lesson: a gate that can't fire on real data is a misleading no-op — give
+  it a signal the live path actually carries, or say so loudly.**
+
 ## 2026-06-28 — A1 finished + C2 cost-aware sizing + D3/D4 loss caps (multi-PR run)
 
 - **Shipped 4 file-disjoint code PRs + 1 bookkeeping PR this run** (8-scout sweep → maximal
