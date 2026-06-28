@@ -2,6 +2,37 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — A1 Increment 1: deleted the stock/crypto trading engine
+
+- Advanced the LOWEST incomplete item (A1). Removed the entire `backend/app/trading/`
+  module (master-bot, quant-bot, options-bot, leap-options + stat-arb engines, live
+  equity/crypto brokers + auto-connect, ML training/backtester) plus its whole API
+  surface and test suite.
+- **Coupling map (verified before cutting):** `prediction_markets/` imports NOTHING
+  from `trading/` — fully decoupled. The ONLY external importers of `trading/` were
+  `api/routes.py`, `api/main.py`, and 4 root scripts — and **every** `..trading` import
+  was function-local (lazy), so deleting the module never broke app import-time, only
+  the handlers that called it (which were removed together).
+- **Mechanics that worked:** computed the removable route set authoritatively by
+  "handler body contains `..trading`" (91 of 164 router handlers), deleted by union of
+  line ranges + absorbed the banner comments. routes.py 4614→2444 lines; router
+  164→73 routes (survivors = prediction-markets + read-only data/AI/learn). Verified:
+  zero `app.trading` refs repo-wide, `from backend.app.api.main import app` imports,
+  `preflight.sh code` GREEN, runtime harness deterministic.
+- **Dep reality (important):** torch/xgboost/lightgbm/tensorflow/sklearn/cvxpy are
+  used by `models/`, `portfolio/`, `signals/` too — NOT trading-only — so the big ML
+  deps can't drop until those stock modules are retired (later A1 increments). Only the
+  crypto-exchange libs (`binance`/`python-binance`/`ccxt`) + `ta-lib` were trading-only
+  and were dropped this run. `statsmodels`/`torchvision` weren't in root requirements.
+- **Env note:** ruff IS installed in this container now (loop-memory previously said it
+  wasn't), so `preflight.sh` step 3 fails LOCALLY on 572 pre-existing lint errors. CI
+  does NOT install ruff (`backend/requirements-ci.txt` has no ruff) → the gate degrades
+  gracefully and is GREEN in CI. Don't be alarmed by the local ruff FAIL; verify the
+  gate with ruff hidden to reproduce CI. (Cleaning the lint debt is a future quality item.)
+- **Scope honesty:** A1 is `[~]`, not done. Read-only stock/crypto data + AI routes,
+  the stock quant-research routes, the stock frontend, and the stock ML stack remain —
+  each a separate coherent increment. No DoD box ticked (floor still not met).
+
 ## 2026-06-27 — GO signal + PnL metrics exposed to the dashboard
 
 - GROWTH_STATUS now exposes weekly PnL + profit metrics (weekly_pnl_paper/live,

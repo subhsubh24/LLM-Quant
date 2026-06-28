@@ -70,18 +70,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Prediction market orchestrator init failed (degraded): {e}")
 
-    # Auto-initialize live brokers from config
-    settings = get_settings()
-    if settings.auto_connect_brokers:
-        try:
-            from ..trading.live_brokers import auto_initialize_brokers
-            broker_results = await auto_initialize_brokers()
-            if broker_results.get("errors"):
-                logger.warning(f"Broker init warnings: {broker_results['errors']}")
-            else:
-                logger.info(f"Live brokers initialized: {broker_results}")
-        except Exception as e:
-            logger.warning(f"Broker auto-init skipped: {e}")
+    # NOTE: Equity/crypto live-broker auto-connect removed (ROADMAP A1 — retire
+    # stock/crypto trading). Prediction-markets is the only venue path now; its live
+    # path is gated behind LIVE_TRADING_ENABLED in the prediction_markets executor.
 
     yield
 
@@ -90,16 +81,6 @@ async def lifespan(app: FastAPI):
     await stop_orchestrator()
     await stop_prediction_feeds()
     await stop_crypto_ws()
-
-    # Disconnect brokers
-    try:
-        from ..trading.live_brokers import get_broker_manager
-        manager = get_broker_manager()
-        await manager.disconnect_all()
-        logger.info("Brokers disconnected")
-    except Exception as e:
-        logger.warning(f"Broker disconnect error: {e}")
-
     logger.info("Crypto WebSocket stopped")
 
 
@@ -162,24 +143,9 @@ async def root():
 async def health():
     """Health check endpoint."""
     settings = get_settings()
-
-    # Get broker status
-    broker_status = {"alpaca": "not_configured", "binance": "not_configured"}
-    try:
-        from ..trading.live_brokers import get_broker_manager
-        manager = get_broker_manager()
-        status = manager.get_status()
-        broker_status = {
-            "alpaca": "connected" if status["alpaca"]["connected"] else ("configured" if status["alpaca"]["configured"] else "not_configured"),
-            "binance": "connected" if status["binance"]["connected"] else ("configured" if status["binance"]["configured"] else "not_configured"),
-        }
-    except Exception as e:  # FIX #10: Use Exception instead of bare except
-        logger.warning(f"Failed to get broker status: {e}")
-
     return {
         "status": "healthy",
         "demo_mode": settings.demo_mode,
         "llm_available": settings.has_llm_key,
-        "brokers": broker_status,
-        "live_data_enabled": broker_status["alpaca"] == "connected" or broker_status["binance"] == "connected",
+        "live_trading_enabled": settings.live_trading_enabled,
     }

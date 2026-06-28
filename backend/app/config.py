@@ -104,9 +104,10 @@ class Settings(BaseSettings):
     binance_api_secret: str = ""
     binance_testnet_mode: bool = True  # True = testnet, False = live
     binance_us_mode: bool = True  # True = Binance.US, False = Binance Global (non-US)
-
-    # Auto-connect to brokers on startup
-    auto_connect_brokers: bool = True
+    # NOTE: equity/crypto live-broker auto-connect was removed (ROADMAP A1 — retire
+    # stock/crypto trading). The alpaca/binance settings above remain only for the
+    # not-yet-retired read-only stock data provider (data/alpaca_data.py); they drive
+    # no order placement. Prediction-markets is the only venue path.
 
     # ============ Alternative Data Settings ============
     # FRED API key (free from https://fred.stlouisfed.org/docs/api/api_key.html)
