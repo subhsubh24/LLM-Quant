@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 from .. import __version__, DISCLAIMER
 from ..config import get_settings
 from ..db.database import init_db
-from ..data.crypto_ws import start_crypto_ws, stop_crypto_ws
 from ..prediction_markets.websocket_feeds import start_prediction_feeds, stop_prediction_feeds
 from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator, init_orchestrator
 from .routes import router
@@ -25,11 +24,6 @@ async def lifespan(app: FastAPI):
     logger.info("Starting QuantLab API...")
     init_db()
     logger.info("Database initialized")
-
-    # Start multi-provider WebSocket for real-time crypto prices
-    # Tries: Coinbase -> Kraken -> Binance.US -> Binance Global
-    await start_crypto_ws()
-    logger.info("Crypto WebSocket started - LIVE prices enabled")
 
     # Start prediction market WebSocket feeds (Polymarket)
     try:
@@ -80,8 +74,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down QuantLab API...")
     await stop_orchestrator()
     await stop_prediction_feeds()
-    await stop_crypto_ws()
-    logger.info("Crypto WebSocket stopped")
+    logger.info("Prediction market feeds stopped")
 
 
 app = FastAPI(

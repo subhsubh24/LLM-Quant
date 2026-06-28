@@ -9,7 +9,7 @@ This module implements a vectorized backtest with:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Protocol, runtime_checkable
 from datetime import date, timedelta
 import numpy as np
 import pandas as pd
@@ -19,7 +19,21 @@ import json
 logger = logging.getLogger(__name__)
 from hashlib import sha256
 
-from ..models.estimators import BaseRanker
+
+@runtime_checkable
+class BaseRanker(Protocol):
+    """Structural interface for a ranking model used by the backtest engine.
+
+    Previously imported from the (now-retired) stock ML stack (``..models.estimators``);
+    kept here as a lightweight structural type so the asset-agnostic backtest engine
+    stays import-clean without the heavy ML dependencies (ROADMAP A1).
+    """
+
+    def fit(self, X, y) -> "BaseRanker": ...
+    def predict(self, X): ...
+    def get_feature_importance(self) -> Dict[str, float]: ...
+
+
 from ..portfolio.optimizer import (
     PortfolioConfig,
     PortfolioOptimizer,
