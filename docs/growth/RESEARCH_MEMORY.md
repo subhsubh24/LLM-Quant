@@ -143,3 +143,31 @@ calibration + cost-realistic validation surviving the adversarial auditors.
 - **Horizon effect (long-dated miscalibration):** Academic evidence for Kalshi
   (2021-2025); no Polymarket-specific confirmation; propose after EXP-001 gives
   baseline calibration measurement.
+
+## 2026-06-28 — EXP-001 code blocker CLEARED (history fetcher built); real-data run is now EGRESS-blocked
+- Hypothesis (falsifiable): unchanged — EXP-001 (NO Position Scanner / crowd-miscalibration
+  on resolved binary markets) still needs a real OOS run before it can pass or be retired.
+- Min sample N: unchanged (100 resolved markets; ≥50/category for category claims).
+- OOS result: **still insufficient data — but the blocker moved from CODE to ENVIRONMENT.**
+  Built `polymarket_history_fetcher.py` (leakage-safe ingest of real resolved markets + a
+  PRE-resolution price snapshot) using Polymarket's OWN public Gamma `closed=true` + CLOB
+  `prices-history` endpoints — so no third-party archive / key is needed (PMData/PolyHistorical
+  not required). The fetcher is the named blocking dependency for ALL OOS validation, and it
+  is now done + fixture-tested + 3-Opus-auditor-clean. **HOWEVER:** the autonomous build env's
+  network egress policy BLOCKS Polymarket (403 at the proxy for gamma-api.polymarket.com /
+  clob.polymarket.com), so the loop cannot actually pull real history here. Real-data OOS is
+  now PENDING_OPS OA-11 (owner runs the fetcher where Polymarket is reachable, or widens egress).
+- Calibration (Brier / reliability): not measured — still no real data to run B2 on.
+- Costs modeled: yes + IMPROVED — added a conservative sqrt market-impact / order-book-depth
+  model (`cost_model.effective_buy_price_with_impact`) applied size-aware inside the
+  walk-forward backtest, so a large order in a thin "near-certainty NO" book now pays realistic
+  impact (the prior audit's "illiquid NO book erases the edge" concern). Still a non-calibrated
+  toy until real OrderBook depth is wired.
+- Verdict: **proposed (unchanged)** — EXP-001 cannot pass/retire until the real fetch runs.
+- Why / next: the binding constraint is now ENVIRONMENTAL, not a missing capability. The
+  cheapest path to a first honest OOS measurement is OA-11: run the (already-built) fetcher
+  against live Polymarket public data, feed `scripts/run_walk_forward.py` + the B2 eval, and
+  report OOS Brier + PnL with the bootstrap CI. ADVERSARIAL PRE-MORTEM addition: the fetcher's
+  "unambiguously settled" filter EXCLUDES contested/re-resolved/UMA-disputed markets, biasing
+  the sample toward clean crowd-friendly outcomes — any first eval MUST disclose this so it
+  doesn't silently overstate crowd calibration (now documented in the fetcher itself).

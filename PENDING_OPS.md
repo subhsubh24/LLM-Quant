@@ -72,11 +72,17 @@ OWNER_ACTIONS:
       why: "DB is Neon Postgres. Neon has NO public Data API (no PostgREST / anon key), so the Supabase-style world-readable-tables risk does not exist — the DB is reachable only with the connection string. The remaining risk is simply leaking that string."
       how: "Keep DATABASE_URL server-side only (backend host env); never commit it or put it in any NEXT_PUBLIC_* var. If it leaks, rotate the password in the Neon Console. No RLS / Data API step is required on Neon."
     - id: OA-10
-      title: "Build a persistent prediction-markets audit log (decisions + would-be orders)"
+      title: "Persistent prediction-markets audit log — BUILT; only the hosting choice is owner-scope"
       priority: low
+      status: in_progress
+      why: "ROADMAP G3 is now DONE in code: prediction_markets/audit_log.py adds a durable PredictionAuditLog SQLModel table + best-effort AuditLogger, wired as an observer into the scan loop, recording every signal/risk/kelly decision + every (would-be) order on the ORM DB (no raw sqlite). The only remaining owner action is the DB hosting choice."
+      how: "Confirm the backend host's DATABASE_URL points at the durable Neon Postgres (not an ephemeral container SQLite) so audit rows survive restarts. No code change needed."
+    - id: OA-11
+      title: "Run the resolved-history fetcher where Polymarket egress is permitted (unblocks real-data OOS validation)"
+      priority: high
       status: open
-      why: "The old raw-sqlite audit_store.py was part of backend/app/trading/ and was DELETED with the stock engine (ROADMAP A1). The prediction-markets path persists orders to the PredictionOrder table, but decision/risk-rejection audit is only an in-memory activity log (lost on restart). ROADMAP G3 covers building a durable decision+would-be-order audit log on the Neon ORM DB."
-      how: "Implement G3: a PredictionAuditLog SQLModel table on Neon recording signal/risk/kelly decisions + every (would-be) order. No raw sqlite. Owner action is only the persistent-disk vs Postgres hosting choice."
+      why: "The binding constraint for go-live is a VALIDATED out-of-sample edge on REAL resolved-Polymarket data. The leakage-safe fetcher (prediction_markets/polymarket_history_fetcher.py) is built + tested, but the autonomous build environment's egress policy BLOCKS outbound HTTPS to gamma-api.polymarket.com / clob.polymarket.com (403 at the proxy), so the loop cannot pull real history itself. Until the fetcher runs against real data, walk_forward + the calibration eval have only synthetic/fixture data and no DoD/floor box can tick."
+      how: "Run scripts (or a small driver around PolymarketHistoryFetcher.fetch_resolved_markets + build_historical_markets) in an environment where Polymarket's public Gamma + CLOB APIs are reachable — e.g. the backend host, or widen the autonomous env's egress allowlist to include gamma-api.polymarket.com and clob.polymarket.com. Feed the resulting HistoricalMarket records into scripts/run_walk_forward.py + the B2 calibration eval. No credentials are needed (public read-only data)."
 ```
 
 ## Quick reference
@@ -90,7 +96,8 @@ OWNER_ACTIONS:
 | OA-5 | Set Polymarket LIVE API keys (LIVE-only; paper needs none) | 🟠 high | pending |
 | OA-6 | Flip `LIVE_TRADING_ENABLED` | 🟠 high | pending |
 | OA-9 | Keep Neon `DATABASE_URL` private (no Data API lockdown needed) | 🟡 medium | pending |
-| OA-10 | Move raw-sqlite audit log to Postgres (optional) | ⚪ low | pending |
+| OA-10 | Audit log BUILT (G3); confirm `DATABASE_URL` is durable Neon | ⚪ low | in progress |
+| OA-11 | Run history fetcher where Polymarket egress is permitted (real-data OOS) | 🟠 high | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 

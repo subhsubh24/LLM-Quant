@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-28
   phase: pre_launch
   engine_built: false
-  engine_pct: 58
+  engine_pct: 61
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -80,7 +80,7 @@ GROWTH_STATUS:
         - "Survivorship bias in third-party archive excludes contested/re-resolved markets"
         - "N per category < 50 even with 100+ total -> no category-level significance claims"
         - "Market efficiency increasing (43% spread compression) -> historical edge gone in recent months"
-      blocking_dependency: "Build polymarket_history_fetcher.py from PMData (pmdata.dev) or PolyHistorical (polyhistorical.com) to populate HistoricalMarket records"
+      blocking_dependency: "RESOLVED IN CODE: polymarket_history_fetcher.py is built + leakage-safe + fixture-tested (uses Polymarket's OWN public Gamma closed=true + CLOB prices-history — no third-party key needed). REMAINING BLOCKER is now ENVIRONMENTAL: outbound HTTPS to gamma-api.polymarket.com / clob.polymarket.com is egress-blocked (403) in the autonomous build env, so the fetcher can't pull real history here. Run it where Polymarket is reachable (PENDING_OPS OA-11) to populate real HistoricalMarket records."
       factory_next_action: >
         Build polymarket_history_fetcher.py; pull >= 200 resolved markets from
         PMData or PolyHistorical APIs; feed into walk_forward.py; run B2
@@ -96,23 +96,29 @@ GROWTH_STATUS:
     - "B2 calibration eval built (calibration.py): Brier+reliability+ECE with a SIGNIFICANCE gate (paired bootstrap CI must exclude 0). A raw Brier point comparison passed ~21% of pure-noise strategies at N=30 (adversarial-audit finding); the bootstrap gate collapses that to <=1.2%. Honest: measures calibration-vs-crowd, not tradeable edge."
     - "A5 data-quality gates wired into the scan loop (data_quality.py): completeness/price-sanity catch None/NaN/inf/out-of-range/sum-violations; staleness fires via end_date expiry. Bad markets skipped before sizing; valid markets never skipped."
     - "C5 weekly-metrics aggregator (weekly_metrics.py): pure deterministic weekly PnL/Sharpe/hit-rate/max-drawdown from real realized trades. C2 unify done: execution.py sources its fill rates from cost_model (drift fails loud)."
+    - "A2 resolved-history fetcher BUILT (polymarket_history_fetcher.py): leakage-safe ingest of real resolved markets + a PRE-resolution price snapshot into HistoricalMarket. The settled outcomePrice is NEVER used as the decision price; raises rather than fabricating; timeout/max-pages-bounded; discloses selection/survivorship bias + late-life pinning. 3 Opus auditors CANNOT-BREAK-LEAKAGE. This RESOLVES the named code blocker for OOS validation — but the autonomous env's EGRESS POLICY blocks Polymarket (403), so the real fetch is now a human-core step (OA-11)."
+    - "C2/C3 market-impact model BUILT (cost_model.effective_buy_price_with_impact, applied in walk_forward): simplified conservative sqrt-impact, floored at the flat rate, capped at 1.0, deployed==budget to machine epsilon (no double-count); thin books strictly worsen PnL. seed_hash now covers liquidity+impact_coeff. Honestly a non-calibrated toy. 3 Opus auditors CANNOT-BREAK."
+    - "G3 audit log DONE (audit_log.py): durable PredictionAuditLog table + best-effort observer in the scan loop records every decision + every would-be order (filled/rejected/gated). Side-effect-honest (event derived from the REAL OrderResult, never a fake fill); execution.py untouched; non-fatal. 3 Opus auditors CANNOT-BREAK."
+    - "ENVIRONMENT REALITY: the binding constraint (validated OOS edge on REAL resolved-Polymarket data) is now blocked by the autonomous env's network EGRESS POLICY, not by missing code. The loop built everything buildable offline; the real-data run is OA-11 (owner runs the fetcher where Polymarket is reachable, or widens egress)."
   next_actions:
-    - "Feed REAL resolved-Polymarket history into the walk_forward engine to produce a VALIDATED OOS weekly-PnL series + run the B2 calibration eval on live strategy probabilities (the binding constraint — until then no floor/DoD box can tick)."
-    - "Apply the cost_model + a liquidity/order-book-depth + market-impact model inside the walk-forward backtest (C2/C3 remainder)."
-    - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5)."
-    - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); G3 persistent audit log."
+    - "OA-11 (human-core, now the binding step): RUN polymarket_history_fetcher in a network-permitted environment (or widen the autonomous env's egress allowlist to Polymarket) so REAL resolved-history flows into walk_forward + the B2 calibration eval. The fetcher is built + leakage-safe; only the egress block stops the OOS run. Until then no floor/DoD box can tick."
+    - "Once real data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth."
+    - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5 remainder)."
+    - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); confirm the audit log's DATABASE_URL is durable (OA-10)."
   owner_blockers:
     - "Confirm venue ToS + jurisdiction eligibility before any live capability."
 ```
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 58` reflects what genuinely exists and runs vs. what's required for a
-proven, go-live-eligible engine (up from 52: the leakage-free walk-forward backtest
-engine (C1/C3 engine), the significance-gated calibration eval (B2), data-quality gates
-at the scan path (A5), the weekly-metrics aggregator (C5), and the cost-rate
-unification (C2 unify) all landed this run — engine pieces toward a validated edge,
-which itself is still absent and remains the bulk of the missing %):
+`engine_pct: 61` reflects what genuinely exists and runs vs. what's required for a
+proven, go-live-eligible engine (up from 58: the leakage-safe resolved-history fetcher
+(A2 ingest — the named code blocker for OOS validation), the market-impact cost model
+applied inside the walk-forward backtest (C2/C3 remainder), and the durable decision +
+would-be-order audit log (G3) all landed this run. These are engine/safety pieces toward
+a validated edge; the validated edge ITSELF is still absent — now gated on an
+ENVIRONMENTAL egress block (Polymarket is unreachable from the autonomous env), not on
+missing code — and remains the bulk of the missing %):
 
 **Exists (counts toward %):**
 - Polymarket ingestion + websocket feeds — `backend/app/prediction_markets/polymarket_client.py`, `websocket_feeds.py`
@@ -122,18 +128,23 @@ which itself is still absent and remains the bulk of the missing %):
 - Kill switch — `execution.py`
 - Backtest/validation/metrics infra — `backend/app/backtest/*`
 
-**Added this run (counts toward %):**
+**Exists from prior runs (counts toward %):**
 - Leakage-free, deterministic walk-forward backtest ENGINE (C1/C3 engine) — `prediction_markets/walk_forward.py` (+ `scripts/run_walk_forward.py`)
 - Significance-gated calibration eval (B2) — `prediction_markets/calibration.py`
 - Data-quality gates at the scan path (A5) — `prediction_markets/data_quality.py` (wired into `orchestrator`)
 - Weekly-metrics aggregator (C5) — `prediction_markets/weekly_metrics.py`
 - C2 unify: `execution.py` sources its fill rates from `cost_model` (drift fails loud)
 
+**Added this run (counts toward %):**
+- Leakage-safe resolved-history fetcher (A2 ingest — the named code blocker for OOS validation) — `prediction_markets/polymarket_history_fetcher.py`
+- Market-impact / order-book-depth cost model, applied size-aware in the backtest (C2/C3 remainder) — `cost_model.effective_buy_price_with_impact` + `walk_forward._settle`
+- Durable decision + would-be-order audit log (G3 DONE) — `prediction_markets/audit_log.py` (observer in `orchestrator`)
+
 **Missing (keeps % < 100):**
-- **Validated, reproducible, cost-realistic out-of-sample weekly-PnL series on REAL data (no proven edge)** — the engine exists; it needs real resolved-Polymarket history
+- **Validated, reproducible, cost-realistic out-of-sample weekly-PnL series on REAL data (no proven edge)** — the engine + the ingest fetcher exist; running the fetcher on real history is EGRESS-BLOCKED in the autonomous env (OA-11: run where Polymarket is reachable)
 - A *passing* calibration eval on real resolved markets + live strategy probabilities (B2 → unlocks B4)
-- Liquidity/market-impact cost model + costs applied inside the walk-forward backtest (C2/C3 remainder)
-- Full live path built + paper-validated (D6); persistent audit log (G3)
+- Market-impact model CALIBRATED against real OrderBook depth (the current model is a conservative non-calibrated toy)
+- Full live path built + paper-validated (D6)
 - A4 event/market-universe + persistent resolution tracking; metrics wired end-to-end into the live run/dashboard (C5 remainder)
 
 `engine_built` flips to `true` (and `engine_pct` to `100`) **only** when the DoD in
