@@ -18,8 +18,13 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
 - This was a **canonical sync** (the only way FACTORY_STANDARD.md may change), not loop
   work. Treat the file as a read-only stable anchor again.
 - LLM-Quant implication: the monitoring panel (dashboard / predictions / bot / login)
-  needs screenshot capture in its journey suite + visual review at the gate — folds
-  into ROADMAP F3 (BUILDS≠WORKS runtime harness) when that's built.
+  needs screenshot capture in its journey suite + visual review at the gate. The
+  product side does NOT capture those screenshots yet, so the new §6/§7/§10 visual
+  lenses have nothing to judge until built. Now a **concrete ROADMAP item: F5** —
+  a **Playwright** journey suite screenshotting every page × key state
+  (empty/loading/error, authed + logged-out), committed as artifacts, with the visual
+  lenses wired to LOOK at them. **Web-only** (Next.js panel — no mobile/component
+  snapshots). Kept separate from the byte-identical `FACTORY_STANDARD.md`.
 
 ## 2026-06-27 — Adopted the shared FACTORY_STANDARD
 

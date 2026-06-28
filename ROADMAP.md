@@ -87,8 +87,9 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 ### F — QUALITY & INTEGRITY
 - [~] F1. Test suite (41 test files under `backend/tests/`); ensure prediction-market-specific coverage. **Known integrity item:** `test_ignores_far_resolution` is `xfail` — the `NearCertaintyStrategy` docstring says "within 72h" but `max_hours_to_resolution` defaults to `720` (30 days). Decide 72h vs 720h **with the owner** (trading-behavior decision), then fix code+test together and un-xfail. Do not silently change strategy behavior to satisfy the test.
 - [ ] F2. Calibration eval holds; backtest **reproduces** bit-for-bit; **no leakage** eval.
-- [ ] F3. BUILDS ≠ WORKS runtime harness: full pipeline ingest → signal → size → (paper) execute → PnL runs end-to-end producing real reproducible results; live path exercised in mock/paper mode.
+- [ ] F3. BUILDS ≠ WORKS runtime harness: full pipeline ingest → signal → size → (paper) execute → PnL runs end-to-end producing real reproducible results; live path exercised in mock/paper mode. (UI visual side = F5.)
 - [ ] F4. CI wiring of the gate (workflow scope — owner/maintainer action).
+- [ ] F5. **Visual verification for the monitoring panel (gives the §6/§7/§10 visual-review lenses artifacts to judge).** A **Playwright** journey suite that screenshots every page (dashboard, predictions, bot, login) in each key state (empty / loading / error; authed + logged-out) and commits them as artifacts; then wire the visual-review lenses (FACTORY_STANDARD §6 capture, §7 readiness gate, §10 deep audit) so the loops actually LOOK at the images against the VISION design bar — a blank/broken/overlapping/unstyled/off-brand page is a release-blocking FAIL even if DOM assertions pass. **Web-only** (the panel is a Next.js app — no mobile/component-snapshot path needed). Product/ROADMAP work, deliberately separate from the byte-identical `FACTORY_STANDARD.md`.
 
 ### G — SAFETY & SECRETS
 - [x] G1. Keys server-side; `.env` gitignored (verified: `.gitignore` covers `.env*`).
