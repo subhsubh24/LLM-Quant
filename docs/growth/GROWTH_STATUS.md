@@ -23,13 +23,37 @@ GROWTH_STATUS:
     - kalshi
     - polymarket_live
   metrics:
-    weekly_pnl_paper: null
+    weekly_pnl_paper: null          # most recent completed eval window, NET USD (realistic costs); dashboard trends this over snapshots
     weekly_pnl_live: null
+    weekly_pnl_target_usd: 2000     # the go-live floor ($2K/wk)
+    weeks_validated_above_floor: 0  # consecutive OOS paper weeks >= floor (SUSTAINED — not one lucky week)
     hit_rate: null
-    brier_calibration: null
+    brier_calibration: null         # lower is better; must beat the naive crowd baseline
     sharpe: null
     max_drawdown_pct: null
+    total_trades: 0
     live_enabled: false
+  # The GO signal — when it is safe + proven enough to risk REAL money. DERIVED from
+  # the gates, NEVER hand-set: scripts/preflight.sh FAILS if status=eligible without
+  # the real proof, so this can't be faked. Even at 'eligible', the OWNER makes the
+  # final call (human-core). 'confidence: high' only when ALL criteria hold.
+  go_live:
+    status: not_ready               # not_ready | eligible
+    confidence: none                # none | building | high
+    criteria:                       # every one must be true for status=eligible
+      validated_weekly_pnl_ge_floor: false        # OOS paper >= floor, realistic costs
+      sustained_track_record: false               # >= several consecutive validated weeks (not one lucky week)
+      sufficient_sample_size: false               # enough N for significance / tight CI above floor
+      calibration_passes: false                   # Brier/reliability eval holds vs crowd
+      backtest_reproduces_deterministically: false # same seed -> same PnL
+      adversarial_auditors_passed: false          # >= 3 fresh Opus auditors each FAILED to break the edge
+      live_path_safe_by_default: false            # caps + kill switch + LIVE_TRADING_ENABLED default off, proven
+      runbook_complete: false                     # docs/growth/LIVE_RUNBOOK.md complete
+      quality_ship_critical_all_A: false          # every ship-critical quality dim A/A+
+      preflight_full_gate_green: false            # scripts/preflight.sh (full) exits 0
+    blocking:                       # honest: what's stopping GO right now
+      - "No validated out-of-sample edge yet — build the leakage-free, cost-realistic walk-forward backtest + calibration eval (ROADMAP C1-C3, B2)."
+    owner_decision_required: true   # even at 'eligible', the human makes the final real-money GO call
   experiments: []
   learnings:
     - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."

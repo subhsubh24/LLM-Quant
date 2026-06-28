@@ -2,6 +2,21 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-27 — GO signal + PnL metrics exposed to the dashboard
+
+- GROWTH_STATUS now exposes weekly PnL + profit metrics (weekly_pnl_paper/live,
+  weekly_pnl_target_usd=2000, weeks_validated_above_floor, hit_rate, brier, sharpe,
+  max_drawdown_pct, total_trades) — the dashboard trends weekly_pnl over its snapshots.
+- New **`go_live`** block = the rigorous real-money GO signal (status not_ready|eligible,
+  confidence none|building|high, 10 criteria, blocking[], owner_decision_required).
+  It is **DERIVED, never hand-set**: `preflight.sh` **step 9c** FAILS (in BOTH scopes)
+  if status=eligible while any criterion is false / floor_met not true / any DoD box
+  unchecked. So a fake/random GO can't ship — proven (set eligible w/ false criteria →
+  gate fails). Turns green only on a SUSTAINED validated track record; even then the
+  owner makes the final call (HUMAN-CORE).
+- Dashboard side (separate repo) must add parsing + UI for `go_live` + the weekly-PnL
+  trend — see the message handed to the owner for the dashboard agent.
+
 ## 2026-06-27 — Canonical sync: FACTORY_STANDARD gains visual verification
 
 - Synced `FACTORY_STANDARD.md` to the new canonical (still **byte-identical** across

@@ -217,6 +217,65 @@ else
 fi
 [ "$FAIL" = 0 ] || die "scorecard parse guard"
 
+# ---------------------------------------------------------------------------
+say "9c. GO signal integrity (a fake 'eligible' cannot ship)"
+# The go_live signal is DERIVED, never hand-set: 'eligible' is allowed ONLY when every
+# criterion is true AND floor_met AND all DoD boxes checked. Runs in BOTH scopes so a
+# falsely-green GO can never merge. At baseline status=not_ready -> passes (honest).
+"$PY" - <<'PYEOF'
+import re, sys, pathlib
+try:
+    import yaml
+except Exception:
+    print("  WARN pyyaml not installed; skipping GO integrity"); sys.exit(0)
+
+def fenced(md):
+    out, op, body = [], False, []
+    for ln in md.replace("\r\n", "\n").split("\n"):
+        if re.match(r"^\s*(```|~~~)", ln):
+            if not op: op, body = True, []
+            else: out.append("\n".join(body)); op = False
+            continue
+        if op: body.append(ln)
+    return out
+
+txt = pathlib.Path("docs/growth/GROWTH_STATUS.md").read_text()
+blk = [b for b in fenced(txt) if re.search(r"(^|\n)\s*GROWTH_STATUS\s*:", b)]
+if not blk:
+    print("  FAIL GROWTH_STATUS block missing"); sys.exit(1)
+root = (yaml.safe_load(blk[0]) or {}).get("GROWTH_STATUS", {})
+go = root.get("go_live") or {}
+status = go.get("status"); conf = go.get("confidence"); crit = go.get("criteria") or {}
+fail = 0
+if status not in ("not_ready", "eligible"):
+    print(f"  FAIL go_live.status invalid: {status!r}"); fail = 1
+if conf not in ("none", "building", "high"):
+    print(f"  FAIL go_live.confidence invalid: {conf!r}"); fail = 1
+if conf == "high" and status != "eligible":
+    print("  FAIL confidence=high requires status=eligible"); fail = 1
+if status == "eligible":
+    false_crit = [k for k, v in crit.items() if v is not True]
+    if false_crit:
+        print(f"  FAIL status=eligible but criteria not all true: {false_crit}"); fail = 1
+    bc = pathlib.Path("docs/BUSINESS_CASE.md").read_text()
+    if not re.search(r"floor_met_year1:\s*true", bc):
+        print("  FAIL status=eligible but floor_met_year1 != true"); fail = 1
+    rm = pathlib.Path("ROADMAP.md").read_text()
+    unchecked = 0
+    f = False
+    for ln in rm.split("\n"):
+        if ln.startswith("## DEFINITION OF DONE"): f = True
+        elif ln.startswith("## STANDING STANDARDS"): f = False
+        elif f and ln.startswith("- [ ]"): unchecked += 1
+    if unchecked:
+        print(f"  FAIL status=eligible but {unchecked} DoD box(es) unchecked"); fail = 1
+if not fail:
+    print(f"  OK   go_live well-formed (status={status}, confidence={conf})")
+sys.exit(fail)
+PYEOF
+[ $? -eq 0 ] && ok "GO signal integrity" || bad "GO signal integrity failed"
+[ "$FAIL" = 0 ] || die "GO signal integrity"
+
 if [ "$SCOPE" = "code" ]; then
   printf '\n\033[32mPREFLIGHT (code scope) GREEN — correctness + safety gates pass.\033[0m\n'
   printf 'Skipped the profit-floor + DoD + quality go-live gates (run the full gate for those).\n'
