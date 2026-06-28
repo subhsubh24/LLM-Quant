@@ -26,11 +26,6 @@ python-dotenv>=1.0.0
 # Database (optional, for persistence)
 redis>=7.0.0
 
-# Crypto Exchanges
-binance>=0.3.0
-python-binance>=1.0.0
-ccxt>=4.0.0
-
 # Utilities
 pytz>=2023.3
 websockets>=16.0
@@ -42,7 +37,6 @@ pytest-cov>=4.0.0
 
 # Optional but useful
 yfinance>=0.2.30
-ta-lib>=0.4.24  # May require system dependencies
 
 # Alternative Data (all optional - providers fall back gracefully)
 pytrends>=4.9.0          # Google Trends data (free, no key)
