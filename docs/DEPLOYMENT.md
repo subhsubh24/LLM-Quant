@@ -74,10 +74,12 @@ adds a moving part rather than removing one. Until then: persistent host.
 The repo ships one-click configs for the two easiest hosts. The backend runs from
 `backend/` and uses `backend/requirements.txt`.
 
-> **Heads-up on size:** the backend bundles heavy ML deps (torch/xgboost/lightgbm)
-> for the stock/crypto side, so it needs **~1GB+ RAM** — free tiers will OOM. Use a
-> small paid instance (~$7/mo) until those deps are trimmed for a
-> prediction-markets-only build (ROADMAP A1).
+> **Heads-up on size:** the heaviest ML deps (torch/torchvision/xgboost/lightgbm/
+> statsmodels) were **dropped** when the stock/crypto stack was retired (ROADMAP A1
+> complete) — the build is now much leaner. `scikit-learn` + `cvxpy` remain (used by the
+> kept asset-agnostic portfolio/backtest infra) and `pandas`/`scipy` are still present, so
+> budget on the order of a small instance; the multi-GB torch download is gone. The CI
+> gate uses the lighter `requirements-ci.txt` (no pandas/sklearn).
 
 ### Option A — Render (blueprint: `render.yaml`)
 Render → **New → Blueprint** → point at this repo. The blueprint builds the backend

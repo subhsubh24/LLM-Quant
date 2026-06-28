@@ -49,7 +49,10 @@ say "2. Code gate — prediction-market tests"
 # is covered inside test_prediction_markets.py.
 if "$PY" -c "import pytest" 2>/dev/null; then
   _testfiles=""
-  for t in backend/tests/test_prediction_markets.py backend/tests/test_scorecard.py; do
+  for t in backend/tests/test_prediction_markets.py \
+           backend/tests/test_cost_model.py \
+           backend/tests/test_loss_caps.py \
+           backend/tests/test_scorecard.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done
   if [ -n "$_testfiles" ]; then
