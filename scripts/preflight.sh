@@ -125,37 +125,57 @@ fi
 [ "$FAIL" = 0 ] || die "secrets"
 
 # ---------------------------------------------------------------------------
-say "7. Machine-readable YAML blocks parse"
+say "7. Machine-readable YAML blocks parse (FENCED — dashboard-readable)"
+# The AutoFactory dashboard reads each block from a fenced ```yaml code block whose
+# content carries the tag (GROWTH_STATUS:/OWNER_ACTIONS: as a top-level key, or a
+# `# BUSINESS_CASE_SUMMARY` marker / arr_year1). Mirror that here so a block the
+# dashboard can't read fails the gate.
 "$PY" - <<'PYEOF'
 import re, sys, pathlib
+# path -> (tag, marker_regex that must appear in the fenced block)
 blocks = {
-  "docs/BUSINESS_CASE.md": "BUSINESS_CASE_SUMMARY",
-  "docs/growth/GROWTH_STATUS.md": "GROWTH_STATUS",
-  "PENDING_OPS.md": "OWNER_ACTIONS",
+  "docs/BUSINESS_CASE.md": ("BUSINESS_CASE_SUMMARY", r"(BUSINESS_CASE_SUMMARY|(^|\n)\s*arr_year1\s*:)"),
+  "docs/growth/GROWTH_STATUS.md": ("GROWTH_STATUS", r"(^|\n)\s*GROWTH_STATUS\s*:"),
+  "PENDING_OPS.md": ("OWNER_ACTIONS", r"(^|\n)\s*OWNER_ACTIONS\s*:"),
 }
 try:
     import yaml
     have_yaml = True
 except Exception:
     have_yaml = False
+
+def fenced_blocks(md):
+    lines = md.replace("\r\n", "\n").split("\n")
+    out, open_, body = [], False, []
+    for ln in lines:
+        if re.match(r"^\s*(```|~~~)", ln):
+            if not open_:
+                open_, body = True, []
+            else:
+                out.append("\n".join(body)); open_ = False
+            continue
+        if open_:
+            body.append(ln)
+    return out
+
 fail = 0
-for path, tag in blocks.items():
+for path, (tag, marker) in blocks.items():
     txt = pathlib.Path(path).read_text()
-    m = re.search(rf"<!--\s*{tag}\n(.*?)-->", txt, re.S)
-    if not m:
-        print(f"  FAIL missing {tag} block in {path}"); fail = 1; continue
-    body = m.group(1)
+    cand = [b for b in fenced_blocks(txt) if re.search(marker, b)]
+    if not cand:
+        print(f"  FAIL no fenced block carrying {tag} in {path}"); fail = 1; continue
+    body = cand[0]
     if have_yaml:
         try:
             yaml.safe_load(body)
-            print(f"  OK   {tag} parses")
+            print(f"  OK   {tag} parses (fenced)")
         except Exception as e:
             print(f"  FAIL {tag} YAML error: {e}"); fail = 1
     else:
         print(f"  WARN pyyaml not installed; presence-checked {tag}")
 sys.exit(fail)
 PYEOF
-[ $? -eq 0 ] && ok "YAML blocks present/parse" || bad "YAML block parse failure"
+[ $? -eq 0 ] && ok "YAML blocks present/parse (dashboard-readable)" || bad "YAML block parse failure"
 [ "$FAIL" = 0 ] || die "yaml blocks"
 
 # ---------------------------------------------------------------------------

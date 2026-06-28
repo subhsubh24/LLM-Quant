@@ -48,15 +48,44 @@ def _norm(g):
     return g.strip() if isinstance(g, str) else g
 
 
+def _fenced_blocks(md):
+    """Yield the text inside each ```/~~~ fenced code block (dashboard-style)."""
+    out, open_, body = [], False, []
+    for ln in md.replace("\r\n", "\n").split("\n"):
+        if re.match(r"^\s*(```|~~~)", ln):
+            if not open_:
+                open_, body = True, []
+            else:
+                out.append("\n".join(body)); open_ = False
+            continue
+        if open_:
+            body.append(ln)
+    return out
+
+
 def load_block():
-    """Return the parsed YAML dict, or None if the scorecard file is absent."""
+    """Return the parsed QUALITY_SCORECARD dict, or None if the file is absent.
+
+    Accepts BOTH the dashboard-standard fenced ```yaml block (with a top-level
+    `QUALITY_SCORECARD:` key or root-level fields) and a legacy `<!-- QUALITY_SCORECARD
+    ... -->` HTML comment, so it works whichever form the auditor produces.
+    """
     if not PATH.exists():
         return None
     txt = PATH.read_text()
+    import yaml
+
+    # Preferred: a fenced block carrying QUALITY_SCORECARD.
+    for body in _fenced_blocks(txt):
+        if re.search(r"(^|\n)\s*QUALITY_SCORECARD\s*:", body) or "dimensions" in body:
+            data = yaml.safe_load(body)
+            if isinstance(data, dict):
+                return data.get("QUALITY_SCORECARD", data) or {}
+
+    # Legacy fallback: HTML-comment block.
     m = re.search(r"<!--\s*QUALITY_SCORECARD\s*\n(.*?)-->", txt, re.S)
     if not m:
-        raise ValueError("QUALITY_SCORECARD block not found in scorecard file")
-    import yaml
+        raise ValueError("QUALITY_SCORECARD block not found (expected a fenced ```yaml block)")
     data = yaml.safe_load(m.group(1))
     if data is None:
         raise ValueError("QUALITY_SCORECARD block is empty")

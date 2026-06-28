@@ -10,37 +10,38 @@ maps: research/backtest → `pre_launch`, paper → `launching`, live → `post_
 `engine_pct` is pinned to real anchor files; `engine_built == (engine_pct == 100)`.
 All metric fields are **real numbers or 0/null — never invented.**
 
-<!-- GROWTH_STATUS
-project: llm-quant
-as_of: 2026-06-27
-phase: pre_launch
-engine_built: false
-engine_pct: 45
-venues_connected:
-  - polymarket_paper
-awaiting_connect:
-  - kalshi
-  - polymarket_live
-metrics:
-  weekly_pnl_paper: null
-  weekly_pnl_live: null
-  hit_rate: null
-  brier_calibration: null
-  sharpe: null
-  max_drawdown_pct: null
-  live_enabled: false
-experiments: []
-learnings:
-  - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
-  - "Kill switch exists in execution.py; LIVE_TRADING_ENABLED master gate added (default false)."
-next_actions:
-  - "Build leakage-free walk-forward OOS backtest with realistic costs (ROADMAP C1-C3)."
-  - "Add calibration eval (Brier/reliability) — ROADMAP B2."
-  - "Wire hard daily+total loss caps with kill-switch auto-trip (ROADMAP D3/D4)."
-  - "Retire stock/crypto data paths; keep asset-agnostic infra (ROADMAP A1)."
-owner_blockers:
-  - "Confirm venue ToS + jurisdiction eligibility before any live capability."
--->
+```yaml
+GROWTH_STATUS:
+  project: llm-quant
+  as_of: 2026-06-27
+  phase: pre_launch
+  engine_built: false
+  engine_pct: 45
+  venues_connected:
+    - polymarket_paper
+  awaiting_connect:
+    - kalshi
+    - polymarket_live
+  metrics:
+    weekly_pnl_paper: null
+    weekly_pnl_live: null
+    hit_rate: null
+    brier_calibration: null
+    sharpe: null
+    max_drawdown_pct: null
+    live_enabled: false
+  experiments: []
+  learnings:
+    - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
+    - "Kill switch exists in execution.py; LIVE_TRADING_ENABLED master gate added (default false)."
+  next_actions:
+    - "Build leakage-free walk-forward OOS backtest with realistic costs (ROADMAP C1-C3)."
+    - "Add calibration eval (Brier/reliability) — ROADMAP B2."
+    - "Wire hard daily+total loss caps with kill-switch auto-trip (ROADMAP D3/D4)."
+    - "Retire stock/crypto data paths; keep asset-agnostic infra (ROADMAP A1)."
+  owner_blockers:
+    - "Confirm venue ToS + jurisdiction eligibility before any live capability."
+```
 
 ## engine_pct rationale (pinned to real files)
 

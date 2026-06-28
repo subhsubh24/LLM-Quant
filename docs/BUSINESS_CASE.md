@@ -20,18 +20,21 @@ The binding constraints to reach the floor (from ROADMAP):
 3. Realistic **cost model** applied (C2).
 4. End-to-end runtime harness proving real PnL (F3).
 
-<!-- BUSINESS_CASE_SUMMARY
+```yaml
+# BUSINESS_CASE_SUMMARY (machine-readable; the profit case — net trading profit, not product revenue)
+# arr_year1 = annualized NET profit from validated paper performance with realistic costs.
+# All 0 because no validated out-of-sample edge exists yet (honest baseline). Raise ONLY on reproduced numbers.
 currency: USD
 arr_year1:
   conservative: 0
   base: 0
   optimistic: 0
-planning_case: 0
+planning_case: base
 floor_usd: 104000
 floor_met_year1: false
 time_to_floor: unknown
 as_of: 2026-06-27
--->
+```
 
 ### Field notes (honesty)
 - `arr_year1.*` = **annualized net profit** from validated paper performance with
