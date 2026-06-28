@@ -115,6 +115,14 @@ Every box below is `[ ]` until proven this run. The "go-live-eligible" issue ope
 - [ ] **Independent Quality Auditor grade:** every ship-critical dimension **A or A+**, all others **≥ B**, scorecard parses (`scripts/check_scorecard.py gate` exits 0). Ship-critical = functional reality, research & backtest integrity, correctness/determinism, security, run & risk-readiness, artifact integrity, business-case strength.
 - [ ] **CONFIDENCE STATEMENT** written (honest, with the weakest link named).
 
+**The GO signal.** This DoD *is* the real-money "GO": the machine-readable
+`go_live` block in `docs/growth/GROWTH_STATUS.md` mirrors these criteria for the
+dashboard. It is **derived, never hand-set** — `scripts/preflight.sh` (step 9c) FAILS
+if `go_live.status: eligible` is set while any criterion is false, `floor_met` is not
+true, or any DoD box is unchecked. So a "GO" can never be faked or random; it turns
+green only when all of the above hold over a **sustained** track record (not one lucky
+week). Even then, flipping to real money is the **owner's** call (HUMAN-CORE).
+
 ---
 
 ## STANDING STANDARDS (these ARE the factory)
