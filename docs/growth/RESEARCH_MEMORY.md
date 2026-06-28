@@ -30,6 +30,32 @@ Format per entry:
   (likely: no leakage-free cost-realistic OOS backtest yet) and propose the first
   falsifiable experiment with a stated minimum sample size.
 
+## 2026-06-28 — Backtest + calibration APPARATUS built (C1/C3 engine, B2 eval) — no alpha tested
+- Hypothesis (falsifiable): n/a — this run built the MEASUREMENT apparatus the binding
+  constraint requires, not an alpha. The prior entries correctly named the constraint as
+  "no leakage-free cost-realistic OOS backtest + no calibration eval"; this run builds both.
+- Min sample N: the B2 eval now ENFORCES significance — `passes` requires a paired-bootstrap
+  CI on the per-market Brier difference to exclude 0 (default 95% CI, ≥30 samples). A raw
+  Brier point comparison was measured to pass ~21% of pure-noise strategies at N=30; the
+  bootstrap gate collapses that to ≤1.2%. **No alpha may be promoted on a sub-significance
+  Brier win.** Multiple-comparison correction (tighten alpha) is required when screening >1.
+- OOS result: none. The walk_forward engine runs on SYNTHETIC data only — it proves the
+  engine is leakage-free (structural: the decision can't see the outcome), reproduces
+  deterministically, recovers a known injected edge, and reports ~0 on a no-edge market. It
+  does NOT prove a real edge. No real resolved-Polymarket history is wired yet.
+- Calibration (Brier / reliability): the eval EXISTS (Brier + reliability curve + ECE +
+  significance gate) but has not been run on real resolved markets / live strategy
+  probabilities — so there is no passing calibration result to report yet.
+- Costs modeled: yes — the walk_forward engine prices every fill through `cost_model`
+  (same source as the executor; C2 unify makes execution.py import those rates too).
+- Verdict: edge-not-proven (apparatus only) — the gate to test the FIRST real alpha is now
+  built and adversarially hardened.
+- Why / next: the binding constraint is unchanged — a VALIDATED out-of-sample weekly-PnL
+  series on REAL resolved markets + a passing calibration eval on live strategy probabilities.
+  Next research run: wire real resolved-Polymarket history into `walk_forward` + run B2 on
+  the strategies' historical probabilities; only then can the first alpha be proposed →
+  backtested → significance-tested. Until then, every candidate below stays a hypothesis.
+
 ## 2026-06-28 — Cost-aware sizing (C2): gross-edge Kelly was systematically over-betting
 - Hypothesis (falsifiable): the orchestrator's Kelly sized on GROSS edge
   (`win_probability - market_price`), ignoring the executor's fees (2% of notional) +

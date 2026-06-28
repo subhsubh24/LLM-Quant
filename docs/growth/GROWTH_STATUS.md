@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-28
   phase: pre_launch
   engine_built: false
-  engine_pct: 52
+  engine_pct: 58
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -61,22 +61,27 @@ GROWTH_STATUS:
     - "A1 complete: stock/crypto engine + data/AI routes + ML stack + stock frontend retired; asset-agnostic infra kept; ~2GB+ leaner deploy (torch/xgboost/lightgbm dropped)."
     - "D3/D4 done: hard daily/total loss caps enforced at the execution gate + kill-switch auto-trip on breach (incl. the resolution loss path). Verified by harness + 2 fresh auditors."
     - "C2 cost-aware Kelly: sizing now uses cost-NET edge — prior gross-edge sizing systematically over-bet AND over-traded (took trades with negative net edge after fees+slippage). Honest costs LOWER turnover/sizing — correctly."
-    - "Fixed a latent NameError on the keeper prediction-markets path (_polymarket_client/_prediction_scanner were never module-declared) — Polymarket status/markets/scan routes were unrunnable before this run."
+    - "C1/C3 walk-forward ENGINE built (prediction_markets/walk_forward.py): leakage-free by construction (decision sees no outcome; training only resolves pre-window), event-driven capital accounting (no over-deployment), cost_model costs, deterministic seed_hash. Proven on synthetic data to recover a known edge + report ~0 on no-edge. NOT a validated edge — no real resolved-market data yet, so no floor/DoD box ticked."
+    - "B2 calibration eval built (calibration.py): Brier+reliability+ECE with a SIGNIFICANCE gate (paired bootstrap CI must exclude 0). A raw Brier point comparison passed ~21% of pure-noise strategies at N=30 (adversarial-audit finding); the bootstrap gate collapses that to <=1.2%. Honest: measures calibration-vs-crowd, not tradeable edge."
+    - "A5 data-quality gates wired into the scan loop (data_quality.py): completeness/price-sanity catch None/NaN/inf/out-of-range/sum-violations; staleness fires via end_date expiry. Bad markets skipped before sizing; valid markets never skipped."
+    - "C5 weekly-metrics aggregator (weekly_metrics.py): pure deterministic weekly PnL/Sharpe/hit-rate/max-drawdown from real realized trades. C2 unify done: execution.py sources its fill rates from cost_model (drift fails loud)."
   next_actions:
-    - "Build leakage-free walk-forward OOS backtest with realistic costs (ROADMAP C1-C3); apply cost_model inside it."
-    - "Add calibration eval (Brier/reliability) — ROADMAP B2 (gates B4 deep-research alpha)."
-    - "Add data-quality gates (staleness/completeness/price-sanity) before strategies act — ROADMAP A5."
-    - "Unify execution.py to import cost_model rates (currently duplicated literals, drift-guarded by a test)."
+    - "Feed REAL resolved-Polymarket history into the walk_forward engine to produce a VALIDATED OOS weekly-PnL series + run the B2 calibration eval on live strategy probabilities (the binding constraint — until then no floor/DoD box can tick)."
+    - "Apply the cost_model + a liquidity/order-book-depth + market-impact model inside the walk-forward backtest (C2/C3 remainder)."
+    - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5)."
+    - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); G3 persistent audit log."
   owner_blockers:
     - "Confirm venue ToS + jurisdiction eligibility before any live capability."
 ```
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 52` reflects what genuinely exists and runs vs. what's required for a
-proven, go-live-eligible engine (up from 45: A1 retirement complete, hard loss caps +
-kill-switch auto-trip now enforced (D3/D4), cost-aware sizing (C2 partial), and the
-latent NameError on the Polymarket route path fixed):
+`engine_pct: 58` reflects what genuinely exists and runs vs. what's required for a
+proven, go-live-eligible engine (up from 52: the leakage-free walk-forward backtest
+engine (C1/C3 engine), the significance-gated calibration eval (B2), data-quality gates
+at the scan path (A5), the weekly-metrics aggregator (C5), and the cost-rate
+unification (C2 unify) all landed this run — engine pieces toward a validated edge,
+which itself is still absent and remains the bulk of the missing %):
 
 **Exists (counts toward %):**
 - Polymarket ingestion + websocket feeds — `backend/app/prediction_markets/polymarket_client.py`, `websocket_feeds.py`
@@ -87,15 +92,18 @@ latent NameError on the Polymarket route path fixed):
 - Backtest/validation/metrics infra — `backend/app/backtest/*`
 
 **Added this run (counts toward %):**
-- Hard daily+total loss caps enforced at the execution gate + kill-switch auto-trip (D3/D4) — `execution.py` + `orchestrator.check_resolutions`
-- Cost-aware Kelly sizing on the net-of-fees/slippage edge (C2 partial) — `cost_model.py`
+- Leakage-free, deterministic walk-forward backtest ENGINE (C1/C3 engine) — `prediction_markets/walk_forward.py` (+ `scripts/run_walk_forward.py`)
+- Significance-gated calibration eval (B2) — `prediction_markets/calibration.py`
+- Data-quality gates at the scan path (A5) — `prediction_markets/data_quality.py` (wired into `orchestrator`)
+- Weekly-metrics aggregator (C5) — `prediction_markets/weekly_metrics.py`
+- C2 unify: `execution.py` sources its fill rates from `cost_model` (drift fails loud)
 
 **Missing (keeps % < 100):**
-- Validated, reproducible, cost-realistic **out-of-sample** weekly-PnL series (no proven edge)
-- Calibration eval (B2)
+- **Validated, reproducible, cost-realistic out-of-sample weekly-PnL series on REAL data (no proven edge)** — the engine exists; it needs real resolved-Polymarket history
+- A *passing* calibration eval on real resolved markets + live strategy probabilities (B2 → unlocks B4)
 - Liquidity/market-impact cost model + costs applied inside the walk-forward backtest (C2/C3 remainder)
-- Full live path built + paper-validated (D6)
-- Data-quality gates before strategies act (A5)
+- Full live path built + paper-validated (D6); persistent audit log (G3)
+- A4 event/market-universe + persistent resolution tracking; metrics wired end-to-end into the live run/dashboard (C5 remainder)
 
 `engine_built` flips to `true` (and `engine_pct` to `100`) **only** when the DoD in
 ROADMAP is fully `[x]` with proof.
