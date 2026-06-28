@@ -54,7 +54,38 @@ GROWTH_STATUS:
     blocking:                       # honest: what's stopping GO right now
       - "No validated out-of-sample edge yet — build the leakage-free, cost-realistic walk-forward backtest + calibration eval (ROADMAP C1-C3, B2)."
     owner_decision_required: true   # even at 'eligible', the human makes the final real-money GO call
-  experiments: []
+  experiments:
+    - id: EXP-001
+      name: "Real-Data Pipeline + NO Position Scanner OOS Validation"
+      status: proposed
+      proposed_date: 2026-06-28
+      edge_source: "crowd-miscalibration (in-scope per PLAYBOOK)"
+      hypothesis: >
+        The NO Position Scanner generates positive net EV — Brier improvement vs
+        crowd baseline AND positive net PnL after costs — on resolved Polymarket
+        binary markets where YES > 90c, on >= 100 resolved markets across >= 3
+        categories. Category reversal base rates (politics 2%, economics 3%,
+        crypto 8%, sports 5%) are empirically calibrated, not hardcoded fiction.
+      min_sample_n: 100
+      oos_plan: >
+        Chronological 60/40 split: earliest 60% to empirically calibrate reversal
+        base rates per category; most recent 40% as true held-out OOS. Significance
+        gate: paired bootstrap CI on per-market Brier difference must exclude 0
+        (calibration.py B2 gate). Net PnL must be positive after cost_model costs.
+      cost_assumptions: "2% fee + 0.5% slippage (cost_model.py); no liquidity model — conservative capacity"
+      significance_threshold: "95% CI excluding 0 on paired-bootstrap Brier improvement; Bonferroni correction if testing multiple categories"
+      how_it_could_be_wrong:
+        - "Reversal rates empirically near-zero -> strategy dead on arrival"
+        - "Near-certainty NO books illiquid -> real slippage erases edge"
+        - "Survivorship bias in third-party archive excludes contested/re-resolved markets"
+        - "N per category < 50 even with 100+ total -> no category-level significance claims"
+        - "Market efficiency increasing (43% spread compression) -> historical edge gone in recent months"
+      blocking_dependency: "Build polymarket_history_fetcher.py from PMData (pmdata.dev) or PolyHistorical (polyhistorical.com) to populate HistoricalMarket records"
+      factory_next_action: >
+        Build polymarket_history_fetcher.py; pull >= 200 resolved markets from
+        PMData or PolyHistorical APIs; feed into walk_forward.py; run B2
+        calibration eval; report OOS Brier + PnL with bootstrap CI. Only then
+        can EXP-001 be declared passing or retired.
   learnings:
     - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
     - "Kill switch exists in execution.py; LIVE_TRADING_ENABLED master gate added (default false)."

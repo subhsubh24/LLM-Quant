@@ -85,3 +85,61 @@ Format per entry:
   look-ahead and liquidity traps.
 All of the above are **hypotheses**, not edges. None may be promoted without OOS +
 calibration + cost-realistic validation surviving the adversarial auditors.
+
+## 2026-06-28 — Research Run 3: Real-data pipeline gap identified; EXP-001 proposed
+
+- Hypothesis (falsifiable): The NO Position Scanner generates positive net EV —
+  Brier improvement vs crowd baseline AND positive net PnL after realistic costs —
+  on resolved Polymarket binary markets where YES > 90¢, across ≥100 resolved
+  markets spanning ≥3 market categories. Category-specific reversal base rates
+  (politics 2%, economics 3%, crypto 8%, sports 5%) are empirically calibrated to
+  real resolution history, not hardcoded fiction.
+- Min sample N: 100 resolved markets total; ≥50 per category for any
+  category-level significance claim.
+- OOS result: **insufficient data** — no real resolved Polymarket history in the
+  system yet. `polymarket_client.py` has no method to batch-fetch historical
+  resolved markets. Third-party APIs (PMData: pmdata.dev; PolyHistorical:
+  polyhistorical.com; PolymarketData: polymarketdata.co) offer 13K–200K+ resolved
+  markets suitable for populating `HistoricalMarket` records. This is the blocking
+  dependency for ALL OOS validation.
+- Calibration (Brier / reliability): not measured — no real data. The eval (B2
+  calibration.py) exists and is significance-gated; it has never run on real
+  resolved-market probabilities.
+- Costs modeled: yes (cost_model.py: 2% fee + 0.5% slippage). No
+  liquidity/market-impact model yet — near-certainty NO positions may have
+  near-zero book depth on the NO side, making slippage estimates conservative.
+- Verdict: **proposed** (EXP-001; see GROWTH_STATUS experiments[])
+- Why: Research confirmed (a) third-party resolved-market data sources exist and
+  are credible; (b) all 11 existing strategies are untested hypotheses; (c) the NO
+  Position Scanner is the most tractable first OOS test — a single calibration
+  question (are the reversal rates real?). Cross-market arb (Polymarket/Kalshi) is
+  a real structural edge ($40M captured 2024-2025) but bot-speed-dominated —
+  unlikely to be our first competitive advantage. Academic evidence (Le 2026,
+  210K+ Kalshi contracts) confirms domain-specific calibration differences persist
+  but spreads are compressing 43% as market volume grows — the efficiency window
+  is closing. The "horizon effect" (long-dated markets underpriced vs near-term)
+  has academic backing but limited near-resolution actionability.
+
+### How EXP-001 could be wrong (adversarial pre-mortem)
+1. Reversal rates empirically near-zero across all categories → strategy dead on
+   arrival; current parameters over-trade relative to the real base rate.
+2. Near-certainty NO books are illiquid → real slippage far exceeds the modeled
+   0.5%, erasing the edge.
+3. Survivorship bias in third-party archives: contested/re-resolved/cancelled
+   markets may be excluded, making the dataset unrepresentative of real outcomes.
+4. N per category < 50 even with 100+ total → cannot make category-level
+   statistical claims; must report "insufficient data" per category.
+5. Market efficiency has increased since early Polymarket data — historical
+   calibration edge may be gone in recent months.
+
+### Candidate alphas NOT proposed this run (reasons)
+- **Cross-market arb (Polymarket/Kalshi):** Real but execution-speed-dominated;
+  "insufficient data" on whether paper-simulator latency can capture it.
+- **Whale copy-trading:** Depends on on-chain wallet tracking — data availability
+  unconfirmed; auto-rejects under "private data" exclusion if wallet identities
+  are non-public.
+- **Weather Arb:** Interesting but niche; NOAA integration needs validation before
+  any edge claim.
+- **Horizon effect (long-dated miscalibration):** Academic evidence for Kalshi
+  (2021-2025); no Polymarket-specific confirmation; propose after EXP-001 gives
+  baseline calibration measurement.
