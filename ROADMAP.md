@@ -54,6 +54,7 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
   - **Cost-modeled in the EV:** per-market LLM research has real cost (e.g. $0.30–1.00/market); subtract it in the edge/EV calc and respect `LLM_SPEND_CAP_USD`. Only pursue markets where size × crowd-mispricing clears the research cost (capacity-aware).
   - **Bounded:** triggered by a market's expected edge, not run on every market; decayed/retired via the B3 lifecycle if it stops beating the crowd.
 - [ ] B5. Lower-cost reasoning alphas that need no per-market deep research (cross-market logical-consistency, miscalibration screens, news-reaction speed) — cheaper, so exhaust these before/alongside B4.
+- [ ] B6. **Per-strategy enable/disable control (the deferred loop).** The panel's strategy toggle was a FAKE control (flipped local UI state only; the orchestrator ran every strategy regardless) — removed per the DECISION COROLLARY (don't gate UI on an unbuilt loop). To bring it back for real: a backend endpoint to enable/disable a strategy in the orchestrator's scanner, **persisted** and **respected by the scan loop**, then re-add the UI toggle. **Re-add the toggle ONLY** once a journey test proves toggling actually changes which strategies the bot runs (verify the effect, not the message — FACTORY_STANDARD §6).
 
 ### C — BACKTEST + PAPER-TRADE HARNESS
 - [~] C1. Backtest engine exists (`backend/app/backtest/*`); confirm leakage-free + walk-forward for prediction markets specifically.
