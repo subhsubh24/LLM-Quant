@@ -95,6 +95,7 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 - [ ] F4. CI wiring of the gate (workflow scope — owner/maintainer action).
 - [~] F4.1. **Side-effect round-trip (verify the EFFECT, not the message).** Done in part: the runtime harness already proves the trading side-effect — a paper order is **really logged/filled**, the live gate + kill switch **really block** real orders, deterministically — so "order placed/executed" can't be a fake confirmation. Still to do: extend the F5 journey suite to assert the **UI never shows a success state unless the op truly succeeded** (e.g. trigger scan/reset/bot-toggle → assert the backend effect actually occurred, not just that a toast appeared), and assert the relevant API client was invoked with the right payload. (No email/SMS/payment in this product today; if any is ever added — e.g. alerting — it must round-trip via a capture/sandbox before any "sent" message ships, per FACTORY_STANDARD §6.) A flow that depends on an unverified side-effect may NOT be ticked done.
 - [ ] F5. **Visual verification for the monitoring panel (gives the §6/§7/§10 visual-review lenses artifacts to judge).** A **Playwright** journey suite that screenshots every page (dashboard, predictions, bot, login) in each key state (empty / loading / error; authed + logged-out) and commits them as artifacts; then wire the visual-review lenses (FACTORY_STANDARD §6 capture, §7 readiness gate, §10 deep audit) so the loops actually LOOK at the images against the VISION design bar — a blank/broken/overlapping/unstyled/off-brand page is a release-blocking FAIL even if DOM assertions pass. **Web-only** (the panel is a Next.js app — no mobile/component-snapshot path needed). Product/ROADMAP work, deliberately separate from the byte-identical `FACTORY_STANDARD.md`.
+- [~] F6. **LOOP HEALTH — measure whether the LOOP converges, not just whether it's busy (FACTORY_STANDARD §10b).** Seeded: `docs/autonomous-loop/LOOP_HEALTH.md` (fenced `LOOP_HEALTH:` block, dashboard-readable). **Standing discipline — every bookkeeping run:** update it with REAL counts (`git`/`gh` + this run): changes shipped vs. abandoned, verify/review failures, circuit-breaker trips, rolling merged-PRs/reverts/readiness-attempts/recurring-failures. **(1) CLASSIFY every abandoned change** (`gate_test`/`gate_determinism`/`gate_backtest_nonreproduce`/`review_value`/`circuit_breaker`/`dead_end`/`blocked_owner`/…) so the loop does NOT re-attempt the same dead-end. **(2) Read the signal honestly** — `churning` (abandon/revert ≫ shipped) or `stuck` (a wall recurring ≥2 runs / no convergence) is the trigger to open ONE `loop: harness improvement proposal` issue (the META channel — the only way the loop's own rules improve, since it can't edit its routine/`.claude`; a recurring wall that never raises a proposal is a dead signal). Observability, NOT a ship gate (`preflight.sh` does not block on it). Ongoing — never "done."
 
 ### G — SAFETY & SECRETS
 - [x] G1. Keys server-side; `.env` gitignored (verified: `.gitignore` covers `.env*`).
@@ -255,6 +256,13 @@ The three cross-project YAML blocks live in:
 - `docs/BUSINESS_CASE.md` → `BUSINESS_CASE_SUMMARY` (the profit case)
 - `docs/growth/GROWTH_STATUS.md` → `GROWTH_STATUS` (model / performance status)
 - `PENDING_OPS.md` → `OWNER_ACTIONS` (Human-Core steps)
+- `docs/autonomous-loop/LOOP_HEALTH.md` → `LOOP_HEALTH` (is the LOOP converging vs. churning —
+  loop-internal observability, updated every bookkeeping run; FACTORY_STANDARD §10b)
 
 `preflight.sh` fails on any malformed block. `engine_built == (engine_pct == 100)`,
-pinned to real anchor files.
+pinned to real anchor files. (`LOOP_HEALTH` is observability, NOT a gate — see F6 / §10b.)
+
+These are all **living artifacts** (FACTORY_STANDARD §14) — when a change alters what one
+describes, update it in the SAME work. `docs/autonomous-loop/LOOP_HEALTH.md` is refreshed
+with real counts every bookkeeping run (F6); classify every abandoned change so the loop
+never re-attempts a dead-end; a `churning`/`stuck` signal must raise a harness proposal.

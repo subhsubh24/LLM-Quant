@@ -2,6 +2,46 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Made "self-improving" measurable: LOOP_HEALTH metric + abandoned-change classification
+
+- **Why:** we grade the PRODUCT every run (deep audit §10, QUALITY_SCORECARD §8) but never
+  graded the LOOP itself — so there was no way to tell *convergence* (durable, correct,
+  DoD-moving change) from *churn* (re-attempting dead-ends, reverts, walling on the same
+  failure), and abandoned build-changes weren't classified, so a dead-end could be re-tried
+  next run. Fixed both.
+- **Shipped (this is observability, NOT a ship gate — `preflight.sh` does not block on it):**
+  - `docs/autonomous-loop/LOOP_HEALTH.md` — **seeded**, not left for the loop to bootstrap.
+    Fenced `LOOP_HEALTH:` block (dashboard-readable, parses under pyyaml), with a contract:
+    update REAL counts every bookkeeping run; honest-only (same anti-gaming rule as the
+    number/GO signal); classify every abandoned change; `churning`/`stuck` → open one
+    `loop: harness improvement proposal`. Seeded with **real** rolling-7d from git: **42
+    merged PRs, 0 reverts, 0 abandoned**; signal = `bootstrapping` (first datapoint — no prior
+    LOOP_HEALTH to trend against; you can't honestly claim `improving` without a comparison).
+  - `FACTORY_STANDARD.md` §10b (canonical sync, byte-identical, verbatim from the directive;
+    file now 22 `##` headings, structure intact). The PRODUCT-vs-LOOP distinction + the two
+    rules (classify abandoned; honest signal → harness proposal as the ONLY meta channel).
+  - `ROADMAP.md` F6 (standing loop-health discipline, ongoing/never-done) + LOOP_HEALTH added
+    to the dashboard-readable living-artifacts list.
+- **`reason` taxonomy adapted to this stack:** added `gate_backtest_nonreproduce` (a backtest
+  that won't reproduce bit-for-bit — the quant analog of `gate_tsc`) and `blocked_owner` (a
+  wall handed to a human-core OA, e.g. the egress/live-key constraints the loop must not route
+  around) alongside the generic `gate_test`/`review_value`/`circuit_breaker`/`dead_end`.
+- **META self-check (the loop-of-the-loop), per the directive — reviewed the last ~10 runs:**
+  the only candidate recurring wall is the **Polymarket egress-block (403 at the env proxy)**
+  that made real-data OOS validation impossible last run. It has been hit **exactly once**
+  (this 06-28 window) and was correctly routed to the owner as **OA-11** (`blocked_owner`) —
+  a network/environment constraint, not a loop-rule deficiency. `gh issue list` shows **zero**
+  open harness-improvement proposals. **Conclusion: no proposal is warranted yet** — the ≥2-run
+  recurrence threshold is not met. **Going forward (now in §10b + F6):** if that same wall
+  blocks convergence on a SECOND run without resolution, the signal flips toward `stuck` and
+  that IS the trigger to open one harness-improvement-proposal (e.g. "the loop needs a
+  network-permitted lane for real-data validation"). Recorded here so next run sees the count.
+- **How to apply:** every bookkeeping run, refresh LOOP_HEALTH from `git`/`gh` + this run;
+  classify each abandoned change so the loop doesn't repeat the failed path; read the signal
+  honestly; `churning`/`stuck` → one harness proposal (the only way the loop's OWN rules
+  improve, since it can't edit its routine/`.claude`). Improving the PRODUCT is autonomous;
+  improving the LOOP's rules is human-gated and happens ONLY via that signal.
+
 ## 2026-06-28 — Real-data ingest + impact model + audit log (3-PR run); binding constraint is now ENVIRONMENTAL
 
 - **Shipped 3 file-disjoint code PRs (#45 fetcher, #46 cost-impact, #47 audit-log) + this
