@@ -7,7 +7,7 @@ import { Activity, Lock, Loader2, AlertCircle } from "lucide-react";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/dashboard";
+  const next = params.get("next") || "/predictions";
 
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
