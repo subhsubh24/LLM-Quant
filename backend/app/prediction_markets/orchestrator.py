@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from .polymarket_client import Market, PolymarketClient, ScanResult
+from .data_quality import DataQualityValidator
 from .execution import (
     Exchange,
     OrderRequest,
@@ -416,6 +417,10 @@ class PredictionMarketOrchestrator:
         self.simulation_pricer = EnhancedContractPricer() if EnhancedContractPricer else None
         self.probability_trackers: Dict[str, "LiveProbabilityTracker"] = {}
 
+        # Data-quality gate (ROADMAP A5): rejects stale/incomplete/insane markets
+        # before any sizing or order placement.
+        self._dq_validator = DataQualityValidator()
+
         self.scan_interval_sec = scan_interval_sec
         self.mtm_interval_sec = mtm_interval_sec
         self.snapshot_interval_sec = snapshot_interval_sec
@@ -540,6 +545,18 @@ class PredictionMarketOrchestrator:
         bankroll = self.executor.max_portfolio_usd - self.executor.total_exposure
 
         for opp in opportunities:
+            # Data-quality gate (ROADMAP A5): skip markets with stale, incomplete,
+            # or price-insane data before any order is sized or placed.
+            dq_result = self._dq_validator.check_market(opp.market)
+            if not dq_result.ok:
+                reason = f"data-quality: {dq_result.reason}"
+                logger.warning(
+                    f"[ORCHESTRATOR] Skipping {opp.market.question[:60]!r} — {reason}"
+                )
+                skipped.append({"market": opp.market.question[:60], "reason": reason})
+                self.total_skipped += 1
+                continue
+
             # Risk check
             risk_result = self.risk_manager.check_opportunity(
                 opp, self.executor, self.scanner
