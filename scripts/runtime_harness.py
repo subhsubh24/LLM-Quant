@@ -41,7 +41,7 @@ def build_order(side, size, price):
         exchange=Exchange.POLYMARKET,
         market_id="0xharness",
         token_id="harness-token",
-        side=OrderSide.BUY if side == "BUY" else OrderSide.BUY,
+        side=OrderSide.BUY if side == "BUY" else OrderSide.SELL,
         order_type=OrderType.LIMIT,
         size=size,
         price=price,
@@ -98,6 +98,37 @@ def main():
     # PnL is a real number (0.0 at entry is fine — it must be computable, not error)
     pnl_ok = isinstance(ex_a.total_pnl, (int, float))
     check("paper_pnl_is_real_number", pnl_ok, f"pnl={ex_a.total_pnl}")
+
+    # 5. HARD LOSS CAP + AUTO-TRIP (ROADMAP D3/D4): a realized loss beyond the TOTAL
+    #    cap must AUTO-TRIP the kill switch and block subsequent orders — proven
+    #    end-to-end through the real order path (open a paper long, then close it at a
+    #    loss), not by poking internal state.
+    capped = PredictionMarketExecutor(
+        dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
+        max_daily_loss_usd=1000.0, max_total_loss_usd=10.0,
+    )
+    capped.execute(build_order("BUY", 100, 0.50))           # long 100 @ 0.50
+    not_tripped_pre = not capped.kill_switch_active
+    check("loss_cap_not_tripped_before_loss", not_tripped_pre,
+          f"kill switch must be OFF before any loss (ks={capped.kill_switch_active})")
+    capped.execute(build_order("SELL", 100, 0.10))          # realize exactly -$40.00 (LIMIT fills at price; > $10 cap)
+    check("loss_cap_auto_trips_kill_switch", capped.kill_switch_active,
+          f"realized_total=${capped._realized_pnl_total:.2f} ks={capped.kill_switch_active}")
+    after = capped.execute(build_order("BUY", 1, 0.50))     # next order must be blocked
+    check("loss_cap_blocks_subsequent_orders",
+          after.status == OrderStatus.REJECTED
+          and ("LOSS CAP" in (after.error or "") or "KILL SWITCH" in (after.error or "")),
+          f"status={after.status} err={after.error!r}")
+
+    # 6. LOSS CAP does NOT trip below the cap (no false halt on a small loss).
+    under = PredictionMarketExecutor(
+        dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
+        max_daily_loss_usd=1000.0, max_total_loss_usd=100.0,
+    )
+    under.execute(build_order("BUY", 100, 0.50))
+    under.execute(build_order("SELL", 100, 0.10))           # exactly -$40.00 loss, under $100 cap
+    check("loss_cap_no_false_trip_under_cap", not under.kill_switch_active,
+          f"realized_total=${under._realized_pnl_total:.2f} ks={under.kill_switch_active}")
 
     print()
     if FAILURES:

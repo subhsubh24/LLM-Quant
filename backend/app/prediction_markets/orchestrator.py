@@ -325,6 +325,13 @@ class MarkToMarketEngine:
                 pos.unrealized_pnl = 0.0
                 pos.current_price = settlement_price
 
+                # Feed the executor-level realized-PnL counters + AUTO-TRIP the kill
+                # switch if this resolution loss breaches a hard cap (ROADMAP D3/D4).
+                # Resolution is the PRIMARY way binary-market positions take losses, so
+                # without this the loss caps would silently miss the dominant loss path
+                # (the gate reads the same counters) — caught by the adversarial audit.
+                self.executor.record_realized_pnl(pnl)
+
                 logger.info(
                     f"[MTM] Position resolved: {token_id} | "
                     f"Settlement: ${settlement_price:.2f} | "
