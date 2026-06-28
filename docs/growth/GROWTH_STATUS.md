@@ -13,10 +13,10 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-06-27
+  as_of: 2026-06-28
   phase: pre_launch
   engine_built: false
-  engine_pct: 45
+  engine_pct: 52
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -58,19 +58,25 @@ GROWTH_STATUS:
   learnings:
     - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
     - "Kill switch exists in execution.py; LIVE_TRADING_ENABLED master gate added (default false)."
+    - "A1 complete: stock/crypto engine + data/AI routes + ML stack + stock frontend retired; asset-agnostic infra kept; ~2GB+ leaner deploy (torch/xgboost/lightgbm dropped)."
+    - "D3/D4 done: hard daily/total loss caps enforced at the execution gate + kill-switch auto-trip on breach (incl. the resolution loss path). Verified by harness + 2 fresh auditors."
+    - "C2 cost-aware Kelly: sizing now uses cost-NET edge — prior gross-edge sizing systematically over-bet AND over-traded (took trades with negative net edge after fees+slippage). Honest costs LOWER turnover/sizing — correctly."
+    - "Fixed a latent NameError on the keeper prediction-markets path (_polymarket_client/_prediction_scanner were never module-declared) — Polymarket status/markets/scan routes were unrunnable before this run."
   next_actions:
-    - "Build leakage-free walk-forward OOS backtest with realistic costs (ROADMAP C1-C3)."
-    - "Add calibration eval (Brier/reliability) — ROADMAP B2."
-    - "Wire hard daily+total loss caps with kill-switch auto-trip (ROADMAP D3/D4)."
-    - "Retire stock/crypto data paths; keep asset-agnostic infra (ROADMAP A1)."
+    - "Build leakage-free walk-forward OOS backtest with realistic costs (ROADMAP C1-C3); apply cost_model inside it."
+    - "Add calibration eval (Brier/reliability) — ROADMAP B2 (gates B4 deep-research alpha)."
+    - "Add data-quality gates (staleness/completeness/price-sanity) before strategies act — ROADMAP A5."
+    - "Unify execution.py to import cost_model rates (currently duplicated literals, drift-guarded by a test)."
   owner_blockers:
     - "Confirm venue ToS + jurisdiction eligibility before any live capability."
 ```
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 45` reflects what genuinely exists and runs vs. what's required for a
-proven, go-live-eligible engine:
+`engine_pct: 52` reflects what genuinely exists and runs vs. what's required for a
+proven, go-live-eligible engine (up from 45: A1 retirement complete, hard loss caps +
+kill-switch auto-trip now enforced (D3/D4), cost-aware sizing (C2 partial), and the
+latent NameError on the Polymarket route path fixed):
 
 **Exists (counts toward %):**
 - Polymarket ingestion + websocket feeds — `backend/app/prediction_markets/polymarket_client.py`, `websocket_feeds.py`
@@ -80,12 +86,16 @@ proven, go-live-eligible engine:
 - Kill switch — `execution.py`
 - Backtest/validation/metrics infra — `backend/app/backtest/*`
 
+**Added this run (counts toward %):**
+- Hard daily+total loss caps enforced at the execution gate + kill-switch auto-trip (D3/D4) — `execution.py` + `orchestrator.check_resolutions`
+- Cost-aware Kelly sizing on the net-of-fees/slippage edge (C2 partial) — `cost_model.py`
+
 **Missing (keeps % < 100):**
 - Validated, reproducible, cost-realistic **out-of-sample** weekly-PnL series (no proven edge)
 - Calibration eval (B2)
-- Hard daily+total loss caps auto-tripping the kill switch (D3/D4)
+- Liquidity/market-impact cost model + costs applied inside the walk-forward backtest (C2/C3 remainder)
 - Full live path built + paper-validated (D6)
-- BUILDS≠WORKS end-to-end runtime harness producing real reproducible PnL (F3)
+- Data-quality gates before strategies act (A5)
 
 `engine_built` flips to `true` (and `engine_pct` to `100`) **only** when the DoD in
 ROADMAP is fully `[x]` with proof.

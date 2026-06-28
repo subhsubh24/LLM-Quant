@@ -72,11 +72,11 @@ OWNER_ACTIONS:
       why: "DB is Neon Postgres. Neon has NO public Data API (no PostgREST / anon key), so the Supabase-style world-readable-tables risk does not exist — the DB is reachable only with the connection string. The remaining risk is simply leaking that string."
       how: "Keep DATABASE_URL server-side only (backend host env); never commit it or put it in any NEXT_PUBLIC_* var. If it leaks, rotate the password in the Neon Console. No RLS / Data API step is required on Neon."
     - id: OA-10
-      title: "Decide whether the raw-sqlite audit trail should move to Postgres"
+      title: "Build a persistent prediction-markets audit log (decisions + would-be orders)"
       priority: low
       status: open
-      why: "backend/app/trading/audit_store.py uses raw sqlite3 (a separate local file, not SQLAlchemy). On an ephemeral host it would lose the audit log; on a persistent-disk host it is fine. The main ORM DB now uses Neon Postgres, but this audit log does not."
-      how: "If the backend runs on persistent disk, leave as-is. To centralize in Neon, rewrite audit_store.py onto SQLModel/Postgres (tracked as ROADMAP G3 audit-log work)."
+      why: "The old raw-sqlite audit_store.py was part of backend/app/trading/ and was DELETED with the stock engine (ROADMAP A1). The prediction-markets path persists orders to the PredictionOrder table, but decision/risk-rejection audit is only an in-memory activity log (lost on restart). ROADMAP G3 covers building a durable decision+would-be-order audit log on the Neon ORM DB."
+      how: "Implement G3: a PredictionAuditLog SQLModel table on Neon recording signal/risk/kelly decisions + every (would-be) order. No raw sqlite. Owner action is only the persistent-disk vs Postgres hosting choice."
 ```
 
 ## Quick reference

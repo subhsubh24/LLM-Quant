@@ -2,6 +2,47 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — A1 finished + C2 cost-aware sizing + D3/D4 loss caps (multi-PR run)
+
+- **Shipped 4 file-disjoint code PRs + 1 bookkeeping PR this run** (8-scout sweep → maximal
+  disjoint set): A1-backend retirement, A1-frontend retirement, C2 cost-aware Kelly,
+  D3/D4 loss caps. All merged to the default branch; gate green; integration branch
+  verified (90 tests + harness deterministic) before merge.
+- **A1 is DONE.** Deleted `backend/app/{models,signals,data,features,strategies}` (none
+  imported by `prediction_markets/` — verified), rewrote `api/routes.py` 2379→1058 (39
+  routes, 0 stock), removed crypto_ws from main.py, deleted stock frontend pages, dropped
+  torch/torchvision/xgboost/lightgbm/statsmodels/pandas-datareader (~2GB+ leaner).
+  **Kept** asset-agnostic infra (backtest/simulation/portfolio/execution/monitoring/llm).
+  One surgical fix in a keeper: `backtest/engine.py` BaseRanker import → local Protocol.
+- **Latent bug found + fixed:** `_polymarket_client`/`_prediction_scanner` were referenced
+  via `global` but NEVER declared at module level → `_get_polymarket_client()` would
+  NameError on first call. The Polymarket status/markets/scan routes were unrunnable. Used
+  an AST check to prove only those two (not `_prediction_executor`/`_orchestrator_instance`)
+  were missing. Lesson: a `global x; if x is None` with no module-level `x = None` is a
+  latent NameError — grep/AST for it when touching singletons.
+- **C2 (cost-aware Kelly):** sizing used GROSS edge, ignoring the 2% fee + 0.5% slippage the
+  executor charges → systematic over-betting + over-trading. New `cost_model.py` (single
+  source of truth) → size on net edge. Auditors confirmed the costs CANCEL correctly
+  (cash deployed == budget; no double-charge) — pinned by an end-to-end test.
+- **D3/D4 (loss caps) — ADVERSARIAL AUDIT CAUGHT A REAL HOLE:** the first cut enforced caps
+  on the position-reduce path only. A fresh Opus auditor proved that market RESOLUTION
+  losses (the PRIMARY way binary positions lose) bypassed the cap entirely, because
+  `orchestrator.check_resolutions` realized PnL without feeding the executor's counter —
+  and the gate reads that same counter (single point of failure). FIXED: added
+  `executor.record_realized_pnl(pnl)` in check_resolutions + a regression test; a fresh
+  re-audit returned ENFORCED. **Lesson: enumerate EVERY realized-loss path, not just the
+  obvious one; a "known follow-up" that defeats a safety control is NOT acceptable to
+  defer.** Watch-item: `PaperTradingSimulator.sell` realizes PnL independently but is a
+  self-contained backtest class not wired into the live flow — would need the same hook if
+  ever wired in.
+- **Process that worked:** 2 Sonnet reviewers/PR + a disjoint-checker + 3 fresh Opus
+  adversarial auditors on the money-path. Reviewers caught quality nits (duplicate import,
+  unused imports); auditors caught the one real safety bug. Integration-branch dry-run
+  before merge confirmed all four auto-merge cleanly (C2 + D4 share orchestrap.py at
+  disjoint hunks — git merged them without conflict).
+- **No DoD/floor box ticked** — still no validated OOS edge; this run was retirement +
+  correctness + safety, not an alpha. engine_pct 45→52.
+
 ## 2026-06-28 — Gate-on-unbuilt-loop audit + DECISION COROLLARY
 
 - **Auth is CLEAN:** single shared-password gate (login → checkPassword → cookie → app).

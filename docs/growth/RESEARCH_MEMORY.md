@@ -30,6 +30,24 @@ Format per entry:
   (likely: no leakage-free cost-realistic OOS backtest yet) and propose the first
   falsifiable experiment with a stated minimum sample size.
 
+## 2026-06-28 — Cost-aware sizing (C2): gross-edge Kelly was systematically over-betting
+- Hypothesis (falsifiable): the orchestrator's Kelly sized on GROSS edge
+  (`win_probability - market_price`), ignoring the executor's fees (2% of notional) +
+  market-order slippage (0.5%). Claim: this both over-bets (full-Kelly on inflated odds)
+  and over-trades (takes positions whose gross edge is positive but net edge ≤ 0).
+- Min sample N: n/a (deterministic correctness fix, not an alpha).
+- OOS result: n/a — no edge claimed. This LOWERS expected turnover/sizing (honestly).
+- Costs modeled: NOW yes — `cost_model.py` is the single source of truth
+  (effective_buy_price = price·(1+slip)·(1+fee); net_edge; contracts_for_budget). Verified
+  end-to-end that net cash deployed == intended budget (no double-counting) and that a 1%
+  gross edge at price 0.50 is now correctly REJECTED (net edge negative).
+- Verdict: promoted (correctness fix; 10 tests + 3 adversarial auditors SOUND).
+- Why / next: this is a prerequisite for honest realized-vs-backtest reconciliation —
+  EV must subtract the same costs realized fills do. REMAINING: model liquidity/market
+  impact; apply the cost model inside the walk-forward backtest (C1/C3); unify
+  `execution.py` to import the cost_model rates (currently duplicated literals + a drift
+  test). Until the cost model also covers depth/impact, capacity claims stay conservative.
+
 ### Candidate alpha directions to investigate (not yet tested — hypotheses only)
 - **Calibration arbitrage:** crowd probabilities on low-liquidity markets may be
   systematically mis-calibrated near 0/1; test reliability vs realized outcomes with
