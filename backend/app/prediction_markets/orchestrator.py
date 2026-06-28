@@ -42,6 +42,7 @@ from .execution import (
 )
 from .strategies import PredictionMarketScanner, StrategyConfig
 from .risk_manager import RiskManager, RiskCheckResult
+from .cost_model import DEFAULT_COST_MODEL
 
 try:
     from .simulation_integration import EnhancedContractPricer, LiveProbabilityTracker
@@ -161,9 +162,16 @@ def size_from_scan_result(
     market_price = result.entry_price
     win_probability = market_price + result.edge
 
-    # Deterministic Kelly first (always computed)
+    # COST-AWARE EDGE (ROADMAP C2): size on the edge NET of the slippage + fee the
+    # executor will actually charge — NOT the gross edge. Sizing on gross edge both
+    # over-bets (full-Kelly on inflated odds) and takes trades whose gross edge is
+    # positive but whose net edge is <= 0 after costs. cost_model is the single source
+    # of truth for those rates (kept consistent with execution.py's paper fills).
+    net_edge = DEFAULT_COST_MODEL.net_edge(win_probability, market_price)
+
+    # Deterministic Kelly first (always computed), on the cost-adjusted edge.
     naive_bet_usd = kelly_size(
-        edge=result.edge,
+        edge=net_edge,
         confidence=result.confidence,
         win_probability=win_probability,
         bankroll=bankroll,
@@ -188,7 +196,7 @@ def size_from_scan_result(
             if abs(sim_prob - market_price) > 0.02:
                 win_probability = sim_prob
                 naive_bet_usd = kelly_size(
-                    edge=win_probability - market_price,
+                    edge=DEFAULT_COST_MODEL.net_edge(win_probability, market_price),
                     confidence=result.confidence,
                     win_probability=win_probability,
                     bankroll=bankroll,
@@ -218,9 +226,12 @@ def size_from_scan_result(
                 f"mc=${mc_bet:.2f} (method={mc_diag.get('method')})"
             )
 
-    # Convert USD to contracts
+    # Convert USD to contracts at the COST-INCLUSIVE price: bet_usd is the capital we
+    # intend to deploy, and the executor charges slippage + fee on top, so the real
+    # contract count is bet_usd / effective_cost — using the raw price would overstate
+    # the position and deploy more cash than bet_usd (ROADMAP C2).
     price = market_price if market_price > 0 else 0.50
-    num_contracts = bet_usd / price
+    num_contracts = DEFAULT_COST_MODEL.contracts_for_budget(bet_usd, price)
 
     return bet_usd, round(num_contracts, 1)
 
