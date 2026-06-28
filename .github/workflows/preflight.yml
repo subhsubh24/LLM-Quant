@@ -33,9 +33,12 @@ jobs:
         run: bash scripts/preflight.sh code
 
   go-live-status:
-    name: go-live gate (informational)
+    # PURELY INFORMATIONAL — reports go-live readiness without ever failing. The full
+    # gate is honest-red (profit floor + DoD + quality) until a validated edge exists,
+    # so we capture its result and surface it as a notice rather than a red error that
+    # looks like (or could mask) a real failure. Merges are gated by the `gate` job only.
+    name: go-live readiness (informational)
     runs-on: ubuntu-latest
-    continue-on-error: true   # never blocks merges — red until validated edge exists
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,5 +49,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements-ci.txt
-      - name: Run full preflight (profit-floor + DoD)
-        run: bash scripts/preflight.sh
+      - name: Report go-live readiness (full gate, never fails)
+        run: |
+          set +e
+          bash scripts/preflight.sh
+          code=$?
+          echo ""
+          if [ "$code" -eq 0 ]; then
+            echo "::notice title=Go-live readiness::GREEN — go-live-eligible (all gates pass)."
+          else
+            echo "::notice title=Go-live readiness::NOT YET ELIGIBLE — expected until a validated out-of-sample edge exists. Informational only; does not block merges."
+          fi
+          exit 0
