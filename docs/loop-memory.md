@@ -2,6 +2,43 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — OA-11: actually RAN the fetcher on real Polymarket data (egress was env-specific)
+
+- **What/why:** owner asked me to "do OA-11" (the egress wall blocking real-data OOS validation).
+  Tested reachability FROM THIS SESSION first — `gamma-api`/`clob.polymarket.com` return **HTTP
+  200**. The 403 egress block is **cloud-routine-env-specific, not universal**; from a permitted
+  host the public APIs are reachable with no credentials. So I did the data half for real.
+- **Shipped (one PR):** `scripts/fetch_polymarket_history.py` (reusable driver); an `order` param
+  on `fetch_resolved_markets` + a forwarding test; `data/polymarket_history_sample.json` (54 real
+  leakage-safe records) + `data/README.md`; `docs/autonomous-loop/OA11_REAL_DATA_VALIDATION.md`
+  (findings); bookkeeping (PENDING_OPS OA-11, ROADMAP A2, LOOP_HEALTH, this entry).
+- **THE bug only a real run could find:** `fetch_resolved_markets` hardcoded `order=endDate`,
+  which surfaces **never-traded junk** — markets closed early with a far-future endDate (saw
+  `endDate=2028-01-01` on a "closed" market) and an EMPTY CLOB price history → every one skipped
+  by the anti-leakage guard → **0 records**, every lead. Fix: `order=volumeNum` harvests markets
+  that ACTUALLY TRADED → 54/100 yield a leakage-safe record. **Lesson: ordering resolved markets
+  by endDate is a trap; order by volume to get markets with real CLOB history. Offline fixtures
+  never exposed this — only a live run did. The 30/90-day price-history probes also taught that
+  CLOB `/prices-history` rejects windows that are "too long" (400) and the fetcher's small
+  [decision-buffer, resolution] windows are why it works.**
+- **THE honest finding (the real value, not a PnL number):** on the most-liquid recently-resolved
+  markets, **crowd Brier ≈ 0.09** and **~70% are already price-pinned (<0.05/>0.95) two days out**
+  — and staying at leads of 5d/7d kept the SAME ~54 markets ~70% pinned (they pinned early); 14d →
+  0 markets. So the crowd is *very sharp* exactly where deep CLOB history exists, and walk-forward
+  makes **0 trades** because `model_prob == crowd` by construction (the fetcher seeds it to the
+  crowd baseline; a real model must override it). It reproduces deterministically (seed_hash
+  `8dc358439ffb5746`). **Lesson: unblocking egress was necessary but NOT sufficient. The binding
+  constraint MOVED from "can't reach data" → "(a) sample markets before they pin + (b) build a
+  real alpha model (track B)." Both are loop-buildable — this is convergence, not a dead-end. Did
+  NOT tick the floor box; fitting model_prob on this same sample would be leakage/overfitting and
+  is forbidden.**
+- **Honesty guard held:** refused to manufacture an edge. The committed dataset + every doc state
+  the liquidity-selection + survivorship + late-life-pinning biases explicitly.
+- **How to apply:** to grow a real OOS corpus, schedule `fetch_polymarket_history.py --order
+  volumeNum` on a network-permitted host (OA-11, now `in_progress`/medium). Next edge work is
+  track B (a model forming an independent decision-time probability on less-pinned markets), not
+  another data-access task.
+
 ## 2026-06-28 — Made "self-improving" measurable: LOOP_HEALTH metric + abandoned-change classification
 
 - **Why:** we grade the PRODUCT every run (deep audit §10, QUALITY_SCORECARD §8) but never

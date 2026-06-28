@@ -301,3 +301,16 @@ def test_fetch_loop_respects_max_pages():
 
     gamma_calls = [c for c in session.calls if c["url"] == f"{GAMMA_API}/markets"]
     assert len(gamma_calls) == 3
+
+
+def test_order_param_forwarded_default_and_override():
+    """The Gamma sort field is forwarded. Default is 'endDate' (back-compat); callers can
+    pass order='volumeNum' to harvest markets that actually traded (OA-11 real-data run)."""
+    session = FakeSession(lambda u, p: [])
+    fetcher = PolymarketHistoryFetcher(session=session)
+
+    fetcher.fetch_resolved_markets(limit=10, max_pages=1)
+    assert session.calls[-1]["params"]["order"] == "endDate"
+
+    fetcher.fetch_resolved_markets(limit=10, max_pages=1, order="volumeNum")
+    assert session.calls[-1]["params"]["order"] == "volumeNum"
