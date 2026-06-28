@@ -229,6 +229,105 @@ def test_seed_hash_covers_all_pnl_inputs():
     assert walk_forward_backtest(data, seed=42).seed_hash == base
 
 
+def _market_liq(i, price, model, outcome, decide_day, resolve_day, liquidity):
+    return HistoricalMarket(
+        market_id=f"m{i}",
+        decision_time=BASE + timedelta(days=decide_day),
+        resolution_time=BASE + timedelta(days=resolve_day),
+        market_price=price,
+        model_prob=model,
+        outcome=outcome,
+        liquidity=liquidity,
+    )
+
+
+def _edge_dataset_liq(n, liquidity):
+    markets = []
+    for i in range(n):
+        outcome = 1 if (i % 10) < 7 else 0
+        markets.append(_market_liq(i, price=0.50, model=0.70, outcome=outcome,
+                                   decide_day=i, resolve_day=i + 1, liquidity=liquidity))
+    return markets
+
+
+def test_thin_liquidity_realizes_worse_pnl_on_same_trades():
+    """Two identical datasets except one is THIN (small liquidity). The thin book pays
+    more market impact → fewer contracts per dollar → worse realized PnL on a winning
+    edge (the depth-aware fill cost in action)."""
+    deep = walk_forward_backtest(_edge_dataset_liq(300, liquidity=1e9), seed=7)
+    thin = walk_forward_backtest(_edge_dataset_liq(300, liquidity=50.0), seed=7)
+    # Both trade the same markets/edge; the thin book just costs more to fill.
+    assert deep.n_trades == thin.n_trades
+    assert thin.total_pnl_usd < deep.total_pnl_usd
+
+
+def test_liquidity_none_matches_flat_behavior():
+    """A dataset with liquidity=None must produce IDENTICAL results to the legacy path
+    (no impact applied) — zero behavior change for existing callers."""
+    legacy = walk_forward_backtest(_edge_dataset(120), seed=7)
+    none_liq = walk_forward_backtest(_edge_dataset_liq(120, liquidity=None), seed=7)
+    assert legacy.total_pnl_usd == none_liq.total_pnl_usd
+    assert [t.pnl_usd for t in legacy.trades] == [t.pnl_usd for t in none_liq.trades]
+
+
+def test_determinism_holds_with_liquidity():
+    data = _edge_dataset_liq(120, liquidity=500.0)
+    a = walk_forward_backtest(data, seed=42)
+    b = walk_forward_backtest(data, seed=42)
+    assert a.seed_hash == b.seed_hash
+    assert a.total_pnl_usd == b.total_pnl_usd
+    assert [t.pnl_usd for t in a.trades] == [t.pnl_usd for t in b.trades]
+
+
+def test_seed_hash_covers_liquidity():
+    """Changing the liquidity signal must change the fingerprint (it now affects PnL)."""
+    base = walk_forward_backtest(_edge_dataset_liq(60, liquidity=None), seed=42).seed_hash
+    thin = walk_forward_backtest(_edge_dataset_liq(60, liquidity=100.0), seed=42).seed_hash
+    assert thin != base
+
+
+def test_seed_hash_covers_impact_coeff():
+    """impact_coeff drives the depth-aware fill cost, so it MUST be in the fingerprint.
+    Two runs over the SAME liquidity-bearing data + seed but different impact_coeff must
+    produce a DIFFERENT seed_hash AND a different PnL — otherwise the hash would certify
+    two materially different results as identical (a reproducibility-invariant violation)."""
+    from backend.app.prediction_markets.cost_model import CostModel
+    # liquidity=2000 keeps the impact UNSATURATED (below the 1.0 cap) so changing
+    # impact_coeff genuinely moves PnL — at a very thin book both coeffs saturate at the
+    # cap and PnL would coincide, hiding the effect.
+    data = _edge_dataset_liq(60, liquidity=2000.0)
+    r_lo = walk_forward_backtest(data, seed=42, cost_model=CostModel(impact_coeff=0.5))
+    r_hi = walk_forward_backtest(data, seed=42, cost_model=CostModel(impact_coeff=1.0))
+    assert r_lo.seed_hash != r_hi.seed_hash
+    assert r_lo.total_pnl_usd != r_hi.total_pnl_usd
+    # And with NO liquidity, impact_coeff cannot affect PnL — but the honest fingerprint
+    # still distinguishes the configs (it covers all PnL-relevant CONFIG, conservatively).
+    flat = _edge_dataset_liq(60, liquidity=None)
+    f_lo = walk_forward_backtest(flat, seed=42, cost_model=CostModel(impact_coeff=0.5))
+    f_hi = walk_forward_backtest(flat, seed=42, cost_model=CostModel(impact_coeff=1.0))
+    assert f_lo.total_pnl_usd == f_hi.total_pnl_usd       # flat path ignores impact_coeff
+    assert f_lo.seed_hash != f_hi.seed_hash               # but the config still differs
+
+
+def test_cash_deployed_matches_budget_under_impact():
+    """The no-double-count invariant must hold even with impact: deployed cash equals
+    contracts * effective_cost for every trade (impact is reflected in contract count,
+    not as a second cash charge)."""
+    res = walk_forward_backtest(_edge_dataset_liq(120, liquidity=200.0), seed=3)
+    assert res.n_trades > 0
+    for t in res.trades:
+        assert t.effective_cost > t.entry_price          # flat + impact both add cost
+        assert t.budget_usd == pytest.approx(t.contracts * t.effective_cost, rel=1e-9)
+        assert t.pnl_usd == pytest.approx(t.payout_usd - t.budget_usd, rel=1e-9)
+
+
+def test_liquidity_must_be_positive():
+    with pytest.raises(ValueError, match="liquidity"):
+        _market_liq(1, 0.5, 0.7, 1, decide_day=0, resolve_day=1, liquidity=0.0)
+    with pytest.raises(ValueError, match="liquidity"):
+        _market_liq(1, 0.5, 0.7, 1, decide_day=0, resolve_day=1, liquidity=-5.0)
+
+
 def test_capital_tied_up_until_resolution():
     """A position opened in one window but resolving far later ties up its cost basis:
     a second candidate decided BEFORE the first resolves is sized off reduced free cash,

@@ -24,7 +24,9 @@ the real venue fee schedule / order-book depth is wired, update these in ONE pla
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from typing import Optional
 
 
 # Canonical paper/most-conservative cost rates. These MATCH execution.py's
@@ -33,6 +35,19 @@ from dataclasses import dataclass
 DEFAULT_SLIPPAGE_RATE = 0.005   # market-order slippage, fraction of price
 DEFAULT_FEE_RATE = 0.02         # venue fee, fraction of traded notional
 
+# Default market-impact coefficient for the depth/order-book model (see
+# CostModel.effective_buy_price_with_impact). This is a SIMPLIFIED, NOT-CALIBRATED
+# parameter: at impact_coeff = 0.5, an order equal to the visible depth (size == depth)
+# pays an extra ~50% (sqrt mode) of the slipped price as impact before the cap. It is
+# deliberately CONSERVATIVE (over-states cost when depth is uncertain) — the safe
+# direction for capacity claims. Tune in ONE place when real book depth is wired.
+DEFAULT_IMPACT_COEFF = 0.5
+# Hard cap on the impact fraction so a pathological size/depth ratio cannot push the
+# all-in cost arbitrarily high; the per-contract price is independently capped at 1.0.
+DEFAULT_MAX_IMPACT_FRACTION = 1.0
+# Floor on depth to keep the size/depth ratio finite when depth -> 0.
+_DEPTH_EPS = 1e-9
+
 
 @dataclass(frozen=True)
 class CostModel:
@@ -40,6 +55,12 @@ class CostModel:
 
     slippage_rate: float = DEFAULT_SLIPPAGE_RATE
     fee_rate: float = DEFAULT_FEE_RATE
+    # SIMPLIFIED order-book-depth / market-impact coefficient. Defaulted so existing
+    # ``CostModel()`` construction, ``DEFAULT_COST_MODEL``, and frozen-dataclass
+    # equality/hash are all unchanged for callers that never set it. Used ONLY by the
+    # *_with_impact methods below; the flat-rate path (effective_buy_price / net_edge /
+    # contracts_for_budget) ignores it entirely, so existing behavior is BIT-IDENTICAL.
+    impact_coeff: float = DEFAULT_IMPACT_COEFF
 
     def effective_buy_price(self, market_price: float) -> float:
         """All-in cost per YES contract when buying at ``market_price``.
@@ -78,6 +99,99 @@ class CostModel:
         if c_eff <= 0:
             return 0.0
         return budget_usd / c_eff
+
+    # -----------------------------------------------------------------------
+    # SIMPLIFIED order-book-depth / market-impact model (ROADMAP C2/C3)
+    # -----------------------------------------------------------------------
+    # WHY: the flat slippage above is a single fixed fraction regardless of how big the
+    # order is relative to the book. That UNDERSTATES cost for a large order in a thin
+    # market — exactly the "near-certainty NO books are illiquid" regime an auditor
+    # flagged, where a marginal positive net edge is really erased by the impact of
+    # walking a shallow book. This adds a size/depth-aware ADD-ON on top of the flat
+    # rate. It is a TOY model (not calibrated to real books): we approximate walking the
+    # book to progressively worse prices by a closed-form impact fraction that GROWS with
+    # the order's size relative to visible depth. Real ``polymarket_client.OrderBook``
+    # depth can feed ``depth_contracts`` later; until then this is intentionally
+    # CONSERVATIVE (over-states cost when depth is uncertain) — the safe direction for
+    # capacity / edge-survival claims.
+    def impact_fraction(
+        self,
+        order_size_contracts: float,
+        depth_contracts: Optional[float],
+        impact_coeff: Optional[float] = None,
+    ) -> float:
+        """Extra slippage fraction (of the slipped price) from walking a finite book.
+
+        Model: ``impact = impact_coeff * sqrt(size / depth)``, clamped to
+        ``[0, DEFAULT_MAX_IMPACT_FRACTION]``. Sqrt (concave) impact is the standard
+        conservative shape — impact per unit size grows sublinearly, matching that the
+        first contracts hit the best quotes and only a large sweep reaches deep levels.
+
+        Continuity to the flat rate: as ``depth_contracts -> infinity`` (a very deep book
+        relative to the order) the ratio ``size/depth -> 0`` so ``impact -> 0`` smoothly,
+        with NO discontinuity — the all-in price reduces continuously to the flat
+        ``effective_buy_price``. ``depth=None`` is treated as "unknown/infinite depth" and
+        returns 0 impact (flat behavior), so liquidity-less callers are unchanged.
+
+        It is always >= 0, so impact can only ADD cost, never reduce it.
+        """
+        if depth_contracts is None:
+            return 0.0
+        if order_size_contracts <= 0.0:
+            return 0.0
+        coeff = self.impact_coeff if impact_coeff is None else impact_coeff
+        if coeff <= 0.0:
+            return 0.0
+        ratio = order_size_contracts / max(depth_contracts, _DEPTH_EPS)
+        frac = coeff * math.sqrt(max(ratio, 0.0))
+        # Clamp into [0, max] — monotone non-decreasing in size up to the cap, then flat.
+        return min(max(frac, 0.0), DEFAULT_MAX_IMPACT_FRACTION)
+
+    def effective_buy_price_with_impact(
+        self,
+        market_price: float,
+        order_size_contracts: float,
+        depth_contracts: Optional[float],
+        impact_coeff: Optional[float] = None,
+    ) -> float:
+        """All-in cost per contract INCLUDING size/depth market impact.
+
+        Built strictly ON TOP of the flat ``effective_buy_price`` so that flat price is a
+        hard FLOOR: the impact term only ever adds. Concretely, impact is applied to the
+        slipped price (price after flat slippage) and added on, then the venue fee is
+        applied to the impacted notional, and the result is capped at $1.0 (breakeven)
+        exactly like the flat path. When ``depth_contracts`` is None or huge relative to
+        the order, impact -> 0 and this returns exactly the flat ``effective_buy_price``
+        (no discontinuity).
+        """
+        flat = self.effective_buy_price(market_price)
+        impact = self.impact_fraction(order_size_contracts, depth_contracts, impact_coeff)
+        if impact <= 0.0:
+            return flat
+        slipped = market_price * (1.0 + self.slippage_rate)
+        impacted = slipped * (1.0 + impact)
+        c_eff = impacted * (1.0 + self.fee_rate)
+        # Floor at the flat all-in price (never reduce below it) and cap at 1.0 (breakeven),
+        # matching effective_buy_price's no-optimism cap.
+        return min(max(c_eff, flat), 1.0)
+
+    def net_edge_with_impact(
+        self,
+        win_probability: float,
+        market_price: float,
+        order_size_contracts: float,
+        depth_contracts: Optional[float],
+        impact_coeff: Optional[float] = None,
+    ) -> float:
+        """Edge net of costs INCLUDING market impact: ``win_probability - impacted_cost``.
+
+        The size-aware analogue of ``net_edge``. A marginal positive net edge can flip
+        NEGATIVE here once a large order in a thin book pays realistic impact — the
+        intended guard against over-stating capacity in illiquid near-certainty books.
+        """
+        return win_probability - self.effective_buy_price_with_impact(
+            market_price, order_size_contracts, depth_contracts, impact_coeff
+        )
 
 
 # Module-level default instance (canonical costs).

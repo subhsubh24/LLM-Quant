@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Sequence
 
-from backend.app.prediction_markets.cost_model import DEFAULT_COST_MODEL, CostModel
+from .cost_model import DEFAULT_COST_MODEL, CostModel
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,12 @@ class HistoricalMarket:
     market_price: float          # crowd P[YES] at decision_time, in [0, 1]
     model_prob: float            # strategy P[YES] at decision_time, in [0, 1]
     outcome: int                 # 1 if YES resolved true, else 0
+    # OPTIONAL order-book depth signal (in contracts) observable at decision_time. When
+    # present it feeds the SIMPLIFIED market-impact model in cost_model so a large order
+    # in a THIN market pays realistic size/depth slippage. Defaulted to None so every
+    # existing positional/keyword construction (tests + fetcher) is unchanged, and a None
+    # market is priced at the FLAT rate exactly as before (zero behavior change).
+    liquidity: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.market_price <= 1.0):
@@ -73,6 +79,10 @@ class HistoricalMarket:
             raise ValueError(f"model_prob out of [0,1]: {self.model_prob}")
         if self.outcome not in (0, 1):
             raise ValueError(f"outcome must be 0/1: {self.outcome}")
+        if self.liquidity is not None and not (self.liquidity > 0.0):
+            # Depth must be a positive number of contracts when supplied; a non-positive
+            # depth is a data error (the impact model divides by it).
+            raise ValueError(f"liquidity (depth) must be > 0 when set: {self.liquidity}")
         if self.resolution_time <= self.decision_time:
             # Strictly positive holding period. A market that "resolves" the instant it
             # is decided is not a real tradeable opportunity and would let capital be
@@ -221,8 +231,32 @@ def _settle(
         basis = 1.0 - m.market_price
         win = m.outcome == 0
 
-    c_eff = cost_model.effective_buy_price(basis)
-    contracts = cost_model.contracts_for_budget(budget_usd, basis)
+    # COST BASIS — flat vs depth-aware. When the market carries a depth signal
+    # (``m.liquidity``), price the fill through the SIMPLIFIED market-impact model so a
+    # large order in a thin book pays realistic size/depth slippage. Otherwise use the
+    # flat rate (UNCHANGED behavior for liquidity=None markets and all existing tests).
+    #
+    # NO-DOUBLE-COUNT / cash==budget invariant. The impact-inclusive per-contract cost
+    # depends on the order size, which is itself what we are solving for (budget / cost)
+    # — a circular dependency. We break it WITHOUT a fixed-point solve and WITHOUT
+    # charging impact twice, in a fixed, documented order of operations:
+    #   1. size a *representative* order at the FLAT price (size0 = budget / c_flat);
+    #   2. evaluate the impact-inclusive per-contract cost ONCE at that representative
+    #      size (c_eff = effective_buy_price_with_impact(basis, size0, depth));
+    #   3. size the FINAL contracts from the budget at that single c_eff
+    #      (contracts = budget / c_eff), and deploy exactly contracts * c_eff.
+    # Because the final cash is budget/c_eff * c_eff, deployed == budget EXACTLY — the
+    # impact is reflected in the *number of contracts* (a thin book buys fewer contracts
+    # per dollar and therefore earns a smaller payout), not added as a second cash charge
+    # on top of the budget. Impact is computed once at a representative size, so it is
+    # neither double-counted nor self-referential.
+    if m.liquidity is None:
+        c_eff = cost_model.effective_buy_price(basis)
+        contracts = cost_model.contracts_for_budget(budget_usd, basis)
+    else:
+        size0 = cost_model.contracts_for_budget(budget_usd, basis)
+        c_eff = cost_model.effective_buy_price_with_impact(basis, size0, m.liquidity)
+        contracts = budget_usd / c_eff if c_eff > 0.0 else 0.0
     if contracts <= 0.0:
         return None
     # Each contract pays $1 on a win, $0 on a loss. Cash deployed == budget (the
@@ -417,12 +451,22 @@ def _seed_hash(
         "initial_bankroll": round(initial_bankroll, 12),
         "slippage_rate": round(cost_model.slippage_rate, 12),
         "fee_rate": round(cost_model.fee_rate, 12),
+        # impact_coeff drives effective_buy_price_with_impact, which changes PnL for any
+        # liquidity-bearing market — so it MUST be in the fingerprint or two runs with
+        # different impact but identical data/seed would share a hash yet diverge in PnL
+        # (a reproducibility-invariant violation). Covered by test_seed_hash_covers_impact_coeff.
+        "impact_coeff": round(cost_model.impact_coeff, 12),
         "train_min_days": train_min_days,
         "test_window_days": test_window_days,
         "max_fraction_per_trade": round(max_fraction_per_trade, 12),
         "markets": [
+            # liquidity is included so determinism/fingerprint covers the depth signal
+            # that now affects fill cost. Existing markets have liquidity=None → stored as
+            # JSON null, a stable representation, so same-data runs keep consistent hashes
+            # and the cost-rate-change hash test still holds.
             [m.market_id, m.decision_time.isoformat(), m.resolution_time.isoformat(),
-             round(m.market_price, 12), round(m.model_prob, 12), m.outcome]
+             round(m.market_price, 12), round(m.model_prob, 12), m.outcome,
+             None if m.liquidity is None else round(m.liquidity, 12)]
             for m in sorted(markets, key=lambda x: (x.decision_time, x.market_id))
         ],
     }

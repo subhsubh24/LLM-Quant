@@ -122,6 +122,91 @@ def test_contracts_for_budget_uses_effective_cost():
 
 
 # ---------------------------------------------------------------------------
+# Depth / market-impact model (ROADMAP C2/C3)
+# ---------------------------------------------------------------------------
+
+def test_impact_price_exceeds_flat_for_large_order_in_thin_book():
+    cm = DEFAULT_COST_MODEL
+    price = 0.50
+    flat = cm.effective_buy_price(price)
+    # Large order (10k contracts) into a thin book (1k depth) pays extra impact.
+    thin = cm.effective_buy_price_with_impact(price, order_size_contracts=10_000.0,
+                                              depth_contracts=1_000.0)
+    assert thin > flat
+
+
+def test_impact_price_approx_flat_for_small_order_in_deep_book():
+    cm = DEFAULT_COST_MODEL
+    price = 0.50
+    flat = cm.effective_buy_price(price)
+    # Tiny order into a very deep book → impact is negligible → ≈ flat.
+    deep = cm.effective_buy_price_with_impact(price, order_size_contracts=1.0,
+                                              depth_contracts=1e12)
+    assert math.isclose(deep, flat, rel_tol=1e-6)
+
+
+def test_impact_none_depth_equals_flat_exactly():
+    cm = DEFAULT_COST_MODEL
+    price = 0.50
+    # depth None means unknown/infinite depth → exactly the flat price (no discontinuity).
+    assert cm.effective_buy_price_with_impact(price, 10_000.0, None) == \
+        cm.effective_buy_price(price)
+
+
+def test_impact_is_monotone_non_decreasing_in_order_size():
+    cm = DEFAULT_COST_MODEL
+    price, depth = 0.40, 2_000.0
+    sizes = [0.0, 1.0, 10.0, 100.0, 1_000.0, 5_000.0, 50_000.0, 500_000.0]
+    prices = [cm.effective_buy_price_with_impact(price, s, depth) for s in sizes]
+    for a, b in zip(prices, prices[1:]):
+        assert b >= a - 1e-12
+
+
+def test_impact_never_reduces_price_below_flat():
+    cm = DEFAULT_COST_MODEL
+    flat = cm.effective_buy_price(0.30)
+    for size in (0.0, 1.0, 1e6):
+        for depth in (None, 1.0, 1e3, 1e9):
+            p = cm.effective_buy_price_with_impact(0.30, size, depth)
+            assert p >= flat - 1e-12
+
+
+def test_impact_price_capped_at_one():
+    cm = DEFAULT_COST_MODEL
+    # Enormous order into a razor-thin book — impact blows up but price caps at 1.0.
+    p = cm.effective_buy_price_with_impact(0.95, order_size_contracts=1e9,
+                                           depth_contracts=1.0)
+    assert p == 1.0
+
+
+def test_thin_book_large_order_flips_marginal_edge_negative():
+    """The auditor concern: a near-certainty NO book is illiquid, so the modeled flat
+    slippage understates cost and reports a spurious positive edge. With depth-aware
+    impact a large order in a thin book erases that marginal edge → net edge < 0."""
+    cm = DEFAULT_COST_MODEL
+    # price 0.90 → flat all-in cost ≈ 0.9226; p=0.93 leaves a thin (~0.7%) positive net.
+    p, price = 0.93, 0.90
+    # Flat net edge is (marginally) positive at this price...
+    assert cm.net_edge(p, price) > 0
+    # ...but a large order against a thin book pushes the all-in cost above p → negative.
+    flat_net = cm.net_edge_with_impact(p, price, order_size_contracts=1.0,
+                                       depth_contracts=1e12)
+    thin_net = cm.net_edge_with_impact(p, price, order_size_contracts=20_000.0,
+                                       depth_contracts=1_000.0)
+    assert flat_net > 0            # tiny order in a deep book still shows the edge
+    assert thin_net < 0            # large order in a thin book erases it
+
+
+def test_default_cost_model_construction_unchanged():
+    """Adding impact_coeff as a defaulted field must not change CostModel() identity or
+    the existing flat methods, nor break frozen-dataclass equality/hash."""
+    assert CostModel() == DEFAULT_COST_MODEL
+    assert hash(CostModel()) == hash(DEFAULT_COST_MODEL)
+    # Flat path is untouched by the new field.
+    assert CostModel().effective_buy_price(0.5) == DEFAULT_COST_MODEL.effective_buy_price(0.5)
+
+
+# ---------------------------------------------------------------------------
 # Cost-aware sizing through the orchestrator
 # ---------------------------------------------------------------------------
 
