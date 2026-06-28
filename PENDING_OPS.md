@@ -78,11 +78,11 @@ OWNER_ACTIONS:
       why: "ROADMAP G3 is now DONE in code: prediction_markets/audit_log.py adds a durable PredictionAuditLog SQLModel table + best-effort AuditLogger, wired as an observer into the scan loop, recording every signal/risk/kelly decision + every (would-be) order on the ORM DB (no raw sqlite). The only remaining owner action is the DB hosting choice."
       how: "Confirm the backend host's DATABASE_URL points at the durable Neon Postgres (not an ephemeral container SQLite) so audit rows survive restarts. No code change needed."
     - id: OA-11
-      title: "Run the resolved-history fetcher where Polymarket egress is permitted (unblocks real-data OOS validation)"
-      priority: high
-      status: open
-      why: "The binding constraint for go-live is a VALIDATED out-of-sample edge on REAL resolved-Polymarket data. The leakage-safe fetcher (prediction_markets/polymarket_history_fetcher.py) is built + tested, but the autonomous build environment's egress policy BLOCKS outbound HTTPS to gamma-api.polymarket.com / clob.polymarket.com (403 at the proxy), so the loop cannot pull real history itself. Until the fetcher runs against real data, walk_forward + the calibration eval have only synthetic/fixture data and no DoD/floor box can tick."
-      how: "Run scripts (or a small driver around PolymarketHistoryFetcher.fetch_resolved_markets + build_historical_markets) in an environment where Polymarket's public Gamma + CLOB APIs are reachable — e.g. the backend host, or widen the autonomous env's egress allowlist to include gamma-api.polymarket.com and clob.polymarket.com. Feed the resulting HistoricalMarket records into scripts/run_walk_forward.py + the B2 calibration eval. No credentials are needed (public read-only data)."
+      title: "Schedule the resolved-history fetcher on a network-permitted host (accumulate a real OOS corpus)"
+      priority: medium
+      status: in_progress
+      why: "PARTLY DONE (2026-06-28): the fetcher was run from a network-permitted host and the pipeline is VALIDATED on REAL data — 54 leakage-safe records (data/polymarket_history_sample.json), walk-forward reproduces deterministically (seed_hash 8dc358439ffb5746). Findings in docs/autonomous-loop/OA11_REAL_DATA_VALIDATION.md: the crowd is very sharp on liquid near-resolution markets (Brier ~0.09, ~70% already price-pinned 2 days out), so NO edge exists at those points and the floor box correctly stays unticked. The binding constraint has MOVED from 'can't reach data' to 'need (a) markets sampled before they pin + (b) a real alpha model (ROADMAP track B)' — not an egress problem anymore. The autonomous build env STILL can't refresh the dataset (egress 403 at the proxy), so periodic real-data refresh remains owner/host scope."
+      how: "Run scripts/fetch_polymarket_history.py (--order volumeNum) on a schedule where Polymarket's public Gamma + CLOB APIs are reachable — the backend host (a cron/worker) or a network-permitted CI job — to grow a real OOS corpus over time, OR widen the autonomous env's egress allowlist to gamma-api.polymarket.com + clob.polymarket.com so the loop can refresh it itself. No credentials needed (public read-only data). The EDGE work (a real model; sampling earlier-life markets) is loop-buildable and tracked under ROADMAP track B — it is NOT an owner action."
 ```
 
 ## Quick reference
@@ -97,7 +97,7 @@ OWNER_ACTIONS:
 | OA-6 | Flip `LIVE_TRADING_ENABLED` | 🟠 high | pending |
 | OA-9 | Keep Neon `DATABASE_URL` private (no Data API lockdown needed) | 🟡 medium | pending |
 | OA-10 | Audit log BUILT (G3); confirm `DATABASE_URL` is durable Neon | ⚪ low | in progress |
-| OA-11 | Run history fetcher where Polymarket egress is permitted (real-data OOS) | 🟠 high | pending |
+| OA-11 | Real-data run DONE (pipeline validated); schedule periodic fetch on a permitted host | 🟡 medium | in progress |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 

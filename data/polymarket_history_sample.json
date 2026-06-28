@@ -1,0 +1,434 @@
+[
+  {
+    "decision_time": "2024-11-03T12:00:00+00:00",
+    "market_id": "253591",
+    "market_price": 0.5665,
+    "model_prob": 0.5665,
+    "outcome": 1,
+    "resolution_time": "2024-11-05T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-02T12:00:00+00:00",
+    "market_id": "253597",
+    "market_price": 0.4235,
+    "model_prob": 0.4235,
+    "outcome": 0,
+    "resolution_time": "2024-11-04T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-01-18T12:00:00+00:00",
+    "market_id": "511754",
+    "market_price": 0.9855,
+    "model_prob": 0.9855,
+    "outcome": 1,
+    "resolution_time": "2025-01-20T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-12-06T12:00:00+00:00",
+    "market_id": "512340",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-12-08T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-06-28T12:00:00+00:00",
+    "market_id": "546814",
+    "market_price": 0.0605,
+    "model_prob": 0.0605,
+    "outcome": 0,
+    "resolution_time": "2025-06-30T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T00:00:00+00:00",
+    "market_id": "253642",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-01-26T00:00:00+00:00",
+    "market_id": "601697",
+    "market_price": 0.0015,
+    "model_prob": 0.0015,
+    "outcome": 0,
+    "resolution_time": "2026-01-28T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-01-26T00:00:00+00:00",
+    "market_id": "601700",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2026-01-28T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-06-13T00:00:00+00:00",
+    "market_id": "2270330",
+    "market_price": 0.182,
+    "model_prob": 0.182,
+    "outcome": 1,
+    "resolution_time": "2026-06-15T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-04-05T00:00:00+00:00",
+    "market_id": "1706788",
+    "market_price": 0.0125,
+    "model_prob": 0.0125,
+    "outcome": 1,
+    "resolution_time": "2026-04-07T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-03-16T00:00:00+00:00",
+    "market_id": "654415",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2026-03-18T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T12:00:00+00:00",
+    "market_id": "253727",
+    "market_price": 0.738,
+    "model_prob": 0.738,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-12-08T00:00:00+00:00",
+    "market_id": "570360",
+    "market_price": 0.0065,
+    "model_prob": 0.0065,
+    "outcome": 0,
+    "resolution_time": "2025-12-10T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-01-29T00:00:00+00:00",
+    "market_id": "680392",
+    "market_price": 0.645,
+    "model_prob": 0.645,
+    "outcome": 1,
+    "resolution_time": "2026-01-31T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T00:00:00+00:00",
+    "market_id": "253609",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-11-02T12:00:00+00:00",
+    "market_id": "538932",
+    "market_price": 0.9415,
+    "model_prob": 0.9415,
+    "outcome": 1,
+    "resolution_time": "2025-11-04T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-02T12:00:00+00:00",
+    "market_id": "253595",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-04T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-05T12:00:00+00:00",
+    "market_id": "504494",
+    "market_price": 0.004,
+    "model_prob": 0.004,
+    "outcome": 0,
+    "resolution_time": "2024-11-07T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-12-08T00:00:00+00:00",
+    "market_id": "570363",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2025-12-10T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-02-26T00:00:00+00:00",
+    "market_id": "1180303",
+    "market_price": 0.0105,
+    "model_prob": 0.0105,
+    "outcome": 1,
+    "resolution_time": "2026-02-28T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T12:00:00+00:00",
+    "market_id": "253706",
+    "market_price": 0.262,
+    "model_prob": 0.262,
+    "outcome": 1,
+    "resolution_time": "2024-11-05T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T00:00:00+00:00",
+    "market_id": "253641",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T12:00:00+00:00",
+    "market_id": "507242",
+    "market_price": 0.053,
+    "model_prob": 0.053,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T00:00:00+00:00",
+    "market_id": "253593",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-01-26T00:00:00+00:00",
+    "market_id": "601699",
+    "market_price": 0.9905,
+    "model_prob": 0.9905,
+    "outcome": 1,
+    "resolution_time": "2026-01-28T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-03-29T00:00:00+00:00",
+    "market_id": "1484949",
+    "market_price": 0.0045,
+    "model_prob": 0.0045,
+    "outcome": 0,
+    "resolution_time": "2026-03-31T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-10-27T12:00:00+00:00",
+    "market_id": "553813",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2025-10-29T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-01-26T00:00:00+00:00",
+    "market_id": "601698",
+    "market_price": 0.0065,
+    "model_prob": 0.0065,
+    "outcome": 0,
+    "resolution_time": "2026-01-28T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T00:00:00+00:00",
+    "market_id": "253610",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-02T12:00:00+00:00",
+    "market_id": "504873",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-04T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-12-22T00:37:17+00:00",
+    "market_id": "797327",
+    "market_price": 0.9965,
+    "model_prob": 0.9965,
+    "outcome": 1,
+    "resolution_time": "2025-12-24T00:37:17+00:00"
+  },
+  {
+    "decision_time": "2026-01-29T00:00:00+00:00",
+    "market_id": "1198423",
+    "market_price": 0.475,
+    "model_prob": 0.475,
+    "outcome": 1,
+    "resolution_time": "2026-01-31T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-06-01T12:00:00+00:00",
+    "market_id": "534189",
+    "market_price": 0.954,
+    "model_prob": 0.954,
+    "outcome": 1,
+    "resolution_time": "2025-06-03T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-05-29T00:00:00+00:00",
+    "market_id": "1919425",
+    "market_price": 0.115,
+    "model_prob": 0.115,
+    "outcome": 0,
+    "resolution_time": "2026-05-31T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-03-16T00:00:00+00:00",
+    "market_id": "654413",
+    "market_price": 0.0035,
+    "model_prob": 0.0035,
+    "outcome": 0,
+    "resolution_time": "2026-03-18T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-05-29T12:00:00+00:00",
+    "market_id": "507300",
+    "market_price": 0.4115,
+    "model_prob": 0.4115,
+    "outcome": 0,
+    "resolution_time": "2025-05-31T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-12-29T00:00:00+00:00",
+    "market_id": "812010",
+    "market_price": 0.455,
+    "model_prob": 0.455,
+    "outcome": 0,
+    "resolution_time": "2025-12-31T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-12-29T23:55:00+00:00",
+    "market_id": "551963",
+    "market_price": 0.0035,
+    "model_prob": 0.0035,
+    "outcome": 0,
+    "resolution_time": "2025-12-31T23:55:00+00:00"
+  },
+  {
+    "decision_time": "2026-04-27T00:00:00+00:00",
+    "market_id": "669662",
+    "market_price": 0.9985,
+    "model_prob": 0.9985,
+    "outcome": 1,
+    "resolution_time": "2026-04-29T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-04-27T00:00:00+00:00",
+    "market_id": "669663",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2026-04-29T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-03-29T00:00:00+00:00",
+    "market_id": "1162940",
+    "market_price": 0.125,
+    "model_prob": 0.125,
+    "outcome": 0,
+    "resolution_time": "2026-03-31T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-12-29T12:00:00+00:00",
+    "market_id": "516719",
+    "market_price": 0.0035,
+    "model_prob": 0.0035,
+    "outcome": 0,
+    "resolution_time": "2025-12-31T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-06-21T12:00:00+00:00",
+    "market_id": "507868",
+    "market_price": 0.289,
+    "model_prob": 0.289,
+    "outcome": 0,
+    "resolution_time": "2025-06-23T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-06-01T12:00:00+00:00",
+    "market_id": "534197",
+    "market_price": 0.0445,
+    "model_prob": 0.0445,
+    "outcome": 0,
+    "resolution_time": "2025-06-03T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-12-18T12:00:00+00:00",
+    "market_id": "511753",
+    "market_price": 0.0135,
+    "model_prob": 0.0135,
+    "outcome": 0,
+    "resolution_time": "2024-12-20T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T12:00:00+00:00",
+    "market_id": "253592",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2024-11-03T00:00:00+00:00",
+    "market_id": "253731",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2024-11-05T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-04-26T12:00:00+00:00",
+    "market_id": "516767",
+    "market_price": 0.23,
+    "model_prob": 0.23,
+    "outcome": 0,
+    "resolution_time": "2025-04-28T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-09-15T12:00:00+00:00",
+    "market_id": "542539",
+    "market_price": 0.0215,
+    "model_prob": 0.0215,
+    "outcome": 0,
+    "resolution_time": "2025-09-17T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-09-15T12:00:00+00:00",
+    "market_id": "542540",
+    "market_price": 0.0015,
+    "model_prob": 0.0015,
+    "outcome": 0,
+    "resolution_time": "2025-09-17T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-04-27T00:00:00+00:00",
+    "market_id": "669660",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2026-04-29T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-04-27T00:00:00+00:00",
+    "market_id": "669661",
+    "market_price": 0.0005,
+    "model_prob": 0.0005,
+    "outcome": 0,
+    "resolution_time": "2026-04-29T00:00:00+00:00"
+  },
+  {
+    "decision_time": "2025-01-18T12:00:00+00:00",
+    "market_id": "503013",
+    "market_price": 0.986,
+    "model_prob": 0.986,
+    "outcome": 1,
+    "resolution_time": "2025-01-20T12:00:00+00:00"
+  },
+  {
+    "decision_time": "2026-03-29T00:00:00+00:00",
+    "market_id": "958442",
+    "market_price": 0.0045,
+    "model_prob": 0.0045,
+    "outcome": 0,
+    "resolution_time": "2026-03-31T00:00:00+00:00"
+  }
+]

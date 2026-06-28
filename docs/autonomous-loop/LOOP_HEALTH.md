@@ -39,34 +39,35 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-28
-  last_run: 2026-06-28          # prior factory run (3-PR real-data/impact/audit-log run, #45-48)
+  last_run: 2026-06-28          # prior run: LOOP_HEALTH seed apparatus (#49)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   this_run:
-    changes_shipped: 1          # the LOOP_HEALTH observability apparatus (this PR)
+    changes_shipped: 1          # OA-11 real-data validation (driver + fetcher order param + dataset + findings)
     changes_abandoned: 0
     abandoned_reasons: []        # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
     verify_cycle_failures: 0
     review_rejections: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 42              # git: squash-merged (#NN) commits, last 7 days
+    merged_prs: 43              # git: squash-merged (#NN) commits, last 7 days
     reverts: 0                  # git: no revert commits in the window
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs yet; WATCH: Polymarket egress-block (403) hit 1x this window -> OA-11 (blocked_owner). A 2nd hit with no resolution => 'stuck' => harness proposal.
+    recurring_failures: []       # nothing has failed >=2 runs yet. WATCH: Polymarket egress-block (403) — but this run RESOLVED it for data access (ran the fetcher from a permitted host); residual is only periodic-refresh scheduling (OA-11, blocked_owner). No longer trending toward 'stuck'.
     harness_proposals_open: 0    # gh: no open `loop: harness improvement proposal` issues
-  signal: bootstrapping          # seed run — first datapoint; no prior LOOP_HEALTH to trend against. Next run can read improving/steady/churning/stuck.
+  signal: improving              # 2nd datapoint: 43 merged / 0 reverts / 0 abandoned, and the egress wall that loomed last run was knocked down to a scheduling residual (binding constraint moved data-access -> model, which is loop-buildable). Converging, not churning.
 ```
 
-## How to read the seed
+## How to read the latest signal
 
-This is the **first** datapoint, so the signal is `bootstrapping` by definition — there is
-nothing prior to trend against. For context (not yet a trend): the last-7-day raw throughput
-is healthy — **42 merged PRs, 0 reverts, 0 abandoned this run** — which *if it holds next run*
-reads as `improving`/`steady`. The one cloud on the horizon is the **Polymarket egress block**
-(403 at the env proxy), which made real-data OOS validation impossible and was correctly handed
-to the owner as **OA-11** (`blocked_owner`, not a loop-rule failure). It has been hit **once**.
-Per FACTORY_STANDARD §10b, if the same wall blocks convergence on a **second** run without
-resolution, that flips the signal toward `stuck` and is the trigger to open one
-`loop: harness improvement proposal` issue (e.g. "the loop needs a network-permitted lane for
-real-data validation").
+**2026-06-28 (2nd datapoint) — `improving`.** Throughput is healthy (**43 merged / 0 reverts /
+0 abandoned** over 7 days), and the wall that loomed last run got knocked down: the **Polymarket
+egress block** (403 at the env proxy) that made real-data OOS validation impossible was resolved
+*for data access* by running the leakage-safe fetcher from a network-permitted host (54 real
+records, pipeline reproduces — see `OA11_REAL_DATA_VALIDATION.md`). It did NOT recur as a
+convergence wall, so it is **not** trending toward `stuck`; the residual is only *periodic
+refresh scheduling* (OA-11, `blocked_owner`). Crucially the binding constraint **moved** from
+data-access to "need a real alpha model" — which is **loop-buildable** (track B), i.e. forward
+motion, not a dead-end. Per FACTORY_STANDARD §10b, had that same wall blocked a second run with
+no progress, the rule would have flipped the signal to `stuck` and required one
+`loop: harness improvement proposal`. It didn't — so none is opened, honestly.

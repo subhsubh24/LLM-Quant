@@ -146,6 +146,7 @@ class PolymarketHistoryFetcher:
         limit: int = 500,
         max_pages: int = 10,
         categories: Optional[Sequence[str]] = None,
+        order: str = "endDate",
     ) -> List[ResolvedMarket]:
         """Page Gamma ``/markets`` for closed, unambiguously-settled binary markets.
 
@@ -153,17 +154,26 @@ class PolymarketHistoryFetcher:
         are not binary, lack token ids / endDate, or whose ``outcomePrices`` are not
         unambiguously settled (≈[1,0] or ≈[0,1]) are SKIPPED (logged), never guessed.
 
+        ``order`` is the Gamma sort field (descending). The default ``"endDate"`` sorts
+        by resolution date, but in practice that surfaces never-traded junk — markets
+        closed early with a far-future endDate and an EMPTY CLOB price history, so every
+        one is skipped by the anti-leakage guard for lack of a pre-decision tick. Pass
+        ``order="volumeNum"`` to harvest markets that ACTUALLY TRADED (liquid, multi-day,
+        retrievable CLOB history) — the only ones that yield a leakage-safe record.
+
         SELECTION/SURVIVORSHIP BIAS (see module docstring): excluding ambiguous /
         contested / re-resolved markets biases the sample toward clean crowd-friendly
-        outcomes — any eval built on it overstates crowd calibration and must say so.
-        ``categories`` must be PRE-REGISTERED, not chosen after seeing results.
+        outcomes — and ``order="volumeNum"`` adds a LIQUIDITY-selection bias (only deep
+        markets). Both are defensible + PRE-REGISTERED here, but any eval built on this
+        sample overstates crowd calibration and must say so. ``categories`` must be
+        PRE-REGISTERED, not chosen after seeing results.
         """
         cats = {c.lower() for c in categories} if categories else None
         out: List[ResolvedMarket] = []
         for page in range(max_pages):
             params = {
                 "closed": "true",
-                "order": "endDate",
+                "order": order,
                 "ascending": "false",
                 "limit": limit,
                 "offset": page * limit,
