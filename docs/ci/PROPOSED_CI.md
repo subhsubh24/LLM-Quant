@@ -59,10 +59,12 @@ incident recently).
    **alone** turns on lint-at-zero in the existing blocking gate — **no `.github/` edit
    needed**.
 
-### A3. Branch protection — 🔶 OWNER ONE-TIME (the actual "required check" toggle)
+### A3. Branch protection — ✅ APPLIED (2026-06-28, owner-authorized)
 
-The branch `claude/llm-stock-trading-app-fXupf` is **not protected** today, so the blocking
-gate is advisory — a red gate does not actually stop a merge. Make it required:
+**DONE.** `claude/llm-stock-trading-app-fXupf` is now protected, requiring **only**
+`code + safety gate (blocking)`, `strict=true`, `enforce_admins=false`. A broken-for-a-user
+change can no longer auto-merge. Issue #51 closed; OA-12 done. The command used (re-runnable to
+adjust):
 
 ```bash
 # Requires admin on the repo. Enable branch protection requiring the blocking gate.
@@ -138,7 +140,7 @@ checkpoint, so it must be a conscious tradeoff.
 
 | Step | Scope | Status |
 |------|-------|--------|
-| Enable branch protection requiring `code + safety gate (blocking)` (A3 command) | admin | 🔶 OA-12 |
+| Enable branch protection requiring `code + safety gate (blocking)` (A3 command) | admin | ✅ OA-12 done |
 | (After lint hits zero) nothing — lint rides inside the same required job | — | ⏸️ ROADMAP F7 |
 | Part B migrate job | — | ⏭️ skipped (no migrations) |
 

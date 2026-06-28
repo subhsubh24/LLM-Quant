@@ -86,9 +86,9 @@ OWNER_ACTIONS:
     - id: OA-12
       title: "Make the blocking CI gate a REQUIRED check (branch protection) so broken changes can't auto-merge"
       priority: high
-      status: open
-      why: "The branch is currently UNPROTECTED, so the green 'code + safety gate (blocking)' job is advisory — a change that regresses the live gate / kill switch / paper-pipeline reproduction could still merge. Requiring the check is the one-time admin toggle the loop cannot do for itself (admin + .github/repo-settings scope). Build/verify already passes on every PR. See docs/ci/PROPOSED_CI.md §A3 and the harness-improvement-proposal issue."
-      how: "Run the gh-api branch-protection command in docs/ci/PROPOSED_CI.md §A3. Require ONLY the context 'code + safety gate (blocking)'. Do NOT require 'go-live readiness (informational)' (it is intentionally honest-red until a validated edge exists — requiring it blocks every merge forever). Leave enforce_admins=false for a manual override. Lint-at-zero (ROADMAP F7) will later ride inside this same job — no change to the required-checks list."
+      status: done
+      why: "DONE (2026-06-28, owner-authorized): branch protection enabled on claude/llm-stock-trading-app-fXupf requiring ONLY 'code + safety gate (blocking)', strict=true (must be up to date), enforce_admins=false (manual override retained). The green gate is now REQUIRED — a change that regresses the live gate / kill switch / paper-pipeline reproduction can no longer auto-merge. Applied via the gh-api call in docs/ci/PROPOSED_CI.md §A3 (a repo-settings API action, not a .github/ file edit); harness issue #51 closed."
+      how: "Already applied. To adjust later: re-run / edit the branch-protection command in docs/ci/PROPOSED_CI.md §A3. When lint-at-zero (ROADMAP F7) is green, ruff rides inside this same job — the required-checks list does NOT change."
 ```
 
 ## Quick reference
@@ -104,7 +104,7 @@ OWNER_ACTIONS:
 | OA-9 | Keep Neon `DATABASE_URL` private (no Data API lockdown needed) | 🟡 medium | pending |
 | OA-10 | Audit log BUILT (G3); confirm `DATABASE_URL` is durable Neon | ⚪ low | in progress |
 | OA-11 | Real-data run DONE (pipeline validated); schedule periodic fetch on a permitted host | 🟡 medium | in progress |
-| OA-12 | Make `code + safety gate (blocking)` a REQUIRED check (branch protection) | 🟠 high | pending |
+| OA-12 | Make `code + safety gate (blocking)` a REQUIRED check (branch protection) | 🟠 high | ✅ done |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 
