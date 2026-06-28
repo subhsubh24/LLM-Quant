@@ -2,6 +2,27 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Gate-on-unbuilt-loop audit + DECISION COROLLARY
+
+- **Auth is CLEAN:** single shared-password gate (login → checkPassword → cookie → app).
+  **No signup, no email verification, no "check your email", no reset/2FA** — so LLM-Quant
+  does NOT have the email-verification dead-end outage. (Verified the code, not assumed.)
+- **Found + fixed a generalized gate-on-unbuilt-loop:** the predictions panel's
+  per-strategy enable/disable toggle was a **FAKE control** — `toggleStrategy` only flipped
+  local React state; the orchestrator ran every strategy regardless. A user "disabling"
+  Flash Crash saw it dimmed while the bot kept trading it.
+  - **Decision (explicit):** REMOVE the gate (don't fake a control whose backend loop
+    isn't built). Strip is now a **read-only status display** (per-strategy positions +
+    PnL); the "Strategies" stat reads "N active" not "X/7 enabled". Frontend builds.
+  - Real control deferred to **ROADMAP B6** — re-add the toggle ONLY once a journey test
+    proves toggling actually changes which strategies the bot runs.
+  - Not logged in PENDING_OPS: it's a build decision, not a human-core owner action
+    (PENDING_OPS OWNER_ACTIONS is dashboard-read owner blockers — a build decision would
+    pollute it). Recorded here + in ROADMAP B6 instead.
+- **DECISION COROLLARY** added to FACTORY_STANDARD §6 (canonical sync): never introduce a
+  feature/gate whose dependency loop doesn't exist — wire it and prove the loop, or don't
+  gate on it. A gate on an unbuilt loop is a self-inflicted outage.
+
 ## 2026-06-28 — Adopted deep-diagnosis discipline
 
 - Added [`docs/autonomous-loop/DEEP_DIAGNOSIS.md`](autonomous-loop/DEEP_DIAGNOSIS.md):

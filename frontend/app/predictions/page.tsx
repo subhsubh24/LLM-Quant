@@ -410,10 +410,6 @@ export default function PredictionsPage() {
     return () => clearInterval(interval);
   }, [activeTab, isLive]);
 
-  const toggleStrategy = (id: string) => {
-    setStrategies((prev) => prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
-  };
-
   // ----------------------------------------------------------------
   // Derived State
   // ----------------------------------------------------------------
@@ -421,7 +417,9 @@ export default function PredictionsPage() {
   const positionCount = livePositions.length;
   const totalPnl = portfolioSummary?.total_pnl ?? strategies.reduce((sum, s) => sum + s.pnl, 0);
   const unrealizedPnl = useMemo(() => livePositions.reduce((s, p) => s + p.pnl, 0), [livePositions]);
-  const enabledCount = strategies.filter((s) => s.enabled).length;
+  // The bot runs all known strategies server-side (there is no per-strategy on/off
+  // loop yet — see ROADMAP), so "active" = the full set, not a user-toggled subset.
+  const activeStrategyCount = strategies.length;
   const effectiveScanCount = botStatus?.total_scans || scanCount;
   const lastScanOpps = botStatus?.last_scan_opportunities || 0;
   const filteredMarkets = markets.filter((m) =>
@@ -513,7 +511,7 @@ export default function PredictionsPage() {
           <div className="px-6 lg:px-8 py-2 flex items-center gap-2">
             <Loader2 className="w-3 h-3 text-primary-foreground animate-spin" />
             <span className="text-[11px] font-medium text-primary-foreground/90">
-              Scanning {enabledCount} strategies across Polymarket... This takes ~2 minutes.
+              Scanning {activeStrategyCount} strategies across Polymarket... This takes ~2 minutes.
             </span>
           </div>
           <div className="h-0.5 bg-primary-foreground/20 overflow-hidden">
@@ -539,7 +537,7 @@ export default function PredictionsPage() {
                 sub={portfolioSummary?.total_exposure ? `$${portfolioSummary.total_exposure.toFixed(2)} exposure` : null} />
               <StatCard label="Open Positions" value={String(positionCount)} color="text-foreground" icon={Activity}
                 sub={positionCount > 0 ? `${new Set(livePositions.map(p => p.strategy)).size} strategies` : null} />
-              <StatCard label="Strategies" value={`${enabledCount}/${strategies.length}`} color="text-foreground" icon={Zap}
+              <StatCard label="Strategies" value={`${activeStrategyCount} active`} color="text-foreground" icon={Zap}
                 sub={botRunning ? "Bot running" : "Bot idle"} />
               <StatCard label="Scans" value={String(effectiveScanCount)} color="text-foreground" icon={BarChart3}
                 sub={lastScanOpps > 0 ? `${lastScanOpps} opps last scan` : null} />
@@ -548,19 +546,18 @@ export default function PredictionsPage() {
         </div>
 
         {/* Strategy Strip */}
+        {/* Read-only status strip: the bot runs all strategies server-side. This is a
+            STATUS display (per-strategy positions + PnL), NOT a control — there is no
+            backend enable/disable loop, so we don't fake one. Real strategy on/off is
+            tracked as ROADMAP B (strategy control) for when the loop is built. */}
         <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
           {strategies.map((strategy) => {
             const dotColor = strategyDotColors[strategy.id] || "bg-gray-500";
             return (
-              <button key={strategy.id} onClick={() => toggleStrategy(strategy.id)}
-                className={cn(
-                  "flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-all",
-                  strategy.enabled
-                    ? "glass-card hover:border-primary/30"
-                    : "border-border bg-muted/30 opacity-40"
-                )}
+              <div key={strategy.id}
+                className="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl border text-left glass-card"
               >
-                <div className={cn("w-2 h-2 rounded-full flex-shrink-0", dotColor, !strategy.enabled && "opacity-40")} />
+                <div className={cn("w-2 h-2 rounded-full flex-shrink-0", dotColor)} />
                 <div className="min-w-0">
                   <span className="text-[11px] font-semibold text-foreground whitespace-nowrap">{strategy.name}</span>
                   <div className="flex items-center gap-2">
@@ -570,7 +567,7 @@ export default function PredictionsPage() {
                     </span>
                   </div>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
