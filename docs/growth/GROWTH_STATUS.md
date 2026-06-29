@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-29
   phase: pre_launch
   engine_built: false
-  engine_pct: 68
+  engine_pct: 70
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -159,11 +159,15 @@ GROWTH_STATUS:
     - "B3/E6 learning-loop ENGINES built (#64): strategy_registry.py (alpha lifecycle state machine with a fail-loud integrity gate — promotion impossible without recorded backtest+OOS+calibration evidence) + per_strategy_metrics.py (pure per-strategy realized-PnL attribution, reconciles to total, no fabricated rows). Pure deterministic engines; NOT yet wired into the live loop (no DoD box). Opus auditors could not bypass the promotion gate or find fabricated attribution."
     - "A5 wall-clock staleness now FIRES (#66): Market carries a fetched_at ingest timestamp (stamped at parse), so the fetch-age staleness gate flags a stale in-memory snapshot in the live scan path (was a no-op). Never enters any backtest seed_hash."
     - "GATE STRENGTHENED again: the blocking preflight now also runs test_calibration/data_quality/market_text/strategy_registry/per_strategy_metrics (176 -> ~290 enforced tests)."
+    - "B4a FIRST model_prob != crowd alpha BUILT (calibration_bucket_strategy.py): per-price-bucket empirical-calibration model + strategy; fits per-bucket YES-rates on a leakage-safe training set, ABSTAINS below min_bucket_n (default 30, never hardcodes), RAISES on empty fit; plugs into walk_forward (fresh model per call) + a live wrapper that abstains entirely without a fitted model (no fake control, left UNWIRED). 24 tests: recovers an injected OOS edge, 0/$0 on a well-calibrated crowd, cost band suppresses sub-threshold miscalibration, leakage-safe + reproduces. 3 fresh Opus auditors CANNOT-BREAK (no leakage, no fabricated edge, no overclaim). The MECHANISM, not a validated edge — needs the 7-day OOS corpus (OA-11) to prove a real edge; no DoD/floor box ticked."
+    - "E5/E2 learning engines WIRED into the live loop (metrics_aggregator.compute_evaluation_windows + compute_calibration_drift; orchestrator.get_resolved_evaluation_trades + get_resolved_predictions; GET /metrics/evaluation-windows + /metrics/calibration-drift). Honest degenerate path: zero-trade windows never fabricated, Brier null without per-trade calibration, drift returns insufficient_data (never a false 'no drift = good'). 2 Sonnet + 1 Opus auditor CANNOT-BREAK."
+    - "C5 dashboard UI BUILT (frontend/components/metrics/*): MetricsPanel + Weekly/Floor/Calibration/PerStrategy/EvaluationWindows cards render all /prediction-markets/metrics/* endpoints under a new Metrics tab; honest degenerate rendering (floor NOT MET with real avg, calibration note verbatim + Brier '—', drift 'not enough data', nulls as '—', a 0-trades banner). npm run build clean. F5 Playwright visual-verification of these states still pending."
+    - "GATE STRENGTHENED again: test_calibration_bucket_strategy.py added to the blocking preflight list."
   next_actions:
     - "EXP-002 activation (HIGHEST-EV owner action): re-run OA-11 with 7-day decision_lead using the EXISTING script: `python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500 --max-pages 3 --min-volume 1000 --merge --out data/polymarket_history_7d.json`. No code changes needed — the flag already exists. This single action unlocks the first real calibration test and is the prerequisite for all calibration alphas."
-    - "EXP-002 factory build: once the 7-day corpus arrives, build CalibrationBucketStrategy (in strategies.py or a new file) — fits per-bucket empirical resolution rates from the training 60%; returns model_prob = bucket_rate for markets in miscalibrated buckets; ABSTAINS if bucket_n < 20 (never hardcodes fiction). This is the first strategy that would produce model_prob != crowd."
-    - "WIRE the new learning-loop engines into the live loop: per_strategy_metrics against orchestrator.get_resolved_trades() (tag by PredictionPosition.strategy) for real per-strategy attribution; strategy_registry to record real alpha state transitions (persisted). These touch the orchestrator (shared file) — a focused follow-up."
-    - "Build the dashboard UI component (frontend, folds with F5) that renders the new /prediction-markets/metrics/* endpoints so paper metrics are visible end-to-end."
+    - "EXP-002 factory build DONE (calibration_bucket_strategy.py) — the CalibrationBucketStrategy is built, tested (24 deterministic tests, 3 Opus auditors CANNOT-BREAK), and plugs into walk_forward. The ONLY remaining EXP-002 blocker is the 7-day-lead OOS corpus (OA-11, owner/egress-scope): once it arrives, fit the model on the training 60%, run the 60/40 OOS test through walk_forward + the B2 calibration gate, and report Brier improvement + net PnL with the bootstrap CI. NEXT factory step (loop-buildable, no data needed): wire the fitted-model fit path into a research/owner entry point + the B3 lifecycle so a proven model can be promoted."
+    - "E5 (evaluation-window) + E2 (calibration-drift) engines are now WIRED into the live loop + exposed read-only (this run). Remaining E-track wiring: feed the B3 registry retirement from the E2 drift signal + drive E5 reconcile from versioned live configs once a real alpha produces a non-degenerate resolved stream."
+    - "Dashboard UI component BUILT (this run): frontend/components/metrics/* renders all /prediction-markets/metrics/* endpoints honestly. Remaining: the F5 Playwright visual-verification suite to LOOK at the rendered empty/degenerate/error states against the VISION design bar."
     - "Once real 7-day data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth."
     - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5 remainder)."
     - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); confirm the audit log's DATABASE_URL is durable (OA-10)."
@@ -173,7 +177,18 @@ GROWTH_STATUS:
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 68` (up from 66) WIRES the previously-pure learning-loop engines into the
+`engine_pct: 70` (up from 68) adds the FIRST `model_prob != crowd` alpha mechanism
+(`CalibrationBucketStrategy` — the per-bucket empirical-calibration model + strategy, the
+EXP-002 build, leakage-safe + abstaining + 3-Opus-auditor-clean), WIRES the last two pure
+learning engines into the running system (E5 evaluation-windows + E2 calibration-drift now
+flow from the resolved stream through new read-only endpoints with an honest
+degenerate/insufficient-data path), and makes paper metrics VISIBLE end-to-end (the
+`frontend/components/metrics/` dashboard renders every `/metrics/*` endpoint with honest
+empty/degenerate states). The validated EDGE itself is still absent — the calibration-bucket
+strategy is the MECHANISM that *could* produce model_prob != crowd, but proving a real edge
+needs the 7-day-lead OOS corpus (OA-11, owner/egress-scope), so no DoD/floor box ticks and
+the bulk of the missing % remains. Prior rationale (engine_pct 68, up from 66) WIRES the
+previously-pure learning-loop engines into the
 running system and adds two more: per-strategy realized-PnL attribution (E6) flows from
 resolved positions through a new `/metrics/per-strategy` endpoint; the alpha-lifecycle
 registry (B3) is now persisted (a durable singleton table) + exposed read-only, seeded

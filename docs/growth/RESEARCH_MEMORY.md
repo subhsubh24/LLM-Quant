@@ -365,3 +365,50 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   delivers the first calibration baseline.
 - **Cross-platform arb (Polymarket/Kalshi):** Still speed-dominated (tightest gaps close within
   seconds per 2026 reports). Insufficient data on whether the bot can execute fast enough.
+
+## 2026-06-29 — EXP-002 mechanism BUILT: CalibrationBucketStrategy (first model_prob != crowd alpha) + E5/E2 wired + dashboard
+- Hypothesis (falsifiable): a per-price-bucket empirical-calibration model — fit per-bucket
+  YES-rates on a leakage-safe training set, replace the crowd price with the bucket's empirical
+  rate, abstain below a min-sample floor — can (a) RECOVER a real OOS calibration edge when the
+  crowd is genuinely miscalibrated AND (b) trade ~nothing / lose-to-costs when the crowd is
+  well-calibrated (no fabricated edge). This is the EXP-002 mechanism.
+- Min sample N: `min_bucket_n` default 30 resolved training markets PER BUCKET (below that the
+  bucket is uncalibrated and the strategy abstains — never hardcodes a rate).
+- OOS result: **insufficient data (real corpus) — the MECHANISM is built + proven on synthetic.**
+  On synthetic data with an INJECTED bucket miscalibration (crowd 0.65, true rate 0.85) the
+  walk-forward recovers the edge and makes positive OOS PnL; on a faithfully well-calibrated
+  crowd it makes 0 trades / $0; a sub-threshold (1-cent) miscalibration is suppressed by the
+  cost band. No real edge is claimed — proving one needs the 7-day-lead OOS corpus (OA-11).
+- Calibration (Brier / reliability): not measured on real data (still no non-degenerate
+  resolved predictions). The strategy is the first that WOULD produce model_prob != crowd to run
+  the B2 eval against.
+- Costs modeled: yes — sizing + the no-trade band use `cost_model` net edge (same fees+slippage
+  the executor charges), so a few-cent miscalibration is correctly eaten by costs.
+- Verdict: **proposed → mechanism built (edge-not-proven).** 24 deterministic tests; 2 Sonnet
+  reviewers + 3 fresh Opus auditors CANNOT-BREAK (leakage structural via walk_forward, no
+  fabricated edge, no overclaim — docstring states "a mechanism, not a validated edge").
+- **THE adversarial lessons this run (the gate earned its keep again):**
+  - **Shared mutable state in a StrategyFn closure (2 reviewers caught it):** the first cut built
+    ONE CalibrationBucketModel in `make_calibration_bucket_strategy` and re-`fit()` it on every
+    call. Harmless under walk_forward's serial expanding-window use, but a latent bug: re-using the
+    same closure on a different corpus would silently carry stale stats, and an empty training set
+    would RAISE and crash the backtest. **Fix: a FRESH model per call + an empty-training abstain
+    guard; added `test_strategy_fn_refits_on_each_call`. Lesson: a closure that holds a mutable
+    model is not "pure" — build the model inside the call or document a serial-only contract;
+    prove re-use with a test, and make "no data" abstain, never raise on a hot path.**
+  - **An auditor named the idealized-test trap (honesty depth):** the "0 trades on a well-calibrated
+    crowd" test gets EXACTLY 0 only because the synthetic empirical rate lands on the penny. A real
+    finite-sample well-calibrated crowd jitters off the penny and WOULD place noise trades — which
+    LOSE to costs on average (the auditor measured negative mean PnL over 20 seeds). **The honest
+    move: annotate the idealized test + add `test_cost_band_suppresses_subthreshold_miscalibration`
+    (the real load-bearing mechanism — the ~3.7-cent cost band eats sub-threshold miscalibration),
+    and defer the empirical noise-trading question to a real OOS run in the docstring. Lesson: a
+    clean synthetic test can be honest about the mechanism while OVER-cleanly suggesting real-world
+    behaviour — name the idealization and test the load-bearing assumption directly.**
+- Why / next: the binding constraint is UNCHANGED but the mechanism for it now EXISTS — a real
+  decision-time alpha producing model_prob != crowd. The single highest-EV unlock is still OA-11
+  (the 7-day-lead corpus); once it lands, fit the bucket model on the training 60%, run the 60/40
+  OOS test through walk_forward + the B2 gate, and report Brier improvement + net PnL with the
+  bootstrap CI. Loop-buildable next (no data): a research/owner fit entry point + B3 promotion once
+  a model passes. E5 (windows) + E2 (drift) are now wired so the moment real trades flow they are
+  measured + monitored honestly. No DoD/floor box ticked.
