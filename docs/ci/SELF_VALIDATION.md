@@ -29,6 +29,10 @@ active flow depends on an unvalidated path. Live real-money keys are HUMAN-CORE 
 ```yaml
 SELF_VALIDATION:
   as_of: 2026-06-29
+  # ci_validatable: can the gate REALLY validate this with NO owner-only secret? An ACTIVE
+  # capability with ci_validatable:false is UNMET -> it surfaces (urgent OWNER_ACTION +
+  # LOOP_HEALTH validation.unmet) and blocks merges. real_flow_note (pitfall #5): for a
+  # mock/degrade/gated capability, where the genuinely-critical path is really exercised.
   capabilities:
     - id: paper_pipeline
       desc: "scan -> Kelly-size -> paper execute -> PnL, deterministic"
@@ -36,6 +40,7 @@ SELF_VALIDATION:
       mode: in_process_deterministic
       requires_env: []
       active: true
+      ci_validatable: true
       status: validated
     - id: risk_and_kill_switch
       desc: "loss caps + kill switch + position caps reject/halt orders"
@@ -43,6 +48,7 @@ SELF_VALIDATION:
       mode: in_process_deterministic
       requires_env: []
       active: true
+      ci_validatable: true
       status: validated
     - id: live_trading_path
       desc: "real-order placement on Polymarket (the gated live path)"
@@ -50,6 +56,8 @@ SELF_VALIDATION:
       mode: gated_off_proven        # built; LIVE_TRADING_ENABLED=false; validated AS gated-off
       requires_env: [POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE, POLYMARKET_PRIVATE_KEY, POLYMARKET_FUNDER]
       active: false                 # not reachable until the owner activates (human-core)
+      ci_validatable: true          # the gated-off PROOF needs no key; live activation is human-core, never a CI target
+      real_flow_note: "the money-critical side-effect (order placement) is REALLY exercised: the harness drives a real order through execution.py and asserts the gate REJECTS it — not a stub."
       status: gated_off
     - id: llm_analysis
       desc: "Gemini-driven market/research analysis"
@@ -57,6 +65,8 @@ SELF_VALIDATION:
       mode: degrades_without_key
       requires_env: [GEMINI_API_KEY]
       active: true
+      ci_validatable: true          # the degraded (no-key) path is the one that runs in CI and is validated
+      real_flow_note: "analysis is advisory, never an order side-effect; the no-key template path is exercised, and a real key only enriches text (enhancement, not a critical path)."
       status: degrades_safely       # absent key => templates, never a fabricated analysis
     - id: db_persistence
       desc: "audit log + state persisted to Neon (prod) / SQLite (dev)"
@@ -64,6 +74,7 @@ SELF_VALIDATION:
       mode: in_process_deterministic
       requires_env: [DATABASE_URL]  # optional; falls back to local SQLite
       active: true
+      ci_validatable: true          # same ORM path exercised against SQLite; Postgres is the same SQLAlchemy dialect surface
       status: validated
     - id: polymarket_market_data
       desc: "read public Gamma + CLOB market data (no auth)"
@@ -71,6 +82,8 @@ SELF_VALIDATION:
       mode: mocked_offline
       requires_env: []
       active: true
+      ci_validatable: true          # no secret needed; the logic-critical part is parsing/anti-leakage, tested on realistic fixtures
+      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, incl. the real fetch run in OA-11); the live HTTP read is a thin GET with no business logic and no side-effect."
       status: validated
     - id: residual_legacy_data
       desc: "retired stock/crypto data-provider config (ROADMAP A1) — no active trading path uses it"
@@ -78,7 +91,14 @@ SELF_VALIDATION:
       mode: inactive
       requires_env: [FINNHUB_API_KEY, ALPACA_API_KEY, ALPACA_API_SECRET, BINANCE_API_KEY, BINANCE_API_SECRET, FRED_API_KEY]
       active: false
+      ci_validatable: false         # cannot validate a retired path — but active:false, so NOT unmet (inactive is exempt)
       status: inactive_residual
+  # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
+  # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
+  readiness:
+    enforced_in_ci: true
+    capabilities_total: 7
+    unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
     GEMINI_API_KEY:        {capability: llm_analysis, needed_to: enhance_analysis, owner_action: null}
@@ -107,3 +127,26 @@ depends on it, or **record the owner action** (PENDING_OPS) and mark it `needs_c
 list it in `unvalidated_blocking`, which **blocks every subsequent PR** until the owner provides
 the key. Never fake a validation to get green (side-effect integrity), and never ship an active
 capability with no validation story.
+
+## Readiness + surfacing (cross-factory addendum)
+
+`scripts/check_self_validation.py --readiness` is the **readiness** mode wired into the gate
+(preflight step 9d). It runs coverage + credential checks AND surfaces **unmet** capabilities.
+
+- **`ci_validatable`** per capability: can the gate REALLY validate it with **no owner-only
+  secret**? An **active** capability with `ci_validatable: false` is **UNMET**.
+- **An unmet capability must be visible in BOTH dashboard channels or it's a bug:** an urgent
+  PENDING_OPS `OWNER_ACTION` id `validation-capability-<service>` **and**
+  `LOOP_HEALTH.validation.unmet`. The checker fails if an unmet capability is missing from either.
+- **`readiness` block** here mirrors `LOOP_HEALTH.validation` (`enforced_in_ci`,
+  `capabilities_total`, `unmet`); the loop refreshes both every run.
+
+Pitfalls deliberately handled: scan covers **only `backend/app` runtime code** (not tests/
+scripts/CI — no false drift from CI-only env vars); the YAML parser (`pyyaml`) is a **declared**
+CI dependency and the gate **fails, never skips**, if it's absent; **two modes** — the default
+coverage check and `--readiness` (wired into the ship gate, any unmet fails). LLM-Quant runs the
+full readiness check on **every** PR (stronger than per-PR scoping), so no base-diff/`fetch-depth`
+machinery is needed. **Honesty (pitfall #5):** a capability marked `validated` via a
+mock/degrade/gated path carries a `real_flow_note` showing the genuinely-critical path is really
+exercised — and the adversarial auditors reconcile that a "validated" capability isn't a stubbed
+critical flow (the email-verification trap in a new form).

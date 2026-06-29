@@ -89,8 +89,11 @@ def check(root: dict | None = None, in_code: set[str] | None = None) -> list[str
         try:
             import yaml
         except ImportError:
-            print("  WARN pyyaml not installed; skipping self-validation check")
-            return []
+            # pitfall #2: the parser is a DECLARED dependency (backend/requirements-ci.txt).
+            # If it's missing the gate must FAIL, not silently skip — a vanished parser must
+            # never disable the check.
+            return ["pyyaml not installed — REQUIRED for the self-validation gate "
+                    "(declared in backend/requirements-ci.txt); refusing to skip."]
         block = _fenced_yaml(MANIFEST.read_text())
         if not block:
             return ["no fenced ```yaml SELF_VALIDATION block in the manifest"]
@@ -136,14 +139,97 @@ def check(root: dict | None = None, in_code: set[str] | None = None) -> list[str
     return fails
 
 
-def main() -> int:
-    fails = check()
+# ---------------------------------------------------------------------------
+# Readiness mode (--readiness): surface UNMET capabilities (active but only
+# validatable with an owner-only secret) and enforce they're visible in BOTH the
+# dashboard feeds — an urgent OWNER_ACTION AND the LOOP_HEALTH validation block.
+# ---------------------------------------------------------------------------
+def readiness(root: dict) -> dict:
+    """The validation sub-block the dashboard reads. An UNMET capability is one that is
+    ACTIVE but `ci_validatable: false` — it cannot be honestly validated in CI without an
+    owner-only secret (a gated-off or safely-degrading capability is NOT unmet)."""
+    caps = root.get("capabilities") or []
+    unmet = sorted(c.get("id") for c in caps if c.get("active") and not c.get("ci_validatable", True))
+    return {"enforced_in_ci": True, "capabilities_total": len(caps), "unmet": unmet}
+
+
+def _yaml_block(path: Path, tag: str) -> dict:
+    import yaml
+    if not path.exists():
+        return {}
+    for b in re.findall(r"```yaml\n(.*?)```", path.read_text(), re.S):
+        if re.search(rf"(^|\n)\s*{tag}\s*:", b):
+            try:
+                return (yaml.safe_load(b) or {}).get(tag, {}) or {}
+            except yaml.YAMLError:
+                return {}
+    return {}
+
+
+def check_readiness(root: dict | None = None) -> list[str]:
+    """Full gate: coverage + credential declaration + UNMET surfacing (dual-visibility)."""
+    try:
+        import yaml  # noqa: F401  (hard dep; pitfall #2)
+    except ImportError:
+        return ["pyyaml not installed — REQUIRED for the readiness gate."]
+    if root is None:
+        block = _fenced_yaml(MANIFEST.read_text()) if MANIFEST.exists() else ""
+        if not block:
+            return ["no fenced ```yaml SELF_VALIDATION block in the manifest"]
+        root = (yaml.safe_load(block) or {}).get("SELF_VALIDATION", {})
+
+    fails = check(root=root)
+    rd = readiness(root)
+
+    if rd["unmet"]:
+        # PENDING_OPS owner-action ids + LOOP_HEALTH validation.unmet (the two dashboard channels)
+        oa_items = (_yaml_block(ROOT / "PENDING_OPS.md", "OWNER_ACTIONS").get("items") or [])
+        oa_ids = {str(it.get("id", "")) for it in oa_items}
+        lh_unmet = set((_yaml_block(ROOT / "docs/autonomous-loop/LOOP_HEALTH.md", "LOOP_HEALTH")
+                        .get("validation", {}) or {}).get("unmet", []) or [])
+        for cid in rd["unmet"]:
+            fails.append(
+                f"capability '{cid}' is ACTIVE but ci_validatable=false (needs an owner-only "
+                f"secret) — UNMET, blocks merges until the owner provides it or it's gated off."
+            )
+            if f"validation-capability-{cid}" not in oa_ids:
+                fails.append(
+                    f"unmet '{cid}' is INVISIBLE to the owner: add an urgent OWNER_ACTION "
+                    f"'validation-capability-{cid}' to PENDING_OPS (the dashboard channel)."
+                )
+            if cid not in lh_unmet:
+                fails.append(
+                    f"unmet '{cid}' is missing from LOOP_HEALTH validation.unmet — an unmet "
+                    f"capability must appear in BOTH PENDING_OPS and LOOP_HEALTH or it's a bug."
+                )
+    return fails
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if "--readiness" in argv:
+        # Compute + print the validation block the loop copies into LOOP_HEALTH each run.
+        try:
+            import yaml
+            block = _fenced_yaml(MANIFEST.read_text())
+            root = (yaml.safe_load(block) or {}).get("SELF_VALIDATION", {})
+            rd = readiness(root)
+            print(f"  validation: enforced_in_ci={rd['enforced_in_ci']} "
+                  f"capabilities_total={rd['capabilities_total']} unmet={rd['unmet']}")
+        except Exception as e:
+            print(f"  self-validation readiness: FAIL ({e})")
+            return 1
+        fails = check_readiness(root=root)
+        label = "self-validation readiness"
+    else:
+        fails = check()
+        label = "self-validation coverage"
     if fails:
-        print("  self-validation coverage: FAIL")
+        print(f"  {label}: FAIL")
         for f in fails:
             print(f"    - {f}")
         return 1
-    print("  self-validation coverage: OK (every active capability validated; all credentials declared)")
+    print(f"  {label}: OK (every active capability validated; all credentials declared; no unmet)")
     return 0
 
 

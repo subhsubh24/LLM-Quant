@@ -42,21 +42,25 @@ LOOP_HEALTH:
   last_run: 2026-06-29          # prior run: factory 3-PR code run (B4a alpha + E5/E2 wiring + metrics dashboard, #74-77)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
+  validation:                   # self-validation capability readiness — refresh every run from `check_self_validation.py --readiness`
+    enforced_in_ci: true        # the coverage gate is a blocking preflight step (9d) inside the required check
+    capabilities_total: 7
+    unmet: []                   # active + ci_validatable:false capabilities (need an owner secret). NON-EMPTY => urgent OWNER_ACTION + blocks. Must match SELF_VALIDATION.readiness.unmet AND have a PENDING_OPS validation-capability-<id>.
   this_run:
-    changes_shipped: 1          # self-validation coverage gate (manifest + blocking checker + factory-routine discipline)
+    changes_shipped: 1          # self-validation ADDENDUM: --readiness mode + ci_validatable + unmet dual-surfacing + auditor honesty-reconcile
     changes_abandoned: 0
     abandoned_reasons: []
     verify_cycle_failures: 0
     review_rejections: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 71             # git: squash-merged (#NN) commits, last 7 days
+    merged_prs: 72             # git: squash-merged (#NN) commits, last 7 days
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
     recurring_failures: []       # OA-11 corpus refresh = owner/egress-scope (automatable, OA-13). No recurring wall.
     harness_proposals_open: 0
-  signal: improving              # 11th datapoint: added the self-validation coverage gate — every active capability must be really validated, and a NEW undeclared credential surfaces + blocks merges (proven via a simulated KALSHI_API_KEY). The loop can now mechanically guarantee it validates the app it builds. Converging.
+  signal: improving              # 12th datapoint: aligned the self-validation gate with the cross-factory addendum — `--readiness` mode, `ci_validatable`, UNMET capabilities surface in BOTH PENDING_OPS + LOOP_HEALTH.validation, pyyaml hardened (fail-not-skip), auditor honesty-reconcile lens. unmet=[] today. Converging.
 ```
 
 ## How to read the latest signal

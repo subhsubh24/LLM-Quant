@@ -301,7 +301,7 @@ say "9d. Self-validation coverage (every capability validated; new credential su
 # manifest. This is the forcing function: the loop cannot ship a capability it can't really
 # validate, and a NEW service needing a key surfaces (here + PENDING_OPS) and blocks merges.
 if [ -f scripts/check_self_validation.py ]; then
-  if "$PY" scripts/check_self_validation.py; then
+  if "$PY" scripts/check_self_validation.py --readiness; then
     ok "self-validation coverage"
   else
     bad "self-validation coverage failed"
