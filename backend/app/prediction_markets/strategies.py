@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult
+from .market_text import DEFAULT_MIN_SHARED, content_tokens, is_content_related
 
 logger = logging.getLogger(__name__)
 
@@ -577,16 +578,16 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                 ),
                             ))
 
-        # ── Phase 2: Keyword overlap heuristic ──
-        skip = {"will", "the", "a", "an", "in", "on", "at", "to", "of", "by", "be", "is"}
+        # ── Phase 2: Keyword overlap heuristic (HARDENED — ROADMAP B5) ──
+        # Group markets by CONTENT token (see market_text.py): a comprehensive stop-word
+        # set + a length-4 floor + a numeric drop, so filler/boilerplate words ("will",
+        # "market", "2024", "real", "sample") can no longer group/pair unrelated markets.
+        # This closes the phantom-signal hole an adversarial audit found (a weak skip set
+        # paired ~98 unrelated markets on shared boilerplate). See RESEARCH_MEMORY.
         keyword_groups: Dict[str, List[Market]] = {}
         for market in active_markets:
-            words = set(market.question.lower().split())
-            for word in words - skip:
-                if len(word) > 3:
-                    if word not in keyword_groups:
-                        keyword_groups[word] = []
-                    keyword_groups[word].append(market)
+            for word in content_tokens(market.question):
+                keyword_groups.setdefault(word, []).append(market)
 
         checked = set()
         for keyword, group in keyword_groups.items():
@@ -614,12 +615,12 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                         gap = abs(p1 - p2)
 
                         if gap >= self.min_inconsistency:
-                            shared_words = (
-                                set(m1.question.lower().split())
-                                & set(m2.question.lower().split())
-                                - skip
-                            )
-                            if len(shared_words) >= 3:
+                            # Require >= DEFAULT_MIN_SHARED shared CONTENT tokens (not
+                            # filler) before treating these as the same underlying
+                            # question — the hardened cross-market relatedness screen.
+                            if is_content_related(
+                                m1.question, m2.question, DEFAULT_MIN_SHARED
+                            ):
                                 results.append(ScanResult(
                                     market=m1 if p1 < p2 else m2,
                                     strategy=self.name,

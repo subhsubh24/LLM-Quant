@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult
 from .strategies import BaseStrategy, StrategyConfig
+from .market_text import content_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -446,16 +447,15 @@ class LogicalImplicationDetector(BaseStrategy):
         return entities
 
     def _extract_keywords(self, question: str) -> Set[str]:
-        """Extract meaningful keywords from a market question."""
-        stop_words = {
-            "will", "the", "a", "an", "in", "on", "at", "to", "of", "by",
-            "be", "is", "it", "do", "or", "and", "for", "this", "that",
-            "with", "from", "not", "but", "what", "when", "who", "how",
-            "has", "have", "been", "was", "were", "are", "does", "did",
-            "before", "after", "above", "below", "more", "than", "yes", "no",
-        }
-        words = set(re.findall(r'\b[a-z]{3,}\b', question.lower()))
-        return words - stop_words
+        """Extract meaningful CONTENT keywords from a market question.
+
+        Delegates to the shared, hardened ``market_text.content_tokens`` (ROADMAP B5):
+        a comprehensive stop-word set + a length-4 floor + a numeric-token drop, so the
+        keyword-overlap relationship discovery below (``shared >= 3``) no longer pairs
+        unrelated markets on shared filler/boilerplate. Entity- and threshold-based
+        discovery are unaffected (they use ``_extract_entities`` / regex).
+        """
+        return content_tokens(question)
 
     def _discover_relationships(self, markets: List[Market]):
         """
