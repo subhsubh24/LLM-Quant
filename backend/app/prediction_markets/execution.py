@@ -244,7 +244,42 @@ class PolymarketExecutor:
         Place an order on Polymarket.
 
         Uses py-clob-client if available, falls back to raw CLOB API.
+
+        DEFENSE-IN-DEPTH (ROADMAP D5/D6): even though PredictionMarketExecutor.execute()
+        already enforces the live gate, PolymarketExecutor is a public class and could be
+        called directly, bypassing the outer gate.  We enforce the same gate here so no
+        code path can reach a real venue call when LIVE_TRADING_ENABLED is false.
         """
+        # --- Fail-closed live gate (defense-in-depth) ---
+        # Check the master switch at the venue layer so a direct call to
+        # polymarket.place_order() cannot bypass the outer gate in execute().
+        try:
+            from ..config import get_settings
+            _live_ok = get_settings().live_trading_enabled
+        except Exception:
+            _live_ok = False  # safest default: treat as disabled
+
+        if not _live_ok:
+            logger.critical(
+                "[LIVE GATE / venue layer] Real order BLOCKED: "
+                "LIVE_TRADING_ENABLED is false (defense-in-depth at PolymarketExecutor)."
+            )
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                error=(
+                    "LIVE_TRADING_ENABLED is false — real order blocked at venue layer "
+                    "(defense-in-depth)"
+                ),
+            )
+
         try:
             client = self._get_clob_client()
         except RuntimeError:
@@ -277,10 +312,62 @@ class PolymarketExecutor:
             signed_order = client.create_and_sign_order(order_args)
             resp = client.post_order(signed_order)
 
+            # SIDE-EFFECT INTEGRITY (ROADMAP G2/F4.1): a reported fill must reflect a
+            # REAL matched execution — never an assumed fill from a non-error response.
+            # Malformed/None/non-numeric responses must → REJECTED, not a fabricated fill.
+            if resp is None:
+                logger.error(
+                    f"Polymarket CLOB returned None response for order; "
+                    f"raw resp: {resp!r}"
+                )
+                return OrderResult(
+                    order_id=str(uuid.uuid4()),
+                    exchange=Exchange.POLYMARKET,
+                    market_id=req.market_id,
+                    token_id=req.token_id,
+                    side=req.side,
+                    order_type=req.order_type,
+                    size=req.size,
+                    price=req.price,
+                    status=OrderStatus.REJECTED,
+                    error="malformed venue response",
+                )
+
             order_id = resp.get("orderID", resp.get("id", str(uuid.uuid4())))
+
+            # Only report FILLED when the venue explicitly says "matched" AND a valid
+            # matched size > 0 is parseable.  Any other combination → OPEN (resting) or
+            # REJECTED on parse failure.
+            venue_status = resp.get("status")
+            filled_size = 0.0
             status = OrderStatus.OPEN
-            if resp.get("status") == "matched":
-                status = OrderStatus.FILLED
+
+            if venue_status == "matched":
+                raw_matched = resp.get("matchedAmount")
+                try:
+                    parsed = float(raw_matched)
+                except (TypeError, ValueError):
+                    logger.error(
+                        f"Polymarket CLOB 'matched' but matchedAmount unparseable; "
+                        f"raw resp: {resp!r}"
+                    )
+                    return OrderResult(
+                        order_id=str(uuid.uuid4()),
+                        exchange=Exchange.POLYMARKET,
+                        market_id=req.market_id,
+                        token_id=req.token_id,
+                        side=req.side,
+                        order_type=req.order_type,
+                        size=req.size,
+                        price=req.price,
+                        status=OrderStatus.REJECTED,
+                        error="malformed venue response",
+                        raw_response=resp,
+                    )
+                if parsed > 0:
+                    filled_size = parsed
+                    status = OrderStatus.FILLED
+                # parsed == 0: venue said "matched" but amount is zero → leave OPEN
 
             return OrderResult(
                 order_id=order_id,
@@ -292,8 +379,8 @@ class PolymarketExecutor:
                 size=req.size,
                 price=req.price,
                 status=status,
-                filled_size=float(resp.get("matchedAmount", 0)),
-                filled_price=req.price or 0.50,
+                filled_size=filled_size,
+                filled_price=req.price if filled_size > 0 else 0.0,
                 raw_response=resp,
             )
         except Exception as e:
