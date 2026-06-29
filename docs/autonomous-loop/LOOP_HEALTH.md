@@ -39,27 +39,44 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-29
-  last_run: 2026-06-29          # prior run: 4-PR models/strategy run (#63-66 B5/B3/E6/B2/A5)
+  last_run: 2026-06-29          # prior run: research-only (EXP-002 proposal #73)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 1          # bookkeeping PR: RESEARCH_MEMORY (EXP-002 entry), GROWTH_STATUS (EXP-002 experiment), LOOP_HEALTH update
-    changes_abandoned: 0
-    abandoned_reasons: []        # no code changes attempted; near-certainty-NO longshot reversal hypothesis (N=34, ~2 outcomes) correctly classified as "insufficient data" and not proposed as an edge
-    verify_cycle_failures: 0
-    review_rejections: 0
+    changes_shipped: 4          # 3 file-disjoint code PRs (B4a calibration-bucket alpha; E5/E2 wiring; frontend metrics dashboard) + 1 bookkeeping PR
+    changes_abandoned: 4         # B6, per-leg arb, A4 (all want orchestrator.py — shared-file conflict with PR-2); Kalshi A3 + lint F7 (value-bar)
+    abandoned_reasons: ["conflict", "conflict", "conflict", "review_value"]  # 3x shared-file conflict (orchestrator owner = E5/E2 PR); A3+F7 dropped on value bar (premature / cosmetic-no-CI-benefit)
+    verify_cycle_failures: 0      # 1 consolidated fix cycle (shared-closure model + idealized-test) — caught pre-merge, not a gate failure
+    review_rejections: 0          # 2 Sonnet + 3 Opus auditors: all CANNOT-BREAK; one fix cycle applied, shipped on mechanical verification
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 59             # 58 prior + this bookkeeping PR
+    merged_prs: 53             # ~49 prior 7d window + this run's 4 PRs (#74-77)
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # OA-11 (7-day corpus) remains owner-scope; the binding constraint (model_prob == crowd) is loop-buildable via CalibrationBucketStrategy — not a dead-end, not a recurring failure.
+    recurring_failures: []       # OA-11 (7-day corpus) remains owner/egress-scope; the binding constraint now has a BUILT mechanism (CalibrationBucketStrategy) — convergence, not a dead-end.
     harness_proposals_open: 0
-  signal: steady                 # 9th datapoint: research-only run (1 bookkeeping PR, 0 code PRs). Correctly classified "insufficient data" on fixture calibration anomaly rather than over-claiming. Identified EXP-002 (7-day horizon) as the highest-EV owner action; no code changes needed. Converging but pacing limited by egress/owner-scope OA-11 re-run.
+  signal: improving              # 10th datapoint: 3-PR code run after a research run — built the FIRST model_prob!=crowd alpha mechanism (B4a), WIRED the last two pure learning engines (E5/E2), and made paper metrics visible end-to-end (dashboard). 3 Opus auditors CANNOT-BREAK; the adversarial gate caught a real shared-closure bug + an idealized-test honesty gap, both fixed in one cycle. 4 items correctly DEFERRED on disjoint/value rules (not scarcity).
 ```
 
 ## How to read the latest signal
+
+**2026-06-29 (10th datapoint — factory run) — `improving`, the binding constraint now has a BUILT mechanism, and disjoint discipline held under contention.**
+Shipped 3 file-disjoint code PRs + 1 bookkeeping from an 8-scout sweep: the FIRST `model_prob != crowd`
+alpha mechanism (`CalibrationBucketStrategy` — per-bucket empirical calibration, leakage-safe, abstaining,
+3-Opus-auditor-clean), the E5/E2 learning engines WIRED into the resolved stream + read-only endpoints
+(honest insufficient-data/degenerate paths), and a frontend metrics dashboard rendering every `/metrics/*`
+endpoint with honest empty/degenerate states. **Disjoint discipline under contention:** 3 genuinely-buildable
+items (B6, per-leg arb, A4) all wanted `orchestrator.py`, which the E5/E2 PR already owned — correctly deferred
+to a later run (the disjoint rule, NOT scarcity); Kalshi A3 + lint F7 were dropped on the value bar (premature /
+cosmetic). **Anti-padding both ways:** a deep-audit scout found NO real defect, so no defect-PR was invented.
+**The adversarial gate earned its keep:** both Sonnet reviewers caught a shared-mutable-model-in-closure bug
+(fresh-model-per-call fix + a re-fit test) and an Opus auditor named an idealized-test honesty gap (added a
+cost-band-suppression test) — all fixed in ONE cycle, shipped on mechanical verification (≤2-cycle brake).
+No DoD/floor box ticked — B4a is the mechanism for an edge, not a validated edge; the highest-EV unlock stays
+OA-11 (the 7-day OOS corpus, owner/egress-scope), so no harness proposal is warranted.
+
+### Earlier
 
 **2026-06-29 (9th datapoint — research run) — `steady`, EXP-002 proposed with zero code waste.**
 Research-only run. Fixture calibration audit (54 records) + academic synthesis (Le 2026 Kalshi

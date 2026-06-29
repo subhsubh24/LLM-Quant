@@ -706,3 +706,68 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
   less-pinned markets). The governance apparatus is now stronger (hardened screen, p-hack-resistant
   calibration gate, lifecycle registry, per-strategy attribution); next run WIRES the engines into the
   orchestrator + starts the alpha. Egress (OA-11) remains owner-scope for refreshing the real corpus.
+
+## 2026-06-29 — 3-PR run: first model_prob!=crowd alpha (B4a) + E5/E2 wired + metrics dashboard
+
+- **Shipped 3 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku-scout sweep across A–G:
+  PR-1 (B4a `calibration_bucket_strategy.py` — the FIRST model_prob != crowd alpha mechanism,
+  new files only), PR-2 (E5/E2 wiring — orchestrator + routes + metrics_aggregator + tests),
+  PR-3 (frontend metrics dashboard — `frontend/components/metrics/*`, frontend-only). Integrated
+  gate green before split (288→444 PM tests + runtime harness deterministic + harness safe).
+  engine_pct 68→70. **No DoD/floor box ticked** — B4a is the MECHANISM for an edge, not a
+  validated edge (needs the 7-day OOS corpus, OA-11).
+- **Disjoint partition that worked:** PR-1 = new files only (no shared-file touch — I deliberately
+  did NOT wire CalibrationBucketStrategy into the default scanner, because unfitted it is a no-op
+  and wiring it without real fitted rates would be a gate-on-unbuilt-loop). PR-2 OWNED the shared
+  files (orchestrator.py + routes.py + metrics_aggregator.py). PR-3 = frontend only. **Lesson: when
+  a new alpha needs no live data yet, ship it as a standalone tested module + leave it UNWIRED — it
+  stays fully file-disjoint from the orchestrator-owning PR, and an honest abstaining strategy is
+  not a fake control.**
+- **Disjoint discipline DROPPED 4 genuinely-buildable items (not scarcity — shared-file conflict):**
+  scouts surfaced B6 (per-strategy enable/disable), per-leg arb execution (B1 follow-up), and A4
+  resolution-tracking — ALL three want orchestrator.py, which PR-2 already owned. Kalshi A3 was
+  dropped on VALUE (a 2nd venue with the same pinning problem + zero alpha is premature; the binding
+  constraint is alpha, not venue count — the scout's reasoning held). Lint-ratchet F7 was dropped on
+  VALUE (removing unused imports from money-path files for ZERO CI benefit — ruff isn't in CI — is
+  cosmetic prep, and Phase-1 collided with PR-2's metrics_aggregator.py). **Lesson: only ONE PR can
+  own a heavily-shared file (orchestrator/routes) per run; pick the highest-value owner (here the
+  named E5/E2 next-action) and defer the rest to a later run — that's the disjoint rule, not
+  artificial scarcity. And anti-padding cuts both ways: a deep-audit scout found NO real defect, so
+  no defect-PR was invented.**
+- **The adversarial gate earned its keep again (2 Sonnet + 3 Opus, ONE consolidated fix cycle):**
+  - **Both Sonnet reviewers independently caught a shared mutable model in the StrategyFn closure**
+    (one CalibrationBucketModel re-fit per call): harmless under walk_forward's serial use but a
+    latent re-use bug, and an empty training set would RAISE and crash the backtest. Fixed with a
+    FRESH model per call + an empty-training abstain guard + `test_strategy_fn_refits_on_each_call`.
+    **Lesson: a closure holding a mutable model is not "pure" — build it inside the call; make "no
+    data" abstain, never raise on a hot path; prove re-use with a test.**
+  - **Opus auditor 1 named the idealized-test trap:** the "0 trades on a well-calibrated crowd" test
+    hits exactly 0 only because the synthetic empirical rate lands on the penny; a real finite-sample
+    crowd jitters off and WOULD noise-trade (losing to costs — the auditor measured negative mean PnL
+    over 20 seeds). Fixed by annotating the idealization + adding
+    `test_cost_band_suppresses_subthreshold_miscalibration` (the real load-bearing mechanism).
+    **Lesson: a clean synthetic test can be honest about the MECHANISM while over-cleanly implying
+    real-world behaviour — name the idealization and test the load-bearing assumption directly.**
+  - **All 3 Opus auditors returned CANNOT-BREAK** on leakage (structural via walk_forward's frozen
+    pre-window training + outcome-free MarketView), fabricated-edge/p-hacking (min_bucket_n floor +
+    cost band), E5/E2 honesty (insufficient_data fires before build_baseline; zero-trade windows
+    never fabricated; chronological split can't invert), live-safety (read-only; execution.py
+    untouched; the kill switch/caps/live gate all still pass the harness), determinism, and
+    import/registration (no new table=True; no cycle though cbs imports both strategies.py and
+    walk_forward.py). Shipped on mechanical verification after the one fix cycle (≤2-cycle brake;
+    strictly-more-correct/honesty-only changes, no 3rd audit).
+- **PR-2 honesty pattern — mirror the existing reviewed path, don't diverge:** `get_resolved_predictions`
+  reconstructs ResolvedPrediction (predicted_prob = market_price + edge_at_entry, skip edge==0)
+  EXACTLY like the already-shipped calibration endpoint. A reviewer flagged the reconstruction's
+  semantic dependence on what edge_at_entry stores — but since the current reality is 0 non-degenerate
+  predictions (it never runs on real data yet) and the calibration endpoint uses the identical
+  reconstruction, the right call was to KEEP it consistent + add a "keep in sync" comment, not invent
+  a divergent reconstruction. **Lesson: when wiring a second consumer of the same DB-to-model mapping,
+  mirror the existing reviewed path byte-for-byte and add a sync comment — divergence is the silent
+  honesty bug, not the duplication.**
+- **Env note:** the autonomous container lacks `pydantic_settings`/`fastapi` until
+  `pip install -r backend/requirements-ci.txt`; preflight's import-smoke fails until then. routes.py
+  imports fastapi, so the gate never imports routes.py — the new endpoints are verified by
+  source-level route-registration uniqueness + exercising their pure `compute_*` wrappers (same as
+  the existing metrics endpoints). **Lesson: install requirements-ci.txt first to reproduce CI; the
+  blocking gate tests pure logic, not the ASGI app boot.**
