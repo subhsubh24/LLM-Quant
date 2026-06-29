@@ -39,26 +39,38 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-28
-  last_run: 2026-06-28          # prior run: OA-11 real-data validation (#50)
+  last_run: 2026-06-28          # prior run: branch protection applied (#53)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
+  enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 1          # CI required-check staging + lint standard (PROPOSED_CI.md + ruff.toml)
+    changes_shipped: 1          # wait-for-CI hardening: enforce_admins=true + auto-merge + test-bypass boot-guard + --auto protocol in docs & routines
     changes_abandoned: 0
     abandoned_reasons: []        # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
     verify_cycle_failures: 0
     review_rejections: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 44             # git: squash-merged (#NN) commits, last 7 days
+    merged_prs: 46             # git: squash-merged (#NN) commits, last 7 days
     reverts: 0                 # git: no revert commits in the window
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs. Egress wall resolved for data access last run; residual is scheduling only (OA-11).
-    harness_proposals_open: 0    # issue #51 RESOLVED same day: owner authorized + branch protection applied (OA-12 done). The META channel closed the loop — proposal raised AND actioned, not left hanging.
-  signal: improving              # 3rd datapoint: 44 merged / 0 reverts / 0 abandoned; required-check now ENFORCED (branch protected, blocking gate required) — broken changes can no longer auto-merge. Lint-at-zero still staged (F7). Converging.
+    recurring_failures: []       # nothing has failed >=2 runs. Egress wall resolved for data access (OA-11 residual = scheduling only).
+    harness_proposals_open: 0    # issue #51 resolved (branch protection applied). No open proposals.
+  signal: improving              # 4th datapoint: 46 merged / 0 reverts / 0 abandoned; required check now has TEETH (enforce_admins=true) and the loop merges via --auto (waits for CI, never --admin). Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-28 (4th datapoint) — `improving`, the required check now has teeth.** Hardened the
+gate enforcement so it actually binds the loop: `enforce_admins=true` (an `--admin` merge can no
+longer bypass), `strict=false` (parallel file-disjoint PRs still auto-merge), repo
+`allow_auto_merge=true`, and the merge protocol switched to `gh pr merge --squash --auto` in
+ROADMAP "Shipping protocol" **and in all three PR-merging routine prompts** (factory / research /
+auditor) — so every future autonomous run waits for CI instead of force-merging. Also shipped a
+prod boot-guard: `E2E_DISABLE_RATE_LIMIT` can never be active with `LIVE_TRADING_ENABLED`
+(`enforced_in_ci: true`). No open proposals.
+
+### Earlier
 
 **2026-06-28 (3rd datapoint) — `improving`, first harness proposal raised AND resolved.** Staged
 the required-check + lint-at-zero work (`docs/ci/PROPOSED_CI.md`), raised harness issue **#51**

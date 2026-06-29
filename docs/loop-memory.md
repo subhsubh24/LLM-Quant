@@ -2,6 +2,37 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-28 — Make the required check have TEETH: enforce_admins + merge via --auto (never --admin)
+
+- **Why:** requiring a check WITHOUT "administrators included" is toothless for the loop — its
+  `--admin` merge bypasses it. The fix has two halves: (1) `enforce_admins=true` so even the
+  loop's admin token must wait for CI; (2) switch the loop's merge protocol to `--auto` so it
+  doesn't get stuck (auto-merge WAITS for the required check, then merges).
+- **Repo/CI (one PR, shipped via `--auto` to prove the behavior):**
+  - `enforce_admins=true`, `strict=false` (parallel file-disjoint PRs still auto-merge), repo
+    `allow_auto_merge=true`.
+  - **No new `.github/workflows/ci.yml`** — the existing `preflight.yml` already provides the
+    required functional gate (`code + safety gate (blocking)` = paper/backtest reproduces
+    deterministically; LLM-Quant has no UI journey). Mirrored the OUTCOME, didn't duplicate the
+    workflow (and didn't touch `.github/`).
+  - **Test-only rate-limit bypass:** there's no inbound limiter to bypass (gate is in-process),
+    so wiring `E2E_DISABLE_RATE_LIMIT` to a limiter would be a fake control. What's REAL: a prod
+    **boot-guard** (`config._forbid_test_bypass_in_live` + `test_config_safety.py`, wired into
+    the preflight test list) that hard-refuses to boot if the flag is ever set with
+    `LIVE_TRADING_ENABLED` — a future CI convenience can never weaken live.
+  - Docs: ROADMAP "Shipping protocol" (the `--auto`, never-`--admin` rule); PROPOSED_CI §A3/A5/A6;
+    LOOP_HEALTH `enforced_in_ci: true`.
+- **Routines self-updated via RemoteTrigger** (factory / research / auditor — all merge PRs): added
+  the `--auto`/never-`--admin` MERGE rule to each prompt. Procedure: GET → change ONLY
+  `events[0].data.message.content` → PUT full job_config (model/cron/sources/allowed_tools/MCP
+  preserved) → re-GET + diff to confirm only the intended text changed.
+- **Lesson:** branch protection that excludes admins is security theater for an admin-token loop —
+  you must set `enforce_admins=true` AND change the loop's own merge command to `--auto` IN THE
+  SAME change, or the next autonomous run either bypasses the gate (admin) or wedges (can't merge).
+  `strict=false` is the detail that keeps parallel disjoint PRs flowing without serial rebases.
+- **Ordering (no lockout):** shipped the repo + routine changes and proved a PR auto-merges green
+  FIRST, then flipped `enforce_admins=true`, then re-validated end-to-end.
+
 ## 2026-06-28 — Branch protection APPLIED (owner-authorized): the required check is now enforced
 
 - Owner authorized the OA-12 toggle, so I applied it directly: `gh api -X PUT .../branches/<default>/protection`

@@ -52,6 +52,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
   for t in backend/tests/test_prediction_markets.py \
            backend/tests/test_cost_model.py \
            backend/tests/test_loss_caps.py \
+           backend/tests/test_config_safety.py \
            backend/tests/test_scorecard.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done

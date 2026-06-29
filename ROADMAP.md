@@ -251,6 +251,20 @@ Never downgrade reviewers below Sonnet or auditors below Opus.
   owner's actual capital.) **HUMAN-CORE:** fund the account, set venue LIVE keys, flip
   `LIVE_TRADING_ENABLED`, raise loss caps, the legal/jurisdiction call.
 
+### SHIPPING PROTOCOL (CI is REQUIRED — wait for it; never `--admin`)
+- The default branch is **protected**: the `code + safety gate (blocking)` check is a
+  **required** status check with **`enforce_admins=true`**, so it applies to the loop too — a
+  red gate genuinely BLOCKS the merge. (`strict=false` so file-disjoint PRs still auto-merge in
+  parallel without serial rebases.) The functional gate for this product = **the paper/backtest
+  reproduces deterministically** (no UI journey); it runs in `scripts/preflight.sh code` via
+  `.github/workflows/preflight.yml`.
+- **MERGE via `gh pr merge --squash --auto --delete-branch`** (auto-merge WAITS for the
+  REQUIRED CI checks; branch protection enforces them for admins too) — **NEVER `--admin`**; a
+  red required check blocks merge, so **fix (≤2 cycles) or abandon, never force**.
+- Repo has `allow_auto_merge=true`. The migrate job (if one ever exists) is push-only → NOT a
+  required check. Never weaken a guard to make a check pass; never require a check not proven
+  green (lint-at-zero stays staged until clean — ROADMAP F7).
+
 ---
 
 ## Machine-readable status blocks (dashboard-readable)

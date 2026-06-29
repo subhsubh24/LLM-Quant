@@ -59,43 +59,56 @@ incident recently).
    **alone** turns on lint-at-zero in the existing blocking gate — **no `.github/` edit
    needed**.
 
-### A3. Branch protection — ✅ APPLIED (2026-06-28, owner-authorized)
+### A3. Branch protection — ✅ APPLIED + HARDENED (2026-06-28)
 
-**DONE.** `claude/llm-stock-trading-app-fXupf` is now protected, requiring **only**
-`code + safety gate (blocking)`, `strict=true`, `enforce_admins=false`. A broken-for-a-user
-change can no longer auto-merge. Issue #51 closed; OA-12 done. The command used (re-runnable to
-adjust):
+**DONE.** `claude/llm-stock-trading-app-fXupf` is protected, requiring **only**
+`code + safety gate (blocking)`, with **`enforce_admins=true`** and **`strict=false`**. Repo
+`allow_auto_merge=true`. Issue #51 closed; OA-12 done.
+
+- **`enforce_admins=true`** is the teeth: without it the loop's `--admin` merge would bypass the
+  gate, making the requirement toothless. With it, **the loop must merge via `--auto` and WAIT
+  for CI** (see §A5 / ROADMAP "Shipping protocol").
+- **`strict=false`** so file-disjoint PRs auto-merge in parallel without serial rebases.
+- **Require ONLY** `code + safety gate (blocking)` — never `go-live readiness (informational)`
+  (honest-red until a validated edge exists; requiring it blocks every merge forever).
+
+The applied config (re-runnable to adjust):
 
 ```bash
-# Requires admin on the repo. Enable branch protection requiring the blocking gate.
 gh api -X PUT repos/subhsubh24/LLM-Quant/branches/claude%2Fllm-stock-trading-app-fXupf/protection \
-  -H "Accept: application/vnd.github+json" \
-  -f 'required_status_checks[strict]=true' \
-  -f 'required_status_checks[contexts][]=code + safety gate (blocking)' \
-  -F 'enforce_admins=false' \
-  -F 'required_pull_request_reviews=null' \
-  -F 'restrictions=null'
+  --input - <<'JSON'
+{ "required_status_checks": { "strict": false, "contexts": ["code + safety gate (blocking)"] },
+  "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null }
+JSON
+gh api -X PATCH repos/subhsubh24/LLM-Quant -F allow_auto_merge=true
 ```
 
-- **Require ONLY** `code + safety gate (blocking)`. Do **NOT** require
-  `go-live readiness (informational)` — it is intentionally honest-red until a validated edge
-  exists; requiring it would block every merge forever.
-- Leave `enforce_admins=false` so the owner retains a manual override.
-- Once lint-at-zero is green (A2) the required-checks list is unchanged — lint runs *inside*
-  the same `code + safety gate` job.
+Once lint-at-zero is green (A2) the required-checks list is unchanged — lint runs *inside* the
+same `code + safety gate` job.
 
-**Required-checks list to set:** `code + safety gate (blocking)` — and nothing else.
+### A5. Merge protocol — wait for CI, never `--admin`
 
-### A4. Gotchas — what does NOT apply here (and why)
+`gh pr merge --squash --auto --delete-branch`. Auto-merge holds the PR until the required check
+is green, then merges; with `enforce_admins=true` even an admin token cannot bypass. A red
+required check blocks merge → fix (≤2 cycles) or abandon, **never force**. Wired into ROADMAP
+"Shipping protocol" + every PR-merging routine prompt (factory / research / auditor).
+
+### A6. Gotchas — what does NOT apply here (and why)
 
 The directive's standard gotchas are about UI products that self-seed over HTTP. LLM-Quant's
 gate is **in-process** (no server is started, no inbound HTTP), so:
 
-- **Rate-limit bypass (`E2E_RATE_LIMIT_BYPASS`): N/A.** The app has **no inbound rate
-  limiter** (only CORS middleware); the gate never makes inbound requests, so nothing can trip.
-  Adding an env-gated bypass wired to no limiter would be an **unwired fake control** (forbidden
-  by our DECISION COROLLARY). *If* a future gate ever starts the server and drives HTTP
-  journeys against a real limiter, add `E2E_RATE_LIMIT_BYPASS` wired into that limiter **then**.
+- **Rate-limit bypass (`E2E_DISABLE_RATE_LIMIT`): tripwire installed, no limiter to bypass
+  yet.** The app has **no inbound rate limiter** (only CORS middleware) and the gate makes no
+  inbound requests, so there is nothing to bypass today — wiring the flag to a non-existent
+  limiter would be an unwired fake control (DECISION COROLLARY). What IS real and shipped: a
+  **prod boot-guard** (`config.Settings._forbid_test_bypass_in_live` + `test_config_safety.py`)
+  that **HARD-REFUSES to boot if `E2E_DISABLE_RATE_LIMIT` is ever set while
+  `LIVE_TRADING_ENABLED` is true** — so a future CI convenience can never weaken the live
+  platform. When a real inbound limiter is added, wire this flag to disable it **on the gate job
+  only**; the boot-guard already guarantees it can't leak to live.
 - **Trusted-host / base-URL env (`AUTH_TRUST_HOST`/`AUTH_URL`/`PLAYWRIGHT_BASE_URL`): N/A.** No
   server is started in the gate, and the frontend auth is a **custom HMAC password gate**, not
   next-auth — there is no trusted-host check to satisfy.
