@@ -62,7 +62,11 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_data_quality.py \
            backend/tests/test_market_text.py \
            backend/tests/test_strategy_registry.py \
-           backend/tests/test_per_strategy_metrics.py; do
+           backend/tests/test_per_strategy_metrics.py \
+           backend/tests/test_learning_loop_wiring.py \
+           backend/tests/test_same_market_arb_costs.py \
+           backend/tests/test_evaluation_window.py \
+           backend/tests/test_calibration_drift.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done
   if [ -n "$_testfiles" ]; then

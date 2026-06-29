@@ -2,6 +2,51 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — Wired the learning loop (E6+B3) + honest cost-arb + E5/E2 engines (5-PR run)
+- **Shipped 4 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku-scout sweep: PR-1 (orchestrator E6
+  attribution + B3 lifecycle persistence + D2 resolution-risk fix), PR-2 (SameMarketArbitrage cost-model
+  net edge + neg_risk MECE guard), PR-3 (E5 evaluation-window engine), PR-4 (E2 calibration-drift detector).
+  Integrated gate green (419→421 tests, runtime harness deterministic, walk-forward reproduces) BEFORE split.
+  engine_pct 66→68. No DoD/floor box ticked — wiring + correctness + infra, not a validated edge.
+- **THE adversarial win — an Opus auditor BROKE a "guaranteed arbitrage" my own tests "proved."** PR-2 made
+  the SameMarketArbitrage *cost accounting* honest (cost-model net edge vs flat `discount-0.02`), and 8 tests
+  asserted the conservatism. But the auditor showed the strategy is NOT a locked arbitrage as WIRED: (1) the
+  multi-outcome branch had no MECE check (could fire on a non-exhaustive candidate list); (2) `outcome.price`
+  is the CLOB **midpoint**, not the ask you'd pay, and flat 0.5% slippage ≠ the real half-spread; (3) the
+  orchestrator `outcome_idx=-1` path records ONE phantom fill (empty token_id), never placing a real per-leg
+  order. **Lesson: "costed the basket correctly" ≠ "real guaranteed arbitrage." A dutch-book is only real
+  if the outcomes are provably MECE (gate on `neg_risk`; binary is MECE by construction), you price the ASK
+  with real depth, and you place+confirm each leg separately. Disclose midpoint/MECE/execution gaps; never
+  ship a half-true "guaranteed". Tests that assert a convenient sub-claim (cost monotonicity) do NOT prove
+  the headline claim — an auditor that RUNS the code finds what the tests were written to miss.**
+- **Honesty win #2 — don't expose a gate that trusts self-asserted evidence over an API.** The B3 registry
+  gates on the PRESENCE of caller-supplied backtest/OOS/calibration booleans (audit trail, not authenticity).
+  My planned `POST /strategies/transition` let a 4-call walk reach PROMOTED with fabricated evidence. **Fix:
+  removed the public write endpoint (GET read only); real transitions only via trusted in-process code that
+  DERIVES evidence from the actual E5/E2 results (follow-up). Lesson (DECISION COROLLARY): never expose a
+  control whose authenticity-backing isn't built — a gate on self-asserted evidence over an open endpoint is
+  a rubber stamp.**
+- **BUILDS≠WORKS — a reviewer caught my B3 wiring as a silent no-op.** The orchestrator is constructed with
+  `scanner=None` (scanner attached AFTER, in `_get_orchestrator`), so the registry seeded empty and — because
+  I persisted the empty seed — never re-seeded on the next boot → `GET registry` would return `[]` forever in
+  the normal API path. **Fix: idempotent `sync_registry_with_scanner()` called after scanner attach; persist
+  ONLY when something was actually added (never overwrite a real registry with an empty seed). Lesson: when an
+  object is populated from state attached AFTER `__init__`, your init-time seeding runs against an empty
+  object — make seeding idempotent + re-callable, and never persist an empty seed that wedges the next boot.**
+- **Pre-existing import-order fragility (avoided, not introduced).** `test_prediction_markets.py` imports
+  models via `app.*` while the newer suites use `backend.app.*`; running a `backend.app.*` suite BEFORE
+  `test_prediction_markets` re-registers a non-`extend_existing` table (`PredictionPortfolio`) and crashes.
+  The preflight list puts `test_prediction_markets.py` FIRST, so appending the 4 new suites at the END is
+  safe (verified 421 passed in that order). **Lesson: append new test files to the gate list AFTER
+  `test_prediction_markets.py`; the real fix (add `extend_existing=True` to the legacy models.py tables) is a
+  separate, deliberate hardening — don't reorder the gate.** New `table=True` classes (B3 store) DO use the
+  `extend_existing` + lazy-import recipe and are dual-import-safe (auditor-confirmed).
+- **Process: ONE consolidated fix cycle for ALL 5 reviewer/auditor reports.** 2 Sonnet reviewers + 3 fresh
+  Opus auditors ran against the integrated diff; I applied every finding in a single pass (MECE guard +
+  honesty docs + endpoint removal + S1 seeding + deep-freeze immutability + reconcile threshold echo + minor
+  cleanups), re-ran the full gate green, and shipped on mechanical verification — no 3rd audit on
+  strictly-more-conservative/honesty-only changes (the ≤2-cycle brake).
+
 ## 2026-06-29 — Automate the real-data refresh (close OA-11 hands-off, without an egress change)
 
 - **Why:** the cloud loop's env blocks Polymarket egress (403), so real OOS data only arrived when a

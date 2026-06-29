@@ -242,3 +242,44 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   forming model_prob != crowd on LESS-PINNED markets. The measurement + governance apparatus is
   now stronger (hardened screen, p-hack-resistant calibration gate, lifecycle registry, per-strategy
   attribution). Next run: WIRE the engines + start the alpha. No DoD/floor box ticked.
+
+## 2026-06-29 — WIRED the learning-loop engines + honest cost-arb + E5/E2 engines (5-PR run)
+- Hypothesis (falsifiable): (a) per-strategy attribution (E6) + the alpha-lifecycle registry (B3) can be
+  wired into the orchestrator + persisted without breaking determinism or the gate; (b) the only true
+  logical-arbitrage strategy (SameMarketArbitrage) can be made HONEST by costing the basket through the
+  canonical cost model; (c) two new pure learning-loop engines (E5 window engine, E2 drift detector) can
+  be built deterministic + significance-honest offline.
+- Min sample N: n/a (wiring + infra + correctness; no alpha eval). E2's significance gate measured at a
+  false-positive rate of 1.3–3.7% on same-distribution noise (vs 46.7% for a raw point comparison).
+- OOS result: n/a — no edge claimed. No DoD/floor box ticked. The binding constraint (a real
+  model_prob != crowd alpha on less-pinned markets) is UNCHANGED.
+- Costs modeled: yes — the SameMarketArbitrage edge is now `1.0 - Σ effective_buy_price(outcome)` (the
+  same multiplicative slippage+fee execution.py charges), replacing an optimistic flat `discount - 0.02`.
+- Verdict: promoted (wiring + correctness + learning-loop infra; 4 file-disjoint code PRs + bookkeeping;
+  2 Sonnet reviewers + 3 fresh Opus auditors; one consolidated fix cycle).
+- **THE adversarial lesson (an Opus auditor BROKE the cost-arb "guaranteed edge" claim):** the
+  SameMarketArbitrage "buy all outcomes → guaranteed $1" is NOT a locked arbitrage as wired: (1) the
+  multi-outcome branch had no MECE check, so it could fire on a non-exhaustive candidate list where
+  "exactly one pays $1" is false — FIXED by gating the multi-outcome branch on `market.neg_risk` (binary
+  markets are MECE by construction); (2) `outcome.price` is the CLOB MIDPOINT, not the ask you'd pay, and
+  the flat 0.5% slippage ≠ the real half-spread, so a fired signal is a candidate to verify against live
+  depth, not locked profit — now disclosed honestly; (3) the orchestrator's `outcome_idx=-1` path records
+  ONE phantom fill (empty token_id) instead of placing a real per-leg order each — a PRE-EXISTING execution
+  defect, logged as the named B-track follow-up (per-leg ask-priced execution). **Lesson: a "guaranteed
+  arbitrage" is only real if (a) the outcomes are provably MECE, (b) you price the ASK with real book
+  depth, and (c) you actually place + confirm each leg separately. Costing the basket honestly is necessary
+  but NOT sufficient; disclose the midpoint/MECE/execution gaps rather than ship a half-true "guaranteed".**
+- **Honesty fix #2 (B3 promotion gate):** the registry gates on the PRESENCE of caller-supplied
+  backtest/OOS/calibration booleans — it is an audit trail, NOT an authenticity verifier. An auditor showed
+  a 4-call walk could reach PROMOTED with fabricated evidence via the planned POST endpoint. FIXED by NOT
+  exposing a public write endpoint this run (GET read only); real transitions are recorded only by trusted
+  in-process code once it DERIVES evidence from the actual E5/E2 gate results (named follow-up). DECISION
+  COROLLARY: don't expose a control whose authenticity-backing isn't built.
+- **BUILDS≠WORKS catch (reviewer):** the B3 registry seeding was a silent no-op in the normal API path
+  (the orchestrator is constructed with scanner=None, so it seeded empty and never re-seeded). FIXED with
+  an idempotent `sync_registry_with_scanner()` called after the scanner attaches (verified it now seeds the
+  deployed strategies as PROPOSED — the honest "no alpha has passed the gate" state).
+- Why / next: the governance + measurement loop is now WIRED (attribution endpoint, persisted lifecycle
+  registry, drawdown-on-resolution risk fix) and two new learning engines (window + drift) exist pure.
+  Next: derive real B3 evidence from E5/E2 + per-leg arb execution + the real alpha. Binding constraint
+  unchanged; egress (OA-11) remains owner-scope.

@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-29
   phase: pre_launch
   engine_built: false
-  engine_pct: 66
+  engine_pct: 68
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -126,7 +126,21 @@ GROWTH_STATUS:
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 66` (up from 64) adds this run's learning-loop engine pieces: the alpha
+`engine_pct: 68` (up from 66) WIRES the previously-pure learning-loop engines into the
+running system and adds two more: per-strategy realized-PnL attribution (E6) flows from
+resolved positions through a new `/metrics/per-strategy` endpoint; the alpha-lifecycle
+registry (B3) is now persisted (a durable singleton table) + exposed read-only, seeded
+honestly with deployed strategies as PROPOSED (truthfully: no alpha has passed the
+integrity gate); market RESOLUTION losses now feed the per-strategy drawdown auto-disable
+(D2 — the dominant binary-loss path was bypassing it); the only true logical-arbitrage
+strategy now costs its basket through the canonical cost model + gates the multi-outcome
+branch on `neg_risk` MECE (B5 honesty); and two new pure learning engines exist — an
+evaluation-window engine with realized-vs-backtest overfit reconciliation (E5) and a
+significance-gated calibration-drift detector (E2, FP-rate ~1–4% vs 47% for a naive
+point comparison). The validated EDGE itself is still absent (no model_prob != crowd
+alpha), and B3 evidence is still caller-asserted (authenticity-derivation is a named
+follow-up), so the bulk of the missing % remains. Prior rationale (engine_pct 66, up from
+64) adds this run's learning-loop engine pieces: the alpha
 lifecycle registry with a fail-loud integrity gate (B3) + the per-strategy realized-PnL
 attribution primitive (E6) — both pure/deterministic, the first concrete E-track
 infrastructure — plus the hardened cross-market relatedness screen (B5), the
