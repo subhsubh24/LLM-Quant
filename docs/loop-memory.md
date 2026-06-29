@@ -2,6 +2,29 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — Automate the real-data refresh (close OA-11 hands-off, without an egress change)
+
+- **Why:** the cloud loop's env blocks Polymarket egress (403), so real OOS data only arrived when a
+  human ran the fetcher. Owner asked to make the data path itself work. Honest constraint: BOTH
+  "permanent" fixes are owner-scope — widening the env egress allowlist is a platform setting I have
+  no tool for, and a backend cron needs the backend deployed + creds.
+- **The third path I CAN leverage:** GitHub-hosted runners have open internet → they CAN reach
+  Polymarket. Staged a scheduled GitHub Action (`docs/ci/PROPOSED_DATA_REFRESH.md`) that runs the
+  fetcher and opens an auto-merging data-only PR. Can't write `.github/` headless, so it's staged +
+  OA-13 + the owner picks Option A (egress allowlist, zero files) or Option B (the workflow + one PAT).
+- **Made the refresh actually USEFUL:** re-running the fetcher returns the SAME ~54 top-volume markets
+  (they don't change day-to-day), so plain overwrite never grows the corpus. Added `--merge` (union
+  by `market_id`, never overwrite an earlier capture) so a scheduled refresh ACCUMULATES across weeks.
+  Verified: seeded 49 + fetched → 54 merged.
+- **The GITHUB_TOKEN caveat baked into the staged YAML:** a PR opened by the default `GITHUB_TOKEN`
+  does NOT trigger other workflows, so `preflight.yml` (the required check) would never run and the PR
+  could never satisfy branch protection → it would wedge. Fix documented: open the PR with a PAT
+  (`DATA_REFRESH_PAT`). **Lesson: any bot-opened PR that must pass a REQUIRED check needs a PAT, not
+  GITHUB_TOKEN — else the gate never fires and auto-merge hangs forever.**
+- **Honesty held:** did NOT claim to "fix" egress (I can't change the platform). Stated plainly which
+  parts are owner-irreducible, and delivered the parts I can (the `--merge` capability + the staged,
+  caveat-correct automation). The edge work (less-pinned sampling + a real model) stays loop track B.
+
 ## 2026-06-28 — Make the required check have TEETH: enforce_admins + merge via --auto (never --admin)
 
 - **Why:** requiring a check WITHOUT "administrators included" is toothless for the loop — its
