@@ -921,6 +921,75 @@ class PredictionMarketOrchestrator:
             logger.error(f"[ORCHESTRATOR] Snapshot error: {e}")
 
     # ================================================================
+    # Metrics helpers (read-only)
+    # ================================================================
+
+    def get_resolved_trades(self):
+        """Return a list of TradePnL built ONLY from genuinely resolved positions.
+
+        READ-ONLY: does not alter resolution accounting, positions, or any executor
+        state.  Maps from the DB-persisted resolved PredictionPosition records
+        (is_resolved=True) so data survives orchestrator restarts.
+
+        Fields derived honestly:
+        - timestamp: closed_at when available, else opened_at (position-close event)
+        - pnl_usd: realized_pnl column from the DB record (set by _persist_resolution)
+        - is_win: pnl_usd > 0
+
+        Positions with no closed_at AND no opened_at are omitted rather than
+        inventing a timestamp.  Positions whose realized_pnl is 0.0 AND
+        resolution_value is None are omitted (no honest PnL to record).
+        """
+        from .weekly_metrics import TradePnL
+
+        trades = []
+
+        # Primary source: DB-persisted resolved positions (survive restarts).
+        try:
+            from ..db.database import get_session
+            from .models import PredictionPosition
+            from sqlmodel import select
+
+            with get_session() as session:
+                stmt = select(PredictionPosition).where(
+                    PredictionPosition.is_resolved == True  # noqa: E712
+                )
+                db_positions = session.exec(stmt).all()
+
+                for pos in db_positions:
+                    # We need a timestamp to bucket by week. Prefer the resolution
+                    # time (closed_at); fall back to opened_at only if missing.
+                    ts = pos.closed_at
+                    if ts is None:
+                        ts = pos.opened_at
+                        if ts is not None:
+                            logger.warning(
+                                "[METRICS] resolved position %s has no closed_at; "
+                                "bucketing by opened_at (week may be slightly off).",
+                                getattr(pos, "market_id", "?"),
+                            )
+                    if ts is None:
+                        continue  # cannot place this trade on the timeline
+
+                    # resolution_value is None means the resolution was never
+                    # persisted properly — skip rather than invent pnl.
+                    if pos.resolution_value is None and pos.realized_pnl == 0.0:
+                        continue
+
+                    trades.append(
+                        TradePnL(
+                            timestamp=ts,
+                            pnl_usd=pos.realized_pnl,
+                            is_win=pos.realized_pnl > 0.0,
+                        )
+                    )
+
+        except Exception as e:
+            logger.debug(f"[METRICS] DB resolved-position fetch failed: {e}")
+
+        return trades
+
+    # ================================================================
     # Status
     # ================================================================
 

@@ -850,6 +850,143 @@ async def trigger_scan_and_execute():
     }
 
 
+# ============ Prediction Markets — Metrics (C5 + B2) ============
+
+@router.get("/prediction-markets/metrics/weekly")
+async def get_weekly_metrics():
+    """
+    Weekly PnL series and portfolio-level performance summary.
+
+    Computed from genuinely resolved positions only (orchestrator.get_resolved_trades).
+    All numbers flow from real trades; if no trades have resolved, returns honest
+    zero-valued state — not an error, not stubbed fake numbers.
+
+    Returns
+    -------
+    JSON with keys:
+        source, num_input_trades, total_pnl_usd, avg_weekly_pnl_usd, weekly_sharpe,
+        max_drawdown_usd, max_drawdown_pct, hit_rate, total_trades, best_week_usd,
+        worst_week_usd, num_weeks, weekly_series (list of per-week dicts).
+    """
+    from ..prediction_markets.metrics_aggregator import compute_weekly_metrics
+
+    try:
+        orchestrator = _get_orchestrator()
+        trades = orchestrator.get_resolved_trades()
+    except Exception as e:
+        logger.warning(f"[METRICS/weekly] get_resolved_trades failed: {e}")
+        trades = []
+
+    return compute_weekly_metrics(trades)
+
+
+@router.get("/prediction-markets/metrics/floor-status")
+async def get_floor_status():
+    """
+    ROADMAP C5 go-live floor status ($2 k/week average PnL threshold).
+
+    Returns
+    -------
+    JSON with keys:
+        meets_floor (bool), floor_usd, avg_weekly_pnl_usd, weeks_counted, total_trades.
+    """
+    from ..prediction_markets.metrics_aggregator import compute_floor_status
+
+    try:
+        orchestrator = _get_orchestrator()
+        trades = orchestrator.get_resolved_trades()
+    except Exception as e:
+        logger.warning(f"[METRICS/floor] get_resolved_trades failed: {e}")
+        trades = []
+
+    return compute_floor_status(trades)
+
+
+@router.get("/prediction-markets/metrics/calibration")
+async def get_calibration():
+    """
+    ROADMAP B2 calibration evaluation.
+
+    Reads resolved positions that have a model_prob distinct from market_price
+    (i.e. non-degenerate predictions).  Current paper-trading reality: strategies
+    seed model to the crowd price → model_prob == market_price for all records →
+    the evaluation is reported as ``"insufficient_degenerate"`` and a plain-language
+    note is included.  This endpoint NEVER fabricates a passing calibration.
+
+    Because the calibration module requires ResolvedPrediction records (not just
+    TradePnL), and the current DB schema does not store model_prob / market_price /
+    outcome per-position, the endpoint returns an honest empty-prediction state until
+    the prediction pipeline writes those fields.
+
+    Returns
+    -------
+    JSON with keys:
+        status, n, passes, strategy_brier, baseline_brier, improvement,
+        improvement_ci_low, improvement_ci_high, expected_calibration_error, note.
+    """
+    from ..prediction_markets.metrics_aggregator import compute_calibration
+
+    # The current DB schema does not persist ResolvedPrediction fields
+    # (predicted_prob, market_price, outcome) — those would need to be recorded at
+    # resolution time by a future pipeline step.  Until then we return an honest
+    # empty-prediction state rather than invent numbers.
+    predictions = []
+
+    try:
+        # Attempt to load from DB if the field ever becomes available.
+        # This block is intentionally future-proof; it produces the same
+        # honest empty result for now.
+        from ..db.database import get_session
+        from ..prediction_markets.models import PredictionPosition
+        from ..prediction_markets.calibration import ResolvedPrediction
+        from sqlmodel import select
+
+        with get_session() as session:
+            stmt = select(PredictionPosition).where(
+                PredictionPosition.is_resolved == True  # noqa: E712
+            )
+            db_positions = session.exec(stmt).all()
+
+            for pos in db_positions:
+                # edge_at_entry is the GROSS edge the strategy recorded.
+                # predicted_prob = market_price + edge_at_entry (our entry model prob).
+                # market_price = avg_entry_price (the contemporaneous crowd quote).
+                # outcome = 1 if resolution_value >= 0.5, 0 otherwise.
+                if pos.resolution_value is None:
+                    continue
+                if pos.avg_entry_price <= 0.0 or pos.avg_entry_price >= 1.0:
+                    continue
+                # HONESTY (reviewer MUST-FIX M2): a position with no recorded model
+                # edge carries predicted_prob == market_price, which cannot inform a
+                # calibration-vs-crowd test. Skip it explicitly rather than silently
+                # adding 0.0 and letting it masquerade as a (degenerate) prediction.
+                # This makes "no non-degenerate predictions" the honest default for the
+                # current paper reality (strategies seed model prob to the crowd).
+                if pos.edge_at_entry == 0.0:
+                    continue
+
+                market_price = pos.avg_entry_price
+                # The strategy's predicted_prob at entry, from the recorded gross edge.
+                predicted_prob = market_price + pos.edge_at_entry
+                # Clamp to [0, 1].
+                predicted_prob = max(0.0, min(1.0, predicted_prob))
+                outcome = 1 if pos.resolution_value >= 0.5 else 0
+
+                predictions.append(
+                    ResolvedPrediction(
+                        market_id=pos.market_id,
+                        predicted_prob=predicted_prob,
+                        market_price=market_price,
+                        outcome=outcome,
+                    )
+                )
+    except Exception as e:
+        logger.debug(f"[METRICS/calibration] DB prediction load failed: {e}")
+        predictions = []
+
+    return compute_calibration(predictions)
+
+
 # ============ Prediction Markets — Risk Manager ============
 
 @router.get("/prediction-markets/risk/status")
