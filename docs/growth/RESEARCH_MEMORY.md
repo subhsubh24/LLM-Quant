@@ -283,3 +283,85 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   registry, drawdown-on-resolution risk fix) and two new learning engines (window + drift) exist pure.
   Next: derive real B3 evidence from E5/E2 + per-leg arb execution + the real alpha. Binding constraint
   unchanged; egress (OA-11) remains owner-scope.
+
+## 2026-06-29 — Research Run 8: EXP-002 proposed (Horizon-Effect Calibration Bias); fixture calibration audit; academic synthesis
+
+- Hypothesis (falsifiable): Binary Polymarket markets with YES probability 65–90% at 7 days to
+  resolution are systematically UNDERPRICED vs their empirical resolution rate — the crowd
+  UNDER-ASSIGNS probability to favorites at early horizons (calibration slope > 1.0) — and this
+  gap survives realistic costs (2% fee + 0.5% slippage). A `CalibrationBucketStrategy` that
+  replaces crowd_prob with empirically fitted per-bucket resolution rates (trained on the oldest
+  60% of a 7-day-lead corpus) produces a positive net Brier improvement on the OOS 40%.
+- Min sample N: 100 resolved markets with YES ∈ [0.65, 0.90] at 7-day decision_lead; ≥30 per
+  bucket for any bucket-level claim. Total corpus ≥200 records across all price ranges.
+- OOS result: **insufficient data** — the committed 54-record fixture was built with a 2-day
+  decision_lead (all records at 48h), so ~70% of markets were already price-pinned at decision
+  time. Walk-forward still makes 0 trades (model_prob == crowd by construction — the fetcher
+  seeds model_prob to the crowd price; no independent model exists yet). The 7-day-lead corpus
+  needed for EXP-002 requires re-running OA-11 with `--decision-lead-days 7` (the script's
+  default — NO code changes needed; it already accepts this flag).
+- Calibration (Brier / reliability): Fixture-level audit of the 54 records revealed: the crowd
+  UNDERPRICES YES in ALL price buckets at 48h. Most striking: 34 near-certainty-NO markets
+  (price < 0.10) had avg_price=0.008 vs yes_rate=0.059 (crowd said 0.8%, empirical 5.9%).
+  Binomial p-value ≈ 0.029 under null (crowd correct). **Treated as a HYPOTHESIS, not an edge:**
+  N=34 with ~2 YES resolutions is too small; in-sample look; sample is biased toward high-volume
+  political/election markets. "Insufficient data" — needs OOS validation with ≥100 records in
+  this bucket. This direction (near-certainty-NO markets resolving YES) is the INVERSE of EXP-001
+  (which tested near-certainty-YES markets over-pricing YES). Both hypotheses need empirical
+  calibration before any edge claim.
+- Costs modeled: 2% fee + 0.5% slippage (cost_model.py). At near-zero prices (< 0.01), the
+  payoff structure is highly asymmetric — a fill at 0.8¢ theoretically gets a 124x payout on a
+  YES, but real bid-ask spread + market-impact on illiquid near-zero tokens may be 5-10% of face
+  value, erasing the edge entirely.
+- Verdict: **proposed** (EXP-002; see GROWTH_STATUS experiments[])
+- Why / next: research (external sources, Le 2026 calibration decomposition on 210K+ Kalshi
+  contracts; PolyBench LLM-ensemble benchmarks 2025-2026; 3%-of-traders price-discovery study
+  2026) + fixture analysis converge on the same conclusion: **the current 54-record corpus is
+  too near-resolution and too volume-biased to test any calibration hypothesis**. The existing
+  infrastructure is complete (fetcher already has `--decision-lead-days` flag, B2 eval exists,
+  walk_forward exists, CalibrationBucketStrategy is unbuilt but trivial once data arrives). The
+  single highest-EV owner action is re-running OA-11 with 7-day decision_lead to unlock all
+  calibration alphas at once.
+
+### Academic + empirical findings this run (DATA; none are claimed edges)
+- **Le 2026 (Kalshi, 210K+ contracts):** calibration slope rises from 0.99 (< 1h to resolution)
+  to 1.32 (> 1 month). A market at 70¢ one month out reflects ~75% true probability → favorites
+  systematically UNDERPRICED far from resolution. Consistent with the 54-record data (crowd
+  underprices YES at all price levels at 48h). **Cannot directly extrapolate to Polymarket** —
+  market microstructure and liquidity profiles differ. Needs Polymarket-specific validation.
+- **3%-of-traders study (CoinDesk 2026):** only ~3% of Polymarket traders drive price discovery.
+  Implication: in LOW-VOLUME markets, those 3% may not have traded yet → wider miscalibration
+  window than in large markets. Consistent with the "volume proxy for informed trading" hypothesis.
+  **How it could be wrong:** the 3% may include market makers (price-neutral), not alpha-bearing
+  informed traders; survivorship bias in the analysis.
+- **PolyBench / Prophet Arena (2025-2026):** LLM ensembles match human market accuracy with
+  realized returns, edge coming from "losing less when wrong." **Supports B4 (LLM-assessed
+  probability) as a viable alpha direction.** But B4 remains formally gated on B2 producing a
+  PASSING eval on real resolved-market probabilities.
+- **Liquidity ≠ Calibration (3,587 markets, 2025):** spread compression 43% from institutional
+  entry, but calibration does NOT improve. Liquidity affects execution cost, not forecast
+  accuracy. Illiquid markets are not necessarily less efficient — they may just be harder to
+  predict, not miscalibrated. CONSERVATIVE implication: don't assume low-volume = mispriced.
+
+### How EXP-002 could be wrong (adversarial pre-mortem)
+1. At 7 days to resolution on high-volume markets, the crowd already incorporates 99% of public
+   information → calibration slope near 1.0 even at 7 days (not 1.32). Only the VERY early
+   (<30 day) low-volume markets show the bias.
+2. The Le 2026 effect is KALSHI-specific: Kalshi's regulated, US-focused user base has different
+   calibration patterns than Polymarket's crypto-native international user base.
+3. Slippage at 7 days is materially higher than at 2 days (wider spreads, less depth) → the 0.5%
+   slippage model underestimates costs, erasing the edge.
+4. Per-bucket calibration fitting on the training set may overfit with N < 50/bucket — the OOS
+   rates will revert toward the crowd's prices.
+5. The horizon effect is priced in by sophisticated arbitrageurs who exploit it continuously →
+   by the time we see the opportunity, the edge is gone.
+
+### Candidate alphas NOT proposed this run (reasons)
+- **Near-certainty-NO longshot reversal:** The fixture hint (0.8% stated vs 5.9% empirical) is
+  intriguing but in-sample on N=34 with ~2 YES outcomes. "Insufficient data." Revisit once OA-11
+  delivers a purpose-sampled near-certainty-NO corpus (target: 100+ records with price < 0.10).
+- **Per-market LLM research (B4):** Gated on B2 producing a passing eval first — per ROADMAP.
+  Also, cost per market ($0.30-0.50) must clear the EV bar per trade. Revisit after EXP-002
+  delivers the first calibration baseline.
+- **Cross-platform arb (Polymarket/Kalshi):** Still speed-dominated (tightest gaps close within
+  seconds per 2026 reports). Insufficient data on whether the bot can execute fast enough.
