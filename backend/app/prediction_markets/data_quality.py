@@ -262,12 +262,14 @@ class DataQualityValidator:
              should not be traded as a live opportunity. This needs only the ``end_date``
              the Market already carries, so it is the staleness guard that actually runs
              in the live scan path today.
-          2. **fetch-age (fires when a timestamp is available):** if ``fetched_at`` is
+          2. **fetch-age (now fires on live data — ROADMAP A5):** if ``fetched_at`` is
              provided (or the market carries a ``fetched_at``/``updated_at`` attribute),
              the snapshot age ``now - fetched_at`` must be <= ``max_age_seconds``. The
-             current Market model does not ingest a fetch timestamp, so this branch is
-             exercised mainly by callers/tests that supply one — documented honestly
-             rather than presented as always-on.
+             ``Market`` model now ingests a ``fetched_at`` timestamp (stamped at parse
+             time by ``PolymarketClient._parse_market``), so this branch fires in the
+             live scan path — a stale snapshot held in memory past ``max_age_seconds``
+             is flagged even before its ``end_date`` passes. A caller-supplied
+             ``fetched_at`` still overrides the market attribute.
 
         Args:
             market:     The market to check.
