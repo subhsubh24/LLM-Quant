@@ -89,6 +89,12 @@ OWNER_ACTIONS:
       status: open
       why: "Makes OA-11 hands-off: instead of a human re-running the fetcher, the corpus refreshes itself. The loop can't do this (its env blocks Polymarket egress) and can't write .github/, so one one-time owner step is irreducible. The fetcher now supports --merge (accumulate by market_id, never overwrite), so a scheduled refresh GROWS the corpus over time."
       how: "OPTION A (simplest, no files): add gamma-api.polymarket.com + clob.polymarket.com to the FactoryDashboard env (env_01LdppMwowGrstp5M55vgJXv) egress allowlist — then the loop fetches real data itself, zero new files/secrets. OPTION B (no egress change): add the staged workflow .github/workflows/refresh-polymarket-data.yml + a DATA_REFRESH_PAT secret (fine-grained PAT, contents+pull-requests write) — GitHub runners CAN reach Polymarket and open an auto-merging data-only PR. Full detail + exact YAML + the GITHUB_TOKEN-recursion caveat: docs/ci/PROPOSED_DATA_REFRESH.md. No credentials needed to READ Polymarket (public data); the PAT only opens the PR."
+    - id: OA-14
+      title: "Set BACKEND_API_TOKEN (+ frontend server-side proxy) to protect the backend control routes on a public deploy"
+      priority: medium
+      status: open
+      why: "BUILT this run (security top_gap): the backend's state-mutating routes (kill-switch, risk config, execute, portfolio reset, bot start/stop/scan) now accept a shared-secret bearer token, enforced server-side (backend/app/api/auth.py, decision in backend/app/auth_core.py). It DEGRADES SAFELY: with BACKEND_API_TOKEN unset (the default) auth is disabled and paper/dev is unchanged, so nothing is required for paper. The control surface is only credential-protected once the owner sets the token on a public deploy. The browser must never hold the secret, so the frontend has to attach it via a SERVER-SIDE proxy (Next.js route handler / server action reading a non-NEXT_PUBLIC env var), not a NEXT_PUBLIC var."
+      how: "On a public/internet-exposed deploy: (1) set BACKEND_API_TOKEN=<random-secret> in the backend host env (server-side only, never committed, never NEXT_PUBLIC); (2) add a server-side proxy in the frontend that injects `Authorization: Bearer <token>` from a server-only env var on the state-mutating calls (so the secret stays off the browser); (3) verify a tokenless direct POST to /prediction-markets/kill-switch/activate now returns 401. Not needed for local/paper (default-off). The autonomous loop never sets this token."
     - id: OA-12
       title: "Make the blocking CI gate a REQUIRED check (branch protection) so broken changes can't auto-merge"
       priority: high
@@ -112,6 +118,7 @@ OWNER_ACTIONS:
 | OA-11 | Real-data run DONE (pipeline validated); schedule periodic fetch on a permitted host | 🟡 medium | in progress |
 | OA-12 | Make `code + safety gate (blocking)` a REQUIRED check (branch protection) | 🟠 high | ✅ done |
 | OA-13 | Automate real-data refresh: env egress allowlist OR scheduled GitHub Action | 🟠 high | pending |
+| OA-14 | Set `BACKEND_API_TOKEN` (+ frontend proxy) to protect control routes on a public deploy (default-off; not needed for paper) | 🟡 medium | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 

@@ -86,6 +86,16 @@ class Settings(BaseSettings):
     # any other setting. The owner flips this only after the LIVE_RUNBOOK steps.
     live_trading_enabled: bool = False  # env: LIVE_TRADING_ENABLED — owner-only master switch
 
+    # Shared-secret bearer token guarding the backend's STATE-MUTATING routes
+    # (kill-switch, risk config, execute, portfolio reset, bot start/stop/scan, …).
+    # DEGRADES SAFELY: empty (the default) => auth DISABLED, every request passes, so
+    # paper/dev behaviour is unchanged. When the owner sets BACKEND_API_TOKEN on a public
+    # deploy, those routes require a matching `Authorization: Bearer <token>` (401 else),
+    # so the backend control surface is credential-protected server-side, not merely
+    # network-isolated. Server-side only; the autonomous loop never sets it. See
+    # backend/app/api/auth.py + PENDING_OPS OA-14.
+    backend_api_token: str = ""  # env: BACKEND_API_TOKEN — owner-set; default off (open)
+
     # TEST-ONLY bypass. The CI functional gate may set E2E_DISABLE_RATE_LIMIT=1 so a single
     # CI-runner IP cannot trip rate limits while exercising endpoints. PRODUCTION MUST NEVER
     # SET IT: if it is ever truthy while live_trading_enabled is on, the app HARD-REFUSES to
