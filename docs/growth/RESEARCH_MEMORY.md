@@ -202,3 +202,43 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   alpha that forms `model_prob != crowd` on LESS-PINNED markets (sampled earlier in market
   life). The measurement apparatus (metrics e2e, calibration honesty, reproduction canary,
   audit harness) is now in place to evaluate it the moment it exists. No DoD/floor box ticked.
+
+## 2026-06-29 — B5 keyword-screen hardened + B2 anti-p-hacking + B3/E6 learning-loop engines (4-PR run)
+- Hypothesis (falsifiable): the cross-market keyword relatedness screen can be made to
+  reject unrelated markets (boilerplate-shared AND same-template/different-subject) WITHOUT
+  losing genuinely-related pairs — closing the phantom-signal weakness logged 2026-06-29.
+- Min sample N: n/a (deterministic strategy-quality + infra change, not an alpha eval).
+- OOS result: n/a — no edge claimed. This run hardens the SCREEN + builds learning-loop
+  engines (lifecycle registry, per-strategy attribution) + strengthens the calibration gate.
+- Calibration (Brier / reliability): unchanged; the B2 module now ENFORCES a Bonferroni
+  multiple-comparison correction (`evaluate_calibration(strategies_screened=K)` →
+  `effective_alpha=alpha/K`) so screening K strategies can no longer p-hack a pass. Verified
+  the correction only ever TIGHTENS (monotone, 0 False→True flips across thousands of datasets,
+  2 independent Opus auditors).
+- Costs modeled: n/a for these changes.
+- Verdict: promoted (strategy-quality + integrity + learning-loop infra; 4 file-disjoint PRs
+  #63/#64/#65/#66 merged, gate green, 2 fix cycles vs 5 reviewers/auditors).
+- **THE adversarial lesson (the keyword screen is a heuristic — entity-gating was whack-a-mole):**
+  A first hardening cut required ≥3 shared content tokens AND ≥1 shared "entity" (capitalized
+  proper noun). A fresh Opus auditor BROKE it both ways: it still paired same-template pairs that
+  share a capitalized VENUE/NATIONALITY/ROLE word (Apple-vs-Tesla "on the Nasdaq", "Chinese mfg"
+  vs "Chinese spending"), AND it wrongly REJECTED real pairs whose only entity was a <4-char
+  acronym dropped by the length floor (NBA, Fed). The robust fix was SIMPLER, not more clever:
+  drop entity detection entirely and rely on a COMPREHENSIVE stopword set — once the template
+  words (approval/rating/exceed/percent/December/stock/dollars/nasdaq/chinese/…) are filler,
+  same-template/different-subject questions share ZERO content tokens and reject naturally.
+  **Lesson: a relatedness heuristic on free text is inherently leaky; chasing perfect entity
+  detection is whack-a-mole. The honest, robust move is a broad stopword list + an explicit
+  "this is a conservative SECONDARY screen, not an exact classifier" disclosure, accepting
+  conservative false negatives (the SAFE direction) over fabricated cross-market signals.**
+- **Learning-loop engines (B3/E6) — built PURE, not wired:** strategy_registry.py (lifecycle
+  state machine, fail-loud integrity gate: promotion impossible without recorded backtest+OOS+
+  calibration evidence) + per_strategy_metrics.py (per-strategy realized-PnL attribution; no
+  fabricated rows; reconciles to total). The integrity gate operationalizes "no alpha ships while
+  integrity is weak" as code. Auditors could not bypass promotion or find fabricated attribution.
+  **Remaining: wire both into the orchestrator's resolved-trade stream (a follow-up) + drive a
+  real alpha through them once one exists.**
+- Why / next: the binding constraint is unchanged and loop-buildable — a real decision-time alpha
+  forming model_prob != crowd on LESS-PINNED markets. The measurement + governance apparatus is
+  now stronger (hardened screen, p-hack-resistant calibration gate, lifecycle registry, per-strategy
+  attribution). Next run: WIRE the engines + start the alpha. No DoD/floor box ticked.

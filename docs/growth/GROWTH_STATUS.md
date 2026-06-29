@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-29
   phase: pre_launch
   engine_built: false
-  engine_pct: 64
+  engine_pct: 66
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -106,8 +106,14 @@ GROWTH_STATUS:
     - "B5 forensic audit harness (#59): existing cross-market alphas fire 0 signals on the real sample (no real question text / grouping). Adversarial auditor caught a boilerplate-text phantom-signal bug (98 false signals) — fixed + enforced by a regression test. Surfaced a real strategy weakness (keyword screen too weak), logged for future B-track."
     - "LLM spend cap + timeout ENFORCED (#60): LLM_SPEND_CAP_USD now fails loud before overspend (was config-only); every Gemini call now has a timeout (was none). LLM is not on the scan loop; hardens the /learn path per the standing hard rule."
     - "GATE STRENGTHENED: the blocking preflight now runs the new live-gate/metrics/canary/audit tests (99 -> 176 enforced tests), so these safety/honesty checks are required on every future change."
+    - "B5 keyword screen HARDENED (#63): the weak '3+ shared words / 12-word skip set' cross-market relatedness screen (which paired on filler boilerplate AND same-template/different-subject text) is replaced by market_text.is_content_related — >=3 shared CONTENT tokens over a comprehensive stopword set. Rejects every adversarial-audit false positive (Biden/Macron, Bitcoin/Tesla, inflation/unemployment, Apple-Tesla-on-Nasdaq) while genuinely-related pairs still fire; strictly more conservative than before (190->0 phantom pairs). Honest SECONDARY-screen, not an exact classifier. Two fix cycles vs 5 reviewers/auditors."
+    - "B2 multiple-comparison correction CODE-ENFORCED (#65): evaluate_calibration(strategies_screened=K) applies Bonferroni effective_alpha=alpha/K — the anti-p-hacking requirement is now a tested feature, not a doc note. Only ever TIGHTENS the gate (verified monotone, 0 False->True flips across thousands of datasets); strategies_screened=1 is bit-identical to prior behavior."
+    - "B3/E6 learning-loop ENGINES built (#64): strategy_registry.py (alpha lifecycle state machine with a fail-loud integrity gate — promotion impossible without recorded backtest+OOS+calibration evidence) + per_strategy_metrics.py (pure per-strategy realized-PnL attribution, reconciles to total, no fabricated rows). Pure deterministic engines; NOT yet wired into the live loop (no DoD box). Opus auditors could not bypass the promotion gate or find fabricated attribution."
+    - "A5 wall-clock staleness now FIRES (#66): Market carries a fetched_at ingest timestamp (stamped at parse), so the fetch-age staleness gate flags a stale in-memory snapshot in the live scan path (was a no-op). Never enters any backtest seed_hash."
+    - "GATE STRENGTHENED again: the blocking preflight now also runs test_calibration/data_quality/market_text/strategy_registry/per_strategy_metrics (176 -> ~290 enforced tests)."
   next_actions:
-    - "Build a real decision-time alpha (B-track) that forms model_prob != crowd on LESS-PINNED markets — the now-wired metrics + canary + audit harness will measure it honestly the moment it exists. This is the binding loop-buildable constraint."
+    - "WIRE the new learning-loop engines into the live loop: per_strategy_metrics against orchestrator.get_resolved_trades() (tag by PredictionPosition.strategy) for real per-strategy attribution; strategy_registry to record real alpha state transitions (persisted). These touch the orchestrator (shared file) — a focused follow-up."
+    - "Build a real decision-time alpha (B-track) that forms model_prob != crowd on LESS-PINNED markets — the now-wired metrics + canary + audit harness + the new lifecycle/attribution engines will measure + govern it honestly the moment it exists. This is the binding loop-buildable constraint."
     - "Harden the cross-market keyword screen (B5): the '3+ shared words' heuristic fires on filler words (phantom signals on boilerplate) — require shared CONTENT words / a stop-word list, with tests."
     - "Build the dashboard UI component (frontend, folds with F5) that renders the new /prediction-markets/metrics/* endpoints so paper metrics are visible end-to-end."
     - "OA-11 (human-core): RUN polymarket_history_fetcher in a network-permitted environment (or widen the autonomous env's egress allowlist to Polymarket) so REAL resolved-history flows into walk_forward + the B2 calibration eval. The fetcher is built + leakage-safe; only the egress block stops the OOS run. Until then no floor/DoD box can tick."
@@ -120,7 +126,16 @@ GROWTH_STATUS:
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 64` (up from 61) adds this run's end-to-end metrics wiring (C5 backend +
+`engine_pct: 66` (up from 64) adds this run's learning-loop engine pieces: the alpha
+lifecycle registry with a fail-loud integrity gate (B3) + the per-strategy realized-PnL
+attribution primitive (E6) — both pure/deterministic, the first concrete E-track
+infrastructure — plus the hardened cross-market relatedness screen (B5), the
+code-enforced Bonferroni multiple-comparison correction on the calibration gate (B2), and
+the now-functional wall-clock staleness gate (A5). These are engine/quality/integrity
+pieces; the lifecycle + attribution engines are not yet wired into the live loop, and the
+validated edge ITSELF is still absent (the canary honestly shows 0 trades / no edge), so
+the bulk of the missing % remains. Prior rationale (engine_pct 64, up from 61): this run's
+end-to-end metrics wiring (C5 backend +
 API), the venue-layer fail-closed live gate (D5 defense-in-depth), the real-data
 reproduction canary (C3/F2), the forensic strategy-audit harness (B5 groundwork), and
 enforced LLM timeout + spend cap (G2) — all engine/safety/measurement pieces. The
