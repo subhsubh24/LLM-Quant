@@ -538,3 +538,50 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
 - **Doc sprawl:** 28 root `.md` files consolidated — legacy audit/plan files moved to
   `docs/legacy/` (history preserved); the coherent source of truth is
   VISION/ROADMAP/BUSINESS_CASE/GROWTH_STATUS/PENDING_OPS + `docs/growth/`.
+
+## 2026-06-29 — 5-PR run: metrics e2e + live-gate depth + real-data canary + audit harness + LLM caps
+
+- **Shipped 5 file-disjoint code PRs (#56 C5 metrics, #57 venue-layer live gate, #58 real-data
+  canary, #59 strategy-audit harness, #60 LLM timeout+spend-cap) + this bookkeeping PR** from an
+  8-scout (Haiku) sweep across tracks A–G. All auto-merged after the blocking gate went green;
+  integration verified before split (176 PM tests + runtime harness deterministic). engine_pct 61→64.
+  **No DoD/floor box ticked** — none of these is a validated edge (the canary honestly shows 0 trades).
+- **THE adversarial gate earned its keep — an Opus honesty auditor BROKE a claim that all my own
+  checks missed.** PR-4's audit harness reported "0 signals fired on the real 54-record sample" and
+  the tests/docstrings asserted ~0 — but the auditor ran it and found **98 phantom signals**. Root
+  cause: the harness's own `load_real_markets_from_history` injected IDENTICAL boilerplate question
+  text ("Market {id} (real sample)") into all 54 records; `CrossMarketArbitrageStrategy`'s keyword
+  screen fires on "3+ shared non-trivial words", so it spuriously paired unrelated markets. The test
+  deliberately did NOT assert the count, so the false prose was never checked. **Lesson: a forensic
+  finding stated in prose but not ENFORCED by an assertion is a lie waiting to happen — pin the claim
+  with a test (here: `total_signals_fired == 0`), and never feed a strategy synthetic filler text that
+  shares words; use unique opaque placeholders. The fix also revealed a real strategy weakness (the
+  keyword screen pairs on filler words) — logged to RESEARCH_MEMORY for a future B-track fix; I did
+  NOT change the strategy in the audit PR (behavior change needs its own deliberate work).**
+- **Sonnet reviewers caught real precision bugs in the metrics aggregator:** (1) `len(list(trades))`
+  computed AFTER `summarize(trades)` already consumed the sequence → silently reports 0 for any
+  one-shot iterator (materialize once at function entry); (2) `_is_degenerate` used `==` float equality
+  → use `math.isclose` (a price round-trip can differ by epsilon). **Lesson: materialize a Sequence
+  param before iterating it twice; never `==` floats on a degenerate-detection path.** All review/audit
+  findings were fixed in ONE consolidated cycle (within the ≤2-verify/≤2-review brake), then merged.
+- **Live-path safety done right (Opus auditor: SAFE — CANNOT-BREAK):** the LIVE_TRADING_ENABLED gate
+  was only at the `PredictionMarketExecutor.execute()` interface; added a fail-closed check INSIDE
+  `PolymarketExecutor.place_order()` (both venue paths) so a direct venue-level call can't bypass it,
+  and it fails CLOSED if settings raise. Hardened response parsing so no FILLED is reported without a
+  real matched execution. Paper is provably unaffected (dry_run routes through `_simulate_fill` and
+  never reaches `place_order`). **Lesson: enforce a safety gate at the LOWEST level, not just the
+  interface; and a "fill" must be downstream of a real match, never assumed from a non-error response.**
+- **GATE STRENGTHENED deliberately:** added the new live-gate/metrics/canary/audit test files to
+  `scripts/preflight.sh`'s blocking test list (99→176 enforced tests) so these safety/honesty checks
+  are REQUIRED on every future change. (preflight.sh is a stable anchor — changed with deliberate
+  intent, verified green before requiring; left `test_llm_safety` out as it has a real-time timeout
+  test and the LLM is off the trading path.)
+- **Process / git lesson:** the default branch advanced (#54/#55) WHILE I worked (I was based on the
+  older tip). The new commits were file-disjoint from my changes, so I `git stash -u` → checkout the
+  new origin tip → `stash pop` to rebase cleanly, then re-ran the gate against the NEW base (config.py
+  + a boot-guard had changed upstream) before splitting/pushing. **Lesson: always re-fetch + re-verify
+  against the CURRENT default tip before opening PRs — the branch moves under you in an active repo.**
+- **Binding constraint unchanged + loop-buildable:** a real decision-time alpha producing
+  `model_prob != crowd` on less-pinned markets. The measurement apparatus is now complete (metrics
+  e2e, calibration honesty, reproduction canary, audit harness) — the next run builds the alpha, not
+  more infra. Egress (OA-11) remains owner-scope for refreshing the real corpus.

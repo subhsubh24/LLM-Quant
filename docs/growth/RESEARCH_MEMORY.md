@@ -171,3 +171,34 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   "unambiguously settled" filter EXCLUDES contested/re-resolved/UMA-disputed markets, biasing
   the sample toward clean crowd-friendly outcomes — any first eval MUST disclose this so it
   doesn't silently overstate crowd calibration (now documented in the fetcher itself).
+
+## 2026-06-29 — Forensic audit of existing cross-market alphas + metrics wired e2e (no new edge)
+- Hypothesis (falsifiable): the existing cross-market logical-consistency alphas
+  (`CrossMarketArbitrageStrategy`, `LogicalImplicationDetector`) actually fire and find
+  real, exploitable mispricing on real-shaped resolved data.
+- Min sample N: 54 real resolved records (the committed leakage-safe fixture).
+- OOS result: **0 signals fired** on the real sample. The records carry NO real question
+  text and NO related-market grouping, which both alphas require to fire. So they are
+  effectively dormant on this individual-record, near-resolution, high-liquidity sample.
+- Calibration (Brier / reliability): crowd baseline Brier ≈ 0.0933 (re-confirmed,
+  reproducible, no look-ahead — `scripts/validate_real_history.py`); no model edge measured
+  (model_prob == crowd → degenerate, honestly reported, NOT a fake pass).
+- Costs modeled: yes (cost_model; the audit is forensic, no fitting on the sample).
+- Verdict: **edge-not-proven** (forensic groundwork only). Built a reusable, deterministic
+  audit harness (`strategy_audit.py`) + wired weekly-metrics + calibration end-to-end into
+  the paper run + API (#56), so the moment a real alpha exists it is measured honestly.
+- **Adversarial-audit finding (a real strategy weakness, recorded for B-track):** a first
+  cut of the audit loader injected IDENTICAL boilerplate question text ("Market {id} (real
+  sample)") into all 54 records; the `CrossMarketArbitrageStrategy` keyword screen fires on
+  "3+ shared non-trivial words", so it spuriously paired completely unrelated markets and
+  produced ~98 PHANTOM signals (forensically "scored" at a 64% hit rate) while the prose
+  claimed 0. An Opus honesty auditor broke the claim. Fixed in the harness (unique opaque
+  placeholders → genuine 0 signals, enforced by a loud regression test). **The deeper lesson:
+  the strategy's keyword screen is too weak — filler/boilerplate words pass the "shared
+  words" test. A future B-track fix must require shared CONTENT words (stop-word list /
+  entity overlap) before pairing markets, with tests. The strategy itself was left untouched
+  this run (behavior change needs its own deliberate work).**
+- Why / next: the binding constraint is unchanged and loop-buildable — a real decision-time
+  alpha that forms `model_prob != crowd` on LESS-PINNED markets (sampled earlier in market
+  life). The measurement apparatus (metrics e2e, calibration honesty, reproduction canary,
+  audit harness) is now in place to evaluate it the moment it exists. No DoD/floor box ticked.

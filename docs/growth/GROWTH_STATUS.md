@@ -13,10 +13,10 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-06-28
+  as_of: 2026-06-29
   phase: pre_launch
   engine_built: false
-  engine_pct: 61
+  engine_pct: 64
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -100,8 +100,17 @@ GROWTH_STATUS:
     - "C2/C3 market-impact model BUILT (cost_model.effective_buy_price_with_impact, applied in walk_forward): simplified conservative sqrt-impact, floored at the flat rate, capped at 1.0, deployed==budget to machine epsilon (no double-count); thin books strictly worsen PnL. seed_hash now covers liquidity+impact_coeff. Honestly a non-calibrated toy. 3 Opus auditors CANNOT-BREAK."
     - "G3 audit log DONE (audit_log.py): durable PredictionAuditLog table + best-effort observer in the scan loop records every decision + every would-be order (filled/rejected/gated). Side-effect-honest (event derived from the REAL OrderResult, never a fake fill); execution.py untouched; non-fatal. 3 Opus auditors CANNOT-BREAK."
     - "ENVIRONMENT REALITY: the binding constraint (validated OOS edge on REAL resolved-Polymarket data) is now blocked by the autonomous env's network EGRESS POLICY, not by missing code. The loop built everything buildable offline; the real-data run is OA-11 (owner runs the fetcher where Polymarket is reachable, or widens egress)."
+    - "C5 metrics WIRED end-to-end (#56): metrics_aggregator + orchestrator.get_resolved_trades() + GET /prediction-markets/metrics/{weekly,floor-status,calibration} flow weekly PnL/Sharpe/hit-rate/drawdown + calibration from REAL resolved positions. Calibration reports honestly degenerate (never a fake pass) while model_prob==crowd. Backend done; dashboard UI remains."
+    - "Live gate DEFENSE-IN-DEPTH (#57): LIVE_TRADING_ENABLED now also enforced fail-closed inside PolymarketExecutor.place_order() (both venue paths), plus side-effect-honest fill parsing (no FILLED without a real match). Opus auditor: SAFE — CANNOT-BREAK; paper provably unaffected."
+    - "Real-data REPRODUCTION canary (#58): walk-forward + crowd Brier on the real 54-record fixture proven bit-for-bit reproducible (seed_hash 8dc358439ffb5746, crowd Brier 0.0933, 0 trades), pinned so drift fails loud. Proves determinism on REAL data; claims NO edge (model_prob==crowd)."
+    - "B5 forensic audit harness (#59): existing cross-market alphas fire 0 signals on the real sample (no real question text / grouping). Adversarial auditor caught a boilerplate-text phantom-signal bug (98 false signals) — fixed + enforced by a regression test. Surfaced a real strategy weakness (keyword screen too weak), logged for future B-track."
+    - "LLM spend cap + timeout ENFORCED (#60): LLM_SPEND_CAP_USD now fails loud before overspend (was config-only); every Gemini call now has a timeout (was none). LLM is not on the scan loop; hardens the /learn path per the standing hard rule."
+    - "GATE STRENGTHENED: the blocking preflight now runs the new live-gate/metrics/canary/audit tests (99 -> 176 enforced tests), so these safety/honesty checks are required on every future change."
   next_actions:
-    - "OA-11 (human-core, now the binding step): RUN polymarket_history_fetcher in a network-permitted environment (or widen the autonomous env's egress allowlist to Polymarket) so REAL resolved-history flows into walk_forward + the B2 calibration eval. The fetcher is built + leakage-safe; only the egress block stops the OOS run. Until then no floor/DoD box can tick."
+    - "Build a real decision-time alpha (B-track) that forms model_prob != crowd on LESS-PINNED markets — the now-wired metrics + canary + audit harness will measure it honestly the moment it exists. This is the binding loop-buildable constraint."
+    - "Harden the cross-market keyword screen (B5): the '3+ shared words' heuristic fires on filler words (phantom signals on boilerplate) — require shared CONTENT words / a stop-word list, with tests."
+    - "Build the dashboard UI component (frontend, folds with F5) that renders the new /prediction-markets/metrics/* endpoints so paper metrics are visible end-to-end."
+    - "OA-11 (human-core): RUN polymarket_history_fetcher in a network-permitted environment (or widen the autonomous env's egress allowlist to Polymarket) so REAL resolved-history flows into walk_forward + the B2 calibration eval. The fetcher is built + leakage-safe; only the egress block stops the OOS run. Until then no floor/DoD box can tick."
     - "Once real data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth."
     - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5 remainder)."
     - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); confirm the audit log's DATABASE_URL is durable (OA-10)."
@@ -111,8 +120,13 @@ GROWTH_STATUS:
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 61` reflects what genuinely exists and runs vs. what's required for a
-proven, go-live-eligible engine (up from 58: the leakage-safe resolved-history fetcher
+`engine_pct: 64` (up from 61) adds this run's end-to-end metrics wiring (C5 backend +
+API), the venue-layer fail-closed live gate (D5 defense-in-depth), the real-data
+reproduction canary (C3/F2), the forensic strategy-audit harness (B5 groundwork), and
+enforced LLM timeout + spend cap (G2) — all engine/safety/measurement pieces. The
+validated edge ITSELF is still absent (the canary honestly shows 0 trades / no edge), so
+the bulk of the missing % remains. Prior rationale (engine_pct 61, up from 58: the
+leakage-safe resolved-history fetcher
 (A2 ingest — the named code blocker for OOS validation), the market-impact cost model
 applied inside the walk-forward backtest (C2/C3 remainder), and the durable decision +
 would-be-order audit log (G3) all landed this run. These are engine/safety pieces toward
