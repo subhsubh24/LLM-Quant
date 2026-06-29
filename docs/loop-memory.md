@@ -32,6 +32,12 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
   `strict=false` is the detail that keeps parallel disjoint PRs flowing without serial rebases.
 - **Ordering (no lockout):** shipped the repo + routine changes and proved a PR auto-merges green
   FIRST, then flipped `enforce_admins=true`, then re-validated end-to-end.
+- **COMPLETED 2026-06-28:** repo `allow_auto_merge=true`; protection = `enforce_admins=true`,
+  `strict=false`, contexts `["code + safety gate (blocking)"]`. All three PR-merging routines
+  (factory / research / auditor) carry the `--auto`/never-`--admin` rule (verified via re-get:
+  only message content changed; model/cron/tools/sources/MCP preserved). End-to-end proof: PR #54
+  sat OPEN/BLOCKED with auto-merge armed and merged ONLY after the required gate went green — the
+  loop now waits for CI, cannot `--admin`-bypass. `LOOP_HEALTH.enforced_in_ci: true`.
 
 ## 2026-06-28 — Branch protection APPLIED (owner-authorized): the required check is now enforced
 
