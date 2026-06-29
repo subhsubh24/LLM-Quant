@@ -608,3 +608,56 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
   `model_prob != crowd` on less-pinned markets. The measurement apparatus is now complete (metrics
   e2e, calibration honesty, reproduction canary, audit harness) — the next run builds the alpha, not
   more infra. Egress (OA-11) remains owner-scope for refreshing the real corpus.
+
+## 2026-06-29 — 4-PR models/strategy run: B5 screen + B2 anti-p-hacking + B3/E6 engines + A5 staleness
+
+- **Shipped 4 file-disjoint code PRs (#63 B5 keyword-screen hardening, #64 B3/E6 lifecycle+attribution
+  engines, #65 B2 Bonferroni correction, #66 A5 fetched_at staleness) + this bookkeeping PR** from an
+  8-scout Haiku sweep across tracks A–G. All auto-merged after the blocking gate went green; integration
+  verified before split (374 PM tests + runtime harness deterministic). engine_pct 64→66. **No DoD/floor
+  box ticked** — these are engine/quality/integrity/learning-loop pieces, not a validated edge.
+- **Scout sweep → DROPPED a fake fix (anti-padding worked):** an 8th scout flagged a cost_model
+  "extreme-price floor" bug. On inspection the 1e-6 floor RAISES cost (conservative/safe direction) →
+  reduces sizing, not oversizes — NOT a real bug. Dropped PR-C. **Lesson: scout findings are leads, not
+  orders — verify the direction of an alleged safety bug before building a fix; a floor that over-states
+  cost is the safe side.**
+- **THE adversarial lesson — a free-text relatedness heuristic is inherently leaky; entity-gating was
+  whack-a-mole.** B5's first hardening cut (≥3 shared content tokens AND ≥1 shared capitalized "entity")
+  was BROKEN by a fresh Opus re-auditor BOTH ways: still paired same-template pairs sharing a venue/
+  nationality/role word (Apple/Tesla "on the Nasdaq"; "Chinese mfg" vs "Chinese spending"), AND wrongly
+  REJECTED real pairs whose only entity was a <4-char acronym dropped by the length floor (NBA, Fed —
+  contradicting my own docstring that listed NBA as an example). The robust fix was SIMPLER: drop entity
+  detection, rely on a COMPREHENSIVE stopword set (template words = filler) so same-template/different-
+  subject pairs share zero content tokens. **Lesson: when an auditor keeps finding edge cases in a
+  heuristic, the answer is usually a simpler, broader, honestly-disclosed-as-imperfect rule — not more
+  clever detection. Document it as a conservative SECONDARY screen; accept conservative false negatives
+  (safe) over fabricated signals (a real losing trade).**
+- **Two-fix-cycle discipline (stayed within the ≤2 brake):** cycle 1 (2 Sonnet + 3 Opus auditors) found
+  the false-positive class → fixed with entity-gating + reconciliation + tz-normalize. cycle 2 (1 fresh
+  Opus re-auditor) found entity-gating incomplete → simplified to stopwords-only. Then merged WITHOUT a
+  3rd audit (mechanically verified all named cases + full gate). **Lesson: a rewrite needs its own fresh
+  audit (cycle-2 caught the cycle-1 fix's new holes), but the brake means apply cycle-2's findings and
+  ship on mechanical verification — don't spiral into a 3rd audit on a strictly-more-conservative change.**
+- **Reviewers/auditors earned their keep (real bugs each):** Sonnet A + Auditor 3 both caught
+  strategy_registry.from_dict NOT normalizing naive timestamps → to_dict would reinterpret them in the
+  host's LOCAL tz, breaking byte-stable round trips on a non-UTC host (fixed with _require_aware). Sonnet B
+  caught per_strategy_metrics' frozen-dataclass-with-mutable-dict (weekly_pnl mutable despite frozen=True →
+  MappingProxyType) and a weekly/total reconciliation gap (total now derived from the weekly series →
+  reconciles exactly). **Lesson: "frozen=True" does NOT freeze a contained dict; use MappingProxyType.
+  And derive a total from its parts so the two views can't drift.**
+- **Determinism guard held:** A5's Market.fetched_at is stamped with now() but only on the LIVE Market
+  dataclass; the backtest uses a separate HistoricalMarket and _seed_hash enumerates fields explicitly,
+  so fetched_at never enters any reproducible fingerprint (Opus-auditor-confirmed + 22 walk-forward tests).
+  **Lesson: when adding a now()-stamped field, prove it's excluded from every seed_hash/reproducible path
+  before shipping — here the separate backtest type made it safe.**
+- **GATE STRENGTHENED (deliberate, verify-green-first):** added test_calibration/data_quality/market_text/
+  strategy_registry/per_strategy_metrics to preflight.sh's blocking list (176→~290 enforced tests). All
+  green before requiring (the verify-green-before-requiring rule).
+- **Process:** built all 4 on one integration branch, verified the integrated gate + harness, then split
+  via `git checkout <base> -- <files>` into 4 disjoint branches off the new default tip, pushed, opened
+  PRs, all 4 required-check-green in ~25s, merged squash. The new test files were added to the gate in the
+  ONE bookkeeping PR (preflight.sh is a shared anchor — one owner).
+- **Binding constraint unchanged + loop-buildable:** a real decision-time alpha (model_prob != crowd on
+  less-pinned markets). The governance apparatus is now stronger (hardened screen, p-hack-resistant
+  calibration gate, lifecycle registry, per-strategy attribution); next run WIRES the engines into the
+  orchestrator + starts the alpha. Egress (OA-11) remains owner-scope for refreshing the real corpus.

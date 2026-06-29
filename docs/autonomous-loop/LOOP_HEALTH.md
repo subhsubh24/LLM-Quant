@@ -39,27 +39,46 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-29
-  last_run: 2026-06-29          # prior run: autonomous factory #56-60 (C5 metrics, venue gate, canary, audit harness, LLM caps)
+  last_run: 2026-06-29          # prior run: data-refresh automation (OA-13: fetcher --merge + staged Action)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
-  enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto and WAITS for CI, never --admin
+  enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 1          # data-refresh automation: fetcher --merge (accumulate corpus) + staged GitHub Action (OA-13)
-    changes_abandoned: 0
-    abandoned_reasons: []        # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
-    verify_cycle_failures: 0     # gate green; data-only + docs change
-    review_rejections: 0
+    changes_shipped: 4          # #63 B5 keyword-screen hardening, #64 B3/E6 lifecycle+attribution engines, #65 B2 Bonferroni correction, #66 A5 fetched_at staleness
+    changes_abandoned: 1
+    abandoned_reasons:           # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
+      - {change: "cost_model extreme-price floor fix", reason: dead_end}  # scout-alleged bug; the 1e-6 floor OVER-states cost (conservative/safe direction), not oversizing — dropped pre-build, not a real bug
+    verify_cycle_failures: 0     # blocking gate stayed green throughout; the 2 fix cycles were review/audit-driven, not gate failures
+    review_rejections: 0         # no PR rejected; 2 fix cycles (entity-gating → simplified screen; tz-normalize; reconcile; immutable mapping) applied in-place within the <=2-cycle brake
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 54             # git: squash-merged (#NN) commits, last 7 days
+    merged_prs: 54             # git: 53 squash-merged (#NN) commits in window + this bookkeeping PR
     reverts: 0                 # git: no revert commits in the window
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11): data-refresh now AUTOMATABLE (OA-13 staged) — no longer a manual residual; binding constraint is loop-buildable (a real alpha).
+    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11/OA-13) remains owner-scope but is NOT a convergence wall (binding constraint is loop-buildable: a real alpha + wiring the new engines).
     harness_proposals_open: 0    # no open proposals; no recurring wall warranting one this run.
-  signal: improving              # 6th datapoint: factory shipped #56-60 (3 review/audit catches, all fixed) then this run staged the data-refresh automation (OA-13); 0 reverts/abandoned. Converging.
+  signal: improving              # 7th datapoint: 4 disjoint PRs shipped, 1 fake-fix correctly dropped pre-build (anti-padding), 0 reverts; adversarial gate caught real bugs (false-positive screen, naive-tz round-trip, mutable frozen dict) all fixed in <=2 cycles. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-29 (7th datapoint) — `improving`, the model/strategy layer got better AND the adversarial
+gate earned its keep again.** Shipped 4 file-disjoint PRs (#63–#66) from an 8-scout sweep: hardened the
+cross-market keyword relatedness screen (B5), made the calibration gate's multiple-comparison correction
+code-enforced (B2 Bonferroni), and built the first concrete learning-loop engines — an alpha lifecycle
+registry with a fail-loud integrity gate (B3) and a per-strategy realized-PnL attribution primitive (E6).
+**Anti-padding worked:** an 8th scout's alleged cost_model "extreme-price" bug did not survive scrutiny
+(the floor is conservative, the safe direction), so it was dropped pre-build rather than shipped as busywork.
+**The two-gate discipline caught real defects across two fix cycles:** a fresh Opus auditor broke the first
+B5 hardening cut (entity-gating still admitted venue/nationality-shared pairs AND dropped acronym subjects)
+→ simplified to a broad-stopword content screen; Sonnet/Opus reviewers caught a naive-timestamp round-trip
+that broke determinism on non-UTC hosts and a frozen-dataclass-with-mutable-dict — all fixed within the
+≤2-cycle brake, then merged on a green required check (no 3rd audit on a strictly-more-conservative change).
+Gate strengthened 176→~290 enforced tests. No DoD/floor box ticked — these are engine/integrity pieces; the
+binding constraint stays loop-buildable (a real alpha + wiring the new engines), so no harness proposal is
+warranted.
+
+### Earlier
 
 **2026-06-29 (6th datapoint) — `improving`, closed the data-access gap hands-off.** Staged the
 real-data refresh automation (OA-13): the fetcher now `--merge`s to ACCUMULATE a growing OOS corpus,
