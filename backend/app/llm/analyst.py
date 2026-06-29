@@ -9,10 +9,103 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, date
 import logging
 import json
+import concurrent.futures
+import threading
 
 logger = logging.getLogger(__name__)
 
 from ..config import get_settings
+
+
+# ---------------------------------------------------------------------------
+# Safety constants
+# ---------------------------------------------------------------------------
+
+# Hard timeout for every Gemini network call.  A single synchronous call
+# that does not return within this window is cancelled and returns None so
+# the caller's graceful-degradation path (template fallback) kicks in.
+LLM_CALL_TIMEOUT_SEC: float = 30.0
+
+# Gemini 2.5 Flash public pricing (conservative – use higher published rates
+# so the estimator is a safe upper bound, not an undercount).
+# https://ai.google.dev/pricing  (as of mid-2025)
+# Input:  $0.15 / 1M tokens
+# Output: $0.60 / 1M tokens
+_COST_PER_INPUT_TOKEN_USD: float = 0.15 / 1_000_000
+_COST_PER_OUTPUT_TOKEN_USD: float = 0.60 / 1_000_000
+
+# Chars-per-token approximation (conservative: 3 chars ≈ 1 token)
+_CHARS_PER_TOKEN: float = 3.0
+
+
+class LLMBudgetExceeded(RuntimeError):
+    """Raised when a requested LLM call would push cumulative estimated spend
+    past the configured llm_spend_cap_usd limit.
+
+    Design choice: we RAISE rather than silently drop or log-only because
+    a silent drop could mask runaway call loops and still accrue cost if the
+    cap is not perfectly tight.  The raised exception is caught by the route
+    handler (which returns a 503 / error payload) — the request worker does
+    not crash, but the caller learns immediately that the budget is exhausted.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Process-local spend tracker (thread-safe, resettable for tests)
+# ---------------------------------------------------------------------------
+
+class _SpendTracker:
+    """Thread-safe cumulative estimated-spend accumulator."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total_usd: float = 0.0
+
+    def estimate_cost(self, prompt: str, max_output_tokens: int) -> float:
+        """Return a conservative USD cost estimate for one call."""
+        input_tokens = max(1, len(prompt) / _CHARS_PER_TOKEN)
+        return (
+            input_tokens * _COST_PER_INPUT_TOKEN_USD
+            + max_output_tokens * _COST_PER_OUTPUT_TOKEN_USD
+        )
+
+    def check_and_accrue(self, estimated_cost: float, cap_usd: float) -> None:
+        """Raise LLMBudgetExceeded if adding *estimated_cost* would exceed the
+        cap; otherwise atomically add it to the running total.
+
+        The check-and-accrue is done under the same lock so two concurrent
+        callers cannot both slip through just under the cap.
+        """
+        with self._lock:
+            if self._total_usd + estimated_cost > cap_usd:
+                raise LLMBudgetExceeded(
+                    f"LLM spend cap of ${cap_usd:.4f} USD would be exceeded. "
+                    f"Cumulative so far: ${self._total_usd:.4f} USD, "
+                    f"this call estimate: ${estimated_cost:.4f} USD. "
+                    "Refusing call to avoid overspend. Reset the tracker or "
+                    "raise LLM_SPEND_CAP_USD to continue."
+                )
+            self._total_usd += estimated_cost
+
+    @property
+    def total_usd(self) -> float:
+        with self._lock:
+            return self._total_usd
+
+    def reset(self) -> None:
+        """Reset cumulative spend to zero.  Intended for tests and daily
+        scheduled resets; NOT called automatically inside this module."""
+        with self._lock:
+            self._total_usd = 0.0
+
+
+# Module-level singleton tracker — shared across all QuantAnalyst instances.
+_spend_tracker = _SpendTracker()
+
+
+def get_spend_tracker() -> _SpendTracker:
+    """Return the module-level spend tracker (useful for tests)."""
+    return _spend_tracker
 
 
 @dataclass
@@ -63,22 +156,77 @@ Be concise but thorough. A busy trader should be able to scan and get key points
         return self._client
 
     def _call_llm(self, prompt: str, max_tokens: int = 1500) -> Optional[str]:
-        """Make a call to the Gemini API."""
+        """Make a call to the Gemini API with timeout and spend-cap enforcement.
+
+        Returns the model's text response, or None when:
+        - no API key is configured (template-fallback path, no exception raised)
+        - the call times out (logged as ERROR, returns None)
+        - the Gemini API returns an error (logged as ERROR, returns None)
+
+        Raises LLMBudgetExceeded (a RuntimeError subclass) when the estimated
+        cost of this call would push cumulative spend past llm_spend_cap_usd.
+        The exception propagates to the route handler so the caller learns the
+        budget is exhausted; it is NOT silently swallowed here.
+        """
         client = self._get_client()
         if not client:
+            # No API key — graceful no-op, template fallback handles it.
             return None
 
+        # --- Spend cap check (fail loud before making the network call) ---
+        estimated_cost = _spend_tracker.estimate_cost(prompt, max_tokens)
+        cap = self.settings.llm_spend_cap_usd
+        _spend_tracker.check_and_accrue(estimated_cost, cap)
+        # From here the cost has been committed to the tracker; if the
+        # network call fails or times out the spend was still "used" (we
+        # don't roll back) — this is intentionally conservative.
+
+        # --- Timeout-guarded network call ---
+        # Resolve the GenerateContentConfig *before* entering the thread so
+        # that an ImportError (e.g. google-genai not installed in test env)
+        # is caught here rather than silently swallowed inside the executor.
         try:
-            from google.genai import types
-            response = client.models.generate_content(
-                model=self.settings.gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_PROMPT,
-                    max_output_tokens=max_tokens,
-                ),
+            from google.genai import types as _genai_types
+            _call_config = _genai_types.GenerateContentConfig(
+                system_instruction=self.SYSTEM_PROMPT,
+                max_output_tokens=max_tokens,
             )
+        except ImportError:
+            # google-genai not installed — only reachable in tests where the
+            # client itself is already a stub that doesn't need a real config.
+            _call_config = None
+
+        model_name = self.settings.gemini_model
+
+        def _do_call() -> Optional[str]:
+            kwargs: Dict[str, Any] = {
+                "model": model_name,
+                "contents": prompt,
+            }
+            if _call_config is not None:
+                kwargs["config"] = _call_config
+            response = client.models.generate_content(**kwargs)
             return response.text
+
+        try:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(_do_call)
+            try:
+                return future.result(timeout=LLM_CALL_TIMEOUT_SEC)
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    "Gemini API call timed out after %s seconds — "
+                    "returning None (template fallback will apply).",
+                    LLM_CALL_TIMEOUT_SEC,
+                )
+                return None
+            finally:
+                # Do NOT wait for the hung worker thread — shut down without
+                # blocking so the caller returns promptly after a timeout.
+                executor.shutdown(wait=False, cancel_futures=True)
+        except LLMBudgetExceeded:
+            # Must not be swallowed here — re-raise so callers know.
+            raise
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             return None
