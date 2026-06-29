@@ -71,3 +71,36 @@ def test_credential_maps_to_real_capability():
         "credential_inventory": {"X_API_KEY": {"capability": "ghost"}},
     }
     assert any("ghost" in f for f in csv.check(root=root, in_code=set()))
+
+
+# --- readiness mode + UNMET surfacing (the addendum) ---
+
+def test_committed_readiness_is_green():
+    assert csv.check_readiness() == [], "committed manifest is not readiness-green"
+
+
+def test_readiness_block_counts_and_unmet():
+    root = {
+        "capabilities": [
+            {"id": "a", "active": True, "ci_validatable": True, "status": "validated"},
+            {"id": "kalshi", "active": True, "ci_validatable": False, "status": "validated"},
+            {"id": "off", "active": False, "ci_validatable": False, "status": "gated_off"},
+        ],
+        "credential_inventory": {},
+    }
+    rd = csv.readiness(root)
+    assert rd["capabilities_total"] == 3
+    assert rd["unmet"] == ["kalshi"]          # active + ci_validatable:false; inactive 'off' exempt
+
+
+def test_unmet_capability_must_be_surfaced_in_both_channels():
+    """An active ci_validatable:false capability blocks AND must appear as an urgent
+    OWNER_ACTION + in LOOP_HEALTH.validation.unmet (not present in the real files -> failures)."""
+    root = {
+        "capabilities": [{"id": "kalshi", "active": True, "ci_validatable": False, "status": "validated"}],
+        "credential_inventory": {},
+    }
+    fails = csv.check_readiness(root=root)
+    assert any("UNMET" in f and "kalshi" in f for f in fails)
+    assert any("validation-capability-kalshi" in f for f in fails)   # missing OWNER_ACTION surfaced
+    assert any("LOOP_HEALTH" in f and "kalshi" in f for f in fails)  # missing LOOP_HEALTH entry surfaced

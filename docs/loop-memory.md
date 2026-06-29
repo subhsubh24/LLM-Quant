@@ -2,6 +2,30 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — Self-validation ADDENDUM: readiness mode + UNMET surfacing + 5 pitfalls + honesty-reconcile
+
+- Cross-factory alignment of the self-validation gate. Added: a `--readiness` mode
+  (`check_self_validation.py --readiness`) wired into preflight step 9d; a per-capability
+  **`ci_validatable`** flag; a **readiness** block (`enforced_in_ci`, `capabilities_total`, `unmet`)
+  mirrored in BOTH `SELF_VALIDATION.readiness` and `LOOP_HEALTH.validation`.
+- **Surfacing (don't let unmet capabilities die in CI logs):** an ACTIVE capability that is
+  `ci_validatable:false` (needs an owner-only secret) is UNMET → the checker requires it to appear
+  in BOTH an urgent PENDING_OPS `OWNER_ACTION` `validation-capability-<service>` AND
+  `LOOP_HEALTH.validation.unmet`. In only one place = invisible to the owner/dashboard = a gate
+  failure. (unmet=[] today — no active capability needs a secret to validate.)
+- **The 5 pitfalls, checked against this repo:** (1) scan is `backend/app` runtime code only — NOT
+  tests/scripts/CI (no false drift from CI-only env vars). (2) pyyaml is a DECLARED ci dep + the gate
+  now FAILS (not skips) if it's absent — a vanished parser must never silently disable the check.
+  (3) per-PR scoped/base-diff machinery is N/A here: LLM-Quant runs FULL readiness on every PR
+  (stronger than scoping), so no `fetch-depth:0`/base-ref diff needed. (4) two modes shipped: default
+  coverage + `--readiness` (any unmet fails, wired into the gate). (5) HONESTY: each mock/degrade/
+  gated capability carries a `real_flow_note` proving the genuinely-critical path is really exercised,
+  and the factory's adversarial auditors now reconcile that a 'validated' capability isn't a stubbed
+  un-exercised critical path (the email-verification trap in a new form).
+- **Lesson:** "validated" is a claim that must survive an adversary — a mock is only honest if the
+  real money/side-effect path is exercised elsewhere; and an unmet capability is only safe if it is
+  LOUD in every channel the owner reads, not buried in a CI log.
+
 ## 2026-06-29 — Self-validation coverage gate: the loop can prove it validates the app it builds
 
 - **Ask:** ensure the factory can validate the app itself — has all the env keys it needs to
