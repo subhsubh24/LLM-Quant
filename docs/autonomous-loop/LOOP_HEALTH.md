@@ -38,28 +38,43 @@ harness proposal).
 ```yaml
 LOOP_HEALTH:
   project: LLM-Quant
-  as_of: 2026-06-28
-  last_run: 2026-06-28          # prior run: branch protection applied (#53)
+  as_of: 2026-06-29
+  last_run: 2026-06-28          # prior run: wait-for-CI hardening + boot-guard (#54/#55)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 1          # wait-for-CI hardening: enforce_admins=true + auto-merge + test-bypass boot-guard + --auto protocol in docs & routines
+    changes_shipped: 5          # #56 C5 metrics e2e, #57 venue-layer live gate, #58 real-data canary, #59 strategy-audit harness, #60 LLM timeout+spend-cap (all file-disjoint, auto-merged after CI green)
     changes_abandoned: 0
     abandoned_reasons: []        # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
-    verify_cycle_failures: 0
-    review_rejections: 0
+    verify_cycle_failures: 0     # gate green every cycle; the issues below were caught by REVIEW/AUDIT pre-merge, not by a gate failure
+    review_rejections: 3         # 2 Sonnet reviewers REQUEST-CHANGES (PR-1 iterator/float precision) + 1 Opus auditor NOT-PROVEN-HONEST (PR-4 boilerplate phantom-signals) — ALL fixed in one consolidated cycle, then merged; none abandoned
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 46             # git: squash-merged (#NN) commits, last 7 days
+    merged_prs: 53             # git: squash-merged (#NN) commits, last 7 days (incl. this run's 5)
     reverts: 0                 # git: no revert commits in the window
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs. Egress wall resolved for data access (OA-11 residual = scheduling only).
-    harness_proposals_open: 0    # issue #51 resolved (branch protection applied). No open proposals.
-  signal: improving              # 4th datapoint: 46 merged / 0 reverts / 0 abandoned; required check now has TEETH (enforce_admins=true) and the loop merges via --auto (waits for CI, never --admin). Converging.
+    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11) residual = scheduling only; binding constraint is now loop-buildable (a real alpha), not a wall.
+    harness_proposals_open: 0    # no open proposals; no recurring wall warranting one this run.
+  signal: improving              # 5th datapoint: 5 shipped / 0 reverts / 0 abandoned; 3 review/audit rejections ALL fixed in one cycle (the adversarial gate working as designed); blocking gate strengthened 99->176 enforced tests. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-29 (5th datapoint) — `improving`, the adversarial gate earned its keep.** Shipped 5
+file-disjoint PRs (#56–#60) from an 8-scout sweep: C5 metrics wired end-to-end, a venue-layer
+fail-closed live gate, a real-data reproduction canary, a forensic strategy-audit harness, and
+enforced LLM timeout + spend cap. **0 abandoned, 0 reverts.** The two-gate discipline caught real
+defects pre-merge: 2 Sonnet reviewers flagged precision bugs in the metrics aggregator (iterator
+double-consume; float-equality degenerate check) and — most importantly — a fresh Opus honesty
+auditor **broke** the strategy-audit claim ("0 signals on the real sample" was FALSE: the harness's
+own boilerplate question text produced ~98 phantom signals). All were fixed in ONE consolidated
+cycle and are now guarded by loud regression tests; the blocking gate was extended from 99 to 176
+enforced tests so the new safety/metrics/canary/audit checks bind every future change. The binding
+constraint stays loop-buildable (a real decision-time alpha producing model_prob != crowd), not an
+environmental wall — so no harness proposal is warranted.
+
+### Earlier
 
 **2026-06-28 (4th datapoint) — `improving`, the required check now has teeth.** Hardened the
 gate enforcement so it actually binds the loop: `enforce_admins=true` (an `--admin` merge can no
