@@ -82,7 +82,13 @@ OWNER_ACTIONS:
       priority: medium
       status: in_progress
       why: "PARTLY DONE (2026-06-28): the fetcher was run from a network-permitted host and the pipeline is VALIDATED on REAL data — 54 leakage-safe records (data/polymarket_history_sample.json), walk-forward reproduces deterministically (seed_hash 8dc358439ffb5746). Findings in docs/autonomous-loop/OA11_REAL_DATA_VALIDATION.md: the crowd is very sharp on liquid near-resolution markets (Brier ~0.09, ~70% already price-pinned 2 days out), so NO edge exists at those points and the floor box correctly stays unticked. The binding constraint has MOVED from 'can't reach data' to 'need (a) markets sampled before they pin + (b) a real alpha model (ROADMAP track B)' — not an egress problem anymore. The autonomous build env STILL can't refresh the dataset (egress 403 at the proxy), so periodic real-data refresh remains owner/host scope."
-      how: "Run scripts/fetch_polymarket_history.py (--order volumeNum) on a schedule where Polymarket's public Gamma + CLOB APIs are reachable — the backend host (a cron/worker) or a network-permitted CI job — to grow a real OOS corpus over time, OR widen the autonomous env's egress allowlist to gamma-api.polymarket.com + clob.polymarket.com so the loop can refresh it itself. No credentials needed (public read-only data). The EDGE work (a real model; sampling earlier-life markets) is loop-buildable and tracked under ROADMAP track B — it is NOT an owner action."
+      how: "Run scripts/fetch_polymarket_history.py (--order volumeNum) on a schedule where Polymarket's public Gamma + CLOB APIs are reachable — the backend host (a cron/worker) or a network-permitted CI job — to grow a real OOS corpus over time, OR widen the autonomous env's egress allowlist to gamma-api.polymarket.com + clob.polymarket.com so the loop can refresh it itself. No credentials needed (public read-only data). The EDGE work (a real model; sampling earlier-life markets) is loop-buildable and tracked under ROADMAP track B — it is NOT an owner action. AUTOMATION STAGED — see OA-13."
+    - id: OA-13
+      title: "Automate the real-data refresh (pick ONE): env egress allowlist OR a scheduled GitHub Action"
+      priority: high
+      status: open
+      why: "Makes OA-11 hands-off: instead of a human re-running the fetcher, the corpus refreshes itself. The loop can't do this (its env blocks Polymarket egress) and can't write .github/, so one one-time owner step is irreducible. The fetcher now supports --merge (accumulate by market_id, never overwrite), so a scheduled refresh GROWS the corpus over time."
+      how: "OPTION A (simplest, no files): add gamma-api.polymarket.com + clob.polymarket.com to the FactoryDashboard env (env_01LdppMwowGrstp5M55vgJXv) egress allowlist — then the loop fetches real data itself, zero new files/secrets. OPTION B (no egress change): add the staged workflow .github/workflows/refresh-polymarket-data.yml + a DATA_REFRESH_PAT secret (fine-grained PAT, contents+pull-requests write) — GitHub runners CAN reach Polymarket and open an auto-merging data-only PR. Full detail + exact YAML + the GITHUB_TOKEN-recursion caveat: docs/ci/PROPOSED_DATA_REFRESH.md. No credentials needed to READ Polymarket (public data); the PAT only opens the PR."
     - id: OA-12
       title: "Make the blocking CI gate a REQUIRED check (branch protection) so broken changes can't auto-merge"
       priority: high
@@ -105,6 +111,7 @@ OWNER_ACTIONS:
 | OA-10 | Audit log BUILT (G3); confirm `DATABASE_URL` is durable Neon | ⚪ low | in progress |
 | OA-11 | Real-data run DONE (pipeline validated); schedule periodic fetch on a permitted host | 🟡 medium | in progress |
 | OA-12 | Make `code + safety gate (blocking)` a REQUIRED check (branch protection) | 🟠 high | ✅ done |
+| OA-13 | Automate real-data refresh: env egress allowlist OR scheduled GitHub Action | 🟠 high | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 

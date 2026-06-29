@@ -55,6 +55,10 @@ def main() -> int:
     ap.add_argument("--min-volume", type=float, default=0.0,
                     help="keep only resolved markets with at least this much volume")
     ap.add_argument("--fidelity", type=int, default=60, help="CLOB price sampling, minutes")
+    ap.add_argument("--merge", action="store_true",
+                    help="union new records into an existing --out file (dedupe by market_id) so a "
+                         "scheduled refresh ACCUMULATES a growing OOS corpus instead of overwriting "
+                         "the latest top-volume snapshot")
     args = ap.parse_args()
 
     lead = timedelta(days=args.decision_lead_days)
@@ -92,6 +96,16 @@ def main() -> int:
     ]
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.merge and out.exists():
+        existing = json.loads(out.read_text())
+        by_id = {r["market_id"]: r for r in existing}
+        before = len(by_id)
+        for r in rows:
+            by_id.setdefault(r["market_id"], r)  # keep the FIRST capture of a market (never overwrite history)
+        rows = sorted(by_id.values(), key=lambda r: r["market_id"])
+        print(f"merged: {before} existing + {len(rows) - before} new = {len(rows)} total")
+
     out.write_text(json.dumps(rows, indent=2, sort_keys=True))
     print(f"wrote {len(rows)} records -> {out}")
     print("NOTE: model_prob is the crowd baseline (no edge). Feed --data to "

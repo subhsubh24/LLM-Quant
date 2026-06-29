@@ -39,27 +39,35 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-29
-  last_run: 2026-06-28          # prior run: wait-for-CI hardening + boot-guard (#54/#55)
+  last_run: 2026-06-29          # prior run: autonomous factory #56-60 (C5 metrics, venue gate, canary, audit harness, LLM caps)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 5          # #56 C5 metrics e2e, #57 venue-layer live gate, #58 real-data canary, #59 strategy-audit harness, #60 LLM timeout+spend-cap (all file-disjoint, auto-merged after CI green)
+    changes_shipped: 1          # data-refresh automation: fetcher --merge (accumulate corpus) + staged GitHub Action (OA-13)
     changes_abandoned: 0
     abandoned_reasons: []        # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
-    verify_cycle_failures: 0     # gate green every cycle; the issues below were caught by REVIEW/AUDIT pre-merge, not by a gate failure
-    review_rejections: 3         # 2 Sonnet reviewers REQUEST-CHANGES (PR-1 iterator/float precision) + 1 Opus auditor NOT-PROVEN-HONEST (PR-4 boilerplate phantom-signals) — ALL fixed in one consolidated cycle, then merged; none abandoned
+    verify_cycle_failures: 0     # gate green; data-only + docs change
+    review_rejections: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 53             # git: squash-merged (#NN) commits, last 7 days (incl. this run's 5)
+    merged_prs: 54             # git: squash-merged (#NN) commits, last 7 days
     reverts: 0                 # git: no revert commits in the window
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11) residual = scheduling only; binding constraint is now loop-buildable (a real alpha), not a wall.
+    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11): data-refresh now AUTOMATABLE (OA-13 staged) — no longer a manual residual; binding constraint is loop-buildable (a real alpha).
     harness_proposals_open: 0    # no open proposals; no recurring wall warranting one this run.
-  signal: improving              # 5th datapoint: 5 shipped / 0 reverts / 0 abandoned; 3 review/audit rejections ALL fixed in one cycle (the adversarial gate working as designed); blocking gate strengthened 99->176 enforced tests. Converging.
+  signal: improving              # 6th datapoint: factory shipped #56-60 (3 review/audit catches, all fixed) then this run staged the data-refresh automation (OA-13); 0 reverts/abandoned. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-29 (6th datapoint) — `improving`, closed the data-access gap hands-off.** Staged the
+real-data refresh automation (OA-13): the fetcher now `--merge`s to ACCUMULATE a growing OOS corpus,
+and a scheduled GitHub Action (or the env egress allowlist) keeps it fresh without a human — the
+loop's egress wall stops being a recurring manual residual. Honest scope: the permanent toggle is
+owner-irreducible (platform/`.github/` settings), so it's staged + tracked, not faked.
+
+### Earlier
 
 **2026-06-29 (5th datapoint) — `improving`, the adversarial gate earned its keep.** Shipped 5
 file-disjoint PRs (#56–#60) from an 8-scout sweep: C5 metrics wired end-to-end, a venue-layer
