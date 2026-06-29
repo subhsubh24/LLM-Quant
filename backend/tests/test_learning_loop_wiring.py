@@ -317,3 +317,97 @@ def test_resolution_without_risk_manager_still_works():
     finally:
         pmc.PolymarketClient = orig
     assert token_id not in ex.positions  # resolved + closed, no crash
+
+
+# ---------------------------------------------------------------------------
+# E5 — evaluation-window metrics serializer (wired via metrics_aggregator)
+# ---------------------------------------------------------------------------
+
+def test_evaluation_windows_buckets_by_iso_week_and_honest_empty():
+    from backend.app.prediction_markets.metrics_aggregator import (
+        compute_evaluation_windows,
+    )
+    from backend.app.prediction_markets.evaluation_window import ResolvedTrade
+
+    # Two trades in the same ISO week, one in a later week.
+    trades = [
+        ResolvedTrade("alpha", _ts(1), 100.0, True),   # 2024-01-01 (Mon)
+        ResolvedTrade("alpha", _ts(3), -40.0, False),  # same week
+        ResolvedTrade("beta", _ts(9), 10.0, True),     # following week
+    ]
+    out = compute_evaluation_windows(trades)
+    assert out["num_input_trades"] == 3
+    assert out["num_windows"] == 2
+    w0 = out["windows"][0]
+    assert w0["metrics"]["num_trades"] == 2
+    assert w0["metrics"]["realized_pnl_usd"] == pytest.approx(60.0)
+    # Brier omitted honestly (no per-trade calibration signal supplied).
+    assert w0["metrics"]["brier_score"] is None
+
+    # Empty input → honest empty shape, no fabricated window.
+    empty = compute_evaluation_windows([])
+    assert empty["num_windows"] == 0 and empty["windows"] == []
+
+
+# ---------------------------------------------------------------------------
+# E2 — calibration-drift signal serializer (wired via metrics_aggregator)
+# ---------------------------------------------------------------------------
+
+def _pred(prob, outcome):
+    from backend.app.prediction_markets.calibration import ResolvedPrediction
+    return ResolvedPrediction(
+        market_id="m", predicted_prob=prob, market_price=0.5, outcome=outcome
+    )
+
+
+def test_calibration_drift_insufficient_data_no_false_alarm():
+    from backend.app.prediction_markets.metrics_aggregator import (
+        compute_calibration_drift,
+    )
+    # Far fewer than min_baseline + recent_window → honest insufficient_data.
+    out = compute_calibration_drift([_pred(0.6, 1) for _ in range(5)])
+    assert out["status"] == "insufficient_data"
+    assert out["drift_detected"] is False
+    # The degenerate current reality (no non-degenerate predictions) lands here too.
+    assert compute_calibration_drift([])["status"] == "insufficient_data"
+
+
+def test_calibration_drift_flags_real_degradation():
+    from backend.app.prediction_markets.metrics_aggregator import (
+        compute_calibration_drift,
+    )
+    # Baseline: well-calibrated (prob 0.9 → outcome 1 ~90% of the time, low Brier).
+    # Recent: badly miscalibrated (prob 0.9 → outcome 0 every time, high Brier).
+    baseline = []
+    for i in range(60):
+        baseline.append(_pred(0.9, 1 if i % 10 != 0 else 0))  # ~90% YES, sharp
+    recent = [_pred(0.9, 0) for _ in range(30)]               # confidently WRONG
+    out = compute_calibration_drift(baseline + recent, recent_window=30, min_baseline=30)
+    assert out["status"] == "evaluated"
+    assert out["drift_detected"] is True
+    assert out["recent_n"] == 30
+    # de-rating must cut Kelly size under detected drift (<= 1.0, strictly < here).
+    assert out["de_rating"] < 1.0
+
+
+def test_calibration_drift_stable_calibration_no_drift():
+    from backend.app.prediction_markets.metrics_aggregator import (
+        compute_calibration_drift,
+    )
+    # Baseline and recent both well-calibrated and identical in distribution → no drift.
+    preds = []
+    for i in range(90):
+        preds.append(_pred(0.7, 1 if i % 10 < 7 else 0))  # 70% YES throughout
+    out = compute_calibration_drift(preds, recent_window=30, min_baseline=30)
+    assert out["status"] == "evaluated"
+    assert out["drift_detected"] is False
+
+
+def test_calibration_drift_is_deterministic():
+    from backend.app.prediction_markets.metrics_aggregator import (
+        compute_calibration_drift,
+    )
+    preds = [_pred(0.8, 1 if i % 5 != 0 else 0) for i in range(90)]
+    a = compute_calibration_drift(preds)
+    b = compute_calibration_drift(preds)
+    assert a == b

@@ -1216,6 +1216,91 @@ class PredictionMarketOrchestrator:
 
         return trades
 
+    def get_resolved_evaluation_trades(self):
+        """Return ``ResolvedTrade`` records for the E5 evaluation-window engine.
+
+        READ-ONLY. Composes on ``get_resolved_trades_by_strategy`` (same DB-persisted
+        resolved positions) and adapts each into an ``evaluation_window.ResolvedTrade``.
+        ``predicted_prob``/``actual_outcome`` are left ``None`` — no per-trade calibration
+        signal is persisted yet, so the window engine reports realized PnL / hit-rate /
+        drawdown honestly and leaves Brier ``None`` (never fabricated).
+        """
+        from .evaluation_window import ResolvedTrade
+
+        return [
+            ResolvedTrade(
+                strategy=t.strategy,
+                timestamp=t.timestamp,
+                pnl_usd=t.pnl_usd,
+                is_win=t.is_win,
+            )
+            for t in self.get_resolved_trades_by_strategy()
+        ]
+
+    def get_resolved_predictions(self):
+        """Return time-ordered ``ResolvedPrediction`` records for the E2 drift detector.
+
+        READ-ONLY. Built from DB-persisted resolved positions that carry a NON-degenerate
+        model edge (``edge_at_entry != 0``), ordered by resolution time (``closed_at``)
+        so a chronological baseline/recent split is possible. Mirrors the calibration
+        endpoint's honest construction: a position whose recorded model edge is exactly 0
+        carries ``predicted_prob == market_price`` and cannot inform a calibration test,
+        so it is SKIPPED rather than imputed — which makes "no non-degenerate predictions"
+        the honest default for the current paper reality (strategies seed model to crowd).
+
+        Keep the degenerate-skip filter (resolution_value None, price at the {0,1} boundary,
+        edge_at_entry == 0) IN SYNC with the ``/prediction-markets/metrics/calibration``
+        route, which reconstructs ResolvedPrediction the same way — a drift between the two
+        would be a silent honesty bug.
+        """
+        from .calibration import ResolvedPrediction
+
+        rows = []
+        try:
+            from ..db.database import get_session
+            from .models import PredictionPosition
+            from sqlmodel import select
+
+            with get_session() as session:
+                stmt = select(PredictionPosition).where(
+                    PredictionPosition.is_resolved == True  # noqa: E712
+                )
+                db_positions = session.exec(stmt).all()
+
+                for pos in db_positions:
+                    if pos.resolution_value is None:
+                        continue
+                    if pos.avg_entry_price <= 0.0 or pos.avg_entry_price >= 1.0:
+                        continue
+                    if pos.edge_at_entry == 0.0:
+                        continue  # degenerate (model == crowd) — never impute
+                    ts = pos.closed_at or pos.opened_at
+                    if ts is None:
+                        continue
+                    market_price = pos.avg_entry_price
+                    predicted_prob = max(0.0, min(1.0, market_price + pos.edge_at_entry))
+                    outcome = 1 if pos.resolution_value >= 0.5 else 0
+                    rows.append(
+                        (
+                            ts,
+                            ResolvedPrediction(
+                                market_id=pos.market_id,
+                                predicted_prob=predicted_prob,
+                                market_price=market_price,
+                                outcome=outcome,
+                            ),
+                        )
+                    )
+                # Sort INSIDE the guarded block: a mix of naive/aware closed_at values
+                # would raise TypeError here, and we want that to degrade to the honest
+                # empty result (insufficient_data) rather than propagate.
+                rows.sort(key=lambda r: r[0])
+        except Exception as e:
+            logger.debug(f"[METRICS] resolved-prediction load failed: {e}")
+            return []
+
+        return [r[1] for r in rows]
+
     # ================================================================
     # Status
     # ================================================================

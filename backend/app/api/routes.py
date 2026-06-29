@@ -1020,6 +1020,60 @@ async def get_per_strategy_metrics():
     return compute_per_strategy_metrics(trades)
 
 
+@router.get("/prediction-markets/metrics/evaluation-windows")
+async def get_evaluation_windows():
+    """
+    ROADMAP E5 — per-window realized metrics (evaluation-window engine).
+
+    Buckets genuinely-resolved, strategy-tagged trades into ISO-week windows
+    (orchestrator.get_resolved_evaluation_trades) and reports each window's realized
+    PnL / hit-rate / drawdown. Only windows with >= 1 trade are emitted (never
+    fabricated); Brier stays null until per-trade calibration signals are persisted.
+
+    Returns
+    -------
+    JSON with keys: source, num_input_trades, num_windows, windows (list).
+    """
+    from ..prediction_markets.metrics_aggregator import compute_evaluation_windows
+
+    try:
+        orchestrator = _get_orchestrator()
+        trades = orchestrator.get_resolved_evaluation_trades()
+    except Exception as e:
+        logger.warning(f"[METRICS/eval-windows] get_resolved_evaluation_trades failed: {e}")
+        trades = []
+
+    return compute_evaluation_windows(trades)
+
+
+@router.get("/prediction-markets/metrics/calibration-drift")
+async def get_calibration_drift():
+    """
+    ROADMAP E2 — calibration-drift signal (significance-gated).
+
+    Splits time-ordered resolved NON-degenerate predictions
+    (orchestrator.get_resolved_predictions) into an older baseline + a recent window and
+    runs the drift detector. Honest: with too few non-degenerate predictions — the
+    current paper reality — it returns ``status="insufficient_data"`` and never raises a
+    false drift alarm (E7 discipline).
+
+    Returns
+    -------
+    JSON: either an ``insufficient_data`` status dict, or ``status="evaluated"`` plus the
+    full drift result (drift_detected, severity, brier deltas, CI, de_rating, …).
+    """
+    from ..prediction_markets.metrics_aggregator import compute_calibration_drift
+
+    try:
+        orchestrator = _get_orchestrator()
+        preds = orchestrator.get_resolved_predictions()
+    except Exception as e:
+        logger.warning(f"[METRICS/drift] get_resolved_predictions failed: {e}")
+        preds = []
+
+    return compute_calibration_drift(preds)
+
+
 @router.get("/prediction-markets/strategies/registry")
 async def get_strategy_registry():
     """

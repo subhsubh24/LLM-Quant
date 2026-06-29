@@ -45,6 +45,14 @@ from .per_strategy_metrics import (
     attribute_by_strategy,
     rank_by_total_pnl,
 )
+from .evaluation_window import (
+    ResolvedTrade,
+    build_windows,
+)
+from .calibration_drift import (
+    build_baseline,
+    detect_drift,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +297,106 @@ def compute_per_strategy_metrics(
     }
 
 
+# ---------------------------------------------------------------------------
+# E5 — evaluation-window metrics + E2 — calibration-drift signal
+# ---------------------------------------------------------------------------
+
+def compute_evaluation_windows(trades: Sequence[ResolvedTrade]) -> Dict[str, Any]:
+    """
+    ROADMAP E5 — per-window realized metrics over strategy-tagged resolved trades.
+
+    Pure + deterministic wrapper around ``evaluation_window.build_windows``: buckets
+    resolved trades into ISO-week windows and reports each window's realized PnL /
+    hit-rate / drawdown (and Brier IF per-trade calibration signals are supplied — they
+    are ``None`` in the current paper reality, so Brier is honestly omitted, never faked).
+
+    HONESTY
+    -------
+    * Only windows that contain >= 1 trade are emitted (zero-trade windows are never
+      fabricated — inherited from ``build_windows``).
+    * Empty input → ``{"windows": [], "num_windows": 0, "num_input_trades": 0}``.
+
+    Returns
+    -------
+    dict
+        ``windows`` (list of per-window dicts via ``EvaluationWindow.to_dict``),
+        ``num_windows``, ``num_input_trades``.
+    """
+    trade_list = list(trades)
+    windows = build_windows(trade_list)
+    return {
+        "source": "resolved_trades_by_strategy",
+        "num_input_trades": len(trade_list),
+        "num_windows": len(windows),
+        "windows": [w.to_dict() for w in windows],
+    }
+
+
+def compute_calibration_drift(
+    ordered_predictions: Sequence[ResolvedPrediction],
+    *,
+    recent_window: int = 30,
+    min_baseline: int = 30,
+    seed: int = 12345,
+) -> Dict[str, Any]:
+    """
+    ROADMAP E2 — calibration-drift signal over time-ordered resolved predictions.
+
+    Splits the chronologically-ordered predictions into an older BASELINE and a RECENT
+    window, then runs the significance-gated drift detector (``calibration_drift``).
+
+    HONESTY
+    -------
+    * When there are too few predictions to form BOTH a baseline and a recent window,
+      returns ``status="insufficient_data"`` + ``drift_detected=False`` WITHOUT calling
+      ``build_baseline`` (which raises on empty). The current paper reality — no
+      non-degenerate predictions persisted — lands here, never a false drift alarm
+      (E7 discipline: prefer "we don't know yet" over a noisy signal).
+    * The caller must pass predictions already ordered oldest→newest; this function does
+      NOT invent an ordering.
+
+    Returns
+    -------
+    dict
+        Either an ``insufficient_data`` status dict, or ``status="evaluated"`` plus the
+        full ``DriftResult.to_dict()`` (drift_detected, severity, brier deltas, CI,
+        de_rating, …).
+    """
+    preds = list(ordered_predictions)
+    total = len(preds)
+    required = min_baseline + recent_window
+    if total < required:
+        return {
+            "status": "insufficient_data",
+            "drift_detected": False,
+            "num_predictions": total,
+            "min_required": required,
+            "note": (
+                "Not enough resolved non-degenerate predictions to form a baseline + "
+                "recent window — drift cannot be evaluated yet (no false alarm)."
+            ),
+        }
+    baseline_part = preds[:-recent_window]
+    recent_part = preds[-recent_window:]
+    baseline = build_baseline(
+        [p.predicted_prob for p in baseline_part],
+        [p.outcome for p in baseline_part],
+    )
+    result = detect_drift(
+        baseline,
+        [p.predicted_prob for p in recent_part],
+        [p.outcome for p in recent_part],
+        min_recent=recent_window,
+        seed=seed,
+    )
+    return {
+        "status": "evaluated",
+        "num_predictions": total,
+        "baseline_n": baseline.n,
+        **result.to_dict(),
+    }
+
+
 def compute_all(
     trades: Sequence[TradePnL],
     predictions: Sequence[ResolvedPrediction],
@@ -337,5 +445,7 @@ __all__ = [
     "compute_floor_status",
     "compute_calibration",
     "compute_per_strategy_metrics",
+    "compute_evaluation_windows",
+    "compute_calibration_drift",
     "compute_all",
 ]
