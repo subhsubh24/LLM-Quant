@@ -121,11 +121,20 @@ class CalibrationResult:
         nan when n == 0.
     passes:
         True iff n >= min_samples AND improvement_ci_low > 0 (the improvement is
-        statistically significant, not noise).
+        statistically significant, not noise) — where the CI is built at the
+        ``effective_alpha`` below (i.e. AFTER any multiple-comparison correction).
     reliability:
         Full reliability curve for the strategy predictions.
     expected_calibration_error:
         ECE of the strategy predictions (lower is better).
+    strategies_screened:
+        How many strategies were screened to select this one (>= 1). 1 means a single
+        pre-committed strategy (no selection). Used for the Bonferroni correction below.
+    effective_alpha:
+        The significance level actually used for the bootstrap CI, AFTER the
+        multiple-comparison (Bonferroni) correction: ``alpha / strategies_screened``.
+        Equal to the requested ``alpha`` when ``strategies_screened == 1``. A tighter
+        (smaller) effective_alpha → a wider CI → a harder bar to ``pass``.
     """
     n: int
     strategy_brier: float
@@ -136,6 +145,8 @@ class CalibrationResult:
     passes: bool
     reliability: ReliabilityCurve
     expected_calibration_error: float
+    strategies_screened: int = 1
+    effective_alpha: float = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +347,7 @@ def evaluate_calibration(
     alpha: float = 0.05,
     n_bootstrap: int = 2000,
     seed: int = 12345,
+    strategies_screened: int = 1,
 ) -> CalibrationResult:
     """Run the full ROADMAP B2 calibration evaluation with a significance test.
 
@@ -345,9 +357,20 @@ def evaluate_calibration(
 
     The evaluation passes iff:
       - n >= min_samples  (insufficient data → passes=False, no exception raised), AND
-      - the lower bound of the (1 - alpha) paired bootstrap CI on the improvement is
-        strictly > 0 (the strategy beats the baseline by a statistically significant
-        margin, not by sampling luck).
+      - the lower bound of the (1 - effective_alpha) paired bootstrap CI on the
+        improvement is strictly > 0 (the strategy beats the baseline by a statistically
+        significant margin, not by sampling luck), where ``effective_alpha`` is
+        ``alpha / strategies_screened`` (the multiple-comparison correction below).
+
+    MULTIPLE-COMPARISON CORRECTION (ROADMAP B2 — anti-p-hacking)
+    A prior adversarial audit showed the p-hacking attack on this gate: screen K
+    strategies on the eval set and keep the one that "wins". With a single fixed
+    ``alpha`` per call, that inflates the family-wise false-positive rate to ~K·alpha.
+    Passing ``strategies_screened=K`` applies a **Bonferroni** correction —
+    ``effective_alpha = alpha / K`` — which widens the CI and restores the intended
+    family-wise error rate, making the correction a CODE-ENFORCED feature of the gate
+    rather than a doc note a caller might ignore. ``strategies_screened=1`` (the default)
+    is bit-for-bit identical to the previous behavior.
 
     Parameters
     ----------
@@ -358,19 +381,35 @@ def evaluate_calibration(
     min_samples:
         Minimum number of resolved predictions required to even be eligible to pass.
     alpha:
-        Significance level for the bootstrap CI (default 0.05 → 95% CI). Tighten this
-        when screening multiple strategies (multiple-comparison correction).
+        Per-comparison significance level for the bootstrap CI (default 0.05 → 95% CI),
+        BEFORE the multiple-comparison correction.
     n_bootstrap:
         Number of bootstrap resamples (deterministic given ``seed``).
     seed:
         RNG seed for the bootstrap — makes ``passes`` and the CI fully reproducible.
+    strategies_screened:
+        Number of strategies screened to select this one (>= 1). The Bonferroni
+        correction divides ``alpha`` by this count. Honestly declaring how many
+        strategies were tried is the caller's responsibility — under-declaring it is
+        the p-hacking the gate is built to resist.
 
     Returns
     -------
     CalibrationResult
-        Full evaluation result including Brier scores, improvement, the CI, pass flag,
-        reliability curve, and ECE.
+        Full evaluation result including Brier scores, improvement, the CI at
+        ``effective_alpha``, pass flag, reliability curve, ECE, and the correction used.
+
+    Raises
+    ------
+    ValueError
+        If ``strategies_screened < 1``.
     """
+    if strategies_screened < 1:
+        raise ValueError(
+            f"strategies_screened must be >= 1 (got {strategies_screened})"
+        )
+    effective_alpha = alpha / strategies_screened
+
     sample_list = list(samples)
     n = len(sample_list)
 
@@ -391,6 +430,8 @@ def evaluate_calibration(
             passes=False,
             reliability=empty_curve,
             expected_calibration_error=0.0,
+            strategies_screened=strategies_screened,
+            effective_alpha=effective_alpha,
         )
 
     strategy_brier = brier_score(strategy_preds, outcomes)
@@ -402,7 +443,9 @@ def evaluate_calibration(
         (b - o) ** 2 - (s - o) ** 2
         for s, b, o in zip(strategy_preds, baseline_preds, outcomes)
     ]
-    ci_low, ci_high = _paired_bootstrap_ci(diffs, alpha, n_bootstrap, seed)
+    # Build the CI at the CORRECTED (effective) alpha so screening many strategies
+    # genuinely tightens the bar, not just the docstring.
+    ci_low, ci_high = _paired_bootstrap_ci(diffs, effective_alpha, n_bootstrap, seed)
 
     curve = reliability_curve(strategy_preds, outcomes, n_bins=n_bins)
     ece = expected_calibration_error(curve)
@@ -420,4 +463,6 @@ def evaluate_calibration(
         passes=passes,
         reliability=curve,
         expected_calibration_error=ece,
+        strategies_screened=strategies_screened,
+        effective_alpha=effective_alpha,
     )

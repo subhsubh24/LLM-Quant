@@ -425,3 +425,66 @@ class TestReliabilityCurve:
     def test_ece_empty_curve_is_zero(self):
         curve = reliability_curve([], [], n_bins=10)
         assert expected_calibration_error(curve) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Multiple-comparison correction (ROADMAP B2 anti-p-hacking) — strategies_screened
+# ---------------------------------------------------------------------------
+
+class TestMultipleComparisonCorrection:
+    """The Bonferroni correction must tighten the gate as more strategies are screened."""
+
+    def test_default_is_single_comparison_and_backward_compatible(self):
+        # strategies_screened defaults to 1 → effective_alpha == alpha and the CI bounds
+        # are identical to an explicit screened=1 call (bit-for-bit, same seed).
+        samples = _base_samples(n_repeat=8)  # N=32 >= min_samples
+        r_default = evaluate_calibration(samples)
+        r_one = evaluate_calibration(samples, strategies_screened=1)
+        assert r_default.strategies_screened == 1
+        assert r_default.effective_alpha == 0.05
+        assert r_one.effective_alpha == 0.05
+        assert r_default.improvement_ci_low == r_one.improvement_ci_low
+        assert r_default.improvement_ci_high == r_one.improvement_ci_high
+        assert r_default.passes == r_one.passes
+
+    def test_effective_alpha_is_bonferroni(self):
+        samples = _base_samples(n_repeat=8)
+        r = evaluate_calibration(samples, alpha=0.05, strategies_screened=5)
+        assert r.strategies_screened == 5
+        assert math.isclose(r.effective_alpha, 0.05 / 5)
+
+    def test_ci_widens_monotonically_with_screening(self):
+        # Smaller effective_alpha → wider CI → ci_low non-increasing, ci_high
+        # non-decreasing, as strategies_screened grows. Deterministic (seeded bootstrap).
+        samples = _base_samples(n_repeat=10)  # N=40
+        lows = []
+        highs = []
+        for k in (1, 2, 5, 20):
+            r = evaluate_calibration(samples, strategies_screened=k)
+            lows.append(r.improvement_ci_low)
+            highs.append(r.improvement_ci_high)
+        assert lows == sorted(lows, reverse=True), f"ci_low not non-increasing: {lows}"
+        assert highs == sorted(highs), f"ci_high not non-decreasing: {highs}"
+
+    def test_screening_can_only_make_passing_harder(self):
+        # The correction must never make a result EASIER to pass: if it passes after
+        # screening K strategies, it must also pass as a single comparison.
+        samples = _base_samples(n_repeat=10)
+        passes_1 = evaluate_calibration(samples, strategies_screened=1).passes
+        for k in (2, 5, 50, 500):
+            if evaluate_calibration(samples, strategies_screened=k).passes:
+                assert passes_1, "passed after correction but not as a single comparison"
+
+    def test_raises_on_invalid_screened(self):
+        samples = _base_samples(n_repeat=8)
+        with pytest.raises(ValueError):
+            evaluate_calibration(samples, strategies_screened=0)
+        with pytest.raises(ValueError):
+            evaluate_calibration(samples, strategies_screened=-3)
+
+    def test_empty_input_records_correction(self):
+        r = evaluate_calibration([], strategies_screened=4)
+        assert r.n == 0
+        assert r.passes is False
+        assert r.strategies_screened == 4
+        assert math.isclose(r.effective_alpha, 0.05 / 4)
