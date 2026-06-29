@@ -368,3 +368,87 @@ class TestCheckMarket:
         dims = {i.dimension for i in result.issues}
         # completeness (missing token_id, price out of range) and price_sanity (price > 1)
         assert "completeness" in dims
+
+
+# ============================================================
+# ROADMAP A5: wall-clock fetch-age staleness now fires on ingested data
+# ============================================================
+
+class TestFetchAgeStaleness:
+    """The fetch-age branch must fire on a Market that carries a stale ``fetched_at``.
+
+    Before A5 the Market had no ingest timestamp, so this branch could never fire on
+    live data (a misleading no-op). Now ``_parse_market`` stamps ``fetched_at`` and the
+    validator reads it off the market with no caller argument.
+    """
+
+    def _validator(self) -> DataQualityValidator:
+        return DataQualityValidator(max_age_seconds=600, max_past_end_seconds=3600)
+
+    def test_fresh_fetched_at_no_staleness(self):
+        now = datetime.now(timezone.utc)
+        m = _make_binary_market()
+        m.fetched_at = now  # just ingested
+        issues = self._validator().check_staleness(m, now=now)
+        assert issues == [], f"a fresh snapshot must not be stale: {issues}"
+
+    def test_stale_fetched_at_fires_via_market_attribute(self):
+        now = datetime.now(timezone.utc)
+        m = _make_binary_market()
+        # end_date still in the future (helper sets +1 day) so ONLY the fetch-age path
+        # can fire — isolating the A5 behavior.
+        m.fetched_at = now - timedelta(seconds=1800)  # 30 min old, max_age 600s
+        issues = self._validator().check_staleness(m, now=now)
+        assert any(i.dimension == "staleness" for i in issues), (
+            "a 30-min-old snapshot with max_age=600s must be flagged stale"
+        )
+
+    def test_caller_fetched_at_overrides_market_attribute(self):
+        now = datetime.now(timezone.utc)
+        m = _make_binary_market()
+        m.fetched_at = now  # market says fresh...
+        # ...but the caller supplies an explicitly old timestamp → must fire.
+        issues = self._validator().check_staleness(
+            m, now=now, fetched_at=now - timedelta(seconds=3600)
+        )
+        assert any(i.dimension == "staleness" for i in issues)
+
+    def test_check_market_aggregate_includes_fetch_age(self):
+        now = datetime.now(timezone.utc)
+        m = _make_binary_market()
+        m.fetched_at = now - timedelta(seconds=2000)
+        result = self._validator().check_market(m, now=now)
+        assert not result.ok
+        assert "stale" in result.reason.lower() or "old" in result.reason.lower()
+
+    def test_parsed_market_carries_fetched_at(self):
+        from backend.app.prediction_markets.polymarket_client import PolymarketClient
+
+        client = PolymarketClient()
+        raw = {
+            "id": "1",
+            "conditionId": "c1",
+            "question": "Will X happen?",
+            "outcomes": '["Yes","No"]',
+            "outcomePrices": '["0.4","0.6"]',
+            "clobTokenIds": '["t1","t2"]',
+            "active": True,
+            "closed": False,
+        }
+        m = client._parse_market(raw)
+        assert isinstance(m.fetched_at, datetime), "parse must stamp fetched_at"
+
+    def test_parsed_market_with_injected_old_timestamp_is_stale(self):
+        from backend.app.prediction_markets.polymarket_client import PolymarketClient
+
+        now = datetime.now(timezone.utc)
+        client = PolymarketClient()
+        raw = {
+            "id": "1", "conditionId": "c1", "question": "Will X happen?",
+            "outcomes": '["Yes","No"]', "outcomePrices": '["0.4","0.6"]',
+            "clobTokenIds": '["t1","t2"]', "active": True, "closed": False,
+            "endDate": (now + timedelta(days=5)).isoformat(),  # future → only fetch-age
+        }
+        m = client._parse_market(raw, fetched_at=now - timedelta(seconds=5000))
+        issues = DataQualityValidator(max_age_seconds=600).check_staleness(m, now=now)
+        assert any(i.dimension == "staleness" for i in issues)

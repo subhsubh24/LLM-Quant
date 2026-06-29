@@ -65,6 +65,12 @@ class Market:
     resolution_source: str = ""
     tags: List[str] = field(default_factory=list)
     neg_risk: bool = False  # Negative risk market (multi-outcome)
+    # Wall-clock time (UTC) this market snapshot was ingested from the venue. Stamped at
+    # parse time by ``PolymarketClient._parse_market`` (ROADMAP A5). The data-quality
+    # validator's fetch-age staleness check reads this — previously the Market carried no
+    # ingest timestamp, so that branch could NEVER fire on live data (a misleading
+    # no-op). Optional/defaulted so every existing constructor is unaffected.
+    fetched_at: Optional[datetime] = None
 
     @property
     def status(self) -> MarketStatus:
@@ -583,9 +589,17 @@ class PolymarketClient:
     # Parsing
     # ================================================================
 
-    def _parse_market(self, raw: dict) -> Market:
-        """Parse raw Gamma API market into Market dataclass."""
+    def _parse_market(self, raw: dict, fetched_at: Optional[datetime] = None) -> Market:
+        """Parse raw Gamma API market into Market dataclass.
+
+        ``fetched_at`` is the wall-clock ingest time stamped onto the Market (ROADMAP
+        A5) so the data-quality validator's fetch-age staleness check can actually fire
+        on live data. Defaults to ``datetime.now(timezone.utc)`` when not supplied.
+        """
         import json as _json
+
+        if fetched_at is None:
+            fetched_at = datetime.now(timezone.utc)
 
         # Parse outcomes from parallel arrays
         # Gamma API returns these as JSON-encoded strings: '["Yes","No"]' or CSV: "Yes,No"
@@ -688,4 +702,5 @@ class PolymarketClient:
             resolution_source=raw.get("resolutionSource", ""),
             tags=tags,
             neg_risk=raw.get("negRisk", False),
+            fetched_at=fetched_at,
         )
