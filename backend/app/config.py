@@ -7,7 +7,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 
 def find_env_file():
@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     # any other setting. The owner flips this only after the LIVE_RUNBOOK steps.
     live_trading_enabled: bool = False  # env: LIVE_TRADING_ENABLED — owner-only master switch
 
+    # TEST-ONLY bypass. The CI functional gate may set E2E_DISABLE_RATE_LIMIT=1 so a single
+    # CI-runner IP cannot trip rate limits while exercising endpoints. PRODUCTION MUST NEVER
+    # SET IT: if it is ever truthy while live_trading_enabled is on, the app HARD-REFUSES to
+    # boot (see _forbid_test_bypass_in_live). NOTE: there is no inbound rate limiter wired
+    # today (the gate runs in-process), so this flag's ONLY current effect is that boot-refusal
+    # tripwire — when a real limiter is added, wire this to disable it on the gate job only.
+    e2e_disable_rate_limit: bool = False  # env: E2E_DISABLE_RATE_LIMIT — CI gate ONLY, never prod
+
     # Hard loss / spend ceilings (USD). Conservative defaults; owner sets real values.
     # These are enforced in code; a breach auto-trips the kill switch.
     max_per_trade_usd: float = 5.0       # env: MAX_PER_TRADE_USD
@@ -124,6 +132,21 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _forbid_test_bypass_in_live(self) -> "Settings":
+        """A test-only bypass must NEVER be active with real money on the line.
+
+        If E2E_DISABLE_RATE_LIMIT is set while LIVE_TRADING_ENABLED is true, refuse to boot.
+        This guarantees a CI convenience can never weaken the live platform — even before any
+        real inbound rate limiter exists, the tripwire is in place.
+        """
+        if self.e2e_disable_rate_limit and self.live_trading_enabled:
+            raise ValueError(
+                "E2E_DISABLE_RATE_LIMIT is a TEST-ONLY flag and must never be set when "
+                "LIVE_TRADING_ENABLED is true — refusing to boot. Unset it on the live host."
+            )
+        return self
 
     @property
     def has_llm_key(self) -> bool:
