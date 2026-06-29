@@ -2,6 +2,37 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — Self-validation coverage gate: the loop can prove it validates the app it builds
+
+- **Ask:** ensure the factory can validate the app itself — has all the env keys it needs to
+  self-validate, and if it hits a NEW service needing a new key, it SURFACES that and BLOCKS
+  subsequent PRs until provided. Don't let an unvalidatable capability ship silently.
+- **Key reframe (the honest answer to "does it have all the keys"):** the gate is DESIGNED to need
+  ZERO external keys to validate the active app — it's in-process / deterministic / mocked. So the
+  loop CAN fully self-validate the core app with no credentials. Keys only ever matter for
+  *activation* (live trading = human-core) or *enhancement* (Gemini = optional, degrades to
+  templates). That's a feature, not a gap.
+- **Built (blocking, in the `code` gate as step 9d):**
+  - `docs/ci/SELF_VALIDATION.md` — manifest: every capability → how it's validated + which credential
+    + status; `credential_inventory` lists every external cred the code reads (13 today).
+  - `scripts/check_self_validation.py` — enforces TWO things: (1) every `active` capability must be
+    `validated`/`gated_off`/`degrades_safely` (an active+unvalidated cap fails); (2) every credential
+    the CODE reads (a `*_api_key/_secret/_token/_url/...` Settings field OR `os.environ.get` of that
+    shape under backend/app) must be DECLARED — a NEW undeclared one fails the gate. That's the
+    "new service surfaces + blocks" forcing function.
+  - `backend/tests/test_self_validation.py` (8 tests, in the gate) + factory-routine discipline (update
+    the manifest in the SAME PR that adds/activates a capability; gate it off or record the
+    OWNER_ACTION if a key is genuinely required; NEVER fake a validation).
+- **Proven end-to-end:** appended a simulated `os.environ.get("KALSHI_API_KEY")` to a real module →
+  gate FAILED with the key surfaced ("Until then, every PR is blocked"); reverted → green. Seeded
+  green against current code (13 creds all declared) so it blocks only FUTURE violations, never the
+  loop today (verify-green-before-requiring).
+- **Lesson:** the resolution for a capability that needs a key the CI gate can't have is the
+  gated-live-path pattern generalized — either GATE IT OFF (validated_as_off) so no active flow
+  depends on it, or declare the OWNER_ACTION + block. Both are honest; faking the validation is the
+  only forbidden move. The cleanest "self-validation" guarantee is a gate that needs no secrets to
+  exercise the real pipeline — keys are for turning capabilities ON, never for proving they work.
+
 ## 2026-06-29 — Wired the learning loop (E6+B3) + honest cost-arb + E5/E2 engines (5-PR run)
 - **Shipped 4 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku-scout sweep: PR-1 (orchestrator E6
   attribution + B3 lifecycle persistence + D2 resolution-risk fix), PR-2 (SameMarketArbitrage cost-model

@@ -39,27 +39,38 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-29
-  last_run: 2026-06-29          # prior run: research-only (EXP-002 proposal #73)
+  last_run: 2026-06-29          # prior run: factory 3-PR code run (B4a alpha + E5/E2 wiring + metrics dashboard, #74-77)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 4          # 3 file-disjoint code PRs (B4a calibration-bucket alpha; E5/E2 wiring; frontend metrics dashboard) + 1 bookkeeping PR
-    changes_abandoned: 4         # B6, per-leg arb, A4 (all want orchestrator.py — shared-file conflict with PR-2); Kalshi A3 + lint F7 (value-bar)
-    abandoned_reasons: ["conflict", "conflict", "conflict", "review_value"]  # 3x shared-file conflict (orchestrator owner = E5/E2 PR); A3+F7 dropped on value bar (premature / cosmetic-no-CI-benefit)
-    verify_cycle_failures: 0      # 1 consolidated fix cycle (shared-closure model + idealized-test) — caught pre-merge, not a gate failure
-    review_rejections: 0          # 2 Sonnet + 3 Opus auditors: all CANNOT-BREAK; one fix cycle applied, shipped on mechanical verification
+    changes_shipped: 1          # self-validation coverage gate (manifest + blocking checker + factory-routine discipline)
+    changes_abandoned: 0
+    abandoned_reasons: []
+    verify_cycle_failures: 0
+    review_rejections: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 53             # ~49 prior 7d window + this run's 4 PRs (#74-77)
+    merged_prs: 71             # git: squash-merged (#NN) commits, last 7 days
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # OA-11 (7-day corpus) remains owner/egress-scope; the binding constraint now has a BUILT mechanism (CalibrationBucketStrategy) — convergence, not a dead-end.
+    recurring_failures: []       # OA-11 corpus refresh = owner/egress-scope (automatable, OA-13). No recurring wall.
     harness_proposals_open: 0
-  signal: improving              # 10th datapoint: 3-PR code run after a research run — built the FIRST model_prob!=crowd alpha mechanism (B4a), WIRED the last two pure learning engines (E5/E2), and made paper metrics visible end-to-end (dashboard). 3 Opus auditors CANNOT-BREAK; the adversarial gate caught a real shared-closure bug + an idealized-test honesty gap, both fixed in one cycle. 4 items correctly DEFERRED on disjoint/value rules (not scarcity).
+  signal: improving              # 11th datapoint: added the self-validation coverage gate — every active capability must be really validated, and a NEW undeclared credential surfaces + blocks merges (proven via a simulated KALSHI_API_KEY). The loop can now mechanically guarantee it validates the app it builds. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-29 (11th datapoint) — `improving`, the loop can now mechanically prove it validates the app.**
+Added a **self-validation coverage gate** (`docs/ci/SELF_VALIDATION.md` manifest +
+`scripts/check_self_validation.py`, blocking preflight step 9d): every *active* capability must be
+really `validated`/`gated_off`/`degrades_safely`, and every credential the code reads must be
+declared — a **new, undeclared** credential **surfaces + blocks every PR** (proven end-to-end with a
+simulated `KALSHI_API_KEY`). By design the gate needs zero keys to validate the active app; keys are
+only for *activation* (live = human-core) or *enhancement* (Gemini = optional). The factory routine
+now maintains the manifest as part of shipping any capability. 8 regression tests; seeded green.
+
+### Earlier
 
 **2026-06-29 (10th datapoint — factory run) — `improving`, the binding constraint now has a BUILT mechanism, and disjoint discipline held under contention.**
 Shipped 3 file-disjoint code PRs + 1 bookkeeping from an 8-scout sweep: the FIRST `model_prob != crowd`
