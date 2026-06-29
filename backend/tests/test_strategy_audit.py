@@ -282,6 +282,77 @@ class TestLogicalImplicationDetectorFires:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Test 3b: HARDENED keyword screen (ROADMAP B5) — boilerplate must NOT pair
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestKeywordScreenHardened:
+    """The Phase-2 keyword heuristic must not fire on markets that share only filler.
+
+    Regression guard for the phantom-signal bug (RESEARCH_MEMORY 2026-06-29): the old
+    12-word skip set let boilerplate/filler words ("will", "market", "before",
+    "deadline", "this", "year") pair completely unrelated markets. The hardened
+    content-token screen (market_text.py) requires >=3 shared CONTENT tokens, so a
+    boilerplate-only pair with a mid-range price gap now produces ZERO signals.
+    """
+
+    def test_no_keyword_signal_on_boilerplate_only_pair(self):
+        m1 = make_synthetic_market(
+            mid="boiler_1",
+            question="Will the market resolve before the deadline this year",
+            yes_price=0.40,  # mid-range, gap 0.30 >= min_inconsistency
+            category="Other",
+        )
+        m2 = make_synthetic_market(
+            mid="boiler_2",
+            question="Will the event happen before the deadline this year",
+            yes_price=0.70,
+            category="Other",
+        )
+        strategy = CrossMarketArbitrageStrategy(
+            client=_mock_client(), config=_config(), min_inconsistency=0.10
+        )
+        report = audit_strategies(
+            [m1, m2], [strategy], data_source="boilerplate_should_not_fire"
+        )
+        cross_signals = [
+            s for s in report.signals if s.strategy_name == "cross_market_arb"
+        ]
+        assert cross_signals == [], (
+            "Hardened keyword screen must not pair markets sharing only filler words; "
+            f"got {[s.reason for s in cross_signals]}"
+        )
+
+    def test_keyword_signal_still_fires_on_shared_content(self):
+        # Two genuinely-related markets (3+ shared content tokens) with a mid-range gap
+        # remain eligible for the keyword heuristic — the screen is conservative, not off.
+        m1 = make_synthetic_market(
+            mid="content_1",
+            question="Will Donald Trump attend the presidential inauguration ceremony",
+            yes_price=0.40,
+            category="Politics",
+        )
+        m2 = make_synthetic_market(
+            mid="content_2",
+            question="Will Donald Trump skip the presidential inauguration ceremony",
+            yes_price=0.70,
+            category="Politics",
+        )
+        strategy = CrossMarketArbitrageStrategy(
+            client=_mock_client(), config=_config(), min_inconsistency=0.10
+        )
+        report = audit_strategies(
+            [m1, m2], [strategy], data_source="content_should_fire"
+        )
+        cross_signals = [
+            s for s in report.signals if s.strategy_name == "cross_market_arb"
+        ]
+        assert len(cross_signals) >= 1, (
+            "Markets sharing >=3 content tokens with a mid-range gap should still be "
+            "eligible for the keyword heuristic"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Test 4: Audit handles empty market list gracefully
 # ──────────────────────────────────────────────────────────────────────────────
 
