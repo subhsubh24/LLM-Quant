@@ -2,12 +2,14 @@
 API routes for QuantLab.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
 import logging
+
+from .auth import require_backend_token
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,11 @@ from ..config import get_settings
 from .. import DISCLAIMER
 
 router = APIRouter()
+
+# Shared-secret guard for STATE-MUTATING routes (kill-switch, risk config, execute,
+# portfolio reset, bot control, …). No-op when BACKEND_API_TOKEN is unset (degrades
+# safely); enforces `Authorization: Bearer <token>` when the owner sets it. See auth.py.
+_MUTATING_AUTH = [Depends(require_backend_token)]
 
 
 # ============ Debug/Health Endpoints ============
@@ -451,7 +458,7 @@ class PlaceOrderRequest(BaseModel):
     strategy: str = ""
 
 
-@router.post("/prediction-markets/execute")
+@router.post("/prediction-markets/execute", dependencies=_MUTATING_AUTH)
 async def execute_prediction_order(req: PlaceOrderRequest):
     """
     Execute an order on a prediction market.
@@ -546,7 +553,7 @@ async def get_prediction_portfolio():
     return executor.get_portfolio_summary()
 
 
-@router.post("/prediction-markets/portfolio/reset")
+@router.post("/prediction-markets/portfolio/reset", dependencies=_MUTATING_AUTH)
 async def reset_prediction_portfolio():
     """Reset all paper trading positions and P&L."""
     executor = _get_prediction_executor()
@@ -576,7 +583,7 @@ async def get_prediction_orders(limit: int = 50):
     return {"orders": executor.get_order_history(limit=limit)}
 
 
-@router.post("/prediction-markets/cancel/{order_id}")
+@router.post("/prediction-markets/cancel/{order_id}", dependencies=_MUTATING_AUTH)
 async def cancel_prediction_order(order_id: str, exchange: str = "polymarket"):
     """Cancel an open prediction market order."""
     from ..prediction_markets.execution import Exchange
@@ -633,7 +640,7 @@ class SubscribeRequest(BaseModel):
     identifiers: List[str] = []  # token_ids for Polymarket
 
 
-@router.post("/prediction-markets/feeds/subscribe")
+@router.post("/prediction-markets/feeds/subscribe", dependencies=_MUTATING_AUTH)
 async def subscribe_prediction_feeds(req: SubscribeRequest):
     """Subscribe to real-time price updates for specific markets."""
     from ..prediction_markets.websocket_feeds import get_feed_manager
@@ -758,7 +765,7 @@ def _get_orchestrator():
     return _orchestrator_instance
 
 
-@router.post("/prediction-markets/bot/start")
+@router.post("/prediction-markets/bot/start", dependencies=_MUTATING_AUTH)
 async def start_prediction_bot(
     scan_interval_sec: int = 120,
     dry_run: bool = True,
@@ -790,7 +797,7 @@ async def start_prediction_bot(
     }
 
 
-@router.post("/prediction-markets/bot/stop")
+@router.post("/prediction-markets/bot/stop", dependencies=_MUTATING_AUTH)
 async def stop_prediction_bot():
     """Stop the prediction market trading bot."""
     orchestrator = _get_orchestrator()
@@ -821,7 +828,7 @@ async def get_prediction_activity_log(limit: int = 50):
     }
 
 
-@router.post("/prediction-markets/bot/scan-now")
+@router.post("/prediction-markets/bot/scan-now", dependencies=_MUTATING_AUTH)
 async def trigger_scan_and_execute():
     """Manually trigger one scan-and-execute cycle.
 
@@ -1113,7 +1120,7 @@ async def get_risk_status():
     return orchestrator.risk_manager.get_status()
 
 
-@router.post("/prediction-markets/risk/enable-strategy/{strategy_name}")
+@router.post("/prediction-markets/risk/enable-strategy/{strategy_name}", dependencies=_MUTATING_AUTH)
 async def enable_strategy(strategy_name: str):
     """Re-enable a strategy that was auto-disabled by drawdown."""
     orchestrator = _get_orchestrator()
@@ -1129,7 +1136,7 @@ class RiskConfigUpdate(BaseModel):
     max_orders_per_minute: Optional[int] = None
 
 
-@router.post("/prediction-markets/risk/config")
+@router.post("/prediction-markets/risk/config", dependencies=_MUTATING_AUTH)
 async def update_risk_config(req: RiskConfigUpdate):
     """Update risk manager configuration."""
     orchestrator = _get_orchestrator()
@@ -1151,7 +1158,7 @@ async def update_risk_config(req: RiskConfigUpdate):
 
 # ============ Prediction Markets — Kill Switch ============
 
-@router.post("/prediction-markets/kill-switch/activate")
+@router.post("/prediction-markets/kill-switch/activate", dependencies=_MUTATING_AUTH)
 async def activate_kill_switch(reason: str = "manual"):
     """Emergency kill switch — immediately blocks ALL new orders."""
     executor = _get_prediction_executor()
@@ -1165,7 +1172,7 @@ async def activate_kill_switch(reason: str = "manual"):
     }
 
 
-@router.post("/prediction-markets/kill-switch/deactivate")
+@router.post("/prediction-markets/kill-switch/deactivate", dependencies=_MUTATING_AUTH)
 async def deactivate_kill_switch():
     """Deactivate the kill switch and resume trading."""
     executor = _get_prediction_executor()
@@ -1270,7 +1277,7 @@ async def get_bayesian_priors():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/prediction-markets/quant/bayesian/update")
+@router.post("/prediction-markets/quant/bayesian/update", dependencies=_MUTATING_AUTH)
 async def update_bayesian_prior(key: str, signal_mean: float, signal_weight: float = 5.0):
     """Update a Bayesian prior with a new signal (e.g., from news, polls)."""
     try:

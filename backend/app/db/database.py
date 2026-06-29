@@ -79,9 +79,19 @@ def init_db():
     Works on both SQLite and Postgres — SQLModel.metadata.create_all is a no-op
     for tables that already exist.
     """
-    # Import all model modules so SQLModel registers their tables
+    # Import all model modules so SQLModel registers their tables BEFORE create_all.
+    # The durable singleton tables below live in their own modules and were previously
+    # imported only LAZILY (inside orchestrator/executor construction, which runs AFTER
+    # this create_all at app startup) — so their tables were never created in prod and the
+    # "durable" audit-log / strategy-registry / executor-safety-state persistence silently
+    # no-op'd (BUILDS≠WORKS, caught by an adversarial auditor). Importing them here
+    # registers their `table=True` classes so create_all actually builds them. All three
+    # use extend_existing=True, so this eager import is dual-import-safe.
     from ..db import models as _db_models  # noqa: F401 — equity/paper trading models
     from ..prediction_markets import models as _pm_models  # noqa: F401 — prediction market models
+    from ..prediction_markets import audit_log as _pm_audit  # noqa: F401 — durable audit log (G3)
+    from ..prediction_markets import strategy_registry_store as _pm_reg  # noqa: F401 — alpha lifecycle (B3)
+    from ..prediction_markets import executor_state_store as _pm_state  # noqa: F401 — kill-switch/PnL durability
     SQLModel.metadata.create_all(engine)
 
 

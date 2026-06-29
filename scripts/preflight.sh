@@ -68,7 +68,12 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_same_market_arb_costs.py \
            backend/tests/test_evaluation_window.py \
            backend/tests/test_calibration_drift.py \
-           backend/tests/test_calibration_bucket_strategy.py; do
+           backend/tests/test_calibration_bucket_strategy.py \
+           backend/tests/test_executor_state_persistence.py \
+           backend/tests/test_rest_order_validation.py \
+           backend/tests/test_backend_auth.py \
+           backend/tests/test_durable_tables_created.py \
+           backend/tests/test_walk_forward_pm.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done
   if [ -n "$_testfiles" ]; then

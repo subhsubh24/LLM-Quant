@@ -14,10 +14,11 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -398,6 +399,22 @@ class PolymarketExecutor:
                 error=str(e),
             )
 
+    def _rest_rejected(self, req: OrderRequest, error: str, raw=None) -> OrderResult:
+        """Build a REJECTED OrderResult for a REST order the venue did not confirm."""
+        return OrderResult(
+            order_id=str(uuid.uuid4()),
+            exchange=Exchange.POLYMARKET,
+            market_id=req.market_id,
+            token_id=req.token_id,
+            side=req.side,
+            order_type=req.order_type,
+            size=req.size,
+            price=req.price,
+            status=OrderStatus.REJECTED,
+            error=error,
+            raw_response=raw,
+        )
+
     def _place_via_rest(self, req: OrderRequest) -> OrderResult:
         """Place order using raw CLOB REST API (fallback)."""
         if not self.is_authenticated:
@@ -436,8 +453,77 @@ class PolymarketExecutor:
             resp.raise_for_status()
             data = resp.json()
 
+            # SIDE-EFFECT INTEGRITY (ROADMAP G2/F4.1): an HTTP 200 is NOT proof the order
+            # was accepted. The CLOB REST API returns a JSON body that can carry
+            # success=false / errorMsg even on a 200. Reporting OPEN off the status code
+            # alone fabricates a resting order that never existed (and would later be
+            # mark-to-market'd / settled as a real position). So we VALIDATE the body:
+            #   * non-dict / None body                      -> REJECTED (malformed)
+            #   * explicit success=false (or an errorMsg)   -> REJECTED (venue refused)
+            #   * status "matched" with a parseable size>0  -> FILLED
+            #   * otherwise, a real acknowledgement (an order id / success / live status)
+            #                                                -> OPEN (resting)
+            #   * an acknowledgement we cannot positively confirm
+            #                                                -> REJECTED (never assume a fill)
+            if not isinstance(data, dict):
+                logger.error(f"Polymarket REST order: malformed (non-dict) response: {data!r}")
+                return self._rest_rejected(req, "malformed venue response", data)
+
+            success = data.get("success")
+            err = data.get("errorMsg") or data.get("error")
+            if success is False or err:
+                logger.error(f"Polymarket REST order refused by venue: {data!r}")
+                return self._rest_rejected(req, f"venue refused order: {err or 'success=false'}", data)
+
+            order_id = data.get("orderID") or data.get("orderId") or data.get("id")
+            venue_status = data.get("status")
+
+            # A terminal NEGATIVE status is a refusal even if an order id echoes back —
+            # never report such an order as resting OPEN (side-effect integrity: an order
+            # id alone is not acknowledgement of a live order).
+            if venue_status in ("rejected", "cancelled", "canceled", "expired"):
+                logger.error(f"Polymarket REST order in terminal status {venue_status!r}: {data!r}")
+                return self._rest_rejected(req, f"venue order {venue_status}", data)
+
+            # Confirmed match -> FILLED only with a FINITE matched size > 0. A non-finite
+            # (inf/nan) size is malformed, not a fill.
+            if venue_status == "matched":
+                raw_matched = data.get("matchedAmount", data.get("size_matched"))
+                try:
+                    parsed = float(raw_matched)
+                except (TypeError, ValueError):
+                    logger.error(f"Polymarket REST 'matched' but size unparseable: {data!r}")
+                    return self._rest_rejected(req, "malformed venue response", data)
+                if not math.isfinite(parsed):
+                    logger.error(f"Polymarket REST 'matched' but size non-finite: {data!r}")
+                    return self._rest_rejected(req, "malformed venue response", data)
+                if parsed > 0:
+                    return OrderResult(
+                        order_id=order_id or str(uuid.uuid4()),
+                        exchange=Exchange.POLYMARKET,
+                        market_id=req.market_id,
+                        token_id=req.token_id,
+                        side=req.side,
+                        order_type=req.order_type,
+                        size=req.size,
+                        price=req.price,
+                        filled_size=parsed,
+                        status=OrderStatus.FILLED,
+                        raw_response=data,
+                    )
+                # parsed == 0: venue said "matched" but zero fill -> not a fill; fall through
+                # to the acknowledgement check (an order id => resting OPEN, as the CLOB path).
+
+            # A positive acknowledgement (an order id, or success truthy, or a live/open
+            # resting status) -> OPEN. Anything we cannot positively confirm -> REJECTED;
+            # we never assume an order rests on a venue we couldn't confirm accepted it.
+            acknowledged = bool(order_id) or success is True or venue_status in ("live", "open")
+            if not acknowledged:
+                logger.error(f"Polymarket REST order: unconfirmed acknowledgement: {data!r}")
+                return self._rest_rejected(req, "venue did not confirm the order", data)
+
             return OrderResult(
-                order_id=data.get("orderID", str(uuid.uuid4())),
+                order_id=order_id or str(uuid.uuid4()),
                 exchange=Exchange.POLYMARKET,
                 market_id=req.market_id,
                 token_id=req.token_id,
@@ -574,6 +660,15 @@ class PredictionMarketExecutor:
         self._kill_switch_reason: str = ""
         self._kill_switch_time: Optional[datetime] = None
 
+        # Durable SAFETY-state persistence (ROADMAP D3/D4 / run-risk-readiness).
+        # OPT-IN: None here means no persistence and fresh in-memory state — so a bare
+        # executor (tests / runtime harness) is fully isolated and deterministic. The
+        # production singleton wires a real store via attach_state_store() in
+        # get_executor(), which then REHYDRATES a tripped kill switch / accumulated loss
+        # across restarts (a restart must not silently un-halt trading or reset the loss
+        # budget). Best-effort throughout: persistence can never break the trade path.
+        self._state_store = None
+
     @property
     def total_exposure(self) -> float:
         """Total USD exposed across all positions."""
@@ -604,10 +699,12 @@ class PredictionMarketExecutor:
             f"[KILL SWITCH] ACTIVATED — reason: {reason} | "
             f"Positions: {len(self.positions)} | Exposure: ${self.total_exposure:.2f}"
         )
+        self._persist_state()
 
     def deactivate_kill_switch(self):
         """Re-enable trading after kill switch was activated."""
-        if self._kill_switch_active:
+        was_active = self._kill_switch_active
+        if was_active:
             logger.info(
                 f"[KILL SWITCH] Deactivated (was active since "
                 f"{self._kill_switch_time.isoformat() if self._kill_switch_time else 'unknown'})"
@@ -615,6 +712,78 @@ class PredictionMarketExecutor:
         self._kill_switch_active = False
         self._kill_switch_reason = ""
         self._kill_switch_time = None
+        # Only persist on a REAL transition. A no-op deactivate (switch already off) must
+        # not write — otherwise a stale process calling deactivate could overwrite another
+        # process's persisted TRIP with an inactive row (reviewer A race note).
+        if was_active:
+            self._persist_state()
+
+    # ------------------------------------------------------------------
+    # Durable safety-state persistence (best-effort; see executor_state_store.py)
+    # ------------------------------------------------------------------
+    def attach_state_store(self, store) -> None:
+        """Wire a durable safety-state store and REHYDRATE from it (production singleton).
+
+        Called once on the long-lived production executor (in ``get_executor``). Loads any
+        persisted kill-switch / realized-PnL state so a restart cannot silently un-trip a
+        halted kill switch or reset the accumulated loss budget. Best-effort: a load
+        failure leaves the fresh in-memory state intact.
+        """
+        self._state_store = store
+        try:
+            self._rehydrate_state()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("[EXECUTOR STATE] rehydrate failed (using fresh state): %s", e)
+
+    def _state_snapshot(self) -> dict:
+        # Both temporal fields are serialized to ISO strings (or None) so the snapshot is
+        # uniformly JSON-safe; the store coerces back to a datetime column on save.
+        return {
+            "kill_switch_active": self._kill_switch_active,
+            "kill_switch_reason": self._kill_switch_reason,
+            "kill_switch_time": self._kill_switch_time.isoformat() if self._kill_switch_time else None,
+            "realized_pnl_total": self._realized_pnl_total,
+            "realized_pnl_daily": self._realized_pnl_daily,
+            "loss_cap_day": self._loss_cap_day.isoformat(),
+        }
+
+    def _rehydrate_state(self) -> None:
+        """Restore persisted safety state, if any. Only ever RESTORES (never clears) a halt."""
+        if self._state_store is None:
+            return
+        state = self._state_store.load()
+        if not state:
+            return
+        self._kill_switch_active = bool(state.get("kill_switch_active", False))
+        self._kill_switch_reason = state.get("kill_switch_reason", "") or ""
+        self._kill_switch_time = state.get("kill_switch_time")
+        self._realized_pnl_total = float(state.get("realized_pnl_total", 0.0))
+        self._realized_pnl_daily = float(state.get("realized_pnl_daily", 0.0))
+        day = state.get("loss_cap_day") or ""
+        try:
+            if day:
+                self._loss_cap_day = date.fromisoformat(day)
+        except (ValueError, TypeError):  # pragma: no cover - defensive
+            pass
+        # A restored daily tally is only valid for the UTC day it was recorded; if the day
+        # has since rolled over, reset it (the safe direction — never carry a stale daily
+        # loss into a new day, and never resurrect one for a past day).
+        self._roll_daily_loss_window()
+        if self._kill_switch_active:
+            logger.critical(
+                "[KILL SWITCH] REHYDRATED as ACTIVE from durable store — reason: %s. "
+                "Trading stays halted across the restart until explicitly deactivated.",
+                self._kill_switch_reason,
+            )
+
+    def _persist_state(self) -> None:
+        """Persist safety state (best-effort, never raises). No-op without an attached store."""
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save(self._state_snapshot())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("[EXECUTOR STATE] persist failed: %s", e)
 
     def _roll_daily_loss_window(self):
         """Reset the daily realized-loss tally when the UTC day rolls over."""
@@ -635,7 +804,14 @@ class PredictionMarketExecutor:
         self._roll_daily_loss_window()
         self._realized_pnl_total += pnl
         self._realized_pnl_daily += pnl
+        was_tripped = self._kill_switch_active
         self._enforce_loss_caps()
+        # Durably persist the updated loss counters so a restart cannot reset the
+        # accumulated loss budget. If _enforce_loss_caps just AUTO-TRIPPED the kill switch,
+        # activate_kill_switch() already persisted the full snapshot (counters included) —
+        # skip the redundant write; otherwise persist the counter update here.
+        if not (self._kill_switch_active and not was_tripped):
+            self._persist_state()
 
     def _loss_cap_breach(self) -> Optional[str]:
         """Return a reason string if a daily/total realized-loss cap is breached, else
@@ -928,4 +1104,18 @@ def get_executor(
             max_position_usd=max_position_usd,
             max_portfolio_usd=max_portfolio_usd,
         )
+        # Wire durable safety-state persistence onto the production singleton and
+        # rehydrate (run-risk-readiness). Best-effort + lazy import (same dual-import
+        # discipline as the audit log / registry store): a persistence problem can never
+        # break executor construction. In CI the DB is an empty ephemeral SQLite, so this
+        # loads nothing and the executor is fresh + deterministic.
+        try:
+            from .executor_state_store import ExecutorStateStore, _NoOpExecutorStateStore
+            try:
+                _executor.attach_state_store(ExecutorStateStore())
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("[EXECUTOR STATE] store init failed, using no-op: %s", e)
+                _executor.attach_state_store(_NoOpExecutorStateStore())
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("[EXECUTOR STATE] persistence unavailable: %s", e)
     return _executor

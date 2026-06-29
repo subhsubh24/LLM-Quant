@@ -50,6 +50,22 @@ SELF_VALIDATION:
       active: true
       ci_validatable: true
       status: validated
+    - id: executor_state_persistence
+      desc: "kill switch + realized-PnL loss counters persist across restart (run-risk-readiness)"
+      validates_via: "test_executor_state_persistence.py — tripped kill switch + accumulated loss rehydrate on a fresh executor (in-memory SQLite); bare executor stays isolated; best-effort never raises"
+      mode: in_process_deterministic   # in-memory SQLite; durable Neon is OA-10
+      requires_env: [DATABASE_URL]      # optional; falls back to local SQLite, degrades to in-memory-only
+      active: true
+      ci_validatable: true             # exercised against in-memory SQLite; no secret needed to validate
+      status: validated
+    - id: backend_route_auth
+      desc: "shared-secret bearer token on state-mutating routes (kill-switch/config/execute/bot)"
+      validates_via: "test_backend_auth.py — open when BACKEND_API_TOKEN unset (degrades safely), exact-Bearer required + all mismatches denied (constant-time) when set"
+      mode: degrades_without_key
+      requires_env: [BACKEND_API_TOKEN]  # unset => auth disabled (open), unchanged paper/dev behaviour
+      active: true
+      ci_validatable: true             # the no-token (open) AND the enforced decision are both tested without any secret; the token only ACTIVATES protection
+      status: degrades_safely            # absent token => open (as today); set => enforced. Owner activates (OA-14).
     - id: live_trading_path
       desc: "real-order placement on Polymarket (the gated live path)"
       validates_via: "runtime_harness asserts the live gate + kill switch BLOCK real orders deterministically"
@@ -97,12 +113,13 @@ SELF_VALIDATION:
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 7
+    capabilities_total: 9
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
     GEMINI_API_KEY:        {capability: llm_analysis, needed_to: enhance_analysis, owner_action: null}
     DATABASE_URL:          {capability: db_persistence, needed_to: durable_persist, owner_action: OA-10}
+    BACKEND_API_TOKEN:     {capability: backend_route_auth, needed_to: protect_state_mutating_routes, owner_action: OA-14}
     POLYMARKET_API_KEY:    {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
     POLYMARKET_API_SECRET: {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
     POLYMARKET_PASSPHRASE: {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
