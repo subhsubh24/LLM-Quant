@@ -33,7 +33,7 @@ planning_case: base
 floor_usd: 104000
 floor_met_year1: false
 time_to_floor: unknown
-as_of: 2026-06-27
+as_of: 2026-06-29
 ```
 
 ### Field notes (honesty)

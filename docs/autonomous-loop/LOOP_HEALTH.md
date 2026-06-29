@@ -39,31 +39,50 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-29
-  last_run: 2026-06-29          # prior run: factory 3-PR code run (B4a alpha + E5/E2 wiring + metrics dashboard, #74-77)
-  last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
+  last_run: 2026-06-29          # prior run: self-validation addendum (#82)
+  last_deep_audit: 2026-06-29   # daily deep audit w/ live-safety + side-effect + auth lenses ran this run (3 Opus auditors)
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   validation:                   # self-validation capability readiness — refresh every run from `check_self_validation.py --readiness`
     enforced_in_ci: true        # the coverage gate is a blocking preflight step (9d) inside the required check
-    capabilities_total: 7
+    capabilities_total: 9       # +2 this run: executor_state_persistence, backend_route_auth
     unmet: []                   # active + ci_validatable:false capabilities (need an owner secret). NON-EMPTY => urgent OWNER_ACTION + blocks. Must match SELF_VALIDATION.readiness.unmet AND have a PENDING_OPS validation-capability-<id>.
   this_run:
-    changes_shipped: 1          # self-validation ADDENDUM: --readiness mode + ci_validatable + unmet dual-surfacing + auditor honesty-reconcile
+    changes_shipped: 3          # PR-A control-path hardening (persistence + REST validation + route auth + init_db durability fix), PR-B frontend design-taste, PR-C bookkeeping
     changes_abandoned: 0
-    abandoned_reasons: []
-    verify_cycle_failures: 0
-    review_rejections: 0
+    abandoned_reasons: []        # dropped pre-build on the value/disjoint rules (NOT abandoned): D2 SELL-path (no-op in current flow), B1 per-leg exec / E7 / B3-derivation (alpha-blocked), C2 impact-calib (egress-blocked)
+    verify_cycle_failures: 1     # durable-tables regression test failed under full-suite contamination on first cut; rewrote as a clean-subprocess test (1 fix cycle)
+    review_rejections: 0         # 2 Sonnet reviewers + 3 Opus auditors flagged 2 MUST-FIX (auth fail-open log level; deactivate-persist race) + a BUILDS≠WORKS gap — all fixed in ONE consolidated cycle, none rejected the change
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 72             # git: squash-merged (#NN) commits, last 7 days
+    merged_prs: 51             # git: squash-merged (#NN) commits to default, last 7 days
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
     recurring_failures: []       # OA-11 corpus refresh = owner/egress-scope (automatable, OA-13). No recurring wall.
     harness_proposals_open: 0
-  signal: improving              # 12th datapoint: aligned the self-validation gate with the cross-factory addendum — `--readiness` mode, `ci_validatable`, UNMET capabilities surface in BOTH PENDING_OPS + LOOP_HEALTH.validation, pyyaml hardened (fail-not-skip), auditor honesty-reconcile lens. unmet=[] today. Converging.
+  signal: improving              # 13th datapoint: drove 3 ship-critical QUALITY_SCORECARD top_gaps (run-risk-readiness durability, security route-auth, design-taste cleanup) to done; an adversarial auditor caught a real BUILDS≠WORKS (durable tables never created in prod) — root-caused + regression-pinned. unmet=[]. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-29 (13th datapoint — factory run) — `improving`, the adversarial gate caught a real BUILDS≠WORKS the tests missed.**
+Shipped 3 file-disjoint PRs from an 8-scout sweep, all driving named QUALITY_SCORECARD top_gaps: (A) control-path
+hardening — durable kill-switch + realized-PnL persistence so a restart can't un-trip the halt or reset the loss
+budget (run-risk-readiness top_gap), REST venue-fill validation (side-effect integrity, D1), and a degrade-safe
+shared-secret on the 12 state-mutating backend routes (security top_gap, OA-14); (B) frontend design-taste — deleted
+the dead `Math.random()` `equity-chart.tsx` and fixed the WeeklyMetricsCard P&L axis to always include $0; (C) this
+bookkeeping. **The headline win — an Opus live-safety auditor proved a BUILDS≠WORKS the unit tests passed over:** the
+durable audit-log/registry/executor tables were never created at startup (`init_db`'s `create_all` ran *before* their
+lazy import), so the "durable" persistence silently no-op'd in prod. Root-caused (import the table modules in `init_db`
+before `create_all`) and pinned with a cold-start subprocess regression test. **The gate earned its keep again:** 2
+Sonnet reviewers + 3 Opus auditors (auth REAL+SOUND, side-effect SOUND, live-safety SAFE) flagged 2 MUST-FIX (auth
+fail-open log→CRITICAL; deactivate-persist race) + several hardening nits — all fixed in ONE consolidated cycle (≤2-cycle
+brake), then re-verified green. **Anti-scarcity + anti-padding both held:** dropped D2-SELL-path (a no-op in the current
+held-to-resolution flow — would be a fake control) and the alpha/egress-blocked items (B1/E7/B3-derivation/C2) on the
+value+disjoint rules, not invented. No DoD/floor box ticked — hardening, not a validated edge; binding constraint stays
+OA-11 (7-day OOS corpus, owner/egress-scope), so no harness proposal warranted.
+
+### Earlier
 
 **2026-06-29 (11th datapoint) — `improving`, the loop can now mechanically prove it validates the app.**
 Added a **self-validation coverage gate** (`docs/ci/SELF_VALIDATION.md` manifest +
