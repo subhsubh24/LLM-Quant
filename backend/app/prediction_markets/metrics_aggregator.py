@@ -39,6 +39,12 @@ from .calibration import (
     CalibrationResult,
     evaluate_calibration,
 )
+from .per_strategy_metrics import (
+    StrategyTradePnL,
+    StrategyAttribution,
+    attribute_by_strategy,
+    rank_by_total_pnl,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +232,63 @@ def compute_calibration(predictions: Sequence[ResolvedPrediction]) -> Dict[str, 
     return _calibration_to_dict(result, is_degenerate=degenerate)
 
 
+def _attribution_to_dict(a: StrategyAttribution) -> Dict[str, Any]:
+    """Serialize a StrategyAttribution to a JSON-safe dict (NaN/Inf → None)."""
+    return {
+        "strategy": a.strategy,
+        "num_trades": a.num_trades,
+        "num_wins": a.num_wins,
+        "total_pnl_usd": _safe_float(a.total_pnl_usd),
+        "mean_pnl_usd": _safe_float(a.mean_pnl_usd),
+        "hit_rate": _safe_float(a.hit_rate),
+        "best_trade_usd": _safe_float(a.best_trade_usd),
+        "worst_trade_usd": _safe_float(a.worst_trade_usd),
+        # weekly_pnl is an immutable MappingProxyType keyed by ISO-Monday date.
+        "weekly_pnl": {k: _safe_float(v) for k, v in a.weekly_pnl.items()},
+    }
+
+
+def compute_per_strategy_metrics(
+    trades: Sequence[StrategyTradePnL],
+) -> Dict[str, Any]:
+    """
+    ROADMAP E6 — per-strategy realized-PnL attribution over strategy-tagged trades.
+
+    Pure + deterministic wrapper around ``per_strategy_metrics.attribute_by_strategy``:
+    groups resolved, strategy-tagged trades by the alpha that opened them and reports
+    each strategy's realized PnL / hit-rate / weekly series, plus a ranking by total
+    realized PnL (the E4 A/B + decayed-alpha-retirement ordering input).
+
+    HONESTY
+    -------
+    * Strategies with zero trades NEVER appear (no fabricated 0/0 rows) — inherited
+      from ``attribute_by_strategy``.
+    * Every number flows from the real resolved trades passed in; empty input →
+      ``{"strategies": [], "ranking": [], "num_input_trades": 0}`` (no crash, no
+      invented strategy).
+
+    Returns
+    -------
+    dict
+        ``strategies`` (list of per-strategy dicts, sorted by name),
+        ``ranking`` (strategy names ranked by total realized PnL desc, ties by name),
+        ``num_input_trades``.
+    """
+    trade_list = list(trades)
+    attributions = attribute_by_strategy(trade_list)
+    ranked = rank_by_total_pnl(attributions)
+    return {
+        "source": "resolved_trades_by_strategy",
+        "num_input_trades": len(trade_list),
+        # Sorted by name for a stable, deterministic listing.
+        "strategies": [
+            _attribution_to_dict(attributions[name]) for name in sorted(attributions)
+        ],
+        # Ranked by realized PnL (desc); the decision input for E4 promote/retire.
+        "ranking": [a.strategy for a in ranked],
+    }
+
+
 def compute_all(
     trades: Sequence[TradePnL],
     predictions: Sequence[ResolvedPrediction],
@@ -273,5 +336,6 @@ __all__ = [
     "compute_weekly_metrics",
     "compute_floor_status",
     "compute_calibration",
+    "compute_per_strategy_metrics",
     "compute_all",
 ]

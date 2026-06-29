@@ -1,0 +1,319 @@
+"""
+Tests for the learning-loop WIRING (this run):
+
+* ROADMAP E6 — per-strategy attribution serialized via metrics_aggregator +
+  orchestrator.get_resolved_trades_by_strategy (untagged → "unattributed").
+* ROADMAP B3 — strategy_registry_store durable round-trip + orchestrator
+  record_strategy_transition enforcing the engine's integrity gate via the
+  same code path the API uses.
+* ROADMAP D2 (resolution risk fix) — a losing market RESOLUTION now feeds
+  risk_manager.record_pnl so a decayed strategy's drawdown auto-disable can
+  actually fire on the dominant binary-market loss path (previously bypassed).
+
+Deterministic; no network. Uses in-memory SQLite for persistence.
+"""
+
+import pytest
+from datetime import datetime, timezone
+
+from backend.app.prediction_markets.per_strategy_metrics import StrategyTradePnL
+from backend.app.prediction_markets.metrics_aggregator import (
+    compute_per_strategy_metrics,
+)
+from backend.app.prediction_markets.strategy_registry import (
+    StrategyRegistry,
+    LifecycleState,
+    Evidence,
+    IllegalTransition,
+    MissingEvidence,
+)
+
+
+def _ts(day):
+    return datetime(2024, 1, day, 12, 0, tzinfo=timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# E6 — per-strategy attribution serializer
+# ---------------------------------------------------------------------------
+
+def test_per_strategy_metrics_groups_and_ranks():
+    trades = [
+        StrategyTradePnL("alpha", _ts(1), 100.0, True),
+        StrategyTradePnL("alpha", _ts(2), -40.0, False),
+        StrategyTradePnL("beta", _ts(1), 10.0, True),
+    ]
+    out = compute_per_strategy_metrics(trades)
+    assert out["num_input_trades"] == 3
+    names = [s["strategy"] for s in out["strategies"]]
+    assert names == ["alpha", "beta"]  # sorted by name
+    alpha = next(s for s in out["strategies"] if s["strategy"] == "alpha")
+    assert alpha["num_trades"] == 2
+    assert alpha["num_wins"] == 1
+    assert alpha["total_pnl_usd"] == pytest.approx(60.0)
+    assert alpha["hit_rate"] == pytest.approx(0.5)
+    # Ranking by total realized PnL desc: alpha (60) before beta (10).
+    assert out["ranking"] == ["alpha", "beta"]
+
+
+def test_per_strategy_metrics_no_fabricated_rows_and_empty():
+    # Zero-trade strategies never appear; empty input → honest empty shape.
+    assert compute_per_strategy_metrics([]) == {
+        "source": "resolved_trades_by_strategy",
+        "num_input_trades": 0,
+        "strategies": [],
+        "ranking": [],
+    }
+
+
+def test_per_strategy_metrics_total_reconciles_to_weekly():
+    trades = [
+        StrategyTradePnL("alpha", _ts(1), 30.0, True),
+        StrategyTradePnL("alpha", _ts(9), -5.0, False),  # different ISO week
+    ]
+    out = compute_per_strategy_metrics(trades)
+    alpha = out["strategies"][0]
+    assert alpha["total_pnl_usd"] == pytest.approx(sum(alpha["weekly_pnl"].values()))
+
+
+def test_per_strategy_metrics_deterministic():
+    trades = [
+        StrategyTradePnL("b", _ts(1), 5.0, True),
+        StrategyTradePnL("a", _ts(1), -1.0, False),
+    ]
+    assert compute_per_strategy_metrics(trades) == compute_per_strategy_metrics(trades)
+
+
+# ---------------------------------------------------------------------------
+# B3 — durable registry store round-trip
+# ---------------------------------------------------------------------------
+
+def _mem_store():
+    from sqlmodel import create_engine
+    from backend.app.prediction_markets.strategy_registry_store import (
+        StrategyRegistryStore,
+        init_db,
+    )
+    engine = create_engine("sqlite://")
+    init_db(engine)
+    return StrategyRegistryStore(engine=engine)
+
+
+def test_registry_store_load_none_when_empty():
+    store = _mem_store()
+    assert store.load() is None  # nothing persisted yet
+
+
+def test_registry_store_roundtrip_is_byte_stable():
+    store = _mem_store()
+    reg = StrategyRegistry()
+    reg.propose("no_scanner", at=_ts(1), reason="seed")
+    reg.transition("no_scanner", LifecycleState.BACKTESTING, at=_ts(2),
+                   evidence=Evidence())
+    assert store.save(reg) is True
+
+    loaded = store.load()
+    assert loaded is not None
+    assert loaded.to_dict() == reg.to_dict()
+    assert loaded.state_of("no_scanner") == LifecycleState.BACKTESTING
+
+
+def test_registry_store_save_overwrites_singleton():
+    store = _mem_store()
+    reg1 = StrategyRegistry()
+    reg1.propose("one", at=_ts(1))
+    store.save(reg1)
+    reg2 = StrategyRegistry()
+    reg2.propose("two", at=_ts(1))
+    store.save(reg2)
+    loaded = store.load()
+    assert loaded.names() == ["two"]  # singleton overwritten, not appended
+
+
+# ---------------------------------------------------------------------------
+# B3 — orchestrator transition path enforces the integrity gate
+# ---------------------------------------------------------------------------
+
+def _orchestrator():
+    # scanner=None → no deployed strategies seeded; executor dry-run paper.
+    from backend.app.prediction_markets.orchestrator import PredictionMarketOrchestrator
+    from backend.app.prediction_markets.execution import get_executor
+    return PredictionMarketOrchestrator(
+        scanner=None, executor=get_executor(dry_run=True)
+    )
+
+
+def test_orchestrator_propose_then_legal_transition():
+    orch = _orchestrator()
+    orch.propose_strategy("exp_alpha", reason="hypothesis", at=_ts(1))
+    rec = orch.record_strategy_transition(
+        "exp_alpha", LifecycleState.BACKTESTING, reason="start", at=_ts(2),
+        evidence=Evidence(),
+    )
+    assert rec.state == LifecycleState.BACKTESTING
+    snap = orch.get_strategy_registry()
+    assert any(a["name"] == "exp_alpha" for a in snap["alphas"])
+
+
+def test_orchestrator_promotion_requires_full_evidence():
+    orch = _orchestrator()
+    orch.propose_strategy("exp_alpha", at=_ts(1))
+    orch.record_strategy_transition("exp_alpha", LifecycleState.BACKTESTING, at=_ts(2),
+                                    evidence=Evidence(backtest_passed=True))
+    orch.record_strategy_transition("exp_alpha", LifecycleState.PAPER, at=_ts(3),
+                                    evidence=Evidence(backtest_passed=True))
+    # Promotion WITHOUT oos+calibration evidence must be refused (integrity gate).
+    with pytest.raises(MissingEvidence):
+        orch.record_strategy_transition(
+            "exp_alpha", LifecycleState.PROMOTED, at=_ts(4),
+            evidence=Evidence(backtest_passed=True),
+        )
+    # With full evidence it is allowed.
+    rec = orch.record_strategy_transition(
+        "exp_alpha", LifecycleState.PROMOTED, at=_ts(5),
+        evidence=Evidence(backtest_passed=True, oos_validated=True,
+                          calibration_passed=True),
+    )
+    assert rec.state == LifecycleState.PROMOTED
+
+
+def test_orchestrator_illegal_jump_rejected():
+    orch = _orchestrator()
+    orch.propose_strategy("exp_alpha", at=_ts(1))
+    # PROPOSED → PROMOTED is structurally impossible.
+    with pytest.raises(IllegalTransition):
+        orch.record_strategy_transition(
+            "exp_alpha", LifecycleState.PROMOTED, at=_ts(2),
+            evidence=Evidence(backtest_passed=True, oos_validated=True,
+                              calibration_passed=True),
+        )
+
+
+def test_orchestrator_seeds_deployed_strategies_as_proposed():
+    # A scanner with named strategies → each seeded PROPOSED (honest: no evidence yet).
+    from backend.app.prediction_markets.orchestrator import PredictionMarketOrchestrator
+    from backend.app.prediction_markets.execution import get_executor
+
+    class _S:
+        def __init__(self, n):
+            self._n = n
+        @property
+        def name(self):
+            return self._n
+
+    class _Scanner:
+        strategies = [_S("alpha_x"), _S("beta_y")]
+
+    orch = PredictionMarketOrchestrator(
+        scanner=_Scanner(), executor=get_executor(dry_run=True)
+    )
+    snap = orch.get_strategy_registry()
+    states = {a["name"]: a["state"] for a in snap["alphas"]}
+    assert states.get("alpha_x") == "proposed"
+    assert states.get("beta_y") == "proposed"
+
+
+# ---------------------------------------------------------------------------
+# D2 resolution risk fix — resolution loss feeds the strategy drawdown circuit
+# ---------------------------------------------------------------------------
+
+def test_resolution_loss_feeds_strategy_drawdown_disable():
+    """A losing market RESOLUTION must feed risk_manager.record_pnl so the
+    per-strategy drawdown auto-disable can fire on the dominant binary loss path.
+    Previously check_resolutions fed ONLY the executor loss caps, never the risk
+    manager — a strategy could decay via resolutions and keep trading.
+    """
+    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
+    from backend.app.prediction_markets import polymarket_client as pmc
+    from backend.app.prediction_markets.execution import (
+        PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
+    )
+    from backend.app.prediction_markets.risk_manager import RiskManager, RiskConfig
+
+    ex = PredictionMarketExecutor(
+        dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
+        max_daily_loss_usd=10_000.0, max_total_loss_usd=10_000.0,  # caps wide so
+    )                                                              # kill switch stays off
+    ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m1", token_id="t1",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=100, price=0.50,
+        strategy="decayed", market_question="Q?", outcome_label="Yes",
+    ))
+    token_id = next(iter(ex.positions))
+
+    rm = RiskManager(config=RiskConfig(
+        strategy_disable_drawdown=0.20, strategy_disable_min_trades=1,
+    ))
+    # Establish a prior peak for the strategy, and enough trades to clear min_trades.
+    rm.record_pnl("decayed", 100.0)
+    rm._strategy_trades["decayed"] = 5
+    assert "decayed" not in rm._disabled_strategies
+
+    lost = pmc.Market(
+        id="m", condition_id="c", question="Q?", slug="q", description="",
+        category="", end_date=None,
+        outcomes=[pmc.Outcome(token_id=token_id, label="Yes", price=0.0,
+                              midpoint=0.0, volume=0.0)],
+        total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+    )
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+        def get_market_by_slug(self, _slug):
+            return lost
+
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _FakeClient
+    try:
+        engine = MarkToMarketEngine(ex, risk_manager=rm)
+        engine.check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+
+    # current_value: 100 (peak) + (-50 resolution) = 50 → 50% drawdown ≥ 20% → disabled.
+    assert "decayed" in rm._disabled_strategies
+    assert token_id not in ex.positions
+
+
+def test_resolution_without_risk_manager_still_works():
+    """The risk_manager wiring is optional/None-safe — resolution accounting must
+    still work (and feed the executor caps) when no risk_manager is attached."""
+    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
+    from backend.app.prediction_markets import polymarket_client as pmc
+    from backend.app.prediction_markets.execution import (
+        PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
+    )
+
+    ex = PredictionMarketExecutor(
+        dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
+        max_daily_loss_usd=10_000.0, max_total_loss_usd=10_000.0,
+    )
+    ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m1", token_id="t1",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=100, price=0.50,
+        strategy="s", market_question="Q?", outcome_label="Yes",
+    ))
+    token_id = next(iter(ex.positions))
+    win = pmc.Market(
+        id="m", condition_id="c", question="Q?", slug="q", description="",
+        category="", end_date=None,
+        outcomes=[pmc.Outcome(token_id=token_id, label="Yes", price=1.0,
+                              midpoint=1.0, volume=0.0)],
+        total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+    )
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+        def get_market_by_slug(self, _slug):
+            return win
+
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _FakeClient
+    try:
+        engine = MarkToMarketEngine(ex)  # no risk_manager
+        engine.check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+    assert token_id not in ex.positions  # resolved + closed, no crash
