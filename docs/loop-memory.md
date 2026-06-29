@@ -2,6 +2,47 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — Control-path hardening (3-PR run); an auditor caught a BUILDS≠WORKS the tests passed
+
+- **Drove 3 named QUALITY_SCORECARD top_gaps to done** (consume-the-grade, never self-grade): run-risk-readiness
+  ("kill switch + realized-PnL are in-memory only; a restart un-trips the halt") → durable
+  `executor_state_store.py` (singleton table, mirrors audit-log/registry), persisted on every kill-switch/PnL
+  mutation, rehydrated on the production executor in `get_executor()`; security ("state-mutating routes have no
+  auth") → a degrade-safe shared-secret bearer guard on the 12 mutating routes; design-taste (dead `Math.random()`
+  `equity-chart.tsx` + floating P&L axis) → deleted + axis fixed. Shipped as 3 file-disjoint PRs (backend / frontend /
+  bookkeeping), rebased onto the newly-merged #82.
+- **THE win — an Opus live-safety auditor broke a BUILDS≠WORKS my unit tests passed over.** The persistence tests
+  passed because they call `init_db(engine)` / `create_all` explicitly. But in PROD, `init_db()` runs `create_all`
+  BEFORE the table modules are imported (they're imported lazily inside orchestrator/executor construction, which runs
+  AFTER `init_db` at startup) — so the durable tables were **never created**, every load/save hit "no such table" and
+  was swallowed. The audit-log (G3) + registry (B3) durability had the SAME latent bug, silently, for runs. **Lesson:
+  a `table=True` class only gets a table if its module is imported BEFORE `create_all`. Lazy-imported table modules are
+  invisible to a startup `create_all` that ran first. A test that imports the module then calls `create_all` CANNOT
+  catch this — you must test the real cold-start path (a clean subprocess with a temp DATABASE_URL, asserting the
+  tables exist). Fix: import all table-bearing modules in `init_db` before `create_all`, pinned by a subprocess
+  regression that fails loud.**
+- **Test-isolation lesson (the regression test itself):** a first cut used `importlib.reload(db)` + env to point at a
+  temp DB; it passed in isolation but FAILED in the full suite (other tests had already imported the table modules /
+  bound the module-level engine, contaminating global SQLModel.metadata + the reloaded engine). **A clean subprocess is
+  the robust way to test "cold-start prod behaviour" — module-global state (SQLModel.metadata, lru_cached settings, a
+  module-level `engine`) leaks across tests in one process and makes reload-based tests lie.**
+- **CI-light constraint shaped the auth design:** CI installs only `requirements-ci.txt` (no fastapi). So the auth
+  DECISION lives in a pure, fastapi-free `backend/app/auth_core.py` (CI-tested: open-when-unset, constant-time match,
+  all mismatches denied), and `api/auth.py` is a thin FastAPI adapter. **Lesson: put a security primitive's decision in
+  a framework-free module so the lightweight gate can validate it; keep the framework binding to a trivial adapter — and
+  verify the adapter once for real (a TestClient 401 check) where the framework IS installed (guarded by `importorskip`
+  so CI skips it).** Also: `backend/app/api/__init__.py` eagerly imports fastapi, so a CI-safe pure module must live
+  OUTSIDE the `api` package (it's at `backend/app/auth_core.py`).
+- **Degrade-safe auth, not a fake control:** `BACKEND_API_TOKEN` unset (default) ⇒ auth disabled ⇒ unchanged paper/dev
+  (existing route tests pass with no token); set ⇒ enforced. This is the LIVE_TRADING_ENABLED pattern (a real, tested,
+  enforced control shipped OFF by default), NOT the removed-fake-UI-toggle anti-pattern — the auditor confirmed
+  REAL+SOUND. The owner-irreducible half (set the token + a frontend SERVER-SIDE proxy so the browser never holds the
+  secret) is OA-14; a browser SPA can't hold a shared secret, so a NEXT_PUBLIC token would defeat the purpose.
+- **Process:** ONE consolidated fix cycle for all 5 reviewer/auditor reports (2 Sonnet + 3 Opus), re-verified green — no
+  3rd audit on strictly-more-conservative/honesty + a well-tested root-cause fix (≤2-cycle brake). Anti-scarcity AND
+  anti-padding both held: dropped D2-SELL-path (a no-op in the held-to-resolution flow = a fake control) and the
+  alpha/egress-blocked items (B1/E7/B3-derivation/C2) on the value+disjoint rules, not invented.
+
 ## 2026-06-29 — Self-validation ADDENDUM: readiness mode + UNMET surfacing + 5 pitfalls + honesty-reconcile
 
 - Cross-factory alignment of the self-validation gate. Added: a `--readiness` mode

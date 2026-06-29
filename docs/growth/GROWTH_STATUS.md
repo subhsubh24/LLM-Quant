@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-29
   phase: pre_launch
   engine_built: false
-  engine_pct: 70
+  engine_pct: 71
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -177,7 +177,15 @@ GROWTH_STATUS:
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 70` (up from 68) adds the FIRST `model_prob != crowd` alpha mechanism
+`engine_pct: 71` (up from 70) is run-risk-readiness + security + side-effect hardening of the
+control path (no new edge): the kill-switch + realized-PnL loss counters now PERSIST and
+rehydrate across a restart (`executor_state_store.py`) — and a BUILDS≠WORKS fix makes the
+durable audit-log/registry/executor tables actually get created at startup (they silently
+no-op'd before); state-mutating backend routes are now guarded by a degrade-safe shared-secret
+token (`auth_core.py` + OA-14); and the REST order path validates the venue body so no fill is
+reported without a real acknowledgement (D1). The validated EDGE is still absent (the binding
+constraint stays the 7-day-lead OOS corpus, OA-11), so no DoD/floor box ticks. Prior rationale
+(engine_pct 70, up from 68) adds the FIRST `model_prob != crowd` alpha mechanism
 (`CalibrationBucketStrategy` — the per-bucket empirical-calibration model + strategy, the
 EXP-002 build, leakage-safe + abstaining + 3-Opus-auditor-clean), WIRES the last two pure
 learning engines into the running system (E5 evaluation-windows + E2 calibration-drift now
