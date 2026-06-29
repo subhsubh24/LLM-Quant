@@ -39,25 +39,24 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-29
-  last_run: 2026-06-29          # prior run: data-refresh automation (OA-13: fetcher --merge + staged Action)
+  last_run: 2026-06-29          # prior run: 4-PR models/strategy run (#63-66 B5/B3/E6/B2/A5)
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 4          # #63 B5 keyword-screen hardening, #64 B3/E6 lifecycle+attribution engines, #65 B2 Bonferroni correction, #66 A5 fetched_at staleness
-    changes_abandoned: 1
-    abandoned_reasons:           # [{change, reason}] reason ∈ gate_tsc|gate_test|gate_determinism|gate_build|gate_backtest_nonreproduce|review_value|review_correctness|circuit_breaker|conflict|dead_end|blocked_owner
-      - {change: "cost_model extreme-price floor fix", reason: dead_end}  # scout-alleged bug; the 1e-6 floor OVER-states cost (conservative/safe direction), not oversizing — dropped pre-build, not a real bug
-    verify_cycle_failures: 0     # blocking gate stayed green throughout; the 2 fix cycles were review/audit-driven, not gate failures
-    review_rejections: 0         # no PR rejected; 2 fix cycles (entity-gating → simplified screen; tz-normalize; reconcile; immutable mapping) applied in-place within the <=2-cycle brake
+    changes_shipped: 4          # PR-1 E6+B3 wiring+D2 resolution-risk fix, PR-2 BCC cost-model honesty+MECE guard, PR-3 E5 window engine, PR-4 E2 drift detector (+ bookkeeping)
+    changes_abandoned: 0
+    abandoned_reasons: []        # none dropped this run; scout candidates that didn't survive honesty review (spread-based miscalibration screen — not validatable on the fixture; category-rate fitting — test-set p-hacking) were never built, not abandoned mid-flight
+    verify_cycle_failures: 0     # blocking gate stayed green throughout; the one fix cycle was review/audit-driven, not a gate failure
+    review_rejections: 0         # no PR rejected; ONE consolidated fix cycle applied all review/audit findings in-place within the <=2-cycle brake
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 54             # git: 53 squash-merged (#NN) commits in window + this bookkeeping PR
+    merged_prs: 58             # git: prior 54 + this run's 4 code PRs (bookkeeping PR not yet counted)
     reverts: 0                 # git: no revert commits in the window
     readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11/OA-13) remains owner-scope but is NOT a convergence wall (binding constraint is loop-buildable: a real alpha + wiring the new engines).
+    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11/OA-13) remains owner-scope but is NOT a convergence wall (binding constraint is loop-buildable: a real alpha + per-leg arb execution + deriving B3 evidence).
     harness_proposals_open: 0    # no open proposals; no recurring wall warranting one this run.
-  signal: improving              # 7th datapoint: 4 disjoint PRs shipped, 1 fake-fix correctly dropped pre-build (anti-padding), 0 reverts; adversarial gate caught real bugs (false-positive screen, naive-tz round-trip, mutable frozen dict) all fixed in <=2 cycles. Converging.
+  signal: improving              # 8th datapoint: 4 disjoint PRs shipped, 0 abandoned, 0 reverts; adversarial gate earned its keep — an Opus auditor BROKE the cost-arb "guaranteed edge" (MECE/midpoint/phantom-fill) and the B3 API promotion-via-fabricated-evidence, both honestly fixed/scoped in ONE consolidated cycle. Converging.
 ```
 
 ## How to read the latest signal
