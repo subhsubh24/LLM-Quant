@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult
 from .market_text import DEFAULT_MIN_SHARED, content_tokens, is_content_related
+from .cost_model import DEFAULT_COST_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -324,15 +325,36 @@ class NearCertaintyStrategy(BaseStrategy):
 
 class SameMarketArbitrageStrategy(BaseStrategy):
     """
-    Exploit YES + NO < $1.00 within a single binary market.
+    Screen for YES + NO < $1.00 (net of costs) within a single market — a
+    *candidate* dutch-book where buying every outcome could return more than it cost.
 
-    In a correctly priced binary market, YES + NO should equal $1.00 (minus fees).
-    When the sum drops below $0.98, buying both guarantees a profit.
+    The structural idea: in a set of mutually-exclusive-and-exhaustive (MECE) outcomes,
+    exactly one resolves YES and pays $1.00, so if you can buy the whole basket for less
+    than $1.00 net of costs the profit is structural, not a forecast. We fire on the
+    cost-model NET edge (ROADMAP B5) rather than the old optimistic flat ``discount-0.02``.
 
-    Warning: These windows typically last milliseconds. This strategy is more
-    useful for monitoring market efficiency than for execution.
-
-    With Polymarket's ~2% winner fee, the sum must be < $0.98 to profit.
+    HONESTY — this is a conservative SCREEN, not a proven guaranteed arbitrage. Known
+    limitations (each is the SAFE/conservative direction or a named follow-up, never an
+    over-statement of profit):
+      * MECE assumption. Binary markets (exactly two outcomes) are YES/NO of one
+        condition — complementary by construction. Multi-outcome baskets are only MECE
+        when the venue marks them ``neg_risk`` (negative-risk markets where exactly one
+        outcome pays $1); we therefore fire the multi-outcome branch ONLY when
+        ``market.neg_risk`` is true. A non-neg_risk multi-outcome list may not be
+        exhaustive, so "exactly one pays $1" would not hold — we do not trade it.
+      * Prices are CLOB MIDPOINTS (enrichment sets ``outcome.price = midpoint``), not the
+        ask you would actually pay. The flat slippage term approximates, but does NOT
+        equal, the real per-leg half-spread. On a book wide enough to show a midpoint
+        discount the executable ask-sum may be back above $1.00 — so a fired signal is a
+        candidate to verify against live depth, not a locked-in profit.
+      * Fee conservatism: the cost model charges the venue fee on EVERY leg, while
+        Polymarket charges it only on the winning payout — so our cost is slightly
+        PESSIMISTIC (we fire on fewer markets than reality permits; the safe direction).
+      * EXECUTION (named follow-up, ROADMAP B-track): realising the basket requires
+        placing + confirming a SEPARATE ask-priced order per leg (real token_id each) and
+        abandoning if any leg cannot fill. The current orchestrator ``outcome_idx=-1``
+        path does not yet do per-leg execution; until it does, treat fired signals as a
+        monitoring/efficiency screen, not an executed arbitrage.
     """
 
     def __init__(
@@ -364,8 +386,26 @@ class SameMarketArbitrageStrategy(BaseStrategy):
             price_sum = sum(o.price for o in market.outcomes)
             discount = 1.0 - price_sum
 
+            # ``discount >= self.min_discount`` is a CHEAP pre-filter only. The edge we
+            # actually fire on is the cost-model NET edge (ROADMAP B5): buying 1 share of
+            # every outcome guarantees a $1.00 payout (exactly one outcome resolves YES),
+            # so the true edge is 1.0 minus the all-in cost the executor will charge for
+            # the basket. cost_model.effective_buy_price already folds in slippage + the
+            # venue fee MULTIPLICATIVELY (the same costs execution.py charges), so:
+            #   net_edge = 1.0 - sum_outcomes effective_buy_price(outcome.price)
+            # effective_buy_price(p) = min(p*1.005*1.02, 1.0) >= p, so the summed cost is
+            # >= price_sum and the (capped) per-contract cost only ever raises it further.
+            # In the realistic near-$1 arbitrage regime (price_sum >= ~0.797, where
+            # 0.0251*price_sum >= the old flat 0.02) the new edge is <= ``discount-0.02``,
+            # so we fire on fewer markets than the old formula. For deep-discount baskets
+            # (price_sum < 0.797, gross discount > 20% — essentially nonexistent in liquid
+            # markets) the cost-model edge is the EXACT net edge (slightly larger than the
+            # additive approximation, but correct, never an optimistic over-estimate).
             if discount >= self.min_discount:
-                edge = discount - 0.02  # Subtract ~2% winner fee
+                total_cost = sum(
+                    DEFAULT_COST_MODEL.effective_buy_price(o.price) for o in market.outcomes
+                )
+                edge = 1.0 - total_cost  # net arb edge after real (multiplicative) costs
                 if edge > 0:
                     results.append(ScanResult(
                         market=market,
@@ -380,24 +420,42 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                             f"Arb: YES({market.outcomes[0].price:.3f}) + "
                             f"NO({market.outcomes[1].price:.3f}) = "
                             f"${price_sum:.3f} (discount={discount*100:.1f}%, "
-                            f"edge after fees={edge*100:.1f}%)"
+                            f"all-in cost=${total_cost:.4f}, "
+                            f"net edge after slippage+fee={edge*100:.2f}%)"
                         ),
                     ))
 
-        # Also check multi-outcome markets
+        # Also check multi-outcome markets — but ONLY negative-risk (neg_risk) baskets,
+        # where the venue guarantees the outcomes are mutually-exclusive-and-exhaustive so
+        # exactly one pays $1.00. A non-neg_risk multi-outcome list may be a non-exhaustive
+        # candidate set, so "buy all → guaranteed $1.00" would NOT hold — we refuse to
+        # trade it (adversarial-audit finding: firing on non-MECE baskets is a fake arb).
         for market in markets:
             if not market.active or market.closed:
                 continue
             if not market.is_multi:
                 continue
+            if not getattr(market, "neg_risk", False):
+                continue  # non-MECE basket — "exactly one pays $1" not guaranteed
             if market.liquidity < self.config.min_liquidity:
                 continue
 
             price_sum = sum(o.price for o in market.outcomes)
             discount = 1.0 - price_sum
 
+            # Same cost-model NET edge as the binary case (ROADMAP B5): on a neg_risk
+            # (MECE) basket exactly one outcome pays $1.00, so the true edge is 1.0 minus the basket's
+            # all-in cost. effective_buy_price folds slippage+fee in multiplicatively and is
+            # >= the raw price. In the realistic arbitrage regime (price_sum near $1, where
+            # 0.0251*price_sum >= the old flat 0.02) this is strictly more conservative than
+            # ``discount-0.02``; for deep-discount baskets it is simply the EXACT net edge
+            # (slightly larger than the additive approximation, but correct) — never an
+            # optimistic over-estimate of profit.
             if discount >= self.min_discount:
-                edge = discount - 0.02
+                total_cost = sum(
+                    DEFAULT_COST_MODEL.effective_buy_price(o.price) for o in market.outcomes
+                )
+                edge = 1.0 - total_cost  # net arb edge after real (multiplicative) costs
                 if edge > 0:
                     prices_str = " + ".join(
                         f"{o.label}({o.price:.2f})" for o in market.outcomes[:5]
@@ -413,7 +471,8 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                         confidence=0.99,
                         reason=(
                             f"Multi-outcome arb: {prices_str} = "
-                            f"${price_sum:.3f} (edge={edge*100:.1f}%)"
+                            f"${price_sum:.3f} (all-in cost=${total_cost:.4f}, "
+                            f"net edge after slippage+fee={edge*100:.2f}%)"
                         ),
                     ))
         if not results:
