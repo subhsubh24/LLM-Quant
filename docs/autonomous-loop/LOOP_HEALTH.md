@@ -43,25 +43,37 @@ LOOP_HEALTH:
   last_deep_audit: null         # no dated "DEEP AUDIT —" entry recorded in loop-memory yet
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   this_run:
-    changes_shipped: 4          # PR-1 E6+B3 wiring+D2 resolution-risk fix, PR-2 BCC cost-model honesty+MECE guard, PR-3 E5 window engine, PR-4 E2 drift detector (+ bookkeeping)
+    changes_shipped: 1          # bookkeeping PR: RESEARCH_MEMORY (EXP-002 entry), GROWTH_STATUS (EXP-002 experiment), LOOP_HEALTH update
     changes_abandoned: 0
-    abandoned_reasons: []        # none dropped this run; scout candidates that didn't survive honesty review (spread-based miscalibration screen — not validatable on the fixture; category-rate fitting — test-set p-hacking) were never built, not abandoned mid-flight
-    verify_cycle_failures: 0     # blocking gate stayed green throughout; the one fix cycle was review/audit-driven, not a gate failure
-    review_rejections: 0         # no PR rejected; ONE consolidated fix cycle applied all review/audit findings in-place within the <=2-cycle brake
+    abandoned_reasons: []        # no code changes attempted; near-certainty-NO longshot reversal hypothesis (N=34, ~2 outcomes) correctly classified as "insufficient data" and not proposed as an edge
+    verify_cycle_failures: 0
+    review_rejections: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 58             # git: prior 54 + this run's 4 code PRs (bookkeeping PR not yet counted)
-    reverts: 0                 # git: no revert commits in the window
-    readiness_attempts: 0       # no GO-live readiness certification attempted (GO = not_ready, pre-launch)
+    merged_prs: 59             # 58 prior + this bookkeeping PR
+    reverts: 0
+    readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # nothing has failed >=2 runs. Egress wall (OA-11/OA-13) remains owner-scope but is NOT a convergence wall (binding constraint is loop-buildable: a real alpha + per-leg arb execution + deriving B3 evidence).
-    harness_proposals_open: 0    # no open proposals; no recurring wall warranting one this run.
-  signal: improving              # 8th datapoint: 4 disjoint PRs shipped, 0 abandoned, 0 reverts; adversarial gate earned its keep — an Opus auditor BROKE the cost-arb "guaranteed edge" (MECE/midpoint/phantom-fill) and the B3 API promotion-via-fabricated-evidence, both honestly fixed/scoped in ONE consolidated cycle. Converging.
+    recurring_failures: []       # OA-11 (7-day corpus) remains owner-scope; the binding constraint (model_prob == crowd) is loop-buildable via CalibrationBucketStrategy — not a dead-end, not a recurring failure.
+    harness_proposals_open: 0
+  signal: steady                 # 9th datapoint: research-only run (1 bookkeeping PR, 0 code PRs). Correctly classified "insufficient data" on fixture calibration anomaly rather than over-claiming. Identified EXP-002 (7-day horizon) as the highest-EV owner action; no code changes needed. Converging but pacing limited by egress/owner-scope OA-11 re-run.
 ```
 
 ## How to read the latest signal
 
-**2026-06-29 (7th datapoint) — `improving`, the model/strategy layer got better AND the adversarial
+**2026-06-29 (9th datapoint — research run) — `steady`, EXP-002 proposed with zero code waste.**
+Research-only run. Fixture calibration audit (54 records) + academic synthesis (Le 2026 Kalshi
+calibration decomposition, PolyBench LLM-ensemble results, 3%-of-traders price-discovery study) converged
+on EXP-002: the 54-record corpus is pinned at 48h and cannot test any calibration hypothesis. The
+fetch_polymarket_history.py script already accepts `--decision-lead-days` (no code change needed); re-running
+OA-11 with 7-day lead is the single highest-EV owner action to unlock all calibration alphas. Correctly
+classified a fixture calibration anomaly (near-certainty-NO bucket: stated 0.8%, empirical 5.9%, p≈0.029)
+as "insufficient data" — N=34 with ~2 YES outcomes, in-sample, biased sample; not an edge claim.
+No code PRs; 1 bookkeeping PR (RESEARCH_MEMORY + GROWTH_STATUS + LOOP_HEALTH).
+
+### Earlier
+
+**2026-06-29 (7th datapoint — factory run) — `improving`, the model/strategy layer got better AND the adversarial
 gate earned its keep again.** Shipped 4 file-disjoint PRs (#63–#66) from an 8-scout sweep: hardened the
 cross-market keyword relatedness screen (B5), made the calibration gate's multiple-comparison correction
 code-enforced (B2 Bonferroni), and built the first concrete learning-loop engines — an alpha lifecycle

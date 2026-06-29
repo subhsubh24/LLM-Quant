@@ -86,6 +86,54 @@ GROWTH_STATUS:
         PMData or PolyHistorical APIs; feed into walk_forward.py; run B2
         calibration eval; report OOS Brier + PnL with bootstrap CI. Only then
         can EXP-001 be declared passing or retired.
+    - id: EXP-002
+      name: "Horizon-Effect Calibration Bias (7-day decision_lead corpus)"
+      status: proposed
+      proposed_date: 2026-06-29
+      edge_source: "crowd-miscalibration + resolution-timing edge (in-scope per PLAYBOOK)"
+      hypothesis: >
+        Binary Polymarket markets with YES probability 65-90% at 7 days to resolution
+        are systematically underpriced vs their empirical resolution rate — the crowd
+        under-assigns probability to favorites at early horizons (calibration slope > 1.0,
+        per Le 2026 on Kalshi; only ~3% of traders drive price discovery in illiquid
+        early-life markets). A CalibrationBucketStrategy that replaces crowd_prob with
+        per-bucket empirical resolution rates (fitted from the oldest 60% of a 7-day-lead
+        corpus) produces a positive net Brier improvement on the OOS 40%, surviving
+        realistic costs (2% fee + 0.5% slippage).
+      min_sample_n: 100
+      oos_plan: >
+        Run fetch_polymarket_history.py with --decision-lead-days 7 (the script default —
+        NO code changes needed). Target >= 200 resolved markets. Chronological 60/40 split:
+        oldest 60% to fit per-bucket empirical resolution rates; newest 40% as held-out OOS.
+        Significance gate: paired bootstrap CI on per-market Brier difference excludes 0
+        (B2 calibration.py, Bonferroni if testing multiple buckets). Net PnL positive after
+        cost_model costs on the OOS set. Min 30 records per bucket for any bucket-level claim.
+      cost_assumptions: >
+        2% fee + 0.5% slippage (cost_model.py). At 7-day decision_lead, spreads are wider
+        than near-resolution — assume 1-2% additional effective slippage for conservative
+        capacity. Target only markets with volume >= $2K at decision time (reduce impact).
+      significance_threshold: "95% CI excluding 0 on paired-bootstrap Brier improvement (B2 gate); Bonferroni correction across tested price buckets"
+      how_it_could_be_wrong:
+        - "Calibration slope effect is Kalshi-specific; Polymarket may already price this in via institutional arbs"
+        - "At 7 days, even high-volume markets are mostly pinned on large events — same 70% pinning problem as the 2-day corpus"
+        - "Slippage at 7 days materially higher than the 0.5% model — illiquid early-life markets"
+        - "Per-bucket fitting overfits with < 50 records per bucket — OOS rates revert to crowd"
+        - "The Le 2026 slope=1.32 is at > 1 month, not at 7 days — the slope may be near 1.0 at a 7-day horizon"
+      blocking_dependency: >
+        NO CODE CHANGES NEEDED. Infrastructure is complete: fetch_polymarket_history.py
+        already accepts --decision-lead-days (default 7.0). ONLY BLOCKER: re-run OA-11
+        with 7-day lead from a network-permitted environment.
+        Command: python3 scripts/fetch_polymarket_history.py --decision-lead-days 7
+        --limit 500 --max-pages 3 --min-volume 1000 --merge
+        --out data/polymarket_history_7d.json
+      factory_next_action: >
+        (1) OWNER: re-run OA-11 with 7-day decision_lead (command above) to produce a
+        >= 200 record 7-day-lead corpus. (2) FACTORY: build CalibrationBucketStrategy
+        (in strategies.py): accepts a pre-fitted bucket_rates dict {(lo, hi): empirical_rate};
+        returns model_prob = bucket_rate when crowd_prob falls in a calibrated bucket;
+        ABSTAINS (no signal) if bucket has < min_bucket_n training samples (never hardcode
+        fiction); raises if no calibration data provided at all. (3) Run 60/40 OOS test,
+        B2 gate, report Brier improvement + net PnL with bootstrap CI.
   learnings:
     - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
     - "Kill switch exists in execution.py; LIVE_TRADING_ENABLED master gate added (default false)."
@@ -112,12 +160,11 @@ GROWTH_STATUS:
     - "A5 wall-clock staleness now FIRES (#66): Market carries a fetched_at ingest timestamp (stamped at parse), so the fetch-age staleness gate flags a stale in-memory snapshot in the live scan path (was a no-op). Never enters any backtest seed_hash."
     - "GATE STRENGTHENED again: the blocking preflight now also runs test_calibration/data_quality/market_text/strategy_registry/per_strategy_metrics (176 -> ~290 enforced tests)."
   next_actions:
+    - "EXP-002 activation (HIGHEST-EV owner action): re-run OA-11 with 7-day decision_lead using the EXISTING script: `python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500 --max-pages 3 --min-volume 1000 --merge --out data/polymarket_history_7d.json`. No code changes needed — the flag already exists. This single action unlocks the first real calibration test and is the prerequisite for all calibration alphas."
+    - "EXP-002 factory build: once the 7-day corpus arrives, build CalibrationBucketStrategy (in strategies.py or a new file) — fits per-bucket empirical resolution rates from the training 60%; returns model_prob = bucket_rate for markets in miscalibrated buckets; ABSTAINS if bucket_n < 20 (never hardcodes fiction). This is the first strategy that would produce model_prob != crowd."
     - "WIRE the new learning-loop engines into the live loop: per_strategy_metrics against orchestrator.get_resolved_trades() (tag by PredictionPosition.strategy) for real per-strategy attribution; strategy_registry to record real alpha state transitions (persisted). These touch the orchestrator (shared file) — a focused follow-up."
-    - "Build a real decision-time alpha (B-track) that forms model_prob != crowd on LESS-PINNED markets — the now-wired metrics + canary + audit harness + the new lifecycle/attribution engines will measure + govern it honestly the moment it exists. This is the binding loop-buildable constraint."
-    - "Harden the cross-market keyword screen (B5): the '3+ shared words' heuristic fires on filler words (phantom signals on boilerplate) — require shared CONTENT words / a stop-word list, with tests."
     - "Build the dashboard UI component (frontend, folds with F5) that renders the new /prediction-markets/metrics/* endpoints so paper metrics are visible end-to-end."
-    - "OA-11 (human-core): RUN polymarket_history_fetcher in a network-permitted environment (or widen the autonomous env's egress allowlist to Polymarket) so REAL resolved-history flows into walk_forward + the B2 calibration eval. The fetcher is built + leakage-safe; only the egress block stops the OOS run. Until then no floor/DoD box can tick."
-    - "Once real data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth."
+    - "Once real 7-day data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth."
     - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5 remainder)."
     - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); confirm the audit log's DATABASE_URL is durable (OA-10)."
   owner_blockers:
