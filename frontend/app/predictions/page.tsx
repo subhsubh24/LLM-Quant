@@ -28,6 +28,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MetricsPanel } from "@/components/metrics/MetricsPanel";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -133,7 +134,7 @@ export default function PredictionsPage() {
   const [markets, setMarkets] = useState<PredictionMarket[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [livePositions, setLivePositions] = useState<Position[]>([]);
-  const [activeTab, setActiveTab] = useState<"scanner" | "analysis" | "markets" | "positions" | "portfolio">("scanner");
+  const [activeTab, setActiveTab] = useState<"scanner" | "analysis" | "markets" | "positions" | "portfolio" | "metrics">("scanner");
   const [scanning, setScanning] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
   const [scanCount, setScanCount] = useState(0);
@@ -580,6 +581,7 @@ export default function PredictionsPage() {
             { key: "markets" as const, label: "Markets" },
             { key: "positions" as const, label: positionCount > 0 ? `Positions (${positionCount})` : "Positions" },
             { key: "portfolio" as const, label: "Portfolio" },
+            { key: "metrics" as const, label: "Metrics" },
           ]).map((tab) => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={cn(
@@ -922,6 +924,13 @@ export default function PredictionsPage() {
           </div>
         )}
       </div>
+
+        {/* ============ METRICS ============ */}
+        {activeTab === "metrics" && (
+          <div className="fade-in">
+            <MetricsPanel />
+          </div>
+        )}
 
       {/* Footer */}
       <div className="px-6 lg:px-8 py-3">
