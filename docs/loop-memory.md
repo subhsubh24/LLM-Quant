@@ -2,6 +2,22 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — Canonical sync: FACTORY_STANDARD.md re-synced to AptDesignerAI + routine anchored to it
+
+- **Canonical sync (authorized):** overwrote `FACTORY_STANDARD.md` VERBATIM with the canonical copy
+  at `github.com/subhsubh24/AptDesignerAI/FACTORY_STANDARD.md` (product-agnostic, ahead of ours —
+  adds the §6 **VALIDATION CAPABILITY** principle + other deltas; reflowed to ~80col). Confirmed
+  **byte-identical** via git blob sha (`caa40a8b04dddc400343a6ac6ffe8748a4b8517c` on both). Structure
+  intact (22 `##` headings, §0–19 + §6b + §10b); ROADMAP's §6b/§10b/§14 references still resolve.
+  This is the ONLY way this file changes — never as loop work, only a deliberate canonical sync.
+- **Routine anchor fix:** the model/strategy factory routine's `ORIENT FIRST` read FACTORY_STANDARD
+  only implicitly. Changed it to read **FACTORY_STANDARD.md FIRST** (the shared discipline every
+  factory follows identically), THEN ROADMAP.md — so every run is grounded in the standard before the
+  product specifics. Self-validation gate left as-is (it's good); this only adds the missing anchor.
+- **Lesson:** the standard being byte-identical across factories is only useful if each loop actually
+  READS it first — the manifest/gate enforces product behavior, but the shared *judgment* (value bar,
+  disjoint rule, BUILDS≠WORKS, deep-audit cadence) lives in FACTORY_STANDARD and must be the first read.
+
 ## 2026-06-29 — Control-path hardening (3-PR run); an auditor caught a BUILDS≠WORKS the tests passed
 
 - **Drove 3 named QUALITY_SCORECARD top_gaps to done** (consume-the-grade, never self-grade): run-risk-readiness
