@@ -57,6 +57,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_metrics_aggregator.py \
            backend/tests/test_real_data_validation.py \
            backend/tests/test_strategy_audit.py \
+           backend/tests/test_self_validation.py \
            backend/tests/test_scorecard.py \
            backend/tests/test_calibration.py \
            backend/tests/test_data_quality.py \
@@ -293,6 +294,22 @@ sys.exit(fail)
 PYEOF
 [ $? -eq 0 ] && ok "GO signal integrity" || bad "GO signal integrity failed"
 [ "$FAIL" = 0 ] || die "GO signal integrity"
+
+say "9d. Self-validation coverage (every capability validated; new credential surfaces + blocks)"
+# BLOCKING: fails if an ACTIVE capability is unvalidated, or if the code reads a credential
+# (a *_api_key/_secret/_token/_url/... env var) that is NOT declared in the self-validation
+# manifest. This is the forcing function: the loop cannot ship a capability it can't really
+# validate, and a NEW service needing a key surfaces (here + PENDING_OPS) and blocks merges.
+if [ -f scripts/check_self_validation.py ]; then
+  if "$PY" scripts/check_self_validation.py; then
+    ok "self-validation coverage"
+  else
+    bad "self-validation coverage failed"
+  fi
+else
+  bad "scripts/check_self_validation.py missing"
+fi
+[ "$FAIL" = 0 ] || die "self-validation coverage"
 
 if [ "$SCOPE" = "code" ]; then
   printf '\n\033[32mPREFLIGHT (code scope) GREEN — correctness + safety gates pass.\033[0m\n'
