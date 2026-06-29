@@ -747,6 +747,14 @@ def _get_orchestrator():
         if _orchestrator_instance.executor is None:
             from ..prediction_markets.execution import get_executor
             _orchestrator_instance.executor = get_executor(dry_run=True)
+        # The orchestrator is constructed with scanner=None, so its B3 registry seeds
+        # empty at __init__; now that the scanner is attached, seed the deployed
+        # strategies as PROPOSED (idempotent — reviewer S1, else the registry is empty
+        # forever in the normal API path).
+        try:
+            _orchestrator_instance.sync_registry_with_scanner()
+        except Exception as e:
+            logger.debug(f"[ORCHESTRATOR] registry sync skipped: {e}")
     return _orchestrator_instance
 
 
@@ -985,6 +993,61 @@ async def get_calibration():
         predictions = []
 
     return compute_calibration(predictions)
+
+
+@router.get("/prediction-markets/metrics/per-strategy")
+async def get_per_strategy_metrics():
+    """
+    ROADMAP E6 — per-strategy realized-PnL attribution.
+
+    Groups genuinely-resolved positions by the strategy that opened them
+    (orchestrator.get_resolved_trades_by_strategy) and reports each alpha's realized
+    PnL, hit-rate, best/worst trade, and weekly series, plus a ranking by total PnL.
+
+    Honest: strategies with zero resolved trades never appear (no fabricated rows);
+    untagged positions bucket under ``"unattributed"`` so totals still reconcile.
+    Empty input → ``{"strategies": [], "ranking": [], "num_input_trades": 0}``.
+    """
+    from ..prediction_markets.metrics_aggregator import compute_per_strategy_metrics
+
+    try:
+        orchestrator = _get_orchestrator()
+        trades = orchestrator.get_resolved_trades_by_strategy()
+    except Exception as e:
+        logger.warning(f"[METRICS/per-strategy] get_resolved_trades_by_strategy failed: {e}")
+        trades = []
+
+    return compute_per_strategy_metrics(trades)
+
+
+@router.get("/prediction-markets/strategies/registry")
+async def get_strategy_registry():
+    """
+    ROADMAP B3 — the alpha-lifecycle registry snapshot (READ-ONLY).
+
+    Returns each alpha's current lifecycle state (proposed → backtesting → paper →
+    promoted → retired) and its append-only transition history with recorded
+    evidence. Deterministic, JSON-serializable. In the current paper reality every
+    deployed strategy is seeded ``proposed`` (no backtest/OOS/calibration evidence
+    recorded yet) — the registry truthfully shows that NO alpha has passed the
+    integrity gate.
+
+    NOTE (honesty, ROADMAP B3 follow-up): there is deliberately NO public WRITE
+    endpoint for lifecycle transitions yet. The registry engine gates on the PRESENCE
+    of caller-supplied evidence (backtest/OOS/calibration booleans) — it is an audit
+    trail, not an authenticity verifier — so exposing a transition over an HTTP body
+    would let a caller PROMOTE an alpha with self-asserted (fabricated) evidence. Real
+    transitions are recorded only by trusted in-process code
+    (``orchestrator.record_strategy_transition``) once it DERIVES the evidence from the
+    actual E5/E2 gate results. Wiring that derivation + a secured write path is the
+    named follow-up; until then we do not expose a fabricable promotion surface.
+    """
+    try:
+        orchestrator = _get_orchestrator()
+        return orchestrator.get_strategy_registry()
+    except Exception as e:
+        logger.warning(f"[STRATEGIES/registry] snapshot failed: {e}")
+        return {"alphas": []}
 
 
 # ============ Prediction Markets — Risk Manager ============

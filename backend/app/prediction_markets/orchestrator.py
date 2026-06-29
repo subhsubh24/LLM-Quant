@@ -258,8 +258,21 @@ class MarkToMarketEngine:
     Called periodically by the orchestrator.
     """
 
-    def __init__(self, executor: PredictionMarketExecutor):
+    def __init__(
+        self,
+        executor: PredictionMarketExecutor,
+        risk_manager: "Optional[RiskManager]" = None,
+    ):
         self.executor = executor
+        # Optional RiskManager so resolution-realized PnL feeds the per-strategy
+        # drawdown circuit (ROADMAP D2). Market RESOLUTION is the PRIMARY way binary
+        # positions take losses, but `check_resolutions` previously fed ONLY the
+        # executor-level loss caps (D3/D4) and never `risk_manager.record_pnl` — so a
+        # strategy could bleed out via resolutions without ever tripping its
+        # drawdown-based auto-disable. Wiring the risk_manager here closes that bypass
+        # (mirrors the earlier D3/D4 fix that closed the same resolution bypass for the
+        # kill-switch counters). Optional/None-safe so the engine still works standalone.
+        self.risk_manager = risk_manager
         self._resolution_cache: Dict[str, bool] = {}
 
     def update_prices(self):
@@ -336,6 +349,26 @@ class MarkToMarketEngine:
                 # (the gate reads the same counters) — caught by the adversarial audit.
                 self.executor.record_realized_pnl(pnl)
 
+                # Feed the per-strategy DRAWDOWN circuit too (ROADMAP D2). Same bypass
+                # as above but for `risk_manager.record_pnl`: without this, a strategy's
+                # resolution losses never reach its drawdown-based auto-disable, so a
+                # decayed alpha keeps trading. Best-effort + None-safe so a risk-manager
+                # hiccup can never break the resolution/settlement path.
+                # SCOPE (reviewer S2, honest): this closes the RESOLUTION path — the
+                # dominant way binary positions realize PnL (held to settlement). The
+                # SELL/partial-reduce path feeds the executor's caps but does not yet feed
+                # risk_manager.record_pnl; wiring that is a named follow-up (positions are
+                # usually held to resolution, so resolution is the right path to close first).
+                if self.risk_manager is not None:
+                    try:
+                        strategy = (getattr(pos, "strategy", "") or "").strip()
+                        if strategy:
+                            self.risk_manager.record_pnl(strategy, pnl)
+                    except Exception as e:  # pragma: no cover - defensive
+                        logger.warning(
+                            f"[MTM] risk_manager.record_pnl failed for {token_id}: {e}"
+                        )
+
                 logger.info(
                     f"[MTM] Position resolved: {token_id} | "
                     f"Settlement: ${settlement_price:.2f} | "
@@ -366,7 +399,7 @@ class MarkToMarketEngine:
                     db_pos.resolution_value = settlement_price
                     db_pos.realized_pnl = pos.realized_pnl
                     db_pos.unrealized_pnl = 0.0
-                    db_pos.closed_at = datetime.utcnow()
+                    db_pos.closed_at = datetime.now(timezone.utc)
                     session.add(db_pos)
         except Exception as e:
             logger.error(f"[MTM] Failed to persist resolution: {e}")
@@ -414,7 +447,7 @@ class PredictionMarketOrchestrator:
         self.executor = executor or get_executor(dry_run=True)
         self.risk_manager = risk_manager or RiskManager()
         self.kelly_config = kelly_config or KellyConfig()
-        self.mtm_engine = MarkToMarketEngine(self.executor)
+        self.mtm_engine = MarkToMarketEngine(self.executor, risk_manager=self.risk_manager)
 
         # Simulation-enhanced pricing and probability tracking
         self.simulation_pricer = EnhancedContractPricer() if EnhancedContractPricer else None
@@ -466,6 +499,138 @@ class PredictionMarketOrchestrator:
                     record_would_be_order=lambda *a, **k: None,
                     recent=lambda *a, **k: [],
                 )
+
+        # Alpha-lifecycle registry (ROADMAP B3): a durable record of each alpha's
+        # lifecycle state (proposed → backtest → paper → promote → retire) with the
+        # engine's fail-loud integrity gate. Best-effort + lazy (same dual-import
+        # discipline as the audit log) so a persistence problem can never break init.
+        self._registry_store = None
+        self._strategy_registry = None
+        self._init_strategy_registry()
+
+    def _init_strategy_registry(self):
+        """Load the persisted alpha-lifecycle registry, then sync it with deployed strategies.
+
+        Best-effort: any failure leaves an in-memory registry so the recording API still
+        works; only DURABILITY (not correctness) depends on the DB.
+        """
+        from .strategy_registry import StrategyRegistry
+        try:
+            from .strategy_registry_store import StrategyRegistryStore, _NoOpStrategyRegistryStore
+            try:
+                self._registry_store = StrategyRegistryStore()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(f"[ORCHESTRATOR] registry store init failed, no-op: {e}")
+                self._registry_store = _NoOpStrategyRegistryStore()
+
+            loaded = self._registry_store.load()
+            self._strategy_registry = loaded if loaded is not None else StrategyRegistry()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"[ORCHESTRATOR] registry load failed: {e}")
+            self._strategy_registry = StrategyRegistry()
+
+        # Seed any deployed strategy not already tracked. Idempotent + re-callable (the
+        # primary get_orchestrator() path attaches the scanner AFTER construction, so this
+        # also runs again via sync_registry_with_scanner() once strategies are present —
+        # otherwise the registry would be empty forever in production, reviewer S1).
+        self.sync_registry_with_scanner()
+
+    def sync_registry_with_scanner(self) -> int:
+        """Propose any DEPLOYED scanner strategy not yet in the registry; persist if changed.
+
+        Returns the number of newly-seeded strategies. Seeding state is PROPOSED — the
+        HONEST state: every deployed strategy is a heuristic running in paper WITHOUT
+        recorded backtest/OOS/calibration evidence, so none can legally reach
+        PAPER/PROMOTED in the engine. The registry therefore truthfully shows that NO
+        alpha has yet passed the integrity gate (rather than implying success). Safe to
+        call repeatedly (e.g. after the scanner is attached); only persists on a real change.
+        """
+        if self._strategy_registry is None:
+            from .strategy_registry import StrategyRegistry
+            self._strategy_registry = StrategyRegistry()
+        now = datetime.now(timezone.utc)
+        seed_reason = "deployed heuristic; no backtest/OOS/calibration evidence recorded yet"
+        added = 0
+        for name in self._deployed_strategy_names():
+            try:
+                if name not in self._strategy_registry:
+                    self._strategy_registry.propose(name, at=now, reason=seed_reason)
+                    added += 1
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(f"[ORCHESTRATOR] could not seed strategy {name!r}: {e}")
+        # Persist ONLY when we actually added something — never overwrite a persisted
+        # registry with an empty seed (which would wedge seeding on the next boot).
+        if added and self._registry_store is not None:
+            self._registry_store.save(self._strategy_registry)
+        return added
+
+    def _deployed_strategy_names(self) -> List[str]:
+        """Names of the strategies currently registered on the scanner (sorted, unique)."""
+        names = set()
+        scanner = getattr(self, "scanner", None)
+        for s in getattr(scanner, "strategies", []) or []:
+            try:
+                nm = getattr(s, "name", None)
+                if nm:
+                    names.add(str(nm))
+            except Exception:  # pragma: no cover - defensive
+                continue
+        return sorted(names)
+
+    def record_strategy_transition(
+        self,
+        name: str,
+        to_state,
+        reason: str = "",
+        evidence=None,
+        at=None,
+    ):
+        """Record + PERSIST a real alpha lifecycle transition (ROADMAP B3).
+
+        Delegates to the pure engine, which enforces the legal-transition map AND the
+        fail-loud integrity gate (e.g. a promotion REQUIRES recorded backtest+OOS+
+        calibration evidence). Raises ``IllegalTransition`` / ``MissingEvidence`` exactly
+        as the engine does. On success the whole registry snapshot is persisted (best-effort).
+
+        HONESTY: the gate checks the PRESENCE of the supplied ``evidence`` booleans — it is
+        an audit trail, NOT an authenticity verifier (a caller that hand-sets
+        ``calibration_passed=True`` without a real passing eval is lying to itself). This is
+        why this method is NOT exposed over an unauthenticated HTTP body: a trusted in-process
+        caller must DERIVE the evidence from the actual E5/E2 gate results before promoting.
+        Wiring that derivation is the named B3 follow-up.
+
+        ``to_state`` may be a ``LifecycleState`` or its string value; ``at`` defaults to
+        wall-clock UTC (live operation, not a reproducible backtest fingerprint).
+        """
+        from .strategy_registry import LifecycleState
+        if self._strategy_registry is None:
+            from .strategy_registry import StrategyRegistry
+            self._strategy_registry = StrategyRegistry()
+        target = to_state if isinstance(to_state, LifecycleState) else LifecycleState(to_state)
+        when = at or datetime.now(timezone.utc)
+        record = self._strategy_registry.transition(
+            name, target, at=when, reason=reason, evidence=evidence
+        )
+        if self._registry_store is not None:
+            self._registry_store.save(self._strategy_registry)
+        return record
+
+    def propose_strategy(self, name: str, reason: str = "", at=None):
+        """Register a NEW alpha in PROPOSED state + persist (ROADMAP B3)."""
+        if self._strategy_registry is None:
+            from .strategy_registry import StrategyRegistry
+            self._strategy_registry = StrategyRegistry()
+        when = at or datetime.now(timezone.utc)
+        record = self._strategy_registry.propose(name, at=when, reason=reason)
+        if self._registry_store is not None:
+            self._registry_store.save(self._strategy_registry)
+        return record
+
+    def get_strategy_registry(self) -> dict:
+        """Deterministic, JSON-serializable snapshot of the alpha-lifecycle registry."""
+        if self._strategy_registry is None:
+            return {"alphas": []}
+        return self._strategy_registry.to_dict()
 
     def _add_activity(self, type: str, message: str, strategy: str = None):
         """Add an entry to the activity log (kept in memory, max 200)."""
@@ -986,6 +1151,68 @@ class PredictionMarketOrchestrator:
 
         except Exception as e:
             logger.debug(f"[METRICS] DB resolved-position fetch failed: {e}")
+
+        return trades
+
+    def get_resolved_trades_by_strategy(self):
+        """Return resolved trades TAGGED with the strategy that opened them (ROADMAP E6).
+
+        READ-ONLY, like ``get_resolved_trades`` — does not alter resolution accounting,
+        positions, or executor state.  Maps from DB-persisted resolved
+        ``PredictionPosition`` rows (``is_resolved=True``), which carry a ``strategy``
+        column, into ``StrategyTradePnL`` records the per-strategy attribution engine
+        consumes.
+
+        Honest by construction:
+        * A position whose ``strategy`` tag is empty/None is bucketed under the
+          sentinel ``"unattributed"`` rather than dropped (so portfolio totals still
+          reconcile) — the attribution engine never fabricates a strategy.
+        * Same timestamp/skip rules as ``get_resolved_trades`` (no invented timeline,
+          no invented PnL).
+        """
+        from .per_strategy_metrics import StrategyTradePnL
+
+        trades = []
+        try:
+            from ..db.database import get_session
+            from .models import PredictionPosition
+            from sqlmodel import select
+
+            with get_session() as session:
+                stmt = select(PredictionPosition).where(
+                    PredictionPosition.is_resolved == True  # noqa: E712
+                )
+                db_positions = session.exec(stmt).all()
+
+                for pos in db_positions:
+                    ts = pos.closed_at
+                    if ts is None:
+                        ts = pos.opened_at
+                        if ts is not None:
+                            # Consistent with get_resolved_trades: warn (don't silently
+                            # bucket) when falling back to opened_at (reviewer F2).
+                            logger.warning(
+                                "[METRICS] resolved position %s has no closed_at; "
+                                "bucketing by opened_at (week may be slightly off).",
+                                getattr(pos, "market_id", "?"),
+                            )
+                    if ts is None:
+                        continue  # cannot place this trade on the timeline
+                    # No honest PnL to record (resolution never persisted properly).
+                    if pos.resolution_value is None and pos.realized_pnl == 0.0:
+                        continue
+
+                    strategy = (getattr(pos, "strategy", "") or "").strip() or "unattributed"
+                    trades.append(
+                        StrategyTradePnL(
+                            strategy=strategy,
+                            timestamp=ts,
+                            pnl_usd=pos.realized_pnl,
+                            is_win=pos.realized_pnl > 0.0,
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"[METRICS] DB by-strategy resolved-position fetch failed: {e}")
 
         return trades
 
