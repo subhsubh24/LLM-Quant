@@ -102,8 +102,22 @@ export function WeeklyMetricsCard({ data }: { data: WeeklyMetricsData }) {
                 className="text-muted-foreground"
               />
               <YAxis
+                // Always include $0 in the domain so the zero reference line is visible
+                // and gains/losses are not visually exaggerated by a series-min baseline
+                // (a P&L axis floated off zero misreads a small loss as a large one).
+                domain={[
+                  (dataMin: number) => Math.min(0, Number.isFinite(dataMin) ? dataMin : 0),
+                  (dataMax: number) => Math.max(0, Number.isFinite(dataMax) ? dataMax : 0),
+                ]}
                 tick={{ fontSize: 10 }}
                 tickFormatter={(v) => `$${v}`}
+                width={56}
+                label={{
+                  value: "P&L ($)",
+                  angle: -90,
+                  position: "insideLeft",
+                  style: { fontSize: 10, textAnchor: "middle", fill: "hsl(var(--muted-foreground))" },
+                }}
                 className="text-muted-foreground"
               />
               <ReferenceLine y={0} stroke="hsl(var(--border))" strokeDasharray="4 2" />
