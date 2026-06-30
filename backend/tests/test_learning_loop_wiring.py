@@ -411,3 +411,81 @@ def test_calibration_drift_is_deterministic():
     a = compute_calibration_drift(preds)
     b = compute_calibration_drift(preds)
     assert a == b
+
+
+def test_resolution_absent_token_not_fabricated_as_loss():
+    """SIDE-EFFECT INTEGRITY (ROADMAP F4.1): a resolved market whose outcomes do
+    NOT contain the held token_id must NOT be settled as a phantom 0.0 total loss.
+    Inventing that settlement would realize a loss the position never took, could
+    AUTO-TRIP the kill switch on the invented loss (D3/D4 read the same realized-PnL
+    counters), and would cache the position resolved so it never reconciles. The fix:
+    skip + leave UNCACHED so the next cycle retries once the venue data is consistent.
+    """
+    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
+    from backend.app.prediction_markets import polymarket_client as pmc
+    from backend.app.prediction_markets.execution import (
+        PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
+    )
+
+    # Tight loss caps so ANY fabricated loss would trip the kill switch loudly.
+    ex = PredictionMarketExecutor(
+        dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
+        max_daily_loss_usd=5.0, max_total_loss_usd=5.0,
+    )
+    ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m1", token_id="t1",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=100, price=0.50,
+        strategy="s", market_question="Q?", outcome_label="Yes",
+    ))
+    token_id = next(iter(ex.positions))
+
+    # A resolved market whose ONLY outcome is a DIFFERENT token than the one held
+    # (the data-inconsistency case: re-resolved/stale market or malformed outcomes).
+    mismatched = pmc.Market(
+        id="m", condition_id="c", question="Q?", slug="q", description="",
+        category="", end_date=None,
+        outcomes=[pmc.Outcome(token_id="OTHER", label="Yes", price=1.0,
+                              midpoint=1.0, volume=0.0)],
+        total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+    )
+
+    class _FakeClientMismatch:
+        def __init__(self, *a, **k):
+            pass
+        def get_market_by_slug(self, _slug):
+            return mismatched
+
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _FakeClientMismatch
+    try:
+        engine = MarkToMarketEngine(ex)
+        engine.check_resolutions()
+        # No fabricated settlement: position still open, NO realized loss fed,
+        # kill switch NOT tripped, and NOT cached resolved (so it retries).
+        assert token_id in ex.positions, "position must NOT be deleted on absent token"
+        assert ex._realized_pnl_total == 0.0, "no phantom loss may be realized"
+        assert ex.kill_switch_active is False, "kill switch must not trip on invented loss"
+        assert token_id not in engine._resolution_cache, "must stay uncached to retry"
+
+        # RETRY: once the venue returns consistent outcomes (held token present and
+        # lost → price 0.0), the SAME engine settles it on the next cycle — a real loss.
+        consistent = pmc.Market(
+            id="m", condition_id="c", question="Q?", slug="q", description="",
+            category="", end_date=None,
+            outcomes=[pmc.Outcome(token_id=token_id, label="Yes", price=0.0,
+                                  midpoint=0.0, volume=0.0)],
+            total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+        )
+
+        class _FakeClientConsistent:
+            def __init__(self, *a, **k):
+                pass
+            def get_market_by_slug(self, _slug):
+                return consistent
+
+        pmc.PolymarketClient = _FakeClientConsistent
+        engine.check_resolutions()
+        assert token_id not in ex.positions, "consistent data must now settle the loss"
+        assert ex._realized_pnl_total < 0.0, "the REAL resolution loss is realized on retry"
+    finally:
+        pmc.PolymarketClient = orig

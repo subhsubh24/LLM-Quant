@@ -335,12 +335,33 @@ class MarkToMarketEngine:
                 # Check via Gamma API
                 market = client.get_market_by_slug(pos.market_id)
                 if market and market.resolved:
-                    # Find the winning outcome
-                    winning_price = 0.0
+                    # Find the held outcome's settled price. CRITICAL (side-effect
+                    # integrity, FACTORY_STANDARD §6 / ROADMAP F4.1): settle ONLY when
+                    # the held token is actually present in the resolved market's
+                    # outcomes. A found loser legitimately settles at 0.0; but a token
+                    # that is ABSENT from the outcomes (a data inconsistency: a
+                    # re-resolved/stale market, a malformed outcomes array, or a market
+                    # #101 marked incomplete) must NOT be fabricated as a 0.0 total loss.
+                    # Inventing that settlement (a) realizes a phantom loss the position
+                    # never actually took, (b) can AUTO-TRIP the kill switch on that
+                    # invented loss (D3/D4 read the same realized-PnL counters), and
+                    # (c) would cache the position resolved so it never reconciles. So
+                    # skip it, log LOUDLY, and leave it UNCACHED to retry next cycle once
+                    # the venue data is consistent. (A missing settlement is not a loss —
+                    # the data analog of the #101 "a missing quote is not a 50/50 market".)
+                    winning_price = None
                     for outcome in market.outcomes:
                         if outcome.token_id == token_id:
                             winning_price = outcome.price  # 1.0 if won, 0.0 if lost
                             break
+                    if winning_price is None:
+                        logger.warning(
+                            f"[MTM] Market {pos.market_id} reports resolved but held "
+                            f"token {token_id} is ABSENT from its outcomes — skipping "
+                            f"settlement (no fabricated loss; uncached, will retry "
+                            f"next cycle)."
+                        )
+                        continue
                     resolved.append((token_id, winning_price))
                     self._resolution_cache[token_id] = True
 
