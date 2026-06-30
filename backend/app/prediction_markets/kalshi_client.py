@@ -40,6 +40,19 @@ KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 # Hard per-request deadline — a required safety rule for every external call.
 REQUEST_TIMEOUT = 15
 
+# Kalshi market lifecycle `status` values, per the documented trade-API contract.
+# IMPORTANT (honesty caveat): the loop's environment blocks Kalshi egress, so this
+# mapping is validated OFFLINE against the DOCUMENTED contract only — it is NOT yet
+# confirmed against a live Kalshi response. The OWNER must verify the exact status
+# strings on the first real run (an unrecognized status is logged LOUDLY below so a
+# contract mismatch surfaces immediately rather than silently dropping every market).
+# A response market is tradeable with `status: "active"` (NOT "open" — "open" is the
+# request-side FILTER value); resolved markets are "settled"/"finalized"/"determined".
+_ACTIVE_STATUSES = frozenset({"active", "open"})            # tradeable now
+_RESOLVED_STATUSES = frozenset({"settled", "finalized", "determined"})  # winner decided
+_CLOSED_STATUSES = frozenset({"closed"})                    # trading ended, not yet determined
+_PREOPEN_STATUSES = frozenset({"initialized", "unopened", "inactive"})  # not yet tradeable
+
 
 class KalshiClient:
     """Read-only Kalshi market-data client.
@@ -163,16 +176,15 @@ class KalshiClient:
     ) -> Market:
         """Parse one raw Kalshi market dict into a ``Market`` object.
 
-        Price conversion: Kalshi prices are integer cents [0, 100].
-        YES price = midpoint of (yes_bid, yes_ask) / 100.
-        NO price  = 1 - YES  (binary, so NO = 1 - P[YES]).
-        If both bid/ask are missing/zero we fall back to 0.5 (midpoint assumption).
+        Price conversion: Kalshi prices are integer cents [0, 100]. YES price comes from
+        the best available signal (both-sided midpoint, else the one quoted side, else
+        last_price); a market with NO usable quote is marked untradeable (active=False)
+        rather than presenting a fabricated 0.50. NO price = 1 - YES (binary).
 
-        Status mapping:
-          status == "open"                        -> active=True,  closed=False, resolved=False
-          status in ("finalized", "settled")      -> active=False, closed=True,  resolved=True
-          status == "closed"                      -> active=False, closed=True,  resolved=False
-          anything else                           -> active=False, closed=False, resolved=False
+        Status mapping uses the documented _*_STATUSES sets (active/open -> active;
+        settled/finalized/determined -> resolved; closed -> closed; initialized/unopened
+        -> pre-open; UNRECOGNIZED -> untradeable + a loud warning). See the module-level
+        honesty caveat: the contract is offline-validated, not yet confirmed live.
 
         Args:
             raw: Raw dict from Kalshi /markets response item.
@@ -195,30 +207,62 @@ class KalshiClient:
         category: str = str(raw.get("category", ""))
 
         # ---- Price conversion (cents -> probability) --------------------
-        yes_bid = _to_float(raw.get("yes_bid")) or 0.0
-        yes_ask = _to_float(raw.get("yes_ask")) or 0.0
-        # Kalshi prices are cents (integers 0-100). Midpoint of bid/ask.
-        if yes_bid > 0 or yes_ask > 0:
+        # Kalshi prices are integer cents [0, 100]. Derive the YES price from the best
+        # available signal WITHOUT fabricating a midpoint from a one-sided book:
+        #   - both bid & ask quoted -> midpoint
+        #   - only one side quoted   -> that side (best available; never average with 0)
+        #   - neither, but last_price-> last trade price
+        #   - no usable price at all -> NOT tradeable (see has_quote below); never
+        #     manufacture a fake 50/50 market (a deep-audit finding: a 0/0 book used to
+        #     fall through to 0.5 and pass DataQualityValidator as a tradeable market).
+        yes_bid = _to_float(raw.get("yes_bid"))
+        yes_ask = _to_float(raw.get("yes_ask"))
+        last_price = _to_float(raw.get("last_price"))
+        bid_ok = yes_bid is not None and yes_bid > 0
+        ask_ok = yes_ask is not None and yes_ask > 0
+        has_quote = True
+        if bid_ok and ask_ok:
             yes_mid_cents = (yes_bid + yes_ask) / 2.0
+        elif bid_ok:
+            yes_mid_cents = yes_bid
+        elif ask_ok:
+            yes_mid_cents = yes_ask
+        elif last_price is not None and 0.0 < last_price <= 100.0:
+            yes_mid_cents = last_price
         else:
-            yes_mid_cents = 50.0  # fallback when no quotes
-        yes_price = yes_mid_cents / 100.0
-        # Clamp to [0, 1] as a safety guard against stale/weird quotes.
-        yes_price = max(0.0, min(1.0, yes_price))
+            yes_mid_cents = 50.0   # neutral placeholder ONLY — forced untradeable below
+            has_quote = False
+        yes_price = max(0.0, min(1.0, yes_mid_cents / 100.0))
         no_price = 1.0 - yes_price
 
         volume = _to_float(raw.get("volume")) or 0.0
 
         # ---- Status mapping --------------------------------------------
-        status_str = str(raw.get("status", "")).lower()
-        if status_str == "open":
+        # See the module-level _*_STATUSES sets + the honesty caveat there. An
+        # UNRECOGNIZED status is logged LOUDLY and treated as untradeable so a live
+        # contract mismatch surfaces on the first real run instead of silently dropping
+        # (or, worse, mis-trading) markets.
+        status_str = str(raw.get("status", "")).lower().strip()
+        if status_str in _ACTIVE_STATUSES:
             active, closed, resolved = True, False, False
-        elif status_str in ("finalized", "settled"):
+        elif status_str in _RESOLVED_STATUSES:
             active, closed, resolved = False, True, True
-        elif status_str == "closed":
+        elif status_str in _CLOSED_STATUSES:
             active, closed, resolved = False, True, False
-        else:
+        elif status_str in _PREOPEN_STATUSES:
             active, closed, resolved = False, False, False
+        else:
+            logger.warning(
+                "Kalshi market %s: unrecognized status %r — treating as untradeable. "
+                "Verify the live Kalshi status contract (egress-blocked offline).",
+                ticker, status_str,
+            )
+            active, closed, resolved = False, False, False
+
+        # A market with no usable quote is NEVER tradeable, regardless of status —
+        # don't let a no-quote 'active' market present a fabricated 0.50 price.
+        if not has_quote:
+            active = False
 
         # ---- End date --------------------------------------------------
         end_date: Optional[datetime] = None

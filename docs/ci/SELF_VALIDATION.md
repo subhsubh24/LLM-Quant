@@ -108,7 +108,7 @@ SELF_VALIDATION:
       requires_env: []              # NO credentials required; Kalshi market data is public
       active: true
       ci_validatable: true          # no secret needed; the logic-critical parts (parsing + anti-leakage) are tested on realistic fixtures
-      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner runs fetch_kalshi_history.py on a network-permitted host."
+      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner runs fetch_kalshi_history.py on a network-permitted host. HONESTY CAVEAT: the Kalshi status-string + price-field CONTRACT (response status='active'/'settled'/'determined'; cent prices; the 'settled' discovery filter) is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response (egress-blocked offline) — an unrecognized status is logged LOUDLY (never silently dropped), and the OWNER must confirm the contract on the first real fetch."
       status: validated
     - id: residual_legacy_data
       desc: "retired stock/crypto data-provider config (ROADMAP A1) — no active trading path uses it"

@@ -217,6 +217,31 @@ def test_uses_pre_resolution_snapshot_not_settled_result():
     assert hm.outcome == 1
 
 
+def test_fetch_uses_settled_status_filter():
+    """Resolved-market discovery must request status='settled' (a VALID Kalshi filter
+    value) — NOT 'finalized', which Kalshi does not accept (would return nothing)."""
+    session = FakeSession(lambda url, params: {"markets": [], "cursor": None})
+    KalshiHistoryFetcher(session=session).fetch_resolved_markets(limit=10, max_pages=1)
+    markets_calls = [c for c in session.calls if "history" not in c["url"]]
+    assert markets_calls, "no /markets request was made"
+    assert markets_calls[0]["params"]["status"] == "settled"
+
+
+def test_zero_price_pre_decision_tick_survives():
+    """A legitimate pre-decision tick with p=0 (YES≈0) must be USED, not dropped by a
+    falsy-`or` chain (which would force a spurious 'no pre-resolution tick' raise)."""
+    decision_lead = timedelta(days=3)
+    decision_time = RESOLUTION - decision_lead
+    pre_tick_ts = int((decision_time - timedelta(hours=1)).timestamp())
+
+    def router(url, params):
+        return {"history": [{"t": pre_tick_ts, "p": 0}]}  # p==0 is valid AND falsy
+
+    fetcher = KalshiHistoryFetcher(session=FakeSession(router))
+    hm = fetcher.to_historical_market(_resolved(outcome=0), decision_lead)
+    assert hm.market_price == 0.0  # the p=0 tick was used, not silently dropped
+
+
 def test_raises_when_only_post_resolution_ticks():
     """A price history with ONLY a tick at/after resolution -> no leakage-safe
     snapshot -> to_historical_market RAISES (never fabricates)."""

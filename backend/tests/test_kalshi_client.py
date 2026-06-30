@@ -241,6 +241,54 @@ def test_status_unknown_defaults():
     assert m.resolved is False
 
 
+# --- Real Kalshi response-side contract values (NOT the request-side filter words).
+# These are the values a live /markets response actually carries; a prior cut only
+# handled the request-FILTER words ("open"/"finalized") and would have dropped every
+# live market. (Offline-validated against the documented contract; verify on first run.)
+def test_status_active_is_the_real_tradeable_value():
+    """Live Kalshi response markets carry status 'active' (not 'open')."""
+    raw = _make_raw_market(status="active")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is True
+    assert m.closed is False
+    assert m.resolved is False
+
+
+def test_status_determined_is_resolved():
+    """'determined' (winner decided, awaiting settlement) is resolved, not still-live."""
+    raw = _make_raw_market(status="determined", result="yes")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is False
+    assert m.resolved is True
+
+
+# --- One-sided / empty order books must not fabricate a midpoint or a fake 50/50.
+def test_one_sided_book_uses_the_quoted_side():
+    """yes_bid=95, no ask → YES≈0.95 (use the quoted side, never average with 0)."""
+    raw = _make_raw_market(yes_bid=95, yes_ask=0, status="active")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert abs(m.outcomes[0].price - 0.95) < 1e-9
+    assert m.active is True  # one real quote → still tradeable
+
+
+def test_last_price_fallback_when_no_book():
+    """No bid/ask but a last_price → use it (80¢ → 0.80)."""
+    raw = _make_raw_market(yes_bid=0, yes_ask=0, status="active")
+    raw["last_price"] = 80
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert abs(m.outcomes[0].price - 0.80) < 1e-9
+    assert m.active is True
+
+
+def test_no_quote_market_is_forced_untradeable_not_fabricated_5050():
+    """A 0/0 book with no last_price must NOT present a tradeable 0.50 market."""
+    raw = _make_raw_market(yes_bid=0, yes_ask=0, status="active")  # no last_price
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is False  # forced untradeable despite 'active' status
+    # YES+NO still internally consistent (placeholder), but it can never be traded.
+    assert abs((m.outcomes[0].price + m.outcomes[1].price) - 1.0) < 1e-9
+
+
 # ---------------------------------------------------------------------------
 # fetched_at is timezone-aware UTC
 # ---------------------------------------------------------------------------

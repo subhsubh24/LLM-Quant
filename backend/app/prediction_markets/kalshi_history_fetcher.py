@@ -151,7 +151,12 @@ class KalshiHistoryFetcher:
         cursor: Optional[str] = None
 
         for page in range(max_pages):
-            params: dict = {"limit": limit, "status": "finalized"}
+            # "settled" is the documented Kalshi GetMarkets `status` FILTER value for
+            # resolved markets (valid filter values: unopened/open/closed/settled).
+            # "finalized" is NOT a valid filter value — using it returned nothing. The
+            # per-market YES/NO outcome is still derived from the `result` field below,
+            # never from this filter. (Offline-validated; verify on first live run.)
+            params: dict = {"limit": limit, "status": "settled"}
             if cursor:
                 params["cursor"] = cursor
 
@@ -264,10 +269,11 @@ class KalshiHistoryFetcher:
 
         ticks = []
         for item in history:
-            t = _to_float(item.get("t") or item.get("ts") or item.get("end_period_ts"))
-            p_raw = _to_float(
-                item.get("p") or item.get("yes_price") or item.get("close")
-            )
+            # Use explicit None-presence (NOT `a or b`): a legitimate tick with t==0 or
+            # p==0 is falsy and would be silently dropped by an `or`-chain (a deep-audit
+            # finding). p==0 (YES≈0¢) is a valid extreme price that must survive.
+            t = _to_float(_first_present(item, ("t", "ts", "end_period_ts")))
+            p_raw = _to_float(_first_present(item, ("p", "yes_price", "close")))
             if t is None or p_raw is None:
                 continue
             # Normalise: Kalshi may return prices as cents (>1.0) or fractions.
@@ -379,6 +385,16 @@ class KalshiHistoryFetcher:
 # ---------------------------------------------------------------------------
 # Pure helpers (no I/O — exhaustively unit-testable)
 # ---------------------------------------------------------------------------
+def _first_present(d: dict, keys: Sequence[str]) -> Any:
+    """Return the value of the first key whose value is not None (presence test, NOT
+    truthiness — so a legitimate 0 / 0.0 is returned, not skipped). None if all absent."""
+    for k in keys:
+        v = d.get(k)
+        if v is not None:
+            return v
+    return None
+
+
 def _to_float(value: Any) -> Optional[float]:
     try:
         return float(value)
