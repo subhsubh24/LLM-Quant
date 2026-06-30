@@ -2,6 +2,53 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-30 — A3 Kalshi venue adapter + deep-audit hardening (2-PR run); the gate caught a BUILDS≠WORKS the tests passed over
+
+- **Shipped 2 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep across tracks A–G:
+  (#92) **A3 — a second-venue Kalshi DATA adapter** (`kalshi_client.py` + `kalshi_history_fetcher.py` +
+  `scripts/fetch_kalshi_history.py`) behind the SAME `Market`/`Outcome`/`HistoricalMarket` interface
+  (imported, never redefined), offline fixture-tested, no new credential (public data); and (#91) a
+  **deep-audit hardening pass** (live-only control-auth boot-guard; category-cap under-count fix;
+  risk-score div-by-zero guards; MTM `PolymarketClient` reuse; routes.py exception-detail leak
+  sanitization). engine_pct 71→72. No DoD/floor box ticked — venue infra + hardening, not a validated edge.
+- **THE win — an Opus parsing auditor returned BROKEN on a Kalshi adapter with 45 green tests.** The
+  offline fixtures had encoded Kalshi's **request-side FILTER words** (`status="open"`, `status="finalized"`)
+  as if they were the values a **live response** carries — but a real Kalshi `/markets` response market
+  carries `status:"active"`, and resolved markets are `settled`/`determined`; the discovery filter
+  `"finalized"` is not even a valid Kalshi filter value. So the adapter would have mapped **every live
+  market to untradeable** (dropped) and the history fetcher would have pulled nothing — while 45 tests
+  passed because they tested the code against its own wrong assumptions. **Lesson: green tests against
+  self-authored fixtures prove NOTHING about a venue contract you can't reach. When egress blocks live
+  verification, (a) encode the DOCUMENTED contract (not a guess), (b) be ROBUST to a set of plausible
+  values per state, (c) FAIL LOUD on an unrecognized value (log a warning + treat as untradeable) so a
+  real-run mismatch surfaces immediately instead of silently dropping/mis-trading, and (d) DISCLOSE in
+  SELF_VALIDATION that the contract is documented-but-unverified-live + add an owner OA to confirm on first
+  fetch. A re-audit (FIX-HOLDS) is warranted after a BROKEN→fixed correctness change.**
+- **Win #2 — a live-safety auditor caught a ~10x risk over-reservation in my own fix.** The category-cap
+  fix reserved `RiskConfig.max_single_position_usd` ($50), but the executor's REAL per-trade notional cap is
+  the decoupled `executor.max_position_usd` (~$5 in prod). The fix was conservative (over-blocks, safe
+  direction) but 10x too aggressive AND the justification cited the wrong field. **Lesson: when a gate
+  estimates "how much could this add," read the ACTUAL enforced cap from the object that enforces it
+  (`executor.max_position_usd`), not a same-named config field that isn't wired to it.**
+- **Honest one-sided-book fix (side-effect-integrity flavor):** a 0/0 Kalshi book used to fall through to a
+  fabricated **0.50** that passed DataQualityValidator as a *tradeable* market, and a one-sided book
+  averaged the quote with 0. Fixed: midpoint only when both sides quoted; else the quoted side; else
+  `last_price`; else **forced untradeable** (`active=False`). **Lesson: a missing quote is not a 50/50
+  market; fabricating a midpoint from a one-sided/empty book invents a tradeable price out of nothing (the
+  data analog of a fake fill).**
+- **Disjoint discipline under contention (anti-scarcity, not padding):** B6 (per-strategy enable/disable —
+  the scan loop already gates on `strategy.config.enabled`, only needs a persisted store + endpoint) and D6
+  (a venue reconciler) were genuinely buildable but BOTH wanted `orchestrator.py`, which the hardening PR
+  already owned — deferred to a later run (the disjoint rule). F5 (Playwright) deferred on exec-risk +
+  can't-CI-gate; F7 lint on low-value/trading-path-risk. A deep-audit scout found NO real defect beyond the
+  audit findings, so none was invented.
+- **Process / git hazard:** review/audit subagents running `git`/`pytest` in the SHARED working tree left
+  stray staged files on a sibling branch (an auditor checked out the other branch to run its tests). The
+  pushed commits stayed clean (the source of truth), but **don't let reviewer subagents mutate git state in
+  the shared tree** — give them `git diff BASE...BRANCH` (reads objects, not the working tree); accept that a
+  per-branch `pytest` needs that branch checked out. Cleaned by unstage + `rm`; re-verified the pushed PR
+  diffs via the API.
+
 ## 2026-06-29 — DETERMINATION: authed-journey-tier-in-CI directive = SKIP (personal bot, no auth tier)
 
 - **Directive:** enforce an AUTHENTICATED journey tier in CI (sign-up → dashboard, sign-in, paywall →

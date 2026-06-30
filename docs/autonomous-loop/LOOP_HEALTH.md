@@ -38,32 +38,56 @@ harness proposal).
 ```yaml
 LOOP_HEALTH:
   project: LLM-Quant
-  as_of: 2026-06-29
-  last_run: 2026-06-29          # prior run: self-validation addendum (#82)
-  last_deep_audit: 2026-06-29   # daily deep audit w/ live-safety + side-effect + auth lenses ran this run (3 Opus auditors)
+  as_of: 2026-06-30
+  last_run: 2026-06-30          # prior run: control-path hardening (#83-#85)
+  last_deep_audit: 2026-06-30   # 8-Haiku scout sweep w/ correctness + security + quality-reconcile + artifact-freshness lenses ran this run
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   validation:                   # self-validation capability readiness — refresh every run from `check_self_validation.py --readiness`
     enforced_in_ci: true        # the coverage gate is a blocking preflight step (9d) inside the required check
-    capabilities_total: 9       # +2 this run: executor_state_persistence, backend_route_auth
+    capabilities_total: 10      # +1 this run: kalshi_market_data (no creds — public data)
     unmet: []                   # active + ci_validatable:false capabilities (need an owner secret). NON-EMPTY => urgent OWNER_ACTION + blocks. Must match SELF_VALIDATION.readiness.unmet AND have a PENDING_OPS validation-capability-<id>.
   this_run:
-    changes_shipped: 3          # PR-A control-path hardening (persistence + REST validation + route auth + init_db durability fix), PR-B frontend design-taste, PR-C bookkeeping
+    changes_shipped: 2          # #91 deep-audit hardening (config/risk/orchestrator/routes); #92 Kalshi second-venue data adapter + leakage-safe history fetcher; + this bookkeeping PR
     changes_abandoned: 0
-    abandoned_reasons: []        # dropped pre-build on the value/disjoint rules (NOT abandoned): D2 SELL-path (no-op in current flow), B1 per-leg exec / E7 / B3-derivation (alpha-blocked), C2 impact-calib (egress-blocked)
-    verify_cycle_failures: 1     # durable-tables regression test failed under full-suite contamination on first cut; rewrote as a clean-subprocess test (1 fix cycle)
-    review_rejections: 0         # 2 Sonnet reviewers + 3 Opus auditors flagged 2 MUST-FIX (auth fail-open log level; deactivate-persist race) + a BUILDS≠WORKS gap — all fixed in ONE consolidated cycle, none rejected the change
+    abandoned_reasons: []        # deferred pre-build on the disjoint/value rules (NOT abandoned): B6 strategy-control + D6 reconciler (collide with #91 on orchestrator.py), F5 Playwright (exec risk + can't CI-gate; better as a focused run), F7 lint ratchet (low value / risky on trading path)
+    verify_cycle_failures: 0     # local preflight step-3 ruff FAILs (ruff installed locally, absent in CI) — a known false alarm, verified GREEN with ruff hidden = CI parity; not a real gate failure
+    review_rejections: 0         # the gate caught real defects fixed in ONE cycle each, none abandoned: (#91) Opus-safety flagged a ~10x category-cap over-reservation (wrong cap field) + RevB a wrong runbook ref; (#92) a parsing auditor returned BROKEN (offline fixtures encoded request-filter words as live response values -> would drop every live market) -> fixed -> re-audit FIX-HOLDS
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 51             # git: squash-merged (#NN) commits to default, last 7 days
+    merged_prs: 52             # git: squash-merged (#NN) commits to default, last 7 days
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # OA-11 corpus refresh = owner/egress-scope (automatable, OA-13). No recurring wall.
+    recurring_failures: []       # OA-11 (Polymarket) + new OA-15 (Kalshi) corpus refresh = owner/egress-scope. No recurring wall.
     harness_proposals_open: 0
-  signal: improving              # 13th datapoint: drove 3 ship-critical QUALITY_SCORECARD top_gaps (run-risk-readiness durability, security route-auth, design-taste cleanup) to done; an adversarial auditor caught a real BUILDS≠WORKS (durable tables never created in prod) — root-caused + regression-pinned. unmet=[]. Converging.
+  signal: improving              # 14th datapoint: 2 file-disjoint code PRs from an 8-scout sweep (a 2nd venue DATA adapter + a deep-audit hardening pass); the adversarial gate caught a BUILDS≠WORKS (Kalshi adapter would drop every live market) AND a ~10x risk over-reservation, both fixed in one cycle (re-audit FIX-HOLDS). unmet=[]. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-30 (14th datapoint — factory run) — `improving`, the adversarial gate caught TWO real defects the tests passed over.**
+An 8-Haiku scout sweep across tracks A–G surfaced the maximal file-disjoint, value-bar-clearing set; shipped **2
+code PRs + this bookkeeping**: (#92) ROADMAP **A3 — a second-venue Kalshi DATA adapter** (`kalshi_client.py` +
+`kalshi_history_fetcher.py`) behind the SAME `Market`/`Outcome`/`HistoricalMarket` interface, with the same
+structural anti-leakage guarantee as the Polymarket fetcher, fully offline fixture-tested, no new credential; and
+(#91) a **deep-audit hardening pass** (live-only control-auth boot-guard; category-cap under-count fix; risk-score
+div-by-zero guards; MTM client reuse; API exception-detail leak sanitization). **The gate earned its keep twice:**
+(1) a fresh Opus **parsing auditor returned BROKEN** on the Kalshi adapter — the offline fixtures had encoded
+Kalshi's *request-side filter* words (`"open"`/`"finalized"`) as if they were *live response* values, so the
+adapter would have dropped **every live market** (a BUILDS≠WORKS: 45 green tests proving nothing about real
+behavior); fixed to the documented response contract (`active`/`settled`/`determined`, `settled` discovery filter,
+one-sided-book honesty, `p=0` tick fix) + an honest "documented-but-unverified-live" disclosure + a loud
+warning-on-unknown-status net, and a **re-audit returned FIX-HOLDS**; (2) an Opus **live-safety auditor** found the
+category-cap fix used the wrong cap field (`RiskConfig.max_single_position_usd` $50 vs the executor's real
+`max_position_usd` ~$5) → a ~10x over-reservation, corrected to read the executor's actual cap. Both fixed in ONE
+cycle each (≤2-cycle brake), merged on green required checks. **Anti-scarcity + anti-padding both held:** deferred
+B6 strategy-control + D6 reconciler (genuinely buildable but collide with #91 on `orchestrator.py` — the disjoint
+rule, not scarcity), F5 Playwright (real exec risk + can't CI-gate; a focused run suits it better), and F7 lint
+(low value / risky on the trading path); a deep-audit scout found NO real defect beyond the audit findings, so none
+was invented. No DoD/floor box ticked — venue infra + hardening, not a validated edge; binding constraint stays the
+7-day-lead OOS corpus (OA-11 Polymarket, new OA-15 Kalshi — owner/egress-scope), so no harness proposal warranted.
+
+### Earlier
 
 **2026-06-29 (13th datapoint — factory run) — `improving`, the adversarial gate caught a real BUILDS≠WORKS the tests missed.**
 Shipped 3 file-disjoint PRs from an 8-scout sweep, all driving named QUALITY_SCORECARD top_gaps: (A) control-path
