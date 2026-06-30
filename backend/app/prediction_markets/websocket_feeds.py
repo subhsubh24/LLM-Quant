@@ -11,6 +11,7 @@ Price updates are stored in-memory and optionally persisted to DB.
 import asyncio
 import json
 import logging
+import math
 import ssl
 import time
 from dataclasses import dataclass, field
@@ -21,6 +22,41 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_prob(raw, field_name: str, token_id: str) -> Optional[float]:
+    """Coerce a raw WS field to a probability in [0, 1], or return None (reject).
+
+    The live WebSocket path used to do a bare ``float(change["price"])`` with NO
+    validation, so a malformed message (``"price": "inf"`` / ``"nan"`` / ``"1.5"`` /
+    ``"-0.2"``) would silently POISON the in-memory price cache that strategies and the
+    executor read — a real data-integrity hole on the live pricing path (the batch
+    discovery path is guarded by DataQualityValidator, but this feed is not). We now
+    reject any non-numeric, non-finite, or out-of-[0,1] value, log loudly, and keep the
+    last good price rather than overwrite it with garbage.
+    """
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("[WS] %s for %s is non-numeric (%r) — rejected", field_name, token_id, raw)
+        return None
+    if not math.isfinite(val) or not (0.0 <= val <= 1.0):
+        logger.warning("[WS] %s for %s out of range/non-finite (%r) — rejected", field_name, token_id, val)
+        return None
+    return val
+
+
+def _coerce_nonneg(raw, field_name: str, token_id: str) -> Optional[float]:
+    """Coerce a raw WS field to a finite, non-negative float, or return None (reject)."""
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("[WS] %s for %s is non-numeric (%r) — rejected", field_name, token_id, raw)
+        return None
+    if not math.isfinite(val) or val < 0.0:
+        logger.warning("[WS] %s for %s negative/non-finite (%r) — rejected", field_name, token_id, val)
+        return None
+    return val
 
 
 def _create_ssl_context():
@@ -226,14 +262,27 @@ class PolymarketWSFeed:
                     price=0.0,
                 ))
 
+                # Validate every incoming field before it touches the cache. If the
+                # primary `price` is malformed we SKIP the whole update for this token
+                # (keep the last good price) rather than poison the cache; bid/ask/spread
+                # are applied only when individually valid.
                 if "price" in change:
-                    price.price = float(change["price"])
+                    p = _coerce_prob(change["price"], "price", token_id)
+                    if p is None:
+                        continue
+                    price.price = p
                 if "bid" in change:
-                    price.bid = float(change["bid"])
+                    b = _coerce_prob(change["bid"], "bid", token_id)
+                    if b is not None:
+                        price.bid = b
                 if "ask" in change:
-                    price.ask = float(change["ask"])
+                    a = _coerce_prob(change["ask"], "ask", token_id)
+                    if a is not None:
+                        price.ask = a
                 if "spread" in change:
-                    price.spread = float(change["spread"])
+                    s = _coerce_nonneg(change["spread"], "spread", token_id)
+                    if s is not None:
+                        price.spread = s
 
                 price.timestamp = datetime.now(timezone.utc)
                 self._prices[token_id] = price
@@ -247,9 +296,20 @@ class PolymarketWSFeed:
         elif msg_type == "last_trade_price":
             token_id = data.get("asset_id", "")
             if token_id and token_id in self._prices:
-                self._prices[token_id].last_trade_price = float(data.get("price", 0))
-                self._prices[token_id].last_trade_size = float(data.get("size", 0))
-                self._prices[token_id].timestamp = datetime.now(timezone.utc)
+                ltp = _coerce_prob(data.get("price", 0), "last_trade_price", token_id)
+                lts = _coerce_nonneg(data.get("size", 0), "last_trade_size", token_id)
+                updated = False
+                if ltp is not None:
+                    self._prices[token_id].last_trade_price = ltp
+                    updated = True
+                if lts is not None:
+                    self._prices[token_id].last_trade_size = lts
+                    updated = True
+                # Only refresh the timestamp when SOMETHING valid landed. Otherwise a flood
+                # of garbage last-trade messages would keep renewing the timestamp on a stale
+                # cached quote, defeating the 300s staleness eviction in _save_price_snapshot.
+                if updated:
+                    self._prices[token_id].timestamp = datetime.now(timezone.utc)
 
     def get_status(self) -> dict:
         return {
