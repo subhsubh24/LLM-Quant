@@ -101,6 +101,15 @@ SELF_VALIDATION:
       ci_validatable: true          # no secret needed; the logic-critical part is parsing/anti-leakage, tested on realistic fixtures
       real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, incl. the real fetch run in OA-11); the live HTTP read is a thin GET with no business logic and no side-effect."
       status: validated
+    - id: kalshi_market_data
+      desc: "read public Kalshi market data + assemble leakage-safe resolved history (no auth)"
+      validates_via: "test_kalshi_client.py + test_kalshi_history_fetcher.py — parsing + anti-leakage core exercised offline with FakeSession fixtures; live reads are egress-gated (same as Polymarket)"
+      mode: mocked_offline
+      requires_env: []              # NO credentials required; Kalshi market data is public
+      active: true
+      ci_validatable: true          # no secret needed; the logic-critical parts (parsing + anti-leakage) are tested on realistic fixtures
+      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner runs fetch_kalshi_history.py on a network-permitted host. HONESTY CAVEAT: the Kalshi status-string + price-field CONTRACT (response status='active'/'settled'/'determined'; cent prices; the 'settled' discovery filter) is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response (egress-blocked offline) — an unrecognized status is logged LOUDLY (never silently dropped), and the OWNER must confirm the contract on the first real fetch."
+      status: validated
     - id: residual_legacy_data
       desc: "retired stock/crypto data-provider config (ROADMAP A1) — no active trading path uses it"
       validates_via: "n/a — dead config kept only until the tidy-up; no active flow reads it for trading"
@@ -113,7 +122,7 @@ SELF_VALIDATION:
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 9
+    capabilities_total: 10
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
