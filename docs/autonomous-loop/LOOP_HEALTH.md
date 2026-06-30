@@ -39,31 +39,54 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-30
-  last_run: 2026-06-30          # prior run: control-path hardening (#83-#85)
+  last_run: 2026-06-30          # prior run (same day, earlier): A3 Kalshi adapter + deep-audit hardening (#91-#92)
   last_deep_audit: 2026-06-30   # 8-Haiku scout sweep w/ correctness + security + quality-reconcile + artifact-freshness lenses ran this run
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   validation:                   # self-validation capability readiness — refresh every run from `check_self_validation.py --readiness`
     enforced_in_ci: true        # the coverage gate is a blocking preflight step (9d) inside the required check
-    capabilities_total: 10      # +1 this run: kalshi_market_data (no creds — public data)
+    capabilities_total: 10      # unchanged this run (no new capability; backend_route_auth coverage widened to /scan + risk-config bounds)
     unmet: []                   # active + ci_validatable:false capabilities (need an owner secret). NON-EMPTY => urgent OWNER_ACTION + blocks. Must match SELF_VALIDATION.readiness.unmet AND have a PENDING_OPS validation-capability-<id>.
   this_run:
-    changes_shipped: 2          # #91 deep-audit hardening (config/risk/orchestrator/routes); #92 Kalshi second-venue data adapter + leakage-safe history fetcher; + this bookkeeping PR
+    changes_shipped: 3          # #96 API security hardening; #95 side-effect integrity (no phantom arb fill); #94 executor fail-closed hardening; + this bookkeeping PR
     changes_abandoned: 0
-    abandoned_reasons: []        # deferred pre-build on the disjoint/value rules (NOT abandoned): B6 strategy-control + D6 reconciler (collide with #91 on orchestrator.py), F5 Playwright (exec risk + can't CI-gate; better as a focused run), F7 lint ratchet (low value / risky on trading path)
+    abandoned_reasons: []        # deferred pre-build on the disjoint/value rules (NOT abandoned): B1-full per-leg execution (risky, larger follow-up), B6 enable/disable (collides routes.py w/ #96), E-track wiring (DECISION COROLLARY — no real alpha drives it), F7 lint + F5 Playwright (repeatedly deferred). DROPPED as redundant (not abandoned): cost-model impact tests (19 already), A5 staleness fixture (already covered).
     verify_cycle_failures: 0     # local preflight step-3 ruff FAILs (ruff installed locally, absent in CI) — a known false alarm, verified GREEN with ruff hidden = CI parity; not a real gate failure
-    review_rejections: 0         # the gate caught real defects fixed in ONE cycle each, none abandoned: (#91) Opus-safety flagged a ~10x category-cap over-reservation (wrong cap field) + RevB a wrong runbook ref; (#92) a parsing auditor returned BROKEN (offline fixtures encoded request-filter words as live response values -> would drop every live market) -> fixed -> re-audit FIX-HOLDS
+    review_rejections: 1         # #94 Opus live-safety auditor returned NOT-SAFE (the fail-closed branch was DEAD CODE vs the production store — load() swallowed all errors -> never raised), + 2 reviewers flagged a now-stale docstring; ALL fixed in ONE consolidated cycle (load() raises on unreadable vs None-on-absent + real-store fail-closed test + empty-token defense-in-depth + docstrings) -> fresh re-audit FIX-HOLDS. None abandoned.
+    process_incidents: 1         # STALE local default-branch ref: PR-C/PR-A were branched from a ~25-commit-old local ref (pre-auth/Kalshi); caught via a scout-vs-session-start guard-status contradiction, fixed by fetch origin + reset ref + rebase. Lesson recorded; no bad code shipped.
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 52             # git: squash-merged (#NN) commits to default, last 7 days
+    merged_prs: 55             # git: squash-merged (#NN) commits to default, last 7 days (+3 this run)
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # OA-11 (Polymarket) + new OA-15 (Kalshi) corpus refresh = owner/egress-scope. No recurring wall.
+    recurring_failures: []       # OA-11 (Polymarket) + OA-15 (Kalshi) corpus refresh = owner/egress-scope. No recurring wall.
     harness_proposals_open: 0
-  signal: improving              # 14th datapoint: 2 file-disjoint code PRs from an 8-scout sweep (a 2nd venue DATA adapter + a deep-audit hardening pass); the adversarial gate caught a BUILDS≠WORKS (Kalshi adapter would drop every live market) AND a ~10x risk over-reservation, both fixed in one cycle (re-audit FIX-HOLDS). unmet=[]. Converging.
+  signal: improving              # 15th datapoint: 3 file-disjoint code PRs from an 8-scout sweep (security + side-effect integrity + executor fail-closed); the adversarial gate earned its keep TWICE — a NOT-SAFE BUILDS!=WORKS (dead fail-closed branch) fixed + FIX-HOLDS, and a stale-base hazard caught before it shipped. unmet=[]. Converging.
 ```
 
 ## How to read the latest signal
+
+**2026-06-30 (15th datapoint — factory run, 2nd of the day) — `improving`, the adversarial gate killed a fail-safe that was DEAD CODE in prod, and a stale-base hazard was caught before it shipped.**
+An 8-Haiku scout sweep across tracks A–G surfaced the maximal file-disjoint, value-bar-clearing set; shipped **3
+code PRs + this bookkeeping**, all ship-critical-dimension hardening: (#96) **API security** — guard the lone
+unguarded state-mutating route `/prediction-markets/scan`, bound user inputs, and bounds-validate `risk/config` so a
+non-positive daily-loss cap (which would DISABLE loss protection) is rejected 422; (#95) **side-effect integrity** —
+stop fabricating a phantom fill (empty token_id) for multi-leg `outcome_idx == -1` arbitrage baskets, skipping them
+honestly until per-leg execution (B1) exists; (#94) **executor fail-closed** — a durable-store rehydrate failure now
+trips the kill switch instead of silently resuming a halted bot. **The gate earned its keep twice:** (1) a fresh Opus
+live-safety auditor returned **NOT-SAFE** on #94 — the new fail-closed branch only fired if `load()` raised, but the
+production `ExecutorStateStore.load()` swallowed every error and returned `None`, so it was **dead code against the
+only store that ships** (a DB-down restart would still resume un-halted); fixed by making `load()` distinguish ABSENT
+(None) from UNREADABLE (raise) + a REAL-store fail-closed test + a defense-in-depth empty-token reject, and a fresh
+**re-audit returned FIX-HOLDS**. (2) A **stale local default-branch ref** (lagging origin by ~25 commits, pre-auth)
+nearly based two PRs on old code — caught when a security scout's "/scan is the only unguarded route" contradicted the
+session-start read (which showed every route guarded); recovered by fetching origin, resetting the ref, and rebasing,
+which in turn surfaced a false-green test the stale base had hidden. **No DoD/floor box ticked** — hardening across
+security/§12, run-risk-readiness (D3/D4), and side-effect integrity (B1); engine_pct 72→73. Binding constraint
+unchanged: the 7-day-lead OOS corpus + a real alpha (OA-11/OA-15, owner/egress-scope), so no harness proposal
+warranted. unmet=[].
+
+### Earlier
 
 **2026-06-30 (14th datapoint — factory run) — `improving`, the adversarial gate caught TWO real defects the tests passed over.**
 An 8-Haiku scout sweep across tracks A–G surfaced the maximal file-disjoint, value-bar-clearing set; shipped **2

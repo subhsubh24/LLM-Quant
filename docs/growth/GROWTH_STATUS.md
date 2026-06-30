@@ -13,10 +13,10 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-06-29
+  as_of: 2026-06-30
   phase: pre_launch
   engine_built: false
-  engine_pct: 72
+  engine_pct: 73
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -176,6 +176,23 @@ GROWTH_STATUS:
 ```
 
 ## engine_pct rationale (pinned to real files)
+
+`engine_pct: 73` (up from 72) is a **security + safety + side-effect-integrity hardening**
+run (no new edge). (#96) closes the last unguarded state-mutating route — `/prediction-markets/scan`
+now carries the shared-secret bearer like its sibling `/bot/scan-now` — bounds the user inputs
+(`market_limit`/search `limit`/`query`/kill-switch `reason`), and **bounds-validates `risk/config`**
+so a non-positive `daily_loss_limit_usd` (which would DISABLE the loss cap) is rejected 422
+(pure `risk_config_validation.py` in the CI gate). (#95) removes a **phantom fill**: the orchestrator
+built one empty-token order for multi-leg `outcome_idx == -1` arbitrage baskets that the paper
+executor "filled," booking a position that never traversed a real per-leg path — now skipped honestly
+until per-leg execution (B1) exists. (#94) makes the durable-state guard **actually fail closed**:
+a rehydrate failure trips the kill switch instead of silently resuming a halted bot (an Opus auditor
+proved the first cut was dead code because the store swallowed read errors; fixed so `load()` raises
+on an unreadable store + a real-store fail-closed test, re-audit FIX-HOLDS) + a defense-in-depth
+empty-token reject at the executor gate. The validated EDGE is still absent (binding constraint stays
+the 7-day-lead OOS corpus, OA-11 / OA-15), so no DoD/floor box ticks.
+
+### Prior
 
 `engine_pct: 72` (up from 71) adds a **second venue DATA adapter** + a fresh deep-audit
 hardening pass (no new edge). A3: `kalshi_client.py` + `kalshi_history_fetcher.py` ingest
