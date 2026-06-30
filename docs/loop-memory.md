@@ -2,6 +2,53 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-30 (2nd run) — security + side-effect-integrity + executor fail-closed (3-PR run); an Opus auditor broke a fail-safe that was DEAD CODE in prod, and a STALE local default-ref nearly shipped PRs on old code
+
+- **Shipped 3 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep across tracks A–G:
+  (#96) **API security hardening** — `/prediction-markets/scan` was the one state-mutating route still UNGUARDED
+  (its sibling `/bot/scan-now` was guarded) → added `_MUTATING_AUTH`; bounded `market_limit`/search `limit`/`query`/
+  kill-switch `reason`; and **risk/config now bounds-validates** so a non-positive `daily_loss_limit_usd` (which would
+  DISABLE the loss cap — the check is `realized_loss > limit`) returns 422. Pure fastapi-free `risk_config_validation.py`
+  in the CI gate + importorskip fastapi adapter tests. (#95) **Side-effect integrity** — the orchestrator built ONE
+  order with an EMPTY token_id for multi-leg arb opportunities (`outcome_idx == -1`); the paper executor `_simulate_fill`
+  fills ANY order → a phantom fill + empty-key position that never traversed a real per-leg path. Now skipped honestly
+  (audit `skip_multi_leg`) until per-leg execution (B1) is built (DECISION COROLLARY). (#94) **Executor fail-closed
+  hardening** — a durable-store rehydrate failure now FAILS CLOSED (kill switch ACTIVE) instead of silently resuming a
+  killed bot, + loud loss-cap config coercion. No DoD/floor box ticked — hardening across security/§12, run-risk-readiness
+  (D3/D4), and side-effect integrity (B1); engine_pct 72→73.
+- **THE win — an Opus live-safety auditor returned NOT-SAFE on a fail-safe that my unit test "proved."** PR-94's new
+  fail-closed branch in `attach_state_store` only fires if `_rehydrate_state()` RAISES. But the PRODUCTION store
+  `ExecutorStateStore.load()` wrapped its whole read in `try/except → return None`, so it NEVER raised — the fail-closed
+  branch was **dead code against the only store that ships**, and a real DB-unreachable restart would still silently
+  resume a halted bot. My test passed only because it used a bespoke boom-store whose `load()` raises (no production path
+  does). **Lesson: a fail-CLOSED guard is only real if the dependency it guards actually SIGNALS the failure. A
+  best-effort `except → return None` swallow that collapses "unreadable" into "absent" defeats any downstream
+  fail-closed. Fix: make `load()` distinguish a genuinely ABSENT row (return None → fresh) from an UNREADABLE store
+  (RAISE), and TEST the REAL store against a broken engine (missing table), not a bespoke raiser. Re-audit returned
+  FIX-HOLDS.** Also added a defense-in-depth empty-token reject in `_check_risk` (a PR-95 auditor caveat) so no path can
+  phantom-fill an empty-token order.
+- **THE process hazard — a STALE local default-branch ref nearly shipped PRs based on ~25-commit-old code.** Session
+  started in DETACHED HEAD at the real latest (`e4b1efe`), but the LOCAL `claude/llm-stock-trading-app-fXupf` ref pointed
+  at a stale `19e882a` (~#73, before the auth + Kalshi work). PR-B was created via `git checkout -b` from the detached
+  HEAD (correct base), but PR-C and PR-A were branched via `git checkout <local-default-ref>` → **wrong, stale base**.
+  Caught it when the security scout's "/scan is the only unguarded route" contradicted my session-start read showing ALL
+  routes guarded: `git show <local-ref>:routes.py` had ZERO `_MUTATING_AUTH` and no `auth_core.py`. **Lesson: NEVER trust
+  the local default-branch ref in a long-lived/detached checkout — it can lag origin badly. Before branching every PR:
+  `git fetch origin <default> && git branch -f <default> origin/<default>` (or branch straight from `origin/<default>`).
+  Diagnose drift by OBSERVING git objects (`git show <ref>:<file>`, `git merge-base`), not by theorizing.** Recovered by
+  fetching origin, resetting the local ref, and rebasing PR-C/PR-A onto the true base — which immediately surfaced a
+  second real bug the stale base had hidden: PR-C's test passed on the old code but FAILED on the real code (the #91
+  category-cap hardening rejected the test opp upstream of the multi-leg branch), forcing a permissive-risk fix. Stale
+  base = false-green tests.
+- **Anti-scarcity + anti-padding both held:** DROPPED cost-model impact sensitivity tests (already 19 tests) and the A5
+  staleness fixture (already covered) as redundant; DEFERRED B1-full per-leg execution (risky, larger follow-up), B6
+  enable/disable (collides routes.py with PR-A), the E-track wiring (DECISION COROLLARY — unwired plumbing no real alpha
+  drives), F7 lint + F5 Playwright (repeatedly deferred for good reasons). The maximal disjoint value-bar set this run was
+  the 3 security/safety/integrity PRs the deep-audit scouts surfaced — all ship-critical-dimension work.
+- **Process: 2 Sonnet reviewers + 1 Opus safety auditor per money/safety-path PR (8 reviewers), ONE consolidated fix
+  cycle on PR-94 (load() + docstrings + empty-token guard + tests) + a fresh re-audit (FIX-HOLDS).** Reviewers ran
+  read-only via `git --no-pager diff base...branch` (objects, not the working tree — avoids the shared-tree git hazard).
+
 ## 2026-06-30 — A3 Kalshi venue adapter + deep-audit hardening (2-PR run); the gate caught a BUILDS≠WORKS the tests passed over
 
 - **Shipped 2 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep across tracks A–G:
