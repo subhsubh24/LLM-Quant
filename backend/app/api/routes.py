@@ -25,6 +25,20 @@ router = APIRouter()
 _MUTATING_AUTH = [Depends(require_backend_token)]
 
 
+def _safe_conn_error(e: Exception) -> str:
+    """Return a SANITIZED connection-error label for a public response.
+
+    The ``/prediction-markets/status`` endpoint is unauthenticated. Returning a raw
+    ``str(e)`` from a failed venue request leaks internals to any caller — the full URL,
+    library internals, proxy/timeout details, sometimes a chunk of stack. We surface only
+    the exception TYPE name (e.g. ``ConnectTimeout``), which is enough to diagnose
+    reachability without disclosing anything sensitive. The full error is still logged
+    server-side for the operator.
+    """
+    logger.warning("venue connectivity check failed: %s", e)
+    return type(e).__name__
+
+
 # ============ Debug/Health Endpoints ============
 
 @router.get("/debug/routes-loaded")
@@ -281,7 +295,7 @@ async def get_polymarket_connection_status():
         if resp.status_code != 200:
             status["gamma_api"]["error"] = f"HTTP {resp.status_code}"
     except Exception as e:
-        status["gamma_api"]["error"] = str(e)
+        status["gamma_api"]["error"] = _safe_conn_error(e)
 
     # Check CLOB API (pricing)
     try:
@@ -296,7 +310,7 @@ async def get_polymarket_connection_status():
         if resp.status_code != 200:
             status["clob_api"]["error"] = f"HTTP {resp.status_code}"
     except Exception as e:
-        status["clob_api"]["error"] = str(e)
+        status["clob_api"]["error"] = _safe_conn_error(e)
 
     all_connected = status["gamma_api"]["connected"] and status["clob_api"]["connected"]
     return {
@@ -308,8 +322,8 @@ async def get_polymarket_connection_status():
 
 @router.get("/prediction-markets/markets")
 async def list_prediction_markets(
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0, le=1_000_000),
 ):
     """List active prediction markets from Polymarket."""
     result = []
@@ -586,7 +600,7 @@ async def reset_prediction_portfolio():
 
 
 @router.get("/prediction-markets/orders")
-async def get_prediction_orders(limit: int = 50):
+async def get_prediction_orders(limit: int = Query(50, ge=1, le=1000)):
     """Get prediction market order history."""
     executor = _get_prediction_executor()
     return {"orders": executor.get_order_history(limit=limit)}
@@ -671,8 +685,8 @@ async def subscribe_prediction_feeds(req: SubscribeRequest):
 @router.get("/prediction-markets/price-history/{token_id}")
 async def get_prediction_price_history(
     token_id: str,
-    limit: int = 100,
-    exchange: str = "polymarket",
+    limit: int = Query(100, ge=1, le=1000),
+    exchange: str = Query("polymarket", min_length=1, max_length=50),
 ):
     """Get price history for a prediction market outcome token."""
     from ..db.database import get_session
@@ -710,7 +724,10 @@ async def get_prediction_price_history(
 # ============ Prediction Markets — P&L Snapshots ============
 
 @router.get("/prediction-markets/pnl-history")
-async def get_prediction_pnl_history(portfolio_id: int = 1, limit: int = 200):
+async def get_prediction_pnl_history(
+    portfolio_id: int = Query(1, ge=1, le=1_000_000),
+    limit: int = Query(200, ge=1, le=5000),
+):
     """Get P&L snapshot history for equity curve charting."""
     from ..db.database import get_session
     from ..prediction_markets.models import PredictionPnLSnapshot
@@ -825,7 +842,7 @@ async def get_prediction_bot_status():
 
 
 @router.get("/prediction-markets/bot/activity")
-async def get_prediction_activity_log(limit: int = 50):
+async def get_prediction_activity_log(limit: int = Query(50, ge=1, le=1000)):
     """Get recent activity log entries and last scan opportunities from the orchestrator."""
     orchestrator = _get_orchestrator()
     return {
@@ -1255,7 +1272,12 @@ async def get_vpin_metrics(token_id: Optional[str] = None):
 
 
 @router.get("/prediction-markets/quant/avellaneda-stoikov")
-async def get_as_diagnostics(token_id: str, mid_price: float, inventory: float = 0.0, hours_to_resolution: float = 24.0):
+async def get_as_diagnostics(
+    token_id: str = Query(..., min_length=1, max_length=200),
+    mid_price: float = Query(..., ge=0.0, le=1.0),
+    inventory: float = Query(0.0, ge=-1_000_000.0, le=1_000_000.0),
+    hours_to_resolution: float = Query(24.0, gt=0.0, le=100_000.0),
+):
     """Get Avellaneda-Stoikov optimal quotes for a given market state."""
     try:
         from ..prediction_markets.quant_models import AvellanedaStoikovModel
@@ -1305,7 +1327,11 @@ async def get_bayesian_priors():
 
 
 @router.post("/prediction-markets/quant/bayesian/update", dependencies=_MUTATING_AUTH)
-async def update_bayesian_prior(key: str, signal_mean: float, signal_weight: float = 5.0):
+async def update_bayesian_prior(
+    key: str = Query(..., min_length=1, max_length=200),
+    signal_mean: float = Query(..., ge=0.0, le=1.0),
+    signal_weight: float = Query(5.0, gt=0.0, le=1_000_000.0),
+):
     """Update a Bayesian prior with a new signal (e.g., from news, polls)."""
     try:
         from ..prediction_markets.quant_models import BayesianUpdater
@@ -1328,9 +1354,9 @@ async def update_bayesian_prior(key: str, signal_mean: float, signal_weight: flo
 
 @router.get("/prediction-markets/quant/monte-carlo-kelly")
 async def get_mc_kelly_estimate(
-    naive_kelly_fraction: float = 0.05,
-    bankroll: float = 500.0,
-    strategy: str = "market_making",
+    naive_kelly_fraction: float = Query(0.05, gt=0.0, le=1.0),
+    bankroll: float = Query(500.0, gt=0.0, le=1_000_000_000.0),
+    strategy: str = Query("market_making", min_length=1, max_length=100),
 ):
     """Run Monte Carlo Kelly simulation and return sizing recommendation."""
     try:
