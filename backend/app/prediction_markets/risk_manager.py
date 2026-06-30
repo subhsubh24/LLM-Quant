@@ -158,16 +158,18 @@ class RiskManager:
         # Record this market's category so _get_category_exposure can filter accurately
         self._market_categories[opportunity.market.id] = category
         cat_exposure = self._get_category_exposure(category, executor)
-        # Conservative upper-bound estimate of what this trade adds to the category.
-        # The real Kelly size is not known until AFTER this pre-trade gate, but the
-        # executor caps any single position at max_single_position_usd — so reserving a
-        # full position's worth of headroom is the SAFE direction. The old
-        # `entry_price * 10` hardcoded ~10 contracts (e.g. $5 at a $0.50 price), which
-        # systematically UNDER-counted the add and let the category cap be breached by a
-        # full-size Kelly trade (a deep-audit gate-bypass finding). Never under-estimate a
-        # risk cap's headroom.
-        estimated_add = max(
-            self.config.max_single_position_usd, opportunity.entry_price * 10
+        # Conservative bound = the executor's REAL per-trade notional cap. The executor
+        # rejects any order whose notional exceeds `executor.max_position_usd`
+        # (execution.py `_check_risk`), so a single trade can add at most that much to a
+        # category. The old `entry_price * 10` hardcoded ~10 contracts (e.g. $5 at a
+        # $0.50 price) and systematically UNDER-counted the add, letting a full-size
+        # trade breach the category cap (a deep-audit gate-bypass finding). We read the
+        # executor's ACTUAL cap rather than RiskConfig.max_single_position_usd (which is
+        # NOT wired to the executor) so the reservation matches the real per-trade size —
+        # neither under- nor over-counting. Falls back to the RiskConfig bound only if the
+        # executor doesn't expose its cap.
+        estimated_add = getattr(
+            executor, "max_position_usd", self.config.max_single_position_usd
         )
         if cat_exposure + estimated_add > self.config.max_category_exposure_usd:
             return RiskCheckResult(

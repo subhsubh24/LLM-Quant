@@ -169,7 +169,8 @@ class Settings(BaseSettings):
         real-money bot (a deep-audit footgun). So when live trading is on, an empty token
         HARD-REFUSES to boot. This can NEVER affect paper/dev/CI (live defaults false and
         the autonomous loop never flips it) — it only binds the owner's real-money host,
-        mirroring `_forbid_test_bypass_in_live`. See PENDING_OPS OA-14 / LIVE_RUNBOOK §5.
+        mirroring `_forbid_test_bypass_in_live`. See PENDING_OPS OA-14 (the control-token
+        owner action); the live master gate itself is LIVE_RUNBOOK §6.
         """
         if self.live_trading_enabled and not (self.backend_api_token or "").strip():
             raise ValueError(
@@ -177,7 +178,7 @@ class Settings(BaseSettings):
                 "state-mutating control routes (kill-switch, execute, bot start/stop) would "
                 "be UNAUTHENTICATED on a real-money deploy. Refusing to boot. Set "
                 "BACKEND_API_TOKEN to a strong random secret on the live host (see "
-                "LIVE_RUNBOOK §5 / PENDING_OPS OA-14)."
+                "PENDING_OPS OA-14 / LIVE_RUNBOOK §6)."
             )
         return self
 

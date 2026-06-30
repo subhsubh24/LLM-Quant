@@ -322,7 +322,7 @@ class MarkToMarketEngine:
         try:
             client = PolymarketClient()
         except Exception as e:  # never let client init break settlement
-            logger.debug(f"[MTM] PolymarketClient init failed; skipping resolution check: {e}")
+            logger.warning(f"[MTM] PolymarketClient init failed; skipping resolution check: {e}")
             return
 
         resolved = []
