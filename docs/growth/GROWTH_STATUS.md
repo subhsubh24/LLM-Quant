@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-29
   phase: pre_launch
   engine_built: false
-  engine_pct: 71
+  engine_pct: 72
   venues_connected:
     - polymarket_paper
   awaiting_connect:
@@ -177,7 +177,20 @@ GROWTH_STATUS:
 
 ## engine_pct rationale (pinned to real files)
 
-`engine_pct: 71` (up from 70) is run-risk-readiness + security + side-effect hardening of the
+`engine_pct: 72` (up from 71) adds a **second venue DATA adapter** + a fresh deep-audit
+hardening pass (no new edge). A3: `kalshi_client.py` + `kalshi_history_fetcher.py` ingest
+public Kalshi market data + leakage-safe resolved history behind the SAME `Market`/`Outcome`
+interface (offline-validated; the live status/price contract is documented-but-unverified,
+disclosed honestly; an adversarial parsing auditor caught — and the maker fixed — a
+BUILDS≠WORKS where the offline fixtures encoded request-filter words as live response values
+that would have dropped every live market). Hardening (#91): a live-only boot-guard that
+refuses to start with `LIVE_TRADING_ENABLED` on while `BACKEND_API_TOKEN` is empty (no
+unauthenticated kill-switch/execute on a real-money deploy), a category-cap under-count fix
+keyed to the executor's REAL per-trade cap, risk-score div-by-zero guards, MTM client reuse,
+and API exception-detail leak sanitization (§12). The validated EDGE is still absent (the
+binding constraint stays the 7-day-lead OOS corpus, OA-11 / now also Kalshi OA-15), so no
+DoD/floor box ticks. Prior rationale (engine_pct 71, up from 70) is run-risk-readiness +
+security + side-effect hardening of the
 control path (no new edge): the kill-switch + realized-PnL loss counters now PERSIST and
 rehydrate across a restart (`executor_state_store.py`) — and a BUILDS≠WORKS fix makes the
 durable audit-log/registry/executor tables actually get created at startup (they silently

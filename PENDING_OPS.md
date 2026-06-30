@@ -101,6 +101,12 @@ OWNER_ACTIONS:
       status: done
       why: "DONE (2026-06-28, owner-authorized): branch protection enabled on claude/llm-stock-trading-app-fXupf requiring ONLY 'code + safety gate (blocking)', strict=true (must be up to date), enforce_admins=false (manual override retained). The green gate is now REQUIRED — a change that regresses the live gate / kill switch / paper-pipeline reproduction can no longer auto-merge. Applied via the gh-api call in docs/ci/PROPOSED_CI.md §A3 (a repo-settings API action, not a .github/ file edit); harness issue #51 closed."
       how: "Already applied. To adjust later: re-run / edit the branch-protection command in docs/ci/PROPOSED_CI.md §A3. When lint-at-zero (ROADMAP F7) is green, ruff rides inside this same job — the required-checks list does NOT change."
+    - id: OA-15
+      title: "Run the Kalshi resolved-history fetcher on a network-permitted host (accumulate a real Kalshi OOS corpus) — the Kalshi analog of OA-11"
+      priority: medium
+      status: open
+      why: "BUILT this run (ROADMAP A3, #92): a leakage-safe Kalshi market-data adapter + resolved-history fetcher, fully offline-validated. Public Kalshi market data needs NO credentials. The autonomous build env blocks Kalshi egress (403 at the proxy), so the loop cannot pull real Kalshi history itself. A second venue with a different liquidity/lifetime profile is a real way to widen the edge search beyond Polymarket's most-liquid (≈70%-pinned-2-days-out) markets. NOTE: the Kalshi status/price field CONTRACT is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response — the first real fetch must verify it (an unrecognized status is logged LOUDLY, never silently dropped)."
+      how: "Run `python scripts/fetch_kalshi_history.py --out data/kalshi_history_sample.json --decision-lead-days 7` on a host where Kalshi's public trade-API v2 is reachable (the backend host / a network-permitted CI job), OR widen the autonomous env's egress allowlist to api.elections.kalshi.com (mirrors OA-13 Option A for Kalshi). No credentials needed (public read-only data). On the first run, CONFIRM the status/price contract (watch the logs for any 'unrecognized status' warnings) and report back so the offline mapping can be reconciled with live. The EDGE work (a real model; multi-venue routing; the live executor) is loop-buildable under ROADMAP track B/A3 — it is NOT an owner action."
 ```
 
 ## Quick reference
@@ -119,6 +125,7 @@ OWNER_ACTIONS:
 | OA-12 | Make `code + safety gate (blocking)` a REQUIRED check (branch protection) | 🟠 high | ✅ done |
 | OA-13 | Automate real-data refresh: env egress allowlist OR scheduled GitHub Action | 🟠 high | pending |
 | OA-14 | Set `BACKEND_API_TOKEN` (+ frontend proxy) to protect control routes on a public deploy (default-off; not needed for paper) | 🟡 medium | pending |
+| OA-15 | Run the Kalshi history fetcher on a network-permitted host (real Kalshi OOS corpus; verify the live status/price contract) | 🟡 medium | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 
