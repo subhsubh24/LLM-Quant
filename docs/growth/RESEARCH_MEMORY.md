@@ -412,3 +412,117 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   bootstrap CI. Loop-buildable next (no data): a research/owner fit entry point + B3 promotion once
   a model passes. E5 (windows) + E2 (drift) are now wired so the moment real trades flow they are
   measured + monitored honestly. No DoD/floor box ticked.
+
+## 2026-06-30 — Research Run 10: Academic synthesis + EXP-003 proposed; Polymarket-v1 HuggingFace dataset identified as OA-11 bypass
+
+- Hypothesis (falsifiable): **EXP-003 (Domain-Calibrated Political Strategy):** Binary
+  Polymarket markets categorised as "politics" or "elections" are systematically more
+  underconfident than other categories at ALL decision horizons — the crowd compresses
+  prices toward 50% via partisan bilateral cancellation. A `CalibrationBucketStrategy`
+  fitted exclusively on political-category resolved markets (using the EXISTING
+  mechanism in `calibration_bucket_strategy.py`) produces positive net Brier improvement
+  AND positive net PnL on the OOS 40%, controlling for the general horizon effect.
+- Min sample N: 100 resolved political/elections markets; ≥30 per price bucket for
+  bucket-level claims. Political markets need a longer sampling window than general
+  markets (fewer per month on Polymarket), so the full Polymarket-v1 HuggingFace corpus
+  (1.3M markets) is the preferred data source; alternatively, OA-11 with an explicit
+  `--categories politics,elections` filter.
+- OOS result: **insufficient data** — no real resolved political-category corpus yet.
+  The EXP-002 mechanism (CalibrationBucketStrategy) is already built; only the domain-
+  filtered corpus is missing. No OOS edge claimed.
+- Calibration (Brier / reliability): not measured — no real resolved predictions yet.
+- Costs modeled: 2% fee + 0.5% slippage (cost_model.py). Political markets at 65–90%
+  YES trade at moderate liquidity; impact model applies.
+- Verdict: **proposed** (EXP-003; see GROWTH_STATUS experiments[])
+- Why: Multiple independent 2026 sources converge on domain-specific political
+  miscalibration as the strongest structural edge hypothesis:
+  (1) **Le 2026 (arxiv 2602.19520, 292M trades, Kalshi + Polymarket):** calibration
+  decomposes into four components explaining 87.3% of variance. The DOMINANT component
+  is political underconfidence: prices chronically compressed toward 50% at ALL horizons
+  via bilateral partisan cancellation. Favorites underpriced, longshots overpriced —
+  the calibration slope is > 1.0 for political favorites across all time-to-resolution
+  windows. The Polymarket political user base shows less large-trade amplification than
+  Kalshi, but the structural bias is present on both.
+  (2) **Prediction Arena (arxiv 2604.07355, live Kalshi trading Jan–Mar 2026):** 6
+  frontier LLMs ALL lost money on Kalshi (-16% to -30.8% over 57 days). On Polymarket,
+  average loss was only -1.1%, with grok-4-20-checkpoint at 71.4% settlement win rate.
+  Key finding: LLMs are not calibrated enough to profitably trade autonomously — but
+  the Polymarket vs Kalshi gap suggests Polymarket is structurally more amenable.
+  (3) **PolyBench (arxiv 2604.14199, 36,165 predictions on 38,666 markets, Feb 2026):**
+  only 2 of 7 LLMs achieve positive CWR: MiMo-V2-Flash (+17.6%) and Gemini-3-Flash
+  (+6.2%). Gemini models consistently show positive calibration. This REFINES B4
+  (per-market LLM research): if built, use GEMINI (we already have the API key) and
+  target domains where it has documented positive calibration. A B4 design using
+  autonomous LLM trading is NOT the right pattern (Prediction Arena proves it loses
+  money); a targeted "LLM as a research tool for specific domains" design is better.
+  (4) **Insider trading on Polymarket (arxiv 2605.02286, 2605.00459; Bloomberg 2026):**
+  ~25% of large longshot bets ($2500+, <35%, near-resolution) resolve YES vs 14%
+  baseline — a 1.8× lift. On-chain observable; commercial tools already track it.
+  Implication: a DEFENSIVE adverse selection filter (skip markets with recent large
+  longshot activity) is in-scope and improves risk-adjusted returns without requiring
+  insider knowledge. It is NOT the primary alpha.
+
+### MAJOR DATA FINDING: Polymarket-v1 HuggingFace Database (arxiv 2606.04217, June 2026)
+  The complete on-chain trade archive of Polymarket's CTF Exchange (2022-11-21 to
+  2026-04-28): 1.20 billion trade records, 1.30 million markets, $61B nominal volume,
+  CC-BY-4.0 license, available at HuggingFace (TimeSeventeen/Polymarket-v1). Three
+  layers: `OrderFilled/` (raw trades), `daily_aligned/` (cleaned + market metadata +
+  event-normalized fields including resolution outcome), `CTF/` (lifecycle events including
+  resolutions). Parquet format, no Polymarket API egress required.
+  **Critical implication:** if the owner can access HuggingFace (a separate domain from
+  gamma-api.polymarket.com), the `daily_aligned/` layer provides pre-resolution price
+  history + outcomes for 1.3M markets — a superset of what OA-11 retrieves from the
+  live API. This could **bypass OA-11 entirely** for historical research. Proposed as
+  OA-16 (new owner action). A `polymarket_v1_hf_fetcher.py` that reads the Parquet
+  `daily_aligned/` layer and assembles leakage-safe `HistoricalMarket` records is
+  loop-buildable once the owner confirms HuggingFace egress is accessible.
+
+### How EXP-003 could be wrong (adversarial pre-mortem)
+1. Polymarket's international / crypto-native political user base may not show the same
+   partisan bilateral cancellation as Kalshi's US-regulated user base → the Le 2026
+   effect may be Kalshi-specific; Polymarket political markets may already be better
+   calibrated.
+2. The political compression bias may be strongest at >30 days (when partisan uncertainty
+   is highest) and near-zero at 7 days (when outcomes are nearly certain for most
+   markets) → same 70%-pinned-near-resolution problem as the 2-day corpus.
+3. With only ~10–30 active political markets per month on Polymarket, accumulating
+   100+ resolved political markets takes 4–6 months → N is slow to accumulate.
+4. The Polymarket-v1 HuggingFace data covers 2022–2026 elections; the calibration
+   pattern may be different in current (post-2026-election-cycle) markets.
+5. Bucket overfitting: with only ~100 political markets, the 65–90% bucket may have
+   fewer than 30 records → CalibrationBucketStrategy abstains → strategy produces no
+   signal.
+
+### Candidate alphas NOT proposed this run (reasons)
+- **Insider-signal copying (following large longshot bets):** Ethically and legally
+  gray; and the commercial tools (Polysights) already exploit it, so the edge is
+  competed away. Auto-reject as private-data inference under the playbook. The
+  DEFENSIVE version (adverse selection filter) stays in scope and is noted above.
+- **LLM autonomous trading (full B4):** Prediction Arena proves 5/6 models lose money
+  at the current state of the art. The right B4 design is targeted LLM research as a
+  TOOL, not an autonomous trader. Gated on B2 producing a PASSING eval — correct.
+- **Manifold Markets as proxy test bed:** Public API, resolved questions, calibration
+  data. HOWEVER: Manifold is play-money / low-stakes / different user base. A positive
+  Manifold calibration result does NOT transfer to Polymarket (different incentive
+  structures). Useful for apparatus testing but NOT for edge validation.
+- **Cross-venue Kalshi/Polymarket arb:** Still bot-dominated ($40M captured by bots
+  2024–2025). Kalshi now exceeds Polymarket in volume ($14.8B vs $9B April 2026).
+  Confirmed as out of scope for a non-speed bot.
+- **Maker (limit order) strategy:** The GWU/UCD 2026 paper studies maker-taker dynamics
+  on Kalshi. Makers may profit vs takers. However, building a market-making strategy
+  requires bid-ask inventory management, hedging, and real-time depth data — a
+  significantly more complex engine than the current taker-only design. Defer until
+  current alpha paths are validated.
+
+### Self-validation (data sources this run)
+- Le 2026 (arxiv 2602.19520): preprint, 292M trades, Kalshi + Polymarket. Credible but
+  not peer-reviewed yet. Cannot reproduce on our data (egress blocked).
+- Prediction Arena (arxiv 2604.07355): preprint, live Kalshi/Polymarket trading. Cannot
+  reproduce.
+- PolyBench (arxiv 2604.14199): preprint, 38K markets, Feb 2026. Cannot reproduce.
+- Polymarket-v1 (arxiv 2606.04217): confirmed on arxiv + HuggingFace page. Dataset
+  existence confirmed; format confirmed (daily_aligned Parquet with metadata). HuggingFace
+  accessibility from our env: NOT YET TESTED (proposed OA-16 for owner to verify).
+- Insider trading research (arxiv 2605.02286, 2605.00459): preprints. Bloomberg corroboration.
+- All findings above are DATA, not claims. NONE may be reported as an edge without OOS
+  + significance + calibration validation on our own real corpus.

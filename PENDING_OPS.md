@@ -107,6 +107,26 @@ OWNER_ACTIONS:
       status: open
       why: "BUILT this run (ROADMAP A3, #92): a leakage-safe Kalshi market-data adapter + resolved-history fetcher, fully offline-validated. Public Kalshi market data needs NO credentials. The autonomous build env blocks Kalshi egress (403 at the proxy), so the loop cannot pull real Kalshi history itself. A second venue with a different liquidity/lifetime profile is a real way to widen the edge search beyond Polymarket's most-liquid (≈70%-pinned-2-days-out) markets. NOTE: the Kalshi status/price field CONTRACT is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response — the first real fetch must verify it (an unrecognized status is logged LOUDLY, never silently dropped)."
       how: "Run `python scripts/fetch_kalshi_history.py --out data/kalshi_history_sample.json --decision-lead-days 7` on a host where Kalshi's public trade-API v2 is reachable (the backend host / a network-permitted CI job), OR widen the autonomous env's egress allowlist to api.elections.kalshi.com (mirrors OA-13 Option A for Kalshi). No credentials needed (public read-only data). On the first run, CONFIRM the status/price contract (watch the logs for any 'unrecognized status' warnings) and report back so the offline mapping can be reconciled with live. The EDGE work (a real model; multi-venue routing; the live executor) is loop-buildable under ROADMAP track B/A3 — it is NOT an owner action."
+    - id: OA-16
+      title: "Download Polymarket-v1 HuggingFace dataset as an alternative data source (bypasses OA-11 Polymarket API egress)"
+      priority: high
+      status: open
+      why: "IDENTIFIED (research run, 2026-06-30): Polymarket-v1 Database (arxiv 2606.04217, June 2026) is the complete on-chain trade archive of Polymarket's CTF Exchange (2022-11-21 to 2026-04-28) — 1.20 billion trade records across 1.30 million markets, $61B nominal volume, available on HuggingFace (TimeSeventeen/Polymarket-v1) under CC-BY-4.0. The daily_aligned/ Parquet layer includes cleaned market metadata + event-normalized fields including resolution outcomes and price history. This could provide a MUCH LARGER research corpus than OA-11 (54 records → 1.3 million markets) WITHOUT requiring live Polymarket API egress (HuggingFace is a separate domain from gamma-api.polymarket.com). This is the preferred path to unlock EXP-002 + EXP-003."
+      how: >
+        Step 1 (verify egress): confirm HuggingFace is reachable from your environment:
+          curl -s https://huggingface.co/datasets/TimeSeventeen/Polymarket-v1 | head -200
+        If accessible: Step 2 (download a sample): install huggingface_hub and stream the
+        daily_aligned/ Parquet layer:
+          pip install huggingface_hub datasets
+          python -c "from datasets import load_dataset; ds = load_dataset('TimeSeventeen/Polymarket-v1', 'daily_aligned', streaming=True); [print(r) for _, r in zip(range(5), ds['train'])]"
+        Step 3: Once confirmed, run the loop-buildable polymarket_v1_hf_fetcher.py (to be
+        built by the factory) which assembles leakage-safe HistoricalMarket records from the
+        daily_aligned fields (market_id, outcome, price timestamps, resolution). The factory
+        will build this fetcher once OA-16 step 1 confirms HuggingFace egress. No Polymarket
+        API credentials needed (CC-BY-4.0 public dataset). NOTE: the daily_aligned/ layer has
+        market metadata joined in but the exact field names for resolution outcome, pre-resolution
+        price, and category must be verified on the first download — the factory will build the
+        parser once the schema is confirmed.
 ```
 
 ## Quick reference
@@ -126,6 +146,7 @@ OWNER_ACTIONS:
 | OA-13 | Automate real-data refresh: env egress allowlist OR scheduled GitHub Action | 🟠 high | pending |
 | OA-14 | Set `BACKEND_API_TOKEN` (+ frontend proxy) to protect control routes on a public deploy (default-off; not needed for paper) | 🟡 medium | pending |
 | OA-15 | Run the Kalshi history fetcher on a network-permitted host (real Kalshi OOS corpus; verify the live status/price contract) | 🟡 medium | pending |
+| OA-16 | Download Polymarket-v1 HuggingFace dataset (1.3M markets, CC-BY-4.0) — preferred bypass for OA-11 | 🟠 high | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 
