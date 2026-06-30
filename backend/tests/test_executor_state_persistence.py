@@ -132,21 +132,50 @@ def test_bare_executor_has_no_persistence_and_fresh_state(engine):
     assert reloaded["kill_switch_reason"] == "halt"
 
 
-def test_persistence_is_best_effort_never_raises(engine):
-    class _BoomStore:
+def test_save_failure_is_best_effort_never_breaks_trade_path(engine):
+    # A store that LOADS cleanly (empty) but whose SAVE raises must never break the trade
+    # path — every mutation's persist is best-effort and swallows the error.
+    class _SaveBoomStore:
         def load(self):
-            raise RuntimeError("boom-load")
+            return None  # empty -> clean rehydrate (no fail-safe trip)
 
         def save(self, state):
             raise RuntimeError("boom-save")
 
     ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
-    # attach_state_store rehydrates; a raising load must be swallowed.
-    ex.attach_state_store(_BoomStore())
-    # A raising save inside a mutation must be swallowed too — the trade path is sacred.
+    ex.attach_state_store(_SaveBoomStore())
+    assert ex.kill_switch_active is False  # clean empty load -> NOT failed-closed
     ex.activate_kill_switch("halt")  # would call save -> raises internally -> swallowed
     ex.record_realized_pnl(-1.0)
     assert ex.kill_switch_active is True  # in-memory state still correct
+
+
+def test_rehydrate_failure_fails_closed(engine):
+    # FAIL SAFE: if the durable store is attached but its load() RAISES (e.g. the DB is
+    # unreachable at startup), the executor cannot confirm there was no persisted halt —
+    # it must BLOCK trading (kill switch ACTIVE) rather than silently resume with fresh,
+    # un-halted state. Leaving fresh state would let a boot-time DB hiccup resurrect a
+    # killed bot.
+    class _LoadBoomStore:
+        def load(self):
+            raise RuntimeError("db-unreachable")
+
+        def save(self, state):
+            raise RuntimeError("db-unreachable")
+
+    ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    ex.attach_state_store(_LoadBoomStore())
+    assert ex.kill_switch_active is True
+    assert ex._kill_switch_reason.startswith("state_rehydrate_failed")
+    # And the gate honours it: any order is rejected while failed-closed.
+    from backend.app.prediction_markets.execution import (
+        OrderRequest, OrderSide, OrderType, Exchange,
+    )
+    res = ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m", token_id="t",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=1.0, price=0.5,
+    ))
+    assert res.status.name == "REJECTED"
 
 
 def test_save_then_load_roundtrip_is_faithful(engine):
@@ -170,3 +199,55 @@ def test_save_then_load_roundtrip_is_faithful(engine):
 
 def test_load_returns_none_when_empty(engine):
     assert ExecutorStateStore(engine=engine).load() is None
+
+
+def test_real_store_unreadable_fails_closed():
+    # The PRODUCTION store (ExecutorStateStore), not a bespoke boom-store: pointed at an
+    # engine whose table was NEVER created, load() must RAISE (it no longer swallows), so
+    # attach_state_store FAILS CLOSED. This is the real DB-unreachable-at-restart scenario
+    # an adversarial auditor proved the old swallow-and-return-None defeated.
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    # Deliberately do NOT init_db(eng) -> the table is absent -> a read raises.
+    store = ExecutorStateStore(engine=eng)
+    with pytest.raises(Exception):
+        store.load()  # confirms load() propagates a read error instead of returning None
+
+    ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    ex.attach_state_store(store)
+    assert ex.kill_switch_active is True
+    assert ex._kill_switch_reason.startswith("state_rehydrate_failed")
+
+
+def test_empty_token_order_is_rejected_no_phantom_fill():
+    # Defense-in-depth: an order with an empty token_id has no tradeable token; the gate
+    # must REJECT it so _simulate_fill (which fills unconditionally) can't book a phantom
+    # empty-key position.
+    from backend.app.prediction_markets.execution import (
+        OrderRequest, OrderSide, OrderType, Exchange,
+    )
+    ex = PredictionMarketExecutor(dry_run=True, max_position_usd=1000.0, max_portfolio_usd=10000.0)
+    res = ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m", token_id="",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=10.0, price=0.5,
+    ))
+    assert res.status.name == "REJECTED"
+    assert ex.positions == {}  # no phantom empty-key position booked
+
+
+def test_malformed_loss_cap_env_falls_back_loud(monkeypatch, caplog):
+    # A malformed MAX_DAILY_LOSS_USD must FAIL LOUD (logged) and fall back to the
+    # conservative $25 — never silently swallowed, never loosened.
+    import logging
+    import backend.app.config as cfg
+
+    class _S:
+        max_daily_loss_usd = "not-a-number"
+        max_total_loss_usd = 100.0
+        live_trading_enabled = False
+
+    monkeypatch.setattr(cfg, "get_settings", lambda: _S())
+    with caplog.at_level(logging.WARNING):
+        ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    assert ex.max_daily_loss_usd == 25.0   # conservative fallback (tighter, never looser)
+    assert ex.max_total_loss_usd == 100.0
+    assert any("MAX_DAILY_LOSS_USD" in r.getMessage() for r in caplog.records)
