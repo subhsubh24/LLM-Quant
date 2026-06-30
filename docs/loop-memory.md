@@ -2,6 +2,32 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — DETERMINATION: authed-journey-tier-in-CI directive = SKIP (personal bot, no auth tier)
+
+- **Directive:** enforce an AUTHENTICATED journey tier in CI (sign-up → dashboard, sign-in, paywall →
+  checkout, account) against a real auth backend, as a required check. Its scope line: *"If your
+  project has no users/auth (e.g. a personal bot), skip — there's no authed tier to enforce."*
+- **Evidence-based determination (read the code, didn't assume):**
+  - LLM-Quant is a **personal bot** (VISION: "Not a product. Not marketed. No users.").
+  - Auth = a **single shared-password owner gate**: `frontend/lib/auth.ts` `checkPassword` compares
+    against one `APP_PASSWORD` env (constant-time), stateless HMAC cookie. **No user lookup, no DB,
+    no sessions table.**
+  - **NO signup / register / accounts / paywall / checkout / billing** (grep across `frontend/` = 0
+    matches); **no Supabase / next-auth / Stripe**. So NONE of the directive's enumerated authed
+    journeys exist, and the Supabase auth-backend + CSP `connect-src` machinery has no analog.
+  - **No journey/Playwright/e2e suite and no Node/browser CI job** (gate is Python-only; F5 — the
+    Playwright visual/journey suite — is deliberately deferred product work).
+- **Decision: SKIP, per the directive's explicit personal-bot carve-out.** Building a Node + Playwright
+  + browser CI tier for a single-password personal dashboard would be disproportionate and is exactly
+  what the scope clause excludes. `required_status_checks` unchanged: `["code + safety gate (blocking)"]`
+  (enforce_admins=true, strict=false).
+- **The one honest residual (NOT this directive's job):** the owner-gate flow (password → /predictions
+  dashboard) renders are not exercised at runtime by the current gate — a small frontend BUILDS≠WORKS
+  gap that belongs to **ROADMAP F5** (the deferred UI journey suite), to be built as product work if/when
+  justified, NOT as a forced authed-tier required check.
+- **Lesson:** "skip" must still be earned by EVIDENCE — confirm no users/signup/paywall/auth-backend by
+  reading the code, then record the determination so the loop doesn't re-litigate this directive every run.
+
 ## 2026-06-29 — GTM honesty gate (validate_gtm): a growth number with no source is a fabrication risk
 
 - **Parity ask:** AptDesignerAI added a required `validate-gtm` check (GTM analog of
