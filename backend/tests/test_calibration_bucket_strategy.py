@@ -278,6 +278,21 @@ def test_live_wrapper_emits_signal_on_miscalibrated_bucket():
     assert r.edge > 0.0
 
 
+def test_live_wrapper_skips_untradeable_market_even_with_in_range_price():
+    # A market the parser marked untradeable (active=False — e.g. inconsistent/incomplete
+    # outcome arrays) must NOT produce a signal, even though its YES price is a real in-range
+    # value the same fitted model trades on the tradeable version. This keeps the parser's
+    # honesty guard (active=False) from leaking through this consumer once it is wired.
+    import dataclasses
+
+    model = fit_model_from_history(_bucket_markets("t", 0.0, 0.65, 0.85, 40), min_bucket_n=20)
+    strat = CalibrationBucketStrategy(client=None, config=StrategyConfig(), model=model, min_edge=0.02)
+    tradeable = _market("m1", 0.65)
+    assert len(strat.scan([tradeable])) == 1  # control: tradeable version DOES signal
+    assert strat.scan([dataclasses.replace(tradeable, active=False)]) == []
+    assert strat.scan([dataclasses.replace(tradeable, closed=True)]) == []
+
+
 def test_live_wrapper_no_signal_on_uncalibrated_market():
     model = fit_model_from_history(_bucket_markets("t", 0.0, 0.65, 0.85, 40), edges=[0.6, 0.7], min_bucket_n=20)
     strat = CalibrationBucketStrategy(client=None, config=StrategyConfig(), model=model, min_edge=0.02)

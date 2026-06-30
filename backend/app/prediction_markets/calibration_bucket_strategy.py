@@ -314,6 +314,15 @@ class CalibrationBucketStrategy(BaseStrategy):
             # Honest abstain — no calibration fitted, so no edge can be claimed.
             return results
         for market in markets:
+            # Respect the venue/parser tradeability signal like every other deployed
+            # strategy (NearCertainty, CrossMarketArb, NOPositionScanner, …). A market the
+            # parser marked untradeable (active=False — e.g. inconsistent/incomplete outcome
+            # arrays) must NEVER produce a signal here: for a non-price failure mode (a length
+            # mismatch / missing token_id) the YES price is still a real in-range value, so
+            # without this gate the honesty guard would leak through this consumer once it is
+            # wired with a fitted model.
+            if not market.active or market.closed:
+                continue
             yes_idx = _yes_outcome_index(market)
             if yes_idx is None:
                 continue
