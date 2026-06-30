@@ -629,6 +629,63 @@ class TestOrchestrator:
         assert "kelly_config" in status
         assert "risk_manager" in status
 
+    def test_multi_leg_opportunity_is_skipped_not_phantom_filled(self):
+        # SIDE-EFFECT INTEGRITY (ROADMAP B1): an outcome_idx == -1 basket opportunity
+        # (e.g. a same-market dutch-book that must BUY several outcomes) has no single
+        # token to trade. It must be recorded as SKIPPED — never executed via the
+        # single-order path, which would send an order with an EMPTY token_id that the
+        # paper executor still "fills", booking a phantom position that never traversed a
+        # real per-leg order path.
+        from app.prediction_markets.orchestrator import (
+            PredictionMarketOrchestrator, KellyConfig,
+        )
+        from app.prediction_markets.execution import PredictionMarketExecutor
+        from app.prediction_markets.risk_manager import RiskManager, RiskConfig
+
+        market = _make_market(mid="arb1", yes_price=0.45, end_hours=48)
+        opp = ScanResult(
+            market=market, strategy="SameMarketArbitrage", outcome_idx=-1, side="BUY",
+            entry_price=0.45, expected_value=0.57, edge=0.12, confidence=0.9,
+            reason="dutch-book basket",
+        )
+
+        class _FakeScanner:
+            strategies: list = []
+
+            def scan(self, market_limit=200):
+                return [opp]
+
+        # Modest per-position cap + permissive risk caps so the opp clears data-quality
+        # AND risk and reaches the EXECUTION step — where the multi-leg branch must skip
+        # it. (Without permissive risk it would be category-capped upstream and we'd not be
+        # exercising the B1 branch at all.)
+        ex = PredictionMarketExecutor(
+            dry_run=True, max_position_usd=50.0, max_portfolio_usd=10000.0
+        )
+        permissive_risk = RiskManager(RiskConfig(
+            daily_loss_limit_usd=100_000.0,
+            max_portfolio_exposure_usd=100_000.0,
+            max_single_position_usd=100_000.0,
+            max_category_exposure_usd=100_000.0,
+            max_strategy_exposure_usd=100_000.0,
+            max_total_positions=1000,
+        ))
+        orch = PredictionMarketOrchestrator(
+            scanner=_FakeScanner(), executor=ex, risk_manager=permissive_risk,
+            kelly_config=KellyConfig(max_bet_usd=20.0),
+        )
+        summary = asyncio.get_event_loop().run_until_complete(orch.scan_and_execute())
+
+        # No execution, no phantom fill.
+        assert summary["executed"] == 0
+        assert orch.total_executions == 0
+        # The skip is SPECIFICALLY the multi-leg reason — proves it reached the B1 branch
+        # (not a data-quality / risk reject upstream that would also yield 0 executions).
+        assert any("multi-leg" in s["reason"] for s in summary["skip_reasons"]), summary["skip_reasons"]
+        # And NO empty-token (phantom) position was booked.
+        assert "" not in ex.positions
+        assert ex.positions == {}
+
 
 # ============================================================
 # Model Tests

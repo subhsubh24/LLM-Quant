@@ -822,6 +822,37 @@ class PredictionMarketOrchestrator:
                     pass
                 continue
 
+            # SIDE-EFFECT INTEGRITY (ROADMAP B1): a multi-leg / basket opportunity
+            # (outcome_idx == -1 — e.g. a same-market or cross-market arbitrage that must
+            # BUY several outcomes at once) has NO single token to trade. The single-order
+            # path below would build ONE order with an EMPTY token_id, which the paper
+            # executor still "fills" — fabricating a phantom fill that never traversed a
+            # real per-leg order path (and books a meaningless empty-token position). That
+            # is exactly the fake-fill the SIDE-EFFECT INTEGRITY rule forbids. Real per-leg
+            # execution (place + confirm each leg, all-or-nothing) is a named, not-yet-built
+            # B1 follow-up. Until it exists we do NOT fake it: record the opportunity
+            # honestly as not-executed and skip, rather than book a fill that didn't happen.
+            if opp.outcome_idx < 0:
+                skipped.append({
+                    "market": opp.market.question[:60],
+                    "reason": "multi-leg basket — per-leg execution not yet built (B1)",
+                })
+                self.total_skipped += 1
+                try:
+                    self._audit.record_decision(
+                        "skip_multi_leg",
+                        strategy=opp.strategy,
+                        market_id=opp.market.id,
+                        market_question=opp.market.question[:200],
+                        side=opp.side,
+                        edge=opp.edge,
+                        confidence=opp.confidence,
+                        reason="multi-leg basket requires per-leg execution (not built); not executed",
+                    )
+                except Exception:
+                    pass
+                continue
+
             # Determine token and labels
             exchange = Exchange.POLYMARKET
             outcome = opp.market.outcomes[opp.outcome_idx] if opp.outcome_idx >= 0 else None
