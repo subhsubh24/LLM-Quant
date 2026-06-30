@@ -144,27 +144,30 @@ class ExecutorStateStore:
                 yield session
 
     def load(self) -> Optional[dict]:
-        """Return the persisted state as a plain dict, or ``None`` if absent/unreadable.
+        """Return the persisted state as a plain dict, or ``None`` ONLY if genuinely ABSENT.
 
-        ``None`` signals "nothing persisted yet" so the caller keeps its fresh in-memory
-        state (distinguishing "never persisted" from "persisted but zeroed").
+        CRITICAL (run-risk-readiness): this distinguishes "no row persisted yet" — return
+        ``None`` so the caller keeps its fresh in-memory state (a first run / never-halted
+        bot) — from "the store is UNREADABLE" (DB unreachable, corrupt row), which RAISES.
+        The caller (``PredictionMarketExecutor.attach_state_store``) FAILS CLOSED on a
+        raise: a restart that cannot CONFIRM the persisted kill-switch / loss state must
+        NOT silently resume a halted bot. The previous behaviour swallowed every error and
+        returned ``None``, collapsing "DB down" into "nothing persisted" — which made the
+        fail-closed guard unreachable for the production store. That swallow is GONE: only
+        a genuine ``row is None`` returns ``None``; any read error propagates.
         """
-        try:
-            with self._session() as session:
-                row = session.get(PredictionExecutorStateRow, self.SINGLETON_KEY)
-                if row is None:
-                    return None
-                return {
-                    "kill_switch_active": bool(row.kill_switch_active),
-                    "kill_switch_reason": row.kill_switch_reason or "",
-                    "kill_switch_time": _parse_dt(row.kill_switch_time),
-                    "realized_pnl_total": float(row.realized_pnl_total),
-                    "realized_pnl_daily": float(row.realized_pnl_daily),
-                    "loss_cap_day": row.loss_cap_day or "",
-                }
-        except Exception as e:
-            logger.warning("ExecutorStateStore: load failed: %s", e)
-            return None
+        with self._session() as session:
+            row = session.get(PredictionExecutorStateRow, self.SINGLETON_KEY)
+            if row is None:
+                return None
+            return {
+                "kill_switch_active": bool(row.kill_switch_active),
+                "kill_switch_reason": row.kill_switch_reason or "",
+                "kill_switch_time": _parse_dt(row.kill_switch_time),
+                "realized_pnl_total": float(row.realized_pnl_total),
+                "realized_pnl_daily": float(row.realized_pnl_daily),
+                "loss_cap_day": row.loss_cap_day or "",
+            }
 
     def save(self, state: dict) -> bool:
         """Persist the executor safety state. Returns True on success (best-effort, never raises)."""

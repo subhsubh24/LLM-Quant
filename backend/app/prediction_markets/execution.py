@@ -690,7 +690,9 @@ class PredictionMarketExecutor:
         # production singleton wires a real store via attach_state_store() in
         # get_executor(), which then REHYDRATES a tripped kill switch / accumulated loss
         # across restarts (a restart must not silently un-halt trading or reset the loss
-        # budget). Best-effort throughout: persistence can never break the trade path.
+        # budget). SAVE is best-effort (never breaks the trade path); but REHYDRATE FAILS
+        # CLOSED — if the store is attached but unreadable, the executor halts rather than
+        # resume un-halted (see attach_state_store).
         self._state_store = None
 
     @property
@@ -750,8 +752,12 @@ class PredictionMarketExecutor:
 
         Called once on the long-lived production executor (in ``get_executor``). Loads any
         persisted kill-switch / realized-PnL state so a restart cannot silently un-trip a
-        halted kill switch or reset the accumulated loss budget. Best-effort: a load
-        failure leaves the fresh in-memory state intact.
+        halted kill switch or reset the accumulated loss budget. FAILS CLOSED: if the store
+        is attached but UNREADABLE (``_rehydrate_state`` raises — e.g. the DB is unreachable
+        at startup), the executor trips its OWN kill switch (reason ``state_rehydrate_failed``)
+        rather than resume with fresh, un-halted state, because it cannot confirm there was
+        no persisted halt. (An ABSENT row is not a failure — the store returns ``None`` and
+        the executor legitimately starts fresh.)
         """
         self._state_store = store
         try:
@@ -882,6 +888,14 @@ class PredictionMarketExecutor:
         # Kill switch overrides everything
         if self._kill_switch_active:
             return f"KILL SWITCH ACTIVE: {self._kill_switch_reason}"
+
+        # SIDE-EFFECT INTEGRITY (defense-in-depth): never fill an order that has no
+        # tradeable token. A multi-leg / basket opportunity (outcome_idx == -1) is skipped
+        # upstream in the orchestrator, but guard HERE too so NO path can phantom-fill an
+        # empty-token order through _simulate_fill (which fills unconditionally) and book a
+        # meaningless empty-key position.
+        if not req.token_id:
+            return "empty token_id — no tradeable token (multi-leg basket not executable here)"
 
         # HARD LOSS CAPS (D3) enforced AT THE GATE — defense-in-depth alongside the
         # auto-trip on PnL realization. If realized losses already breach a cap, trip

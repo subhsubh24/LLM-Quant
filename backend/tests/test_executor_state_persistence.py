@@ -199,3 +199,55 @@ def test_save_then_load_roundtrip_is_faithful(engine):
 
 def test_load_returns_none_when_empty(engine):
     assert ExecutorStateStore(engine=engine).load() is None
+
+
+def test_real_store_unreadable_fails_closed():
+    # The PRODUCTION store (ExecutorStateStore), not a bespoke boom-store: pointed at an
+    # engine whose table was NEVER created, load() must RAISE (it no longer swallows), so
+    # attach_state_store FAILS CLOSED. This is the real DB-unreachable-at-restart scenario
+    # an adversarial auditor proved the old swallow-and-return-None defeated.
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    # Deliberately do NOT init_db(eng) -> the table is absent -> a read raises.
+    store = ExecutorStateStore(engine=eng)
+    with pytest.raises(Exception):
+        store.load()  # confirms load() propagates a read error instead of returning None
+
+    ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    ex.attach_state_store(store)
+    assert ex.kill_switch_active is True
+    assert ex._kill_switch_reason.startswith("state_rehydrate_failed")
+
+
+def test_empty_token_order_is_rejected_no_phantom_fill():
+    # Defense-in-depth: an order with an empty token_id has no tradeable token; the gate
+    # must REJECT it so _simulate_fill (which fills unconditionally) can't book a phantom
+    # empty-key position.
+    from backend.app.prediction_markets.execution import (
+        OrderRequest, OrderSide, OrderType, Exchange,
+    )
+    ex = PredictionMarketExecutor(dry_run=True, max_position_usd=1000.0, max_portfolio_usd=10000.0)
+    res = ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m", token_id="",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=10.0, price=0.5,
+    ))
+    assert res.status.name == "REJECTED"
+    assert ex.positions == {}  # no phantom empty-key position booked
+
+
+def test_malformed_loss_cap_env_falls_back_loud(monkeypatch, caplog):
+    # A malformed MAX_DAILY_LOSS_USD must FAIL LOUD (logged) and fall back to the
+    # conservative $25 — never silently swallowed, never loosened.
+    import logging
+    import backend.app.config as cfg
+
+    class _S:
+        max_daily_loss_usd = "not-a-number"
+        max_total_loss_usd = 100.0
+        live_trading_enabled = False
+
+    monkeypatch.setattr(cfg, "get_settings", lambda: _S())
+    with caplog.at_level(logging.WARNING):
+        ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    assert ex.max_daily_loss_usd == 25.0   # conservative fallback (tighter, never looser)
+    assert ex.max_total_loss_usd == 100.0
+    assert any("MAX_DAILY_LOSS_USD" in r.getMessage() for r in caplog.records)
