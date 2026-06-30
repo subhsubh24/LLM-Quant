@@ -104,3 +104,67 @@ def test_search_query_and_limit_bounded(monkeypatch):
     assert client.post(
         "/prediction-markets/search", json={"query": "", "limit": 10}
     ).status_code == 422
+
+
+def test_read_endpoint_limits_are_bounded(monkeypatch):
+    # Read endpoints used to take an UNBOUNDED limit/offset → a single request could ask
+    # for a million-row fetch + serialization (resource exhaustion). Validation now rejects
+    # out-of-range values (422) BEFORE the handler runs, so no DB/work happens.
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.get("/prediction-markets/markets?limit=999999").status_code == 422
+    assert client.get("/prediction-markets/markets?limit=0").status_code == 422
+    assert client.get("/prediction-markets/markets?offset=-1").status_code == 422
+    assert client.get("/prediction-markets/orders?limit=999999").status_code == 422
+    assert client.get("/prediction-markets/price-history/tok?limit=999999").status_code == 422
+    assert client.get("/prediction-markets/pnl-history?limit=999999").status_code == 422
+    assert client.get("/prediction-markets/bot/activity?limit=999999").status_code == 422
+    # happy path: an IN-BOUNDS value must NOT be rejected (guards against a too-tight bound).
+    # The handler may 200/500 on egress, but validation must pass (never 422).
+    assert client.get("/prediction-markets/markets?limit=1000&offset=0").status_code != 422
+    assert client.get("/prediction-markets/orders?limit=1000").status_code != 422
+    assert client.get("/prediction-markets/bot/activity?limit=1").status_code != 422
+
+
+def test_quant_endpoint_floats_are_bounded(monkeypatch):
+    # Quant endpoints expect constrained numerics (mid_price ∈ [0,1], hours > 0,
+    # kelly ∈ (0,1], bankroll > 0). Out-of-range / non-finite inputs are rejected (422)
+    # instead of crashing the model or poisoning Bayesian state.
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    base = "/prediction-markets/quant/avellaneda-stoikov?token_id=t"
+    assert client.get(f"{base}&mid_price=1.5").status_code == 422
+    assert client.get(f"{base}&mid_price=-0.1").status_code == 422
+    assert client.get(f"{base}&mid_price=inf").status_code == 422
+    assert client.get(f"{base}&mid_price=nan").status_code == 422
+    assert client.get(f"{base}&mid_price=0.5&hours_to_resolution=0").status_code == 422
+    mc = "/prediction-markets/quant/monte-carlo-kelly"
+    assert client.get(f"{mc}?naive_kelly_fraction=2.0").status_code == 422
+    assert client.get(f"{mc}?bankroll=-10").status_code == 422
+    # the bayesian update is also auth-guarded; with token unset, bounds still apply
+    assert client.post(
+        "/prediction-markets/quant/bayesian/update?key=k&signal_mean=1.5"
+    ).status_code == 422
+    # happy path: in-bounds quant inputs are accepted by validation (never 422)
+    assert client.get(f"{base}&mid_price=0.5&hours_to_resolution=24").status_code != 422
+    assert client.get(f"{mc}?naive_kelly_fraction=0.05&bankroll=500").status_code != 422
+
+
+def test_status_error_is_sanitized_no_raw_exception(monkeypatch):
+    # The public /status endpoint must not leak a raw exception string (URL, internals,
+    # stack) when a venue request fails — only the exception TYPE name is surfaced.
+    import requests as _requests
+
+    def _boom(*a, **k):
+        raise RuntimeError("secret-internal-host:5432/db?token=leak")
+
+    # the /status route does `import requests; requests.get(...)`, so patch requests.get
+    monkeypatch.setattr(_requests, "get", _boom)
+    client = _router_client()
+    r = client.get("/prediction-markets/status")
+    assert r.status_code == 200
+    body = r.json()
+    for venue in ("gamma_api", "clob_api"):
+        err = body[venue]["error"]
+        assert err == "RuntimeError"
+        assert "secret-internal-host" not in str(err)
