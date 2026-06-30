@@ -10,6 +10,7 @@ Uses py-clob-client for authenticated operations, raw HTTP for read-only scannin
 """
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -638,15 +639,44 @@ class PolymarketClient:
             except (ValueError, TypeError):
                 token_ids = [t.strip() for t in token_ids.split(",") if t.strip()]
 
+        # Honesty guard (mirrors the Kalshi one-sided-book fix, RESEARCH_MEMORY 2026-06-30):
+        # the label / price / token arrays must be PARALLEL and COMPLETE. When they were not,
+        # a missing token_id silently became "" and a missing/garbage price was FABRICATED as
+        # 0.5 — inventing a "tradeable 50/50" market out of nothing (the data analog of a fake
+        # fill: an Outcome at 0.5 passes DataQualityValidator since 0.5 ∈ [0,1], so the
+        # fabrication would flow downstream as a real price). We no longer fabricate: a length
+        # mismatch, a missing/empty token_id, or a non-finite / out-of-range price marks the
+        # whole market UNTRADEABLE (active=False) and logs LOUDLY, so nothing trades on
+        # invented data and the discrepancy surfaces on the first real fetch.
+        n_labels = len(outcome_labels)
+        parse_incomplete = (len(token_ids) != n_labels) or (len(outcome_prices) != n_labels)
         outcomes = []
         for i, label in enumerate(outcome_labels):
+            tok = token_ids[i] if i < len(token_ids) else ""
+            raw_price = outcome_prices[i] if i < len(outcome_prices) else None
+            if raw_price is None or not math.isfinite(raw_price) or not (0.0 <= raw_price <= 1.0):
+                parse_incomplete = True
+                # a finite, in-range sentinel ONLY so the dataclass stays well-formed;
+                # active=False below guarantees this market is never traded.
+                price = 0.0
+            else:
+                price = raw_price
+            if not tok:
+                parse_incomplete = True
             outcomes.append(Outcome(
-                token_id=token_ids[i] if i < len(token_ids) else "",
+                token_id=tok,
                 label=label.strip(),
-                price=outcome_prices[i] if i < len(outcome_prices) else 0.5,
-                midpoint=outcome_prices[i] if i < len(outcome_prices) else 0.5,
+                price=price,
+                midpoint=price,
                 volume=0.0,
             ))
+        if parse_incomplete:
+            logger.warning(
+                "[PARSE] Polymarket market %r has inconsistent/incomplete outcome arrays "
+                "(labels=%d prices=%d tokens=%d) or an out-of-range price — marking "
+                "UNTRADEABLE (active=False) rather than fabricating a price",
+                raw.get("id", ""), n_labels, len(outcome_prices), len(token_ids),
+            )
 
         # Parse end date
         end_date = None
@@ -696,7 +726,7 @@ class PolymarketClient:
             outcomes=outcomes,
             total_volume=volume,
             liquidity=liquidity,
-            active=raw.get("active", False),
+            active=bool(raw.get("active", False)) and not parse_incomplete,
             closed=raw.get("closed", False),
             resolved=raw.get("resolved", False) if "resolved" in raw else False,
             resolution_source=raw.get("resolutionSource", ""),
