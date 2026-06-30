@@ -376,7 +376,7 @@ async def scan_prediction_markets(market_limit: int = 200):
         }
     except Exception as e:
         logger.error(f"Prediction scan error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Prediction scan failed")
 
 
 @router.get("/prediction-markets/weather")
@@ -404,7 +404,7 @@ async def get_weather_forecasts():
         }
     except Exception as e:
         logger.error(f"Weather forecast error: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Weather forecast failed")
 
 
 @router.get("/prediction-markets/strategies")
@@ -573,7 +573,8 @@ async def reset_prediction_portfolio():
 
         return {"status": "ok", "message": "Portfolio and strategy state reset"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio reset error: {e}")
+        raise HTTPException(status_code=500, detail="Portfolio reset failed")
 
 
 @router.get("/prediction-markets/orders")
@@ -1226,7 +1227,8 @@ async def get_vpin_metrics(token_id: Optional[str] = None):
                     return {"tracked_tokens": len(all_vpin), "metrics": all_vpin}
         return {"error": "Market making strategy not active or VPIN tracker not initialized"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"VPIN metrics error: {e}")
+        raise HTTPException(status_code=500, detail="VPIN metrics unavailable")
 
 
 @router.get("/prediction-markets/quant/avellaneda-stoikov")
@@ -1248,7 +1250,8 @@ async def get_as_diagnostics(token_id: str, mid_price: float, inventory: float =
             "diagnostics": diagnostics,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Avellaneda-Stoikov diagnostics error: {e}")
+        raise HTTPException(status_code=500, detail="Quote diagnostics failed")
 
 
 @router.get("/prediction-markets/quant/bayesian")
@@ -1274,7 +1277,8 @@ async def get_bayesian_priors():
             }
         return {"active_priors": len(priors), "priors": priors}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Bayesian priors error: {e}")
+        raise HTTPException(status_code=500, detail="Bayesian priors unavailable")
 
 
 @router.post("/prediction-markets/quant/bayesian/update", dependencies=_MUTATING_AUTH)
@@ -1295,7 +1299,8 @@ async def update_bayesian_prior(key: str, signal_mean: float, signal_weight: flo
                 }
         return {"error": "No strategy with Bayesian updater found"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Bayesian update error: {e}")
+        raise HTTPException(status_code=500, detail="Bayesian update failed")
 
 
 @router.get("/prediction-markets/quant/monte-carlo-kelly")
@@ -1315,4 +1320,5 @@ async def get_mc_kelly_estimate(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Monte Carlo Kelly error: {e}")
+        raise HTTPException(status_code=500, detail="Kelly sizing failed")

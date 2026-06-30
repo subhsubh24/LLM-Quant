@@ -158,7 +158,19 @@ class RiskManager:
         # Record this market's category so _get_category_exposure can filter accurately
         self._market_categories[opportunity.market.id] = category
         cat_exposure = self._get_category_exposure(category, executor)
-        estimated_add = opportunity.entry_price * 10  # Rough estimate
+        # Conservative bound = the executor's REAL per-trade notional cap. The executor
+        # rejects any order whose notional exceeds `executor.max_position_usd`
+        # (execution.py `_check_risk`), so a single trade can add at most that much to a
+        # category. The old `entry_price * 10` hardcoded ~10 contracts (e.g. $5 at a
+        # $0.50 price) and systematically UNDER-counted the add, letting a full-size
+        # trade breach the category cap (a deep-audit gate-bypass finding). We read the
+        # executor's ACTUAL cap rather than RiskConfig.max_single_position_usd (which is
+        # NOT wired to the executor) so the reservation matches the real per-trade size —
+        # neither under- nor over-counting. Falls back to the RiskConfig bound only if the
+        # executor doesn't expose its cap.
+        estimated_add = getattr(
+            executor, "max_position_usd", self.config.max_single_position_usd
+        )
         if cat_exposure + estimated_add > self.config.max_category_exposure_usd:
             return RiskCheckResult(
                 approved=False,
@@ -281,8 +293,14 @@ class RiskManager:
         """Calculate a composite risk score for an opportunity (0 = safe, 1 = risky)."""
         scores = []
 
-        # Exposure ratio
-        exposure_ratio = executor.total_exposure / self.config.max_portfolio_exposure_usd
+        # Exposure ratio. Guard the division: an owner/admin can set the limit to 0 via
+        # the risk-config route, and `_calculate_risk_score` must never raise
+        # ZeroDivisionError into the scan loop (a deep-audit finding). A non-positive
+        # cap means "no headroom" → treat as fully-saturated (ratio 1.0).
+        if self.config.max_portfolio_exposure_usd > 0:
+            exposure_ratio = executor.total_exposure / self.config.max_portfolio_exposure_usd
+        else:
+            exposure_ratio = 1.0
         scores.append(exposure_ratio)
 
         # Daily P&L ratio (how close to circuit breaker)
@@ -290,8 +308,11 @@ class RiskManager:
             pnl_ratio = abs(min(0, self._daily_pnl)) / self.config.daily_loss_limit_usd
             scores.append(pnl_ratio)
 
-        # Position count ratio
-        pos_ratio = len(executor.positions) / self.config.max_total_positions
+        # Position count ratio (same zero-cap guard as above)
+        if self.config.max_total_positions > 0:
+            pos_ratio = len(executor.positions) / self.config.max_total_positions
+        else:
+            pos_ratio = 1.0
         scores.append(pos_ratio)
 
         # Low confidence = higher risk

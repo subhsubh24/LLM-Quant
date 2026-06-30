@@ -25,10 +25,38 @@ def test_bypass_in_paper_mode_is_allowed():
     assert s.live_trading_enabled is False
 
 
-def test_live_without_bypass_is_allowed():
-    """Live mode with the bypass OFF boots normally."""
-    s = Settings(e2e_disable_rate_limit=False, live_trading_enabled=True)
+def test_live_without_bypass_but_with_control_token_is_allowed():
+    """Live mode with the bypass OFF + a control token set boots normally."""
+    s = Settings(
+        e2e_disable_rate_limit=False,
+        live_trading_enabled=True,
+        backend_api_token="a-strong-secret",
+    )
     assert s.live_trading_enabled is True
+    assert s.backend_api_token == "a-strong-secret"
+
+
+def test_live_without_control_token_refuses_to_boot():
+    """Real money on the line + an UNAUTHENTICATED control surface → hard boot refusal.
+
+    LIVE_TRADING_ENABLED=true with an empty BACKEND_API_TOKEN would leave the
+    kill-switch / execute / bot-control routes open on a real-money deploy.
+    """
+    with pytest.raises(ValidationError):
+        Settings(live_trading_enabled=True, backend_api_token="")
+
+
+def test_live_with_whitespace_only_token_refuses_to_boot():
+    """A blank/whitespace token is not a credential — still refuses in live mode."""
+    with pytest.raises(ValidationError):
+        Settings(live_trading_enabled=True, backend_api_token="   ")
+
+
+def test_paper_mode_needs_no_control_token():
+    """Paper/dev (live OFF, the default) boots fine with no token — auth degrades open."""
+    s = Settings(live_trading_enabled=False, backend_api_token="")
+    assert s.live_trading_enabled is False
+    assert s.backend_api_token == ""
 
 
 def test_default_is_safe():
