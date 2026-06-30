@@ -58,6 +58,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_real_data_validation.py \
            backend/tests/test_strategy_audit.py \
            backend/tests/test_self_validation.py \
+           backend/tests/test_validate_gtm.py \
            backend/tests/test_scorecard.py \
            backend/tests/test_calibration.py \
            backend/tests/test_data_quality.py \
@@ -315,6 +316,22 @@ else
   bad "scripts/check_self_validation.py missing"
 fi
 [ "$FAIL" = 0 ] || die "self-validation coverage"
+
+say "9e. GTM honesty (a growth number with no connected source is a fabrication risk)"
+# BLOCKING: fails closed if any GROWTH_STATUS funnel/acquisition/pmf/channels/metrics number is
+# reported (>0, excl. target/config keys) without a connected source (channels_connected /
+# venues_connected / a sources block), or if a GTM_SCORECARD is present but malformed. Pre-launch
+# everything is 0/null -> green. (GTM analog of self-validation; mirrors AptDesignerAI validate-gtm.)
+if [ -f scripts/validate_gtm.py ]; then
+  if "$PY" scripts/validate_gtm.py; then
+    ok "GTM honesty"
+  else
+    bad "GTM honesty failed"
+  fi
+else
+  bad "scripts/validate_gtm.py missing"
+fi
+[ "$FAIL" = 0 ] || die "GTM honesty"
 
 if [ "$SCOPE" = "code" ]; then
   printf '\n\033[32mPREFLIGHT (code scope) GREEN — correctness + safety gates pass.\033[0m\n'
