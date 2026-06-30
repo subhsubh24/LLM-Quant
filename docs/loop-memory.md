@@ -2,6 +2,32 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-29 — GTM honesty gate (validate_gtm): a growth number with no source is a fabrication risk
+
+- **Parity ask:** AptDesignerAI added a required `validate-gtm` check (GTM analog of
+  `validate-capabilities`). Built the same here, adapted to stack + product.
+- **Stack adaptation:** wrote it in **Python** (`scripts/validate_gtm.py`), not `.mjs` — the preflight
+  gate runs Python, not Node, and `requirements-ci.txt` is Python-only; a Node script would force Node
+  into the gate job. Mirrors the reference's OUTCOME (fail-closed on a sourceless metric + GTM_SCORECARD
+  validity), wired as blocking preflight step **9e**.
+- **Product adaptation (the real insight):** LLM-Quant is a PERSONAL bot — NOT marketed, no users — so
+  the literal `funnel/acquisition/pmf/channels` GTM sections don't exist. The meaningful analog of "a
+  growth number with no source" is the performance **`metrics`** block (weekly_pnl/hit_rate/…), whose
+  "connected source" is **`venues_connected`**. So the rule becomes: you cannot report a paper/live PnL
+  or hit-rate with ZERO connected venues. Same honesty principle, mapped to the product's real growth
+  surface.
+- **Two traps avoided:** (1) TARGET/CONFIG keys (`weekly_pnl_target_usd`, `*_floor`, `*_cap`,
+  `live_enabled`, `engine_pct`) are EXCLUDED from the tripwire — a target is not reported traction, so
+  it must not trip the gate. (2) The grade-validity check flags any short non-grade string (e.g. `Z`),
+  not just malformed A–F — my first regex was too narrow and a test caught it.
+- **Readiness N/A:** the reference's `--readiness` requires a GTM_SCORECARD; this bot has no GTM
+  auditor/scorecard and won't, so GTM readiness is N/A and `--readiness` is deliberately NOT wired into
+  the gate (would red-block). Documented in the script.
+- **Lesson:** GTM-rigor parity for a no-GTM product isn't vacuous — re-map "growth metric" to the
+  product's actual traction numbers (here: trading performance sourced by connected venues) and the
+  same fail-closed honesty gate becomes genuinely protective. Green pre-launch (all metrics 0/null);
+  11 regression tests; now a blocking step inside the required check.
+
 ## 2026-06-29 — Canonical sync: FACTORY_STANDARD.md re-synced to AptDesignerAI + routine anchored to it
 
 - **Canonical sync (authorized):** overwrote `FACTORY_STANDARD.md` VERBATIM with the canonical copy
