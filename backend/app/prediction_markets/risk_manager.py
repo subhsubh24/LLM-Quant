@@ -158,7 +158,17 @@ class RiskManager:
         # Record this market's category so _get_category_exposure can filter accurately
         self._market_categories[opportunity.market.id] = category
         cat_exposure = self._get_category_exposure(category, executor)
-        estimated_add = opportunity.entry_price * 10  # Rough estimate
+        # Conservative upper-bound estimate of what this trade adds to the category.
+        # The real Kelly size is not known until AFTER this pre-trade gate, but the
+        # executor caps any single position at max_single_position_usd — so reserving a
+        # full position's worth of headroom is the SAFE direction. The old
+        # `entry_price * 10` hardcoded ~10 contracts (e.g. $5 at a $0.50 price), which
+        # systematically UNDER-counted the add and let the category cap be breached by a
+        # full-size Kelly trade (a deep-audit gate-bypass finding). Never under-estimate a
+        # risk cap's headroom.
+        estimated_add = max(
+            self.config.max_single_position_usd, opportunity.entry_price * 10
+        )
         if cat_exposure + estimated_add > self.config.max_category_exposure_usd:
             return RiskCheckResult(
                 approved=False,
@@ -281,8 +291,14 @@ class RiskManager:
         """Calculate a composite risk score for an opportunity (0 = safe, 1 = risky)."""
         scores = []
 
-        # Exposure ratio
-        exposure_ratio = executor.total_exposure / self.config.max_portfolio_exposure_usd
+        # Exposure ratio. Guard the division: an owner/admin can set the limit to 0 via
+        # the risk-config route, and `_calculate_risk_score` must never raise
+        # ZeroDivisionError into the scan loop (a deep-audit finding). A non-positive
+        # cap means "no headroom" → treat as fully-saturated (ratio 1.0).
+        if self.config.max_portfolio_exposure_usd > 0:
+            exposure_ratio = executor.total_exposure / self.config.max_portfolio_exposure_usd
+        else:
+            exposure_ratio = 1.0
         scores.append(exposure_ratio)
 
         # Daily P&L ratio (how close to circuit breaker)
@@ -290,8 +306,11 @@ class RiskManager:
             pnl_ratio = abs(min(0, self._daily_pnl)) / self.config.daily_loss_limit_usd
             scores.append(pnl_ratio)
 
-        # Position count ratio
-        pos_ratio = len(executor.positions) / self.config.max_total_positions
+        # Position count ratio (same zero-cap guard as above)
+        if self.config.max_total_positions > 0:
+            pos_ratio = len(executor.positions) / self.config.max_total_positions
+        else:
+            pos_ratio = 1.0
         scores.append(pos_ratio)
 
         # Low confidence = higher risk

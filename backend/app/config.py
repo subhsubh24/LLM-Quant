@@ -158,6 +158,29 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _require_control_auth_in_live(self) -> "Settings":
+        """Real money on the line ⇒ the control surface MUST be authenticated.
+
+        The backend's state-mutating routes (kill-switch, execute, bot start/stop, risk
+        config, portfolio reset) degrade-safely to OPEN when BACKEND_API_TOKEN is unset —
+        correct for paper/dev, but a deploy that flips LIVE_TRADING_ENABLED while leaving
+        the token empty would expose an unauthenticated kill-switch/execute surface on a
+        real-money bot (a deep-audit footgun). So when live trading is on, an empty token
+        HARD-REFUSES to boot. This can NEVER affect paper/dev/CI (live defaults false and
+        the autonomous loop never flips it) — it only binds the owner's real-money host,
+        mirroring `_forbid_test_bypass_in_live`. See PENDING_OPS OA-14 / LIVE_RUNBOOK §5.
+        """
+        if self.live_trading_enabled and not (self.backend_api_token or "").strip():
+            raise ValueError(
+                "LIVE_TRADING_ENABLED is true but BACKEND_API_TOKEN is empty — the "
+                "state-mutating control routes (kill-switch, execute, bot start/stop) would "
+                "be UNAUTHENTICATED on a real-money deploy. Refusing to boot. Set "
+                "BACKEND_API_TOKEN to a strong random secret on the live host (see "
+                "LIVE_RUNBOOK §5 / PENDING_OPS OA-14)."
+            )
+        return self
+
     @property
     def has_llm_key(self) -> bool:
         """Check if LLM API key is configured."""

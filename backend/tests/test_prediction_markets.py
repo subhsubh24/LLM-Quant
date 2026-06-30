@@ -547,6 +547,62 @@ class TestRiskManager:
         assert "test" not in rm._disabled_strategies
 
 
+class TestRiskManagerHardening:
+    """Deep-audit hardening: the category cap must not be under-counted, and the risk
+    score must never crash on a zero/unset config limit."""
+
+    def _today(self):
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def test_category_estimate_uses_conservative_single_position_bound(self):
+        """A full-size Kelly trade must not slip past the category cap.
+
+        The old `entry_price * 10` estimate (~$5 at a $0.50 price) under-counted the add,
+        so a real max_single_position_usd ($50) trade could breach the category cap. With
+        the cap at $40 and an empty category, the conservative estimate ($50) BLOCKS it —
+        the old estimate ($5) would have wrongly approved it.
+        """
+        from app.prediction_markets.risk_manager import RiskManager, RiskConfig
+        from app.prediction_markets.execution import PredictionMarketExecutor
+        rm = RiskManager(config=RiskConfig(
+            max_category_exposure_usd=40.0, max_single_position_usd=50.0))
+        rm._daily_date = self._today()
+        executor = PredictionMarketExecutor(dry_run=True)
+        opp = _make_scan_result(entry_price=0.50)  # old estimate would be $5
+        result = rm.check_opportunity(opp, executor)
+        assert not result.approved
+        assert "Category" in result.reason
+
+    def test_category_cap_with_headroom_still_approves(self):
+        """The conservative estimate is not absurdly strict: one full position fits a
+        cap with headroom (no over-blocking of legitimate trades)."""
+        from app.prediction_markets.risk_manager import RiskManager, RiskConfig
+        from app.prediction_markets.execution import PredictionMarketExecutor
+        rm = RiskManager(config=RiskConfig(
+            max_category_exposure_usd=60.0, max_single_position_usd=50.0))
+        rm._daily_date = self._today()
+        executor = PredictionMarketExecutor(dry_run=True)
+        opp = _make_scan_result(entry_price=0.50)
+        result = rm.check_opportunity(opp, executor)
+        assert result.approved
+
+    def test_risk_score_does_not_crash_on_zero_config_limits(self):
+        """A risk-config route that sets a limit to 0 must not raise ZeroDivisionError
+        into the scan loop — `_calculate_risk_score` guards the divisions."""
+        from app.prediction_markets.risk_manager import RiskManager, RiskConfig
+        from app.prediction_markets.execution import PredictionMarketExecutor
+        rm = RiskManager(config=RiskConfig(
+            max_portfolio_exposure_usd=0.0,
+            daily_loss_limit_usd=0.0,
+            max_total_positions=0,
+        ))
+        executor = PredictionMarketExecutor(dry_run=True)
+        opp = _make_scan_result()
+        score = rm._calculate_risk_score(opp, executor)  # must NOT raise
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+
 # ============================================================
 # Orchestrator Tests
 # ============================================================

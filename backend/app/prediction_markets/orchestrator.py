@@ -310,15 +310,29 @@ class MarkToMarketEngine:
         except ImportError:
             return
 
+        positions = list(self.executor.positions.items())
+        if not positions:
+            return
+
+        # Reuse ONE client (and its requests.Session connection pool) across all
+        # positions this cycle. The MTM loop runs every ~30s, so the old per-position
+        # `PolymarketClient()` leaked a fresh Session per open position per cycle
+        # (2880 cycles/day × N positions) — a deep-audit resource-churn finding. The
+        # client's own get() carries timeout=15, so a hung venue cannot block forever.
+        try:
+            client = PolymarketClient()
+        except Exception as e:  # never let client init break settlement
+            logger.debug(f"[MTM] PolymarketClient init failed; skipping resolution check: {e}")
+            return
+
         resolved = []
-        for token_id, pos in list(self.executor.positions.items()):
+        for token_id, pos in positions:
             if token_id in self._resolution_cache:
                 continue
 
             # Check if market has resolved
             try:
                 # Check via Gamma API
-                client = PolymarketClient()
                 market = client.get_market_by_slug(pos.market_id)
                 if market and market.resolved:
                     # Find the winning outcome
