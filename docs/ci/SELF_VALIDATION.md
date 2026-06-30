@@ -59,8 +59,8 @@ SELF_VALIDATION:
       ci_validatable: true             # exercised against in-memory SQLite; no secret needed to validate
       status: validated
     - id: backend_route_auth
-      desc: "shared-secret bearer token on state-mutating routes (kill-switch/config/execute/bot)"
-      validates_via: "test_backend_auth.py — open when BACKEND_API_TOKEN unset (degrades safely), exact-Bearer required + all mismatches denied (constant-time) when set"
+      desc: "shared-secret bearer token on state-mutating routes (kill-switch/config/execute/bot/scan); risk-config bounds-validated (a non-positive loss cap can't disable the control)"
+      validates_via: "test_backend_auth.py (pure decision: open when BACKEND_API_TOKEN unset, exact-Bearer + constant-time when set) + test_risk_config_validation.py (pure bounds: reject non-positive/NaN/inf/absurd risk limits) in the CI gate; test_backend_auth_fastapi.py exercises the FastAPI adapter (the /scan guard + market_limit/risk-config/search bounds return 401/422) where fastapi is installed (importorskip — CI-skipped, run locally)"
       mode: degrades_without_key
       requires_env: [BACKEND_API_TOKEN]  # unset => auth disabled (open), unchanged paper/dev behaviour
       active: true

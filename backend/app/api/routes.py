@@ -2,8 +2,8 @@
 API routes for QuantLab.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
@@ -242,8 +242,8 @@ def _get_prediction_scanner():
 
 
 class MarketSearchRequest(BaseModel):
-    query: str
-    limit: int = 20
+    query: str = Field(..., min_length=1, max_length=200)
+    limit: int = Field(20, ge=1, le=500)
 
 
 def _serialize_market(m, exchange: str = "polymarket") -> dict:
@@ -339,9 +339,17 @@ async def search_prediction_markets(req: MarketSearchRequest):
     return {"markets": result, "count": len(result)}
 
 
-@router.post("/prediction-markets/scan")
-async def scan_prediction_markets(market_limit: int = 200):
-    """Run all strategies and return identified opportunities."""
+@router.post("/prediction-markets/scan", dependencies=_MUTATING_AUTH)
+async def scan_prediction_markets(
+    market_limit: int = Query(200, ge=1, le=5000),
+):
+    """Run all strategies and return identified opportunities.
+
+    Guarded by the shared-secret bearer (like its sibling ``/bot/scan-now``): a scan
+    mutates scanner counters and fans out many rate-limited Gamma/CLOB HTTP calls, so it
+    is a state-mutating / expensive endpoint, not a free read. ``market_limit`` is bounded
+    so the endpoint can't be driven into a million-page fetch.
+    """
     import asyncio
     scanner = _get_prediction_scanner()
     try:
@@ -1140,6 +1148,21 @@ class RiskConfigUpdate(BaseModel):
 @router.post("/prediction-markets/risk/config", dependencies=_MUTATING_AUTH)
 async def update_risk_config(req: RiskConfigUpdate):
     """Update risk manager configuration."""
+    # Bounds-validate BEFORE mutating live limits. A non-positive daily-loss cap would
+    # DISABLE loss protection (the check is realized_loss > limit, which a negative limit
+    # can never trip); NaN/inf/absurd values are likewise rejected. Pure decision in
+    # risk_config_validation so the CI-light gate can test it without fastapi.
+    from ..prediction_markets.risk_config_validation import validate_risk_config_update
+    errors = validate_risk_config_update(
+        daily_loss_limit_usd=req.daily_loss_limit_usd,
+        max_portfolio_exposure_usd=req.max_portfolio_exposure_usd,
+        max_single_position_usd=req.max_single_position_usd,
+        max_total_positions=req.max_total_positions,
+        max_orders_per_minute=req.max_orders_per_minute,
+    )
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+
     orchestrator = _get_orchestrator()
     config = orchestrator.risk_manager.config
 
@@ -1160,7 +1183,7 @@ async def update_risk_config(req: RiskConfigUpdate):
 # ============ Prediction Markets — Kill Switch ============
 
 @router.post("/prediction-markets/kill-switch/activate", dependencies=_MUTATING_AUTH)
-async def activate_kill_switch(reason: str = "manual"):
+async def activate_kill_switch(reason: str = Query("manual", max_length=200)):
     """Emergency kill switch — immediately blocks ALL new orders."""
     executor = _get_prediction_executor()
     executor.activate_kill_switch(reason=reason)

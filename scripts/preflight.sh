@@ -73,6 +73,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_executor_state_persistence.py \
            backend/tests/test_rest_order_validation.py \
            backend/tests/test_backend_auth.py \
+           backend/tests/test_risk_config_validation.py \
            backend/tests/test_durable_tables_created.py \
            backend/tests/test_walk_forward_pm.py \
            backend/tests/test_kalshi_client.py \
