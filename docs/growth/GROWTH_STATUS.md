@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-30
   phase: pre_launch
   engine_built: false
-  engine_pct: 73
+  engine_pct: 74   # +1 (2026-06-30, #99-#102): ingest-honesty + §12 hardening — WS price validation (no cache poisoning), Polymarket parse honesty (no fabricated 0.5/empty-token tradeable market), read/quant input bounds + /status error sanitization, CalibrationBucketStrategy active-gate. No new edge — quality hardening only.
   venues_connected:
     - polymarket_paper
   awaiting_connect:

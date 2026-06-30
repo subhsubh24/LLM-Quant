@@ -2,6 +2,61 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-30 (4th run) — data-integrity + security hardening (4-PR run); the live WS feed had NO price validation (cache-poisoning), and the Polymarket parser FABRICATED a DQV-passing 0.5/0.5 market
+
+- **Shipped 4 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep (data-integrity / security /
+  correctness / artifact-freshness lenses) across tracks A–G: (#99) **§12 input-bounds + error-hygiene** — bound the
+  remaining UNBOUNDED read endpoints (`/markets`,`/orders`,`/price-history`,`/pnl-history`,`/bot/activity`) + quant-model
+  float params (`mid_price`∈[0,1], `hours_to_resolution`>0, bayesian signal, mc-kelly fraction/bankroll), and sanitize the
+  unauthenticated `/status` raw-`str(e)` leak to the exception TYPE name only; (#100) **WS price validation** — the live
+  `websocket_feeds._handle_message` did a bare `float(change["price"])` with NO validation; (#101) **Polymarket parse
+  honesty** — the Gamma parser fabricated a `0.5`/`""` for incomplete outcome arrays; (#102) **CalibrationBucketStrategy
+  active-gate** (the Opus auditor's named finding). engine_pct 73→74. No DoD/floor box ticked — data-integrity + security
+  hardening, not a validated edge.
+- **THE headline gap — the live WS price path had ZERO validation, and the batch DQV gate doesn't cover it.** ROADMAP A5
+  wired `DataQualityValidator` into the orchestrator SCAN loop, so it's easy to assume "prices are validated." But the
+  real-time `websocket_feeds.py` cache (`_prices`) is written by `_handle_message` with a bare `float(change["price"])`
+  and consumed by `orchestrator.update_prices()` → `pos.current_price` → `unrealized_pnl`. DQV never sees it. A malformed
+  `"inf"`/`"nan"`/`"1.5"` would silently poison the cache; an `inf` bid/ask flows through `midpoint` into P&L + circuit
+  breakers. **Lesson: a data-quality gate validates the PATH it's wired into, not "the data" — enumerate every WRITER to a
+  shared cache (batch fetch AND the live WS feed AND last-trade), not just the one the gate guards.**
+- **THE side-effect-integrity catch — a fabricated price that PASSES the quality gate is the data analog of a fake fill.**
+  The Polymarket parser padded a missing price with a hardcoded `0.5` and a missing token with `""`. A symmetric
+  fabricated `0.5/0.5` SUMS TO 1.0 and (with both tokens present) PASSES `DataQualityValidator` as a tradeable market —
+  the exact Kalshi one-sided-book trap in a new place. **Lesson: fabricating a "reasonable-looking" default for missing
+  data is a correctness bug even when the default is in-range — the quality gate is tuned to catch GARBAGE, not PLAUSIBLE
+  fabrications. Make the fabrication FAIL the gate (sentinel `0.0`, sum≠1) AND mark the market untradeable (`active=False`),
+  not invent a value that slips through. A missing quote is not a 50/50 market.**
+- **THE reviewer catch (Reviewer A REQUEST_CHANGES) — a stale-but-fresh timestamp.** PR-#100's first cut refreshed the
+  `last_trade_price` timestamp UNCONDITIONALLY, even when both price and size were rejected. Since `data_age_seconds` (the
+  300s staleness eviction) derives from that timestamp, a flood of all-invalid last-trade messages would keep a STALE quote
+  looking fresh forever. **Lesson: when validation rejects an update, don't advance the freshness clock either — a rejected
+  write must be a true no-op (value AND timestamp), or you trade staleness for a subtler stale-but-fresh bug.** Fixed with
+  an `updated` flag + a regression test.
+- **THE auditor catch (Opus SOUND, with a named LOW finding) — the honesty invariant relies on EVERY consumer checking
+  `active`.** The parse fix's protection is "mark the bad market `active=False`, every strategy skips it." The auditor
+  enumerated all deployed strategies (all gate on `active`) and found ONE that didn't: `CalibrationBucketStrategy.scan`. For
+  a NON-price failure mode the YES price is a real in-range value, so it would leak. UNWIRED today (abstains with
+  `model=None`) so not a live break, but it's the B4a alpha mechanism that WILL be wired. **Lesson: a guard that relies on
+  "every consumer checks the flag" is only as strong as the consumer that forgets — when you add an honesty flag, grep
+  EVERY reader and confirm each gates on it, including the unwired-but-coming ones; fix them before they're wired.** Shipped
+  as #102 in the SAME run (disjoint file).
+- **Anti-padding held HARD under a mature engine + an egress-blocked constraint.** All egress (HuggingFace, Polymarket,
+  Kalshi) is 403 this run, so binding-constraint work (OOS corpus + alpha) is owner-scope. The 8 scouts surfaced ~25
+  candidates; I rejected ~20: a kelly-fraction seed_hash "determinism bug" that's a FALSE POSITIVE (the `_seed_hash`
+  docstring deliberately excludes the strategy_fn); `paper_simulator.py` cost-leak (the module is imported NOWHERE — dead);
+  a "scan unguarded" finding ALREADY fixed in #96 (stale ROADMAP read); a kill-switch multi-process race (overengineered for
+  the singleton) and a loss-cap FP-boundary "fix" that would make the cap LOOSER (wrong, unsafe direction); E-track polish
+  (unwired); the SELL-path risk wiring (a held-to-resolution no-op ALREADY deferred 2026-06-29); F7 lint activation (staged
+  ratchet). **Lesson: in a mature repo with the headline constraint owner-blocked, the honest maximal set is small +
+  defensive — verify each scout claim against the ACTUAL code (is the module wired? is the "bug" the documented contract? is
+  the safe direction tighter or looser?) before selecting; a Haiku scout's confident finding is a hypothesis, not a work item.**
+- **Process / env: local gate needs `pip install -r backend/requirements-ci.txt` + `fastapi` (importorskip tests), and
+  ruff must be REMOVED from the env (`/root/.local/bin/ruff`) — `preflight` step 3 `bad`s on ruff findings ONLY when ruff is
+  present; CI has no ruff, so the 166 pre-existing findings don't red the gate. Verified my diff added 0 new ruff findings
+  (statistics identical before/after) before relying on that.** Reviewed via `git diff BASE...HEAD` objects (not the shared
+  tree); ONE consolidated fix cycle; split integration branch into 4 disjoint branches; auto-merge on the required check.
+
 ## 2026-06-30 (2nd run) — security + side-effect-integrity + executor fail-closed (3-PR run); an Opus auditor broke a fail-safe that was DEAD CODE in prod, and a STALE local default-ref nearly shipped PRs on old code
 
 - **Shipped 3 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep across tracks A–G:

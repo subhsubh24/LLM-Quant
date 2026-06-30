@@ -40,31 +40,36 @@ LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-30
   last_run: 2026-06-30          # prior run (same day, 3rd): research run 10 — academic synthesis + EXP-003 + OA-16
-  last_deep_audit: 2026-06-30   # 8-Haiku scout sweep w/ correctness + security + quality-reconcile + artifact-freshness lenses ran last factory run
+  last_deep_audit: 2026-06-30   # 8-Haiku scout sweep w/ data-integrity + security + correctness + artifact-freshness lenses ran THIS factory run
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   validation:                   # self-validation capability readiness — refresh every run from `check_self_validation.py --readiness`
     enforced_in_ci: true        # the coverage gate is a blocking preflight step (9d) inside the required check
-    capabilities_total: 10      # unchanged this run (no new capability; backend_route_auth coverage widened to /scan + risk-config bounds)
+    capabilities_total: 10      # unchanged this run (no new capability/credential; data-integrity + §12 hardening only)
     unmet: []                   # active + ci_validatable:false capabilities (need an owner secret). NON-EMPTY => urgent OWNER_ACTION + blocks. Must match SELF_VALIDATION.readiness.unmet AND have a PENDING_OPS validation-capability-<id>.
   this_run:
-    changes_shipped: 0          # research-only run — no code PRs; 1 bookkeeping PR (RESEARCH_MEMORY + GROWTH_STATUS + PENDING_OPS + LOOP_HEALTH)
+    changes_shipped: 4          # 4 file-disjoint code PRs (#99 API input bounds + /status sanitization; #100 WS price validation; #101 Polymarket parse honesty; #102 CalibrationBucketStrategy active-gate) + this bookkeeping
     changes_abandoned: 0
-    abandoned_reasons: []        # research runs produce no code; correctly deferred factory builds to data-available state (binding constraint: OA-11/OA-16 corpus)
+    abandoned_reasons: []        # rejected ~20 scout candidates pre-build (false-positive kelly seed_hash; dead/unwired paper_simulator; already-fixed scan-guard; kill-switch-race/FP-boundary wrong-direction; unwired E-track polish; SELL-path already-deferred no-op; lint-gate sensitive F7 ratchet) — anti-padding, not abandonment
     verify_cycle_failures: 0
-    review_rejections: 0
+    review_rejections: 1         # Reviewer A REQUEST_CHANGES on #100 (last_trade timestamp refreshed unconditionally -> stale-but-fresh quote) — fixed in ONE cycle + regression test; re-verified green
     process_incidents: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 55             # unchanged (no new code PRs this run; +1 bookkeeping pending)
+    merged_prs: 60             # +5 this run (#99-#102 + bookkeeping)
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # OA-11 (Polymarket) + OA-15 (Kalshi) corpus = owner/egress-scope. OA-16 (HuggingFace) proposed as a bypass. No recurring loop wall.
+    recurring_failures: []       # OA-11 (Polymarket) + OA-15 (Kalshi) corpus = owner/egress-scope. OA-16 (HuggingFace) proposed as a bypass. All egress 403 in-env (universal this run) — confirmed owner-scope, not a loop wall.
     harness_proposals_open: 0
-  signal: improving              # 16th datapoint: research-only run (no code). Identified Polymarket-v1 HuggingFace dataset (1.3M markets, CC-BY-4.0) as a potential bypass for the OA-11 egress blocker — this is a genuine forward motion on the binding constraint. Academic synthesis (Le 2026, Prediction Arena, PolyBench) strengthens EXP-002/EXP-003 hypotheses with domain-specific calibration evidence. EXP-003 (political underconfidence) proposed. B4 design implication: LLMs lose money as autonomous traders (Prediction Arena); use Gemini as targeted research tool instead. No harness proposal warranted (loop not churning; the OA-16 path makes the data blocker tractable without a loop-rule change). unmet=[].
+  signal: improving              # 17th datapoint: factory run. 8-Haiku scout sweep -> maximal file-disjoint set of 4 data-integrity/security hardening PRs, all ship-critical-dimension work. The adversarial gate earned its keep: Reviewer A caught a stale-but-fresh-timestamp bug the unit tests passed over; the Opus auditor (SOUND) named the one consumer missing the active-gate (CalibrationBucketStrategy) -> shipped as #102. Honest maximal selection under a mature engine + egress-blocked binding constraint: rejected ~20 padding/false-positive/owner-gated candidates. No DoD/floor box ticked; engine_pct 73->74 (hardening, not a validated edge). Binding constraint unchanged: a real OOS corpus + alpha (OA-11/OA-15/OA-16, owner/egress-scope), so no harness proposal warranted. unmet=[].
 ```
 
 ## How to read the latest signal
+
+**2026-06-30 (17th datapoint — factory run, 4th of the day) — `improving`, a data-integrity + security hardening sweep; the adversarial gate caught a stale-quote bug and named the one consumer missing the active-gate.**
+An 8-Haiku scout sweep across tracks A–G (data-integrity / security / correctness / artifact-freshness lenses) surfaced the maximal file-disjoint, value-bar-clearing set; shipped **4 code PRs + this bookkeeping**, all ship-critical-dimension (functional-reality / security / artifact-integrity) hardening: (#99) **§12** — bound the remaining UNBOUNDED read endpoints + quant-model float params (resource-exhaustion + NaN/inf-into-model) and sanitize the unauthenticated `/status` raw-exception leak; (#100) **BUILDS≠WORKS** — the live WS price path did a bare `float()` with NO validation, so NaN/inf/out-of-range could silently poison the in-memory price cache that strategies+executor read (the batch path has DQV; the feed did not) → coerce + range-check every field, skip the update on a bad primary price; (#101) **side-effect integrity** — the Polymarket parser FABRICATED a `0.5`/empty-token "tradeable 50/50" market that PASSES DQV (the data analog of a fake fill) → now marked untradeable (`active=False`), un-fabricated data fails DQV; (#102) **honesty-invariant completion** — gate `CalibrationBucketStrategy.scan` on `market.active` (the one consumer the parse fix relied on that wasn't gating). **The gate earned its keep twice:** (1) Reviewer A returned REQUEST_CHANGES on #100 — the `last_trade_price` timestamp refreshed even when ALL fields were rejected, so a garbage flood could keep a stale quote looking fresh (defeating the 300s staleness eviction); fixed in ONE cycle + a regression test. (2) the Opus data-integrity auditor (**SOUND** — could not get a fabricated/invalid price onto any deployed tradeable path) named `CalibrationBucketStrategy` as the lone consumer missing the active-gate → shipped as #102. **Honest maximal selection under a mature engine (engine_pct 73→74) + an egress-blocked binding constraint:** rejected ~20 scout candidates as padding / false-positive (a kelly seed_hash "bug" that's actually the documented strategy-fn exclusion) / dead-unwired (paper_simulator) / already-fixed (scan-guard #96) / wrong-direction (loosening a loss cap) / already-deferred (SELL-path held-to-resolution no-op) / sensitive-staged (F7 lint ratchet). **All egress (HuggingFace + Polymarket + Kalshi) is 403 in-env this run** — confirming OA-11/OA-15/OA-16 are owner-scope, not a loop wall. No DoD/floor box ticked — hardening, not a validated edge; binding constraint unchanged, so no harness proposal warranted.
+
+### Earlier
 
 **2026-06-30 (16th datapoint — research run, 3rd of the day) — `improving`, Polymarket-v1 HuggingFace dataset identified as a bypass for the primary data blocker; EXP-003 proposed on domain-calibrated political miscalibration.**
 Academic synthesis across five 2026 papers identified three actionable findings: (1) **Polymarket-v1** (arxiv 2606.04217) — 1.3M resolved markets on HuggingFace under CC-BY-4.0 with market metadata + outcomes in the `daily_aligned/` Parquet layer; no Polymarket API egress required; proposed as **OA-16** (the preferred path to bypass OA-11). (2) **Le 2026** (292M trades) confirms domain-specific calibration: political markets are PERSISTENTLY underconfident at all horizons (bilateral partisan cancellation compresses prices toward 50%); proposed **EXP-003** (domain-calibrated political strategy, same mechanism as the already-built CalibrationBucketStrategy). (3) **Prediction Arena + PolyBench**: autonomous LLM trading on Kalshi loses money (-16% to -30.8%); Gemini-3-Flash achieves +6.2% CWR on Polymarket — this REFINES B4 (targeted Gemini research tool for specific domains, not autonomous trader). Correctly classified insider-signal copying as out-of-scope; proposed an in-scope defensive adverse selection filter. No code PRs this run (research-only). No harness proposal warranted — the data blocker now has two owner paths (OA-11 OR new OA-16), so the loop has forward motion without a rule change.
