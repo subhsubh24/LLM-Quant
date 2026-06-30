@@ -615,17 +615,41 @@ class PredictionMarketExecutor:
         # config value. Cap is on REALIZED loss (money actually lost): the safest hard
         # stop. Raising a cap is HUMAN-CORE (owner-only) — the loop never raises it.
         if max_daily_loss_usd is None or max_total_loss_usd is None:
+            _cfg_daily = _cfg_total = None
             try:
                 from ..config import get_settings
                 _s = get_settings()
-                if max_daily_loss_usd is None:
-                    max_daily_loss_usd = float(_s.max_daily_loss_usd)
-                if max_total_loss_usd is None:
-                    max_total_loss_usd = float(_s.max_total_loss_usd)
-            except Exception:
-                if max_daily_loss_usd is None:
+                _cfg_daily = _s.max_daily_loss_usd
+                _cfg_total = _s.max_total_loss_usd
+            except Exception as e:
+                logger.warning(
+                    "[EXECUTOR] could not read loss-cap settings; using conservative "
+                    "fallbacks ($25 daily / $100 total): %s", e
+                )
+            # Coerce each cap independently and FAIL LOUD (not silently) on a malformed
+            # env value — a misconfigured MAX_*_LOSS_USD must surface in the logs, never
+            # be swallowed. The fallback is the SAFE direction (tighter caps), so a bad
+            # value never loosens protection; but the owner needs to SEE that their value
+            # was ignored.
+            if max_daily_loss_usd is None:
+                try:
+                    max_daily_loss_usd = float(_cfg_daily)
+                except (TypeError, ValueError):
+                    if _cfg_daily is not None:
+                        logger.warning(
+                            "[EXECUTOR] MAX_DAILY_LOSS_USD=%r is unparseable; using "
+                            "conservative fallback $25", _cfg_daily
+                        )
                     max_daily_loss_usd = 25.0
-                if max_total_loss_usd is None:
+            if max_total_loss_usd is None:
+                try:
+                    max_total_loss_usd = float(_cfg_total)
+                except (TypeError, ValueError):
+                    if _cfg_total is not None:
+                        logger.warning(
+                            "[EXECUTOR] MAX_TOTAL_LOSS_USD=%r is unparseable; using "
+                            "conservative fallback $100", _cfg_total
+                        )
                     max_total_loss_usd = 100.0
         self.max_daily_loss_usd = max_daily_loss_usd
         self.max_total_loss_usd = max_total_loss_usd
@@ -732,8 +756,26 @@ class PredictionMarketExecutor:
         self._state_store = store
         try:
             self._rehydrate_state()
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning("[EXECUTOR STATE] rehydrate failed (using fresh state): %s", e)
+        except Exception as e:
+            # FAIL SAFE (run-risk-readiness): a durable store is attached PRECISELY so a
+            # restart cannot silently un-trip a halted kill switch or reset the loss
+            # budget. If rehydration FAILS (e.g. the DB is unreachable at startup), we
+            # CANNOT confirm there was no persisted halt — so we must assume the worst and
+            # BLOCK trading rather than resume with fresh (un-halted) in-memory state.
+            # Leaving the fresh state would let a DB hiccup at boot silently resurrect a
+            # killed bot. The owner deactivates once the store is healthy again (which
+            # itself requires the persisted state to be readable). We do NOT _persist_state
+            # here: the store is the thing that just failed, and a halt born of an
+            # unreadable store must not overwrite whatever (possibly tripped) row it holds.
+            self._kill_switch_active = True
+            self._kill_switch_reason = f"state_rehydrate_failed: {e}"
+            self._kill_switch_time = datetime.now(timezone.utc)
+            logger.critical(
+                "[EXECUTOR STATE] rehydrate FAILED and is REQUIRED for safety; cannot "
+                "confirm a prior kill-switch / loss state. FAILING CLOSED (kill switch "
+                "ACTIVE) until the durable store is readable and the owner deactivates: %s",
+                e,
+            )
 
     def _state_snapshot(self) -> dict:
         # Both temporal fields are serialized to ISO strings (or None) so the snapshot is

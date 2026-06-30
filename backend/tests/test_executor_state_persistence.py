@@ -132,21 +132,50 @@ def test_bare_executor_has_no_persistence_and_fresh_state(engine):
     assert reloaded["kill_switch_reason"] == "halt"
 
 
-def test_persistence_is_best_effort_never_raises(engine):
-    class _BoomStore:
+def test_save_failure_is_best_effort_never_breaks_trade_path(engine):
+    # A store that LOADS cleanly (empty) but whose SAVE raises must never break the trade
+    # path — every mutation's persist is best-effort and swallows the error.
+    class _SaveBoomStore:
         def load(self):
-            raise RuntimeError("boom-load")
+            return None  # empty -> clean rehydrate (no fail-safe trip)
 
         def save(self, state):
             raise RuntimeError("boom-save")
 
     ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
-    # attach_state_store rehydrates; a raising load must be swallowed.
-    ex.attach_state_store(_BoomStore())
-    # A raising save inside a mutation must be swallowed too — the trade path is sacred.
+    ex.attach_state_store(_SaveBoomStore())
+    assert ex.kill_switch_active is False  # clean empty load -> NOT failed-closed
     ex.activate_kill_switch("halt")  # would call save -> raises internally -> swallowed
     ex.record_realized_pnl(-1.0)
     assert ex.kill_switch_active is True  # in-memory state still correct
+
+
+def test_rehydrate_failure_fails_closed(engine):
+    # FAIL SAFE: if the durable store is attached but its load() RAISES (e.g. the DB is
+    # unreachable at startup), the executor cannot confirm there was no persisted halt —
+    # it must BLOCK trading (kill switch ACTIVE) rather than silently resume with fresh,
+    # un-halted state. Leaving fresh state would let a boot-time DB hiccup resurrect a
+    # killed bot.
+    class _LoadBoomStore:
+        def load(self):
+            raise RuntimeError("db-unreachable")
+
+        def save(self, state):
+            raise RuntimeError("db-unreachable")
+
+    ex = PredictionMarketExecutor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    ex.attach_state_store(_LoadBoomStore())
+    assert ex.kill_switch_active is True
+    assert ex._kill_switch_reason.startswith("state_rehydrate_failed")
+    # And the gate honours it: any order is rejected while failed-closed.
+    from backend.app.prediction_markets.execution import (
+        OrderRequest, OrderSide, OrderType, Exchange,
+    )
+    res = ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="m", token_id="t",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=1.0, price=0.5,
+    ))
+    assert res.status.name == "REJECTED"
 
 
 def test_save_then_load_roundtrip_is_faithful(engine):
