@@ -2,6 +2,55 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-06-30 (5th run) — ONE genuine side-effect-integrity fix (phantom 0.0 settlement); the binding constraint is now OWNER-BLOCKED, and anti-scarcity meant shipping small, not padding
+
+- **Shipped 1 file-disjoint code PR + 1 bookkeeping** from a deliberately SKEPTICAL 4-Haiku scout sweep (data/alpha · risk/safety
+  · backtest/learning · quality/frontend), each primed with "default to NOTHING-GENUINE; 4 hardening runs already today; egress
+  blocked." 3 of 4 scouts returned NOTHING-GENUINE. (#104) **MTM resolution side-effect integrity** — `check_resolutions()` settled
+  a held position at a fabricated `winning_price=0.0` (a phantom TOTAL loss) whenever the held `token_id` was ABSENT from a resolved
+  market's `outcomes` (a data inconsistency: re-resolved/stale market, malformed/short `clobTokenIds`). That invented loss fed
+  `record_realized_pnl()` and could **AUTO-TRIP the kill switch on a fiction** (halting the whole bot), and cached the position
+  resolved so it never reconciled. Fixed with a `None` sentinel: settle only when the token is present (a found loser still settles
+  at a real 0.0), else log loudly + skip + leave UNCACHED to retry. engine_pct stays 74 (a correctness fix, not new completeness).
+  No DoD/floor box ticked.
+- **THE pattern — the same honesty bug class keeps recurring in new functions; once named, audit for it everywhere.** #101 ("a
+  missing quote is not a 50/50 market"), #95 (no phantom fill), the Kalshi one-sided-book fix, and now #104 are all the SAME defect:
+  *absent/incomplete data silently upgraded into a confident value* (a 0.5 price, an empty-token fill, a midpoint, a 0.0 total-loss
+  settlement). **Lesson: when you fix one "fabricate a plausible default for missing data" bug, grep the WHOLE pipeline for the
+  pattern — every place that defaults a missing/absent field to an in-range value instead of failing/skipping. The settlement path
+  was the analog the prior data-ingest fixes hadn't reached.**
+- **THE gate earned its keep WITHOUT a fix cycle — and the value was the REPRODUCTION, not a catch.** All 3 reviewers (2 Sonnet + 1
+  Opus safety auditor) cleared #104 first pass, but Reviewer B AND the Opus auditor each INDEPENDENTLY restored the pre-fix logic and
+  ran the regression test, capturing the real failure (`[KILL SWITCH] ACTIVATED — realized $-50.00 breaches -$5.00`). On the 5th run
+  of the day, with heavy padding-scrutiny, that independent reproduction is exactly what distinguishes a genuine value-bar-clearing
+  fix from busywork — the reviewers proved reachability (#101's `active=False` does NOT gate this path; resolution gates only on
+  `resolved`) rather than rubber-stamping. **Lesson: a regression test that "fails loud on the pre-fix code" is only credible if
+  someone actually RUNS it against the old code — make the reviewers do it; a green test on the new code proves nothing about the bug.**
+- **Anti-SCARCITY vs anti-PADDING, the honest call on a near-empty barrel.** 5th factory run today; 4 prior runs already hardened the
+  engine; egress universally blocked → the binding constraint (a real OOS corpus + alpha) is OWNER-scope and untouchable. The honest
+  maximal set was ONE fix — not zero (a real kill-switch-on-fiction defect was there) and not a padded 3-4 (the other scouts genuinely
+  found nothing; the one extra find, NearCertaintyStrategy 72h-vs-720h, is ROADMAP F1 = an OWNER trading-behavior decision the loop must
+  NOT make unilaterally, so it was SURFACED not built). **Lesson: on a mature engine with the headline constraint owner-blocked, "ship
+  exactly the genuine fixes, however few" beats both stopping at zero (scarcity) and inflating to look busy (padding). 1 is a fine
+  number when the gate-verified barrel holds 1.**
+- **THE meta-signal worth surfacing to the OWNER (not a harness proposal).** 5 runs in one day, all hardening, no DoD movement, because
+  real convergence requires data the loop CANNOT fetch (egress 403/000 for Polymarket + Kalshi + HuggingFace). This is NOT `churning`
+  /`stuck` (0 reverts, 0 abandoned, durable correct changes) and NOT a loop-rule deficiency (egress is environmental + already tracked
+  across OA-11/13/15/16), so per §10b NO harness proposal is warranted. BUT the highest-value next action has clearly MOVED to the
+  owner's side: action **OA-16** (download the Polymarket-v1 HuggingFace corpus — 1.3M markets, CC-BY-4.0, the preferred bypass) or
+  **OA-13** (widen egress). **Lesson: when the loop is healthy but DoD-blocked on an owner action, the right channel is the routine
+  NOTIFICATION (surface the owner action), not a harness proposal (which is for the loop's own rules) and not silence (which wastes the
+  run's signal).**
+- **Two pre-existing latent issues the Opus auditor flagged for a FUTURE run (orthogonal to #104, not folded in to respect scope/≤2-cycle
+  brake):** (1) `check_resolutions` fetches via `get_market_by_slug(pos.market_id)` but positions are created with `market_id=opp.market.id`
+  (the Gamma numeric id, not the slug) — if `id != slug`, the fetch returns None and resolution may **never fire in prod** (the existing
+  tests mock `get_market_by_slug`, so they can't catch it). (2) `_persist_resolution` swallows failures, so in-memory settlement and the DB
+  can diverge. Both are real candidates for the next sweep — verify #1 against the actual Polymarket id/slug semantics first.
+- **Process: SKEPTICAL scouts (4, Haiku) + 2 Sonnet reviewers + 1 Opus safety auditor, all reading `git diff base...branch` objects (not the
+  shared tree). Local gate: 619 pass; ruff is a local-only artifact (`/root/.local/bin/ruff`; CI has none) — verified my diff added 0 new
+  ruff findings (orchestrator 14→14, test 0→0) before relying on the required check.** Squash auto-merge on the required check; bookkeeping in
+  this separate PR.
+
 ## 2026-06-30 (4th run) — data-integrity + security hardening (4-PR run); the live WS feed had NO price validation (cache-poisoning), and the Polymarket parser FABRICATED a DQV-passing 0.5/0.5 market
 
 - **Shipped 4 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep (data-integrity / security /
