@@ -229,6 +229,20 @@ ship-critical dimension and ≥B elsewhere.
 - **Maximize:** do NOT settle once the floor is cleared; push each lever to its defensible
   maximum (pricing/tiers, the free→paid conversion moment, retention/LTV, expansion,
   margin/COGS, reach) — each first-class work, documented with its upside, built best-first.
+- **The monetization MODEL itself is a first-class lever — not a fixed assumption.** HOW you charge
+  (freemium-subscription, paid-upfront, free-trial→paid, usage/credits/consumable, one-time, hybrid,
+  creator/Pro tiers, team/B2B seats, licensing/API, ad-supported, or a defensible mix) is one of the
+  highest-leverage revenue decisions — weigh it like any other lever, never inherit it by default.
+  SWITCH only on honest, benchmark-grounded evidence that another model materially raises DEFENSIBLE
+  expected revenue/LTV/margin for THIS product + audience (cite comparables, source+date); the chosen
+  model + prices must reconcile with the real billing config (correct product TYPE — subscription vs
+  consumable vs one-time) and comply with current platform payment rules; no dark patterns. PMF-aware
+  + bounded: pre-PMF pick the best-evidenced DEFAULT but do NOT thrash — a model change is a major
+  coherent unit, decided from real funnel/retention/ARPU data once it exists, triggered only by a
+  NAMED evidenced delta (never "the number could be higher"). A model change RE-OPENS building
+  (paywall/checkout, billing product TYPES, entitlement, in-app + marketing copy, recomputed unit
+  economics) and is recorded as a dated decision (models compared, evidence, why the winner);
+  readiness reconciles it — an unbuilt, evidence-backed better model is a GAP (weak-case loop-back).
 - **Never game the number:** no inflated price/user-count/adoption-%; pricing is
   value/benchmark-based, justified, and matches the real billing config. A higher number
   that isn't real is a FAILURE.
