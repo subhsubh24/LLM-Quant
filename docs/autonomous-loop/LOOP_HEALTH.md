@@ -39,32 +39,37 @@ harness proposal).
 LOOP_HEALTH:
   project: LLM-Quant
   as_of: 2026-06-30
-  last_run: 2026-06-30          # prior run (same day, earlier): A3 Kalshi adapter + deep-audit hardening (#91-#92)
-  last_deep_audit: 2026-06-30   # 8-Haiku scout sweep w/ correctness + security + quality-reconcile + artifact-freshness lenses ran this run
+  last_run: 2026-06-30          # prior run (same day, 3rd): research run 10 — academic synthesis + EXP-003 + OA-16
+  last_deep_audit: 2026-06-30   # 8-Haiku scout sweep w/ correctness + security + quality-reconcile + artifact-freshness lenses ran last factory run
   enforced_in_ci: true          # required check (enforce_admins=true, strict=false) + repo auto_merge; loop merges via --auto/direct-on-green and WAITS for CI, never --admin
   validation:                   # self-validation capability readiness — refresh every run from `check_self_validation.py --readiness`
     enforced_in_ci: true        # the coverage gate is a blocking preflight step (9d) inside the required check
     capabilities_total: 10      # unchanged this run (no new capability; backend_route_auth coverage widened to /scan + risk-config bounds)
     unmet: []                   # active + ci_validatable:false capabilities (need an owner secret). NON-EMPTY => urgent OWNER_ACTION + blocks. Must match SELF_VALIDATION.readiness.unmet AND have a PENDING_OPS validation-capability-<id>.
   this_run:
-    changes_shipped: 3          # #96 API security hardening; #95 side-effect integrity (no phantom arb fill); #94 executor fail-closed hardening; + this bookkeeping PR
+    changes_shipped: 0          # research-only run — no code PRs; 1 bookkeeping PR (RESEARCH_MEMORY + GROWTH_STATUS + PENDING_OPS + LOOP_HEALTH)
     changes_abandoned: 0
-    abandoned_reasons: []        # deferred pre-build on the disjoint/value rules (NOT abandoned): B1-full per-leg execution (risky, larger follow-up), B6 enable/disable (collides routes.py w/ #96), E-track wiring (DECISION COROLLARY — no real alpha drives it), F7 lint + F5 Playwright (repeatedly deferred). DROPPED as redundant (not abandoned): cost-model impact tests (19 already), A5 staleness fixture (already covered).
-    verify_cycle_failures: 0     # local preflight step-3 ruff FAILs (ruff installed locally, absent in CI) — a known false alarm, verified GREEN with ruff hidden = CI parity; not a real gate failure
-    review_rejections: 1         # #94 Opus live-safety auditor returned NOT-SAFE (the fail-closed branch was DEAD CODE vs the production store — load() swallowed all errors -> never raised), + 2 reviewers flagged a now-stale docstring; ALL fixed in ONE consolidated cycle (load() raises on unreadable vs None-on-absent + real-store fail-closed test + empty-token defense-in-depth + docstrings) -> fresh re-audit FIX-HOLDS. None abandoned.
-    process_incidents: 1         # STALE local default-branch ref: PR-C/PR-A were branched from a ~25-commit-old local ref (pre-auth/Kalshi); caught via a scout-vs-session-start guard-status contradiction, fixed by fetch origin + reset ref + rebase. Lesson recorded; no bad code shipped.
+    abandoned_reasons: []        # research runs produce no code; correctly deferred factory builds to data-available state (binding constraint: OA-11/OA-16 corpus)
+    verify_cycle_failures: 0
+    review_rejections: 0
+    process_incidents: 0
     circuit_breaker_trips: 0
   rolling_7d:
-    merged_prs: 55             # git: squash-merged (#NN) commits to default, last 7 days (+3 this run)
+    merged_prs: 55             # unchanged (no new code PRs this run; +1 bookkeeping pending)
     reverts: 0
     readiness_attempts: 0
     readiness_rejected: 0
-    recurring_failures: []       # OA-11 (Polymarket) + OA-15 (Kalshi) corpus refresh = owner/egress-scope. No recurring wall.
+    recurring_failures: []       # OA-11 (Polymarket) + OA-15 (Kalshi) corpus = owner/egress-scope. OA-16 (HuggingFace) proposed as a bypass. No recurring loop wall.
     harness_proposals_open: 0
-  signal: improving              # 15th datapoint: 3 file-disjoint code PRs from an 8-scout sweep (security + side-effect integrity + executor fail-closed); the adversarial gate earned its keep TWICE — a NOT-SAFE BUILDS!=WORKS (dead fail-closed branch) fixed + FIX-HOLDS, and a stale-base hazard caught before it shipped. unmet=[]. Converging.
+  signal: improving              # 16th datapoint: research-only run (no code). Identified Polymarket-v1 HuggingFace dataset (1.3M markets, CC-BY-4.0) as a potential bypass for the OA-11 egress blocker — this is a genuine forward motion on the binding constraint. Academic synthesis (Le 2026, Prediction Arena, PolyBench) strengthens EXP-002/EXP-003 hypotheses with domain-specific calibration evidence. EXP-003 (political underconfidence) proposed. B4 design implication: LLMs lose money as autonomous traders (Prediction Arena); use Gemini as targeted research tool instead. No harness proposal warranted (loop not churning; the OA-16 path makes the data blocker tractable without a loop-rule change). unmet=[].
 ```
 
 ## How to read the latest signal
+
+**2026-06-30 (16th datapoint — research run, 3rd of the day) — `improving`, Polymarket-v1 HuggingFace dataset identified as a bypass for the primary data blocker; EXP-003 proposed on domain-calibrated political miscalibration.**
+Academic synthesis across five 2026 papers identified three actionable findings: (1) **Polymarket-v1** (arxiv 2606.04217) — 1.3M resolved markets on HuggingFace under CC-BY-4.0 with market metadata + outcomes in the `daily_aligned/` Parquet layer; no Polymarket API egress required; proposed as **OA-16** (the preferred path to bypass OA-11). (2) **Le 2026** (292M trades) confirms domain-specific calibration: political markets are PERSISTENTLY underconfident at all horizons (bilateral partisan cancellation compresses prices toward 50%); proposed **EXP-003** (domain-calibrated political strategy, same mechanism as the already-built CalibrationBucketStrategy). (3) **Prediction Arena + PolyBench**: autonomous LLM trading on Kalshi loses money (-16% to -30.8%); Gemini-3-Flash achieves +6.2% CWR on Polymarket — this REFINES B4 (targeted Gemini research tool for specific domains, not autonomous trader). Correctly classified insider-signal copying as out-of-scope; proposed an in-scope defensive adverse selection filter. No code PRs this run (research-only). No harness proposal warranted — the data blocker now has two owner paths (OA-11 OR new OA-16), so the loop has forward motion without a rule change.
+
+### Earlier
 
 **2026-06-30 (15th datapoint — factory run, 2nd of the day) — `improving`, the adversarial gate killed a fail-safe that was DEAD CODE in prod, and a stale-base hazard was caught before it shipped.**
 An 8-Haiku scout sweep across tracks A–G surfaced the maximal file-disjoint, value-bar-clearing set; shipped **3

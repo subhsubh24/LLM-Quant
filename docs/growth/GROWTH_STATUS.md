@@ -134,6 +134,59 @@ GROWTH_STATUS:
         ABSTAINS (no signal) if bucket has < min_bucket_n training samples (never hardcode
         fiction); raises if no calibration data provided at all. (3) Run 60/40 OOS test,
         B2 gate, report Brier improvement + net PnL with bootstrap CI.
+    - id: EXP-003
+      name: "Domain-Calibrated Political Strategy (Partisan Underconfidence)"
+      status: proposed
+      proposed_date: 2026-06-30
+      edge_source: "crowd-miscalibration (domain-specific; in-scope per PLAYBOOK)"
+      hypothesis: >
+        Binary Polymarket markets categorised as "politics" or "elections" are
+        systematically MORE underconfident than other categories at ALL decision horizons
+        — crowd prices chronically compressed toward 50% via bilateral partisan
+        cancellation (Le 2026: dominant calibration component, explains a large fraction
+        of the 87.3% calibration variance across 292M trades on Kalshi + Polymarket).
+        A CalibrationBucketStrategy fitted EXCLUSIVELY on political-category resolved
+        markets produces a positive net Brier improvement on the OOS 40%, with the
+        miscalibration robust across decision horizons (unlike the general horizon effect,
+        which primarily manifests at >30 days).
+      min_sample_n: 100
+      oos_plan: >
+        (A) PREFERRED — Polymarket-v1 HuggingFace (OA-16): extract daily_aligned Parquet,
+        filter to "politics"/"elections" category, reconstruct pre-resolution price
+        snapshots at desired decision_lead. (B) ALTERNATIVE — OA-11 with filter:
+        python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500
+        --max-pages 3 --categories "politics,elections" --merge
+        --out data/polymarket_history_politics.json
+        Chronological 60/40 split. CalibrationBucketStrategy (already built) fitted on
+        oldest 60%. B2 significance gate: bootstrap CI excludes 0. Bonferroni correction
+        across tested price buckets.
+      cost_assumptions: >
+        2% fee + 0.5% slippage (cost_model.py). Political markets at 60-90% YES have
+        moderate book depth; conservative 1% additional effective slippage assumed.
+        Focus on markets with volume >= $2K at decision time to reduce impact.
+      significance_threshold: >
+        95% CI excluding 0 on paired-bootstrap Brier improvement (B2 gate, strategies_screened=3
+        for Bonferroni across EXP-001/EXP-002/EXP-003). Net PnL positive after costs on OOS set.
+        Min 30 records per price bucket for any bucket-level claim.
+      how_it_could_be_wrong:
+        - "Polymarket political user base (international/crypto-native) may not show the same partisan bilateral cancellation as Kalshi's US-regulated base — the Le 2026 effect may be Kalshi-specific"
+        - "Only ~10-30 active political Polymarket markets per month — accumulating 100+ resolved markets takes 4-6 months; N is slow"
+        - "Political miscalibration may concentrate at >30 days (peak partisan uncertainty) and be near-zero at 7-day horizon (late pinning)"
+        - "With <100 political markets, per-bucket N < 30 threshold triggers abstain — strategy produces zero signals"
+        - "Le 2026 covers the 2020-2024 US election super-cycle; post-cycle calibration pattern may differ in non-election-year markets"
+      blocking_dependency: >
+        MECHANISM: CalibrationBucketStrategy is already built (calibration_bucket_strategy.py).
+        DATA: need a political-category resolved corpus. Two paths: (A) OA-16 — owner downloads
+        Polymarket-v1 HuggingFace daily_aligned Parquet (no Polymarket API egress, CC-BY-4.0,
+        1.3M markets); or (B) OA-11 re-run with --categories filter (existing script, no code
+        change). Path A is preferred (larger corpus, no live API egress).
+      factory_next_action: >
+        Loop-buildable (no new data required first): build polymarket_v1_hf_fetcher.py that
+        reads the daily_aligned Parquet from HuggingFace (huggingface_hub Python library,
+        dataset TimeSeventeen/Polymarket-v1) and assembles leakage-safe HistoricalMarket records
+        — same structural anti-leakage guarantee as polymarket_history_fetcher.py. Once owner
+        confirms HuggingFace egress is accessible (OA-16 step 1), run the fetcher to extract
+        the political corpus and feed EXP-003.
   learnings:
     - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
     - "Kill switch exists in execution.py; LIVE_TRADING_ENABLED master gate added (default false)."
@@ -163,16 +216,18 @@ GROWTH_STATUS:
     - "E5/E2 learning engines WIRED into the live loop (metrics_aggregator.compute_evaluation_windows + compute_calibration_drift; orchestrator.get_resolved_evaluation_trades + get_resolved_predictions; GET /metrics/evaluation-windows + /metrics/calibration-drift). Honest degenerate path: zero-trade windows never fabricated, Brier null without per-trade calibration, drift returns insufficient_data (never a false 'no drift = good'). 2 Sonnet + 1 Opus auditor CANNOT-BREAK."
     - "C5 dashboard UI BUILT (frontend/components/metrics/*): MetricsPanel + Weekly/Floor/Calibration/PerStrategy/EvaluationWindows cards render all /prediction-markets/metrics/* endpoints under a new Metrics tab; honest degenerate rendering (floor NOT MET with real avg, calibration note verbatim + Brier '—', drift 'not enough data', nulls as '—', a 0-trades banner). npm run build clean. F5 Playwright visual-verification of these states still pending."
     - "GATE STRENGTHENED again: test_calibration_bucket_strategy.py added to the blocking preflight list."
+    - "Research Run 10 (2026-06-30): academic synthesis. Le 2026 (292M trades, Kalshi+Polymarket) confirms domain-specific calibration decomposition: political markets show PERSISTENT underconfidence (compression toward 50%) at ALL horizons — the dominant calibration component (bilateral partisan cancellation). EXP-003 proposed. Prediction Arena 2026: ALL 6 frontier LLMs lost money live-trading on Kalshi (-16% to -30.8%); Polymarket only -1.1% avg. PolyBench 2026: only 2/7 LLMs positive (MiMo-V2-Flash +17.6% CWR, Gemini-3-Flash +6.2%) — Gemini models show positive calibration, relevant for B4 design. MAJOR DATA FINDING: Polymarket-v1 HuggingFace dataset (arxiv 2606.04217, June 2026) — 1.3M markets, 1.2B trades, CC-BY-4.0, Parquet, includes market metadata + outcomes in daily_aligned layer — could bypass OA-11 entirely (proposed OA-16). Insider trading on Polymarket: ~25% of large longshot bets ($2500+, <35%) resolve YES vs 14% baseline; proposed as a DEFENSIVE adverse selection filter (avoid these markets), not an edge to copy. Cross-venue arb: confirmed bot-dominated (Kalshi now #1 by volume at $14.8B/mo April 2026). Binding constraint UNCHANGED: no validated OOS edge; OA-11/OA-15 (egress) OR new OA-16 (HuggingFace download) needed."
   next_actions:
-    - "EXP-002 activation (HIGHEST-EV owner action): re-run OA-11 with 7-day decision_lead using the EXISTING script: `python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500 --max-pages 3 --min-volume 1000 --merge --out data/polymarket_history_7d.json`. No code changes needed — the flag already exists. This single action unlocks the first real calibration test and is the prerequisite for all calibration alphas."
-    - "EXP-002 factory build DONE (calibration_bucket_strategy.py) — the CalibrationBucketStrategy is built, tested (24 deterministic tests, 3 Opus auditors CANNOT-BREAK), and plugs into walk_forward. The ONLY remaining EXP-002 blocker is the 7-day-lead OOS corpus (OA-11, owner/egress-scope): once it arrives, fit the model on the training 60%, run the 60/40 OOS test through walk_forward + the B2 calibration gate, and report Brier improvement + net PnL with the bootstrap CI. NEXT factory step (loop-buildable, no data needed): wire the fitted-model fit path into a research/owner entry point + the B3 lifecycle so a proven model can be promoted."
-    - "E5 (evaluation-window) + E2 (calibration-drift) engines are now WIRED into the live loop + exposed read-only (this run). Remaining E-track wiring: feed the B3 registry retirement from the E2 drift signal + drive E5 reconcile from versioned live configs once a real alpha produces a non-degenerate resolved stream."
-    - "Dashboard UI component BUILT (this run): frontend/components/metrics/* renders all /prediction-markets/metrics/* endpoints honestly. Remaining: the F5 Playwright visual-verification suite to LOOK at the rendered empty/degenerate/error states against the VISION design bar."
-    - "Once real 7-day data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth."
-    - "Wire weekly_metrics + calibration into the live paper run + dashboard so metrics flow end-to-end from real resolutions (C5 remainder)."
+    - "HIGHEST-EV owner action (two paths, either unblocks all calibration alphas at once): PATH A (new OA-16, PREFERRED) — verify HuggingFace egress is accessible, download Polymarket-v1 daily_aligned Parquet (1.3M markets, CC-BY-4.0, no Polymarket API key needed, broader corpus than OA-11); PATH B (existing OA-11) — re-run `python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500 --max-pages 3 --min-volume 1000 --merge --out data/polymarket_history_7d.json` from a network-permitted host. Either path produces the corpus needed for EXP-002 + EXP-003 (same CalibrationBucketStrategy mechanism, already built)."
+    - "LOOP-BUILDABLE (no data needed): build polymarket_v1_hf_fetcher.py — reads the daily_aligned Parquet from HuggingFace (huggingface_hub Python library, dataset TimeSeventeen/Polymarket-v1) and assembles leakage-safe HistoricalMarket records with the same structural anti-leakage guarantee as polymarket_history_fetcher.py. Once built, OA-16 step 2 (owner runs it) can bypass OA-11 entirely."
+    - "EXP-002 + EXP-003 share the same BUILT mechanism (calibration_bucket_strategy.py) and differ only in the corpus: EXP-002 uses all price ranges at 7-day lead; EXP-003 filters to politics/elections category. Once the corpus arrives, both can be tested in one run: fit on oldest 60%, OOS on newest 40%, B2 significance gate with Bonferroni correction across the two strategies."
+    - "B4 LLM research design implication (Prediction Arena + PolyBench findings): if B4 is built, do NOT design an autonomous LLM trader (Prediction Arena proves 5/6 models lose money). Design LLM as a TARGETED RESEARCH TOOL for specific question categories (domain-specific calibration assistance). Use Gemini (already have GEMINI_API_KEY) — PolyBench shows Gemini-3-Flash achieves positive CWR. Gated on B2 producing a passing eval first."
+    - "EXP-002 factory build DONE (calibration_bucket_strategy.py) — the CalibrationBucketStrategy is built, tested (24 deterministic tests, 3 Opus auditors CANNOT-BREAK), and plugs into walk_forward. ONLY remaining EXP-002 blocker is the real corpus (OA-11 or OA-16)."
+    - "Once real data is available: produce a VALIDATED OOS weekly-PnL series + a passing B2 calibration eval on live strategy probabilities; calibrate the market-impact model against real OrderBook depth; wire the fitted-model fit path into a research/owner entry point + the B3 lifecycle."
     - "A4 event/market-universe + persistent resolution tracking (foundation for B2 on real data + the E learning loop); confirm the audit log's DATABASE_URL is durable (OA-10)."
   owner_blockers:
     - "Confirm venue ToS + jurisdiction eligibility before any live capability."
+    - "OA-16 (NEW): verify HuggingFace egress from owner's environment; download Polymarket-v1 daily_aligned Parquet (CC-BY-4.0, no API key). This is the preferred path over OA-11 (broader corpus, no Polymarket API egress needed). See PENDING_OPS OA-16."
 ```
 
 ## engine_pct rationale (pinned to real files)
