@@ -16,7 +16,7 @@ GROWTH_STATUS:
   as_of: 2026-06-30
   phase: pre_launch
   engine_built: false
-  engine_pct: 74   # +1 (2026-06-30, #99-#102): ingest-honesty + §12 hardening — WS price validation (no cache poisoning), Polymarket parse honesty (no fabricated 0.5/empty-token tradeable market), read/quant input bounds + /status error sanitization, CalibrationBucketStrategy active-gate. No new edge — quality hardening only.
+  engine_pct: 74   # unchanged (2026-06-30, #104): a single side-effect-integrity CORRECTNESS fix on the settlement path — MTM no longer fabricates a 0.0 total-loss (+ false kill-switch trip) when a held token is absent from a resolved market's outcomes. A bug fix, not new completeness, so engine_pct does not move. No new edge. Prior +1 (#99-#102): ingest-honesty + §12 hardening.
   venues_connected:
     - polymarket_paper
   awaiting_connect:
