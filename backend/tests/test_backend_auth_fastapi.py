@@ -168,3 +168,45 @@ def test_status_error_is_sanitized_no_raw_exception(monkeypatch):
         err = body[venue]["error"]
         assert err == "RuntimeError"
         assert "secret-internal-host" not in str(err)
+
+
+def test_place_order_request_bounds():
+    # §12: /execute payload flows into the executor + sizing; bound it so a caller can't
+    # inject size=inf / price=NaN / a multi-MB id. Validation happens at the model, before
+    # the handler runs. (importorskip: routes.py imports fastapi at module load.)
+    pytest.importorskip("fastapi")
+    from pydantic import ValidationError
+    from backend.app.api.routes import PlaceOrderRequest
+
+    ok = PlaceOrderRequest(market_id="253591", token_id="t1", size=10.0, price=0.5)
+    assert ok.size == 10.0 and ok.price == 0.5
+
+    bad_payloads = [
+        dict(market_id="m", token_id="t", size=float("inf")),
+        dict(market_id="m", token_id="t", size=float("nan")),
+        dict(market_id="m", token_id="t", size=0.0),          # must be > 0
+        dict(market_id="m", token_id="t", size=-5.0),
+        dict(market_id="m", token_id="t", size=2_000_000.0),  # > max
+        dict(market_id="m", token_id="t", price=1.5),         # price must be in [0,1]
+        dict(market_id="m", token_id="t", price=float("nan")),
+        dict(market_id="", token_id="t"),                     # empty id
+        dict(market_id="x" * 201, token_id="t"),              # id too long
+        dict(token_id="t"),                                   # missing required market_id
+    ]
+    for bad in bad_payloads:
+        with pytest.raises(ValidationError):
+            PlaceOrderRequest(**bad)
+
+
+def test_subscribe_request_bounds():
+    # §12: an unbounded identifiers list = unbounded WS subscription fan-out.
+    pytest.importorskip("fastapi")
+    from pydantic import ValidationError
+    from backend.app.api.routes import SubscribeRequest
+
+    assert SubscribeRequest(identifiers=["a", "b"]).identifiers == ["a", "b"]
+    assert SubscribeRequest().identifiers == []              # default is empty, mutable-safe
+    with pytest.raises(ValidationError):
+        SubscribeRequest(identifiers=["x"] * 1001)           # too many identifiers
+    with pytest.raises(ValidationError):
+        SubscribeRequest(identifiers=["y" * 201])            # a single identifier too long
