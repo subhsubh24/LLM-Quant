@@ -260,7 +260,7 @@ def test_resolution_loss_feeds_strategy_drawdown_disable():
     class _FakeClient:
         def __init__(self, *a, **k):
             pass
-        def get_market_by_slug(self, _slug):
+        def get_market_by_id(self, _market_id):
             return lost
 
     orig = pmc.PolymarketClient
@@ -306,7 +306,7 @@ def test_resolution_without_risk_manager_still_works():
     class _FakeClient:
         def __init__(self, *a, **k):
             pass
-        def get_market_by_slug(self, _slug):
+        def get_market_by_id(self, _market_id):
             return win
 
     orig = pmc.PolymarketClient
@@ -452,7 +452,7 @@ def test_resolution_absent_token_not_fabricated_as_loss():
     class _FakeClientMismatch:
         def __init__(self, *a, **k):
             pass
-        def get_market_by_slug(self, _slug):
+        def get_market_by_id(self, _market_id):
             return mismatched
 
     orig = pmc.PolymarketClient
@@ -480,7 +480,7 @@ def test_resolution_absent_token_not_fabricated_as_loss():
         class _FakeClientConsistent:
             def __init__(self, *a, **k):
                 pass
-            def get_market_by_slug(self, _slug):
+            def get_market_by_id(self, _market_id):
                 return consistent
 
         pmc.PolymarketClient = _FakeClientConsistent
@@ -489,3 +489,67 @@ def test_resolution_absent_token_not_fabricated_as_loss():
         assert ex._realized_pnl_total < 0.0, "the REAL resolution loss is realized on retry"
     finally:
         pmc.PolymarketClient = orig
+
+
+def test_resolution_looks_up_market_by_id_not_slug():
+    """BUILDS≠WORKS regression: positions store the Gamma numeric ``id``
+    (``market_id=opp.market.id``), NOT the URL slug — DISTINCT fields. The old
+    ``check_resolutions`` called ``get_market_by_slug(pos.market_id)``, querying Gamma's
+    ``slug`` filter with a numeric id, which matches NOTHING in production — so positions
+    NEVER settled and the dominant binary-market loss path (feeding the loss caps + kill
+    switch) was silently dead. The prior tests missed it because their fakes ignore the
+    argument. This fake reproduces prod: ``get_market_by_slug`` returns None (a numeric id
+    never matches a slug), while ``get_market_by_id`` returns the resolved market. It FAILS
+    on the pre-fix code (no settlement -> no realized loss) and passes once resolution looks
+    the market up by id.
+    """
+    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
+    from backend.app.prediction_markets import polymarket_client as pmc
+    from backend.app.prediction_markets.execution import (
+        PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
+    )
+
+    ex = PredictionMarketExecutor(
+        dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
+        max_daily_loss_usd=10_000.0, max_total_loss_usd=10_000.0,
+    )
+    ex.execute(OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="253591", token_id="t1",
+        side=OrderSide.BUY, order_type=OrderType.LIMIT, size=100, price=0.50,
+        strategy="s", market_question="Q?", outcome_label="Yes",
+    ))
+    token_id = next(iter(ex.positions))
+    assert ex.positions[token_id].market_id == "253591"  # a numeric Gamma id, not a slug
+
+    lost = pmc.Market(
+        id="253591", condition_id="c", question="Q?", slug="will-x-happen",
+        description="", category="", end_date=None,
+        outcomes=[pmc.Outcome(token_id=token_id, label="Yes", price=0.0,
+                              midpoint=0.0, volume=0.0)],
+        total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+    )
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_market_by_slug(self, slug):
+            # Prod reality: querying the slug filter with a numeric id matches nothing.
+            return None
+
+        def get_market_by_id(self, market_id):
+            assert market_id == "253591"
+            return lost
+
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _FakeClient
+    try:
+        engine = MarkToMarketEngine(ex)
+        engine.check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+
+    # Settlement actually fired: the losing position is closed and the ~-$50 loss realized.
+    assert token_id not in ex.positions, "position must settle when looked up by id"
+    assert ex._realized_pnl_total == pytest.approx(-50.0), \
+        "the real resolution loss must be booked (dead on the pre-fix slug lookup)"

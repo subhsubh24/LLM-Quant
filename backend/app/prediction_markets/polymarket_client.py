@@ -284,6 +284,26 @@ class PolymarketClient:
             return self._parse_market(data[0])
         return None
 
+    def get_market_by_id(self, market_id: str) -> Optional[Market]:
+        """Fetch a single market by its Gamma numeric ``id`` (NOT its slug).
+
+        CRITICAL — this exists because a ``Market``'s ``id`` (Gamma's numeric market
+        id, e.g. ``"253591"``) and its ``slug`` (the URL text slug, e.g.
+        ``"will-trump-win-2024"``) are DISTINCT fields. Positions are created with
+        ``market_id=opp.market.id`` (the numeric id), so resolving them via
+        ``get_market_by_slug(pos.market_id)`` queried Gamma's ``slug`` filter with a
+        numeric id — which matches nothing, so ``check_resolutions`` NEVER settled a
+        position in production (the unit tests passed only because their fakes ignore
+        the argument). This looks the market up by the ``id`` filter, the field the
+        position actually stores. See ``orchestrator.MarkToMarketEngine.check_resolutions``.
+        """
+        if not market_id:
+            return None
+        data = self._get(f"{GAMMA_API}/markets", params={"id": market_id})
+        if data and len(data) > 0:
+            return self._parse_market(data[0])
+        return None
+
     def get_events(self, limit: int = 50, offset: int = 0) -> List[dict]:
         """Fetch events (each event contains 1+ markets)."""
         data = self._get(f"{GAMMA_API}/events", params={"limit": limit, "offset": offset})
@@ -326,18 +346,53 @@ class PolymarketClient:
         return None
 
     def get_order_book(self, token_id: str) -> Optional[OrderBook]:
-        """Get full order book for a token."""
+        """Get full order book for a token.
+
+        HONESTY (mirrors the Kalshi one-sided-book fix, RESEARCH_MEMORY 2026-06-30):
+        a real spread requires BOTH sides quoted. An empty or one-sided book used to
+        fabricate ``best_bid=0.0`` / ``best_ask=1.0`` → a bogus spread up to 1.0 that a
+        strategy reads as a real 100%-wide market (``strategies.py`` uses ``book.spread``)
+        — the data analog of a fake fill. We now drop non-finite / out-of-range / non-
+        positive-size levels and return ``None`` when either side is unquoted, so nothing
+        trades on an invented spread. (A missing quote is not a price — cf. the #101
+        "a missing quote is not a 50/50 market" and the Kalshi fix.)
+        """
         data = self._get(f"{CLOB_API}/book", params={"token_id": token_id})
         if not data:
             return None
 
-        bids = [{"price": float(b["price"]), "size": float(b["size"])}
-                for b in data.get("bids", [])]
-        asks = [{"price": float(a["price"]), "size": float(a["size"])}
-                for a in data.get("asks", [])]
+        def _clean_levels(raw_levels) -> list:
+            cleaned = []
+            for lvl in raw_levels or []:
+                try:
+                    p = float(lvl["price"])
+                    s = float(lvl["size"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                # Reject non-finite (NaN/inf), out-of-range prices, and non-positive
+                # sizes — a malformed level must never enter the cache as a real quote.
+                if not (math.isfinite(p) and math.isfinite(s)):
+                    continue
+                if not (0.0 <= p <= 1.0) or s <= 0.0:
+                    continue
+                cleaned.append({"price": p, "size": s})
+            return cleaned
 
-        best_bid = bids[0]["price"] if bids else 0.0
-        best_ask = asks[0]["price"] if asks else 1.0
+        bids = _clean_levels(data.get("bids"))
+        asks = _clean_levels(data.get("asks"))
+
+        # A real two-sided spread needs BOTH sides. An empty or one-sided book is not a
+        # tradeable quote — return None rather than fabricate best_bid=0 / best_ask=1.
+        if not bids or not asks:
+            logger.warning(
+                f"[POLYMARKET] Order book for {token_id} is empty or one-sided after "
+                f"validation (bids={len(bids)}, asks={len(asks)}) — no real spread; "
+                f"returning None (no fabricated 0/1 quote)."
+            )
+            return None
+
+        best_bid = bids[0]["price"]
+        best_ask = asks[0]["price"]
 
         return OrderBook(
             token_id=token_id,

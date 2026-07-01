@@ -130,7 +130,11 @@ def test_resolution_loss_feeds_cap_and_auto_trips():
         def __init__(self, *a, **k):
             pass
 
-        def get_market_by_slug(self, _slug):
+        # Resolution looks the market up by its Gamma numeric id (NOT slug); the
+        # fake asserts the RIGHT id is passed so a revert to get_market_by_slug
+        # (which never matches a numeric id in prod) fails loud here.
+        def get_market_by_id(self, market_id):
+            assert market_id == pos.market_id
             return lost
 
     orig = pmc.PolymarketClient
