@@ -2,6 +2,63 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-01 (1st run) — THE settlement path was DEAD in prod: check_resolutions looked markets up by slug using a numeric id, so no position ever resolved. A "next-run note" from the prior auditor became the headline fix (3-PR run)
+
+- **Shipped 3 file-disjoint code PRs + 1 bookkeeping** from a 6-Haiku skeptical scout sweep (data-parser / risk-safety /
+  backtest-learning / security / frontend / artifact lenses): (#108) **resolution lookup by Gamma id, not slug** — the
+  headline HIGH-severity BUILDS≠WORKS + a same-file order-book honesty fix; (#109) **§12 input bounds** on the last two
+  unbounded state-mutating request models (`PlaceOrderRequest`/`/execute`, `SubscribeRequest`/`/feeds/subscribe`); (#110)
+  **frontend honesty** — Portfolio cards show `—` not a fabricated `$0.00`/`0` when the summary hasn't loaded. engine_pct
+  stays 74 (correctness/security/honesty hardening, no new completeness). No DoD/floor box ticked.
+- **THE headline — the DOMINANT settlement path was silently dead in production, and 5 prior skeptical scout sweeps missed
+  it.** `MarkToMarketEngine.check_resolutions()` called `get_market_by_slug(pos.market_id)`, but positions store
+  `market_id=opp.market.id` — the Gamma **numeric** id, a DISTINCT field from the URL `slug`. Querying Gamma's `slug`
+  filter with a numeric id matches NOTHING, so `market` was always `None` → **no position ever settled**: resolution PnL
+  never realized, the executor loss caps + kill switch never fed on the dominant binary-market loss path (D3/D4), MTM never
+  reconciled. Every unit test passed because the fakes are `def get_market_by_slug(self, _slug)` — **they ignore the
+  argument**. Fixed with a new `get_market_by_id()` (queries the `id` filter) + a regression test that reproduces prod
+  (slug→None, id→resolved market) and was PROVEN to fail on pre-fix code (position never settles). **Lesson: a mock that
+  ignores its argument is a BUILDS≠WORKS trap — it proves the code runs, NOT that it passes the RIGHT identifier to the
+  RIGHT lookup. When a fake accepts any input, it cannot catch a wrong-key/wrong-endpoint bug. For any lookup keyed on an
+  id/slug/token, the fake MUST assert the exact argument (the #108 loss-cap fake now does `assert market_id == pos.market_id`)
+  so a wrong-key regression fails loud.**
+- **THE process lesson — a deferred "next-run note" IS the next run's headline; mine the prior auditor's flags first.** This
+  bug was not found by THIS run's scouts either (the data-parser scout looked at parsing, not the resolution call site) —
+  it was surfaced as a **NEXT-RUN NOTE** by the #104 Opus auditor on 2026-06-30 and recorded in LOOP_HEALTH. I investigated
+  it FIRST this run (before the scout sweep) by OBSERVING the real code (id vs slug fields, position-creation call sites),
+  not theorizing. **Lesson: the prior run's auditor "latent issue / next-run" notes are the highest-EV starting point of the
+  next run — read LOOP_HEALTH's NEXT-RUN NOTE and the loop-memory follow-ups BEFORE scouting; a flagged-but-unbuilt defect
+  from a fresh adversarial auditor beats a cold scout sweep.**
+- **The adversarial gate earned its keep — 7 reviewers, 0 fix cycles, and the Opus auditor INDEPENDENTLY validated a
+  deferral.** 2 Sonnet reviewers per PR + 1 Opus safety auditor on the money-path #108. All cleared first pass; BOTH #108
+  Sonnet reviewers AND the Opus auditor independently **reverted the one-line fix and confirmed the regression test fails on
+  pre-fix code** (`0.0 == -50.0` mismatch) — reachability proven, not rubber-stamped. The Opus auditor also independently
+  verified my deferral of the `_persist_resolution`-swallow issue (#2) is SAFE: `executor.positions` is populated ONLY by
+  `execute()` and is **never rehydrated from the `PredictionPosition` table** (I confirmed `load_positions_into_executor`
+  has ZERO callers), and the safety-critical loss counters + kill-switch state persist independently via
+  `record_realized_pnl → _persist_state` BEFORE `_persist_resolution` — so a swallowed DB write is reporting-only
+  degradation, not a double-count. **Lesson: a deferral is only honest if you PROVE the deferred path can't cause a safety
+  regression NOW — here, that the newly-live settlement path can't double-count because nothing rehydrates settled positions.**
+- **Anti-padding / anti-scarcity both held on a mature, egress-blocked engine.** All egress (Polymarket/Kalshi/HuggingFace)
+  is 000/blocked again this run, so the binding constraint (a real less-pinned OOS corpus + a real alpha) stays OWNER-scope
+  (OA-16/13/11). The 6 scouts surfaced ~9 candidates; I selected the 3 genuine value-bar-clearing, file-disjoint ones and
+  rejected the rest: the WS-empty-market_id-to-DB finding (low value — the feed only has token_id; empty is acceptable), the
+  `/learn/explain` **kwargs finding (low confidence — methods are a fixed dict), the risk/backtest scouts returned
+  NOTHING-GENUINE (well-hardened), and NearCertainty 72h/720h stays an OWNER F1 decision. The headline was NOT a scout find at
+  all — it was the prior auditor's deferred note.
+- **NEXT-RUN NOTES (this run's auditors flagged, deferred as out-of-scope):** (1) `paper_simulator._resolve_market`
+  (`paper_simulator.py:366`) ALSO calls `get_market_by_slug` on what's typically a numeric id — same bug class, but it
+  degrades SAFELY (falls back to a full `get_markets()` scan matching on `m.id`/`m.condition_id`), so it's a follow-up
+  tidy, not a live break; consider giving it the same `get_market_by_id` path. (2) `_persist_resolution` still swallows DB
+  failures (reporting-only divergence, proven non-safety-critical this run) — a clean fix is persist-before-book with a
+  DB-optional guard, but it must not break the bare-executor loss-cap tests. (3) Confirm the Gamma `?id=` filter param on
+  the first real fetch (documented-but-unverified-live, egress-blocked — same discipline as the Kalshi contract).
+- **Process/env:** pytest + fastapi + httpx are NOT preinstalled (`pip install -r backend/requirements-ci.txt` + `fastapi`
+  + `httpx` for the importorskip adapter tests). ruff is a LOCAL-only artifact (CI has none) — verified my diff added **0
+  new ruff findings** (net −1; per-rule diff base-vs-working-tree) before relying on the required check. Reviewers ran
+  read-only via `git diff BASE...BRANCH` objects + detached worktrees (no shared-tree mutation). Squash auto-merge/merge on
+  the green required check; this bookkeeping in a separate PR.
+
 ## 2026-06-30 (5th run) — ONE genuine side-effect-integrity fix (phantom 0.0 settlement); the binding constraint is now OWNER-BLOCKED, and anti-scarcity meant shipping small, not padding
 
 - **Shipped 1 file-disjoint code PR + 1 bookkeeping** from a deliberately SKEPTICAL 4-Haiku scout sweep (data/alpha · risk/safety
