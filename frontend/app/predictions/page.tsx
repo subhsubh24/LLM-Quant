@@ -35,6 +35,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceLine,
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { MetricsPanel } from "@/components/metrics/MetricsPanel";
@@ -437,12 +438,8 @@ export default function PredictionsPage() {
     (!searchQuery || m.question.toLowerCase().includes(searchQuery.toLowerCase()) || m.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  // Equity-curve data for a labeled line chart. A prior design-taste gap: the old
-  // hand-rolled bars scaled height as (value − seriesMin)/range with NO axis labels,
-  // so a $5 move on a $1000 portfolio (0.5%) rendered as a ~50% bar — a fabricated
-  // read of volatility. A zoomed line WITH a labeled $-axis discloses the real scale
-  // (the standard, honest equity-curve representation), so the y-axis is no longer a
-  // hidden non-zero baseline that exaggerates small moves.
+  // Equity-curve data for a labeled line chart. The old hand-rolled bars scaled height
+  // as (value − seriesMin)/range with NO axis labels, so a 0.5% move read as a ~50% bar.
   const equityChartData = useMemo(
     () =>
       equityCurve.map((s: any) => ({
@@ -460,6 +457,15 @@ export default function PredictionsPage() {
       })),
     [equityCurve]
   );
+
+  // Starting balance = the first snapshot's value. A value series near ~$1000 anchored
+  // at $0 is a flat wall, so (unlike the P&L chart, which anchors at $0) the honest
+  // anchor for an equity curve is the STARTING balance: a labeled reference line lets a
+  // viewer tell "up 0.5% today" from "up 40% since inception" on a zoomed, $-labeled axis.
+  const equityStartValue = useMemo(() => {
+    const first = equityChartData.find((d) => typeof d.value === "number");
+    return first ? (first.value as number) : null;
+  }, [equityChartData]);
 
   const timeAgo = lastUpdated
     ? `${Math.round((Date.now() - lastUpdated.getTime()) / 1000)}s ago`
@@ -939,9 +945,8 @@ export default function PredictionsPage() {
                         minTickGap={32}
                       />
                       <YAxis
-                        // Zoomed to the value range but with VISIBLE $ tick labels so the
-                        // scale is disclosed (the fix for the old no-axis-label baseline
-                        // that exaggerated small moves). Null values are ignored by recharts.
+                        // Zoomed to the value range with VISIBLE $ tick labels so the scale
+                        // is disclosed (the standard, honest way to show a value series).
                         domain={["dataMin", "dataMax"]}
                         tick={{ fontSize: 10 }}
                         tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
@@ -954,6 +959,18 @@ export default function PredictionsPage() {
                         }}
                         className="text-muted-foreground"
                       />
+                      {equityStartValue != null && (
+                        <ReferenceLine
+                          y={equityStartValue}
+                          stroke="hsl(var(--border))"
+                          strokeDasharray="4 2"
+                          label={{
+                            value: `start $${equityStartValue.toFixed(0)}`,
+                            position: "insideTopRight",
+                            style: { fontSize: 9, fill: "hsl(var(--muted-foreground))" },
+                          }}
+                        />
+                      )}
                       <Tooltip
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
