@@ -14,7 +14,8 @@ HTTPException 401) where fastapi is installed. Run it standalone:
 import pytest
 
 
-def test_fastapi_dependency_enforces_401(monkeypatch):
+def test_fastapi_dependency_is_default_closed(monkeypatch):
+    """The adapter is fail-closed: no token + no opt-out => 401 (never silently open)."""
     pytest.importorskip("fastapi")
     from fastapi import FastAPI, Depends
     from fastapi.testclient import TestClient
@@ -31,12 +32,19 @@ def test_fastapi_dependency_enforces_401(monkeypatch):
 
     class _S:
         backend_api_token = ""
+        backend_auth_disabled = False
 
-    # token unset -> open (degrades safely)
+    # DEFAULT (no token, no opt-out) -> DENY. A public paper deploy that forgets the token
+    # is fail-closed, NOT silently open.
     monkeypatch.setattr(cfg, "get_settings", lambda: _S())
+    assert client.post("/mutate").status_code == 401
+
+    # Explicit dev opt-out -> open (trusted single-user host).
+    _S.backend_auth_disabled = True
     assert client.post("/mutate").status_code == 200
 
-    # token set -> enforced (exact Bearer required; 401 on any mismatch)
+    # token set (opt-out off) -> enforced (exact Bearer required; 401 on any mismatch)
+    _S.backend_auth_disabled = False
     _S.backend_api_token = "s3cret"
     assert client.post("/mutate").status_code == 401
     assert client.post("/mutate", headers={"Authorization": "Bearer nope"}).status_code == 401
@@ -56,8 +64,13 @@ def _router_client():
 def _set_token(monkeypatch, token: str):
     import backend.app.config as cfg
 
+    # Control auth is now DEFAULT-CLOSED. Tests that pass an empty token are exercising a
+    # route's *validation/bounds* (or an unguarded read), not auth — so they run with the
+    # explicit dev opt-out (auth open) to reach the handler. Tests that pass a real token
+    # are exercising the *enforced* path (opt-out off), so a tokenless request is 401.
     class _S:
         backend_api_token = token
+        backend_auth_disabled = (token == "")
     monkeypatch.setattr(cfg, "get_settings", lambda: _S())
 
 
