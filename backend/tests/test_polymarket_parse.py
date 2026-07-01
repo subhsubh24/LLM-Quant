@@ -104,3 +104,87 @@ def test_already_closed_market_stays_untradeable_even_if_complete():
     raw = _base_raw(active=False)
     m = _client()._parse_market(raw)
     assert m.active is False
+
+
+# ============================================================
+# get_order_book: no fabricated spread from an empty / one-sided / malformed book
+# (deep-audit 2026-07-01 — the data analog of a fake fill; mirrors the Kalshi
+# one-sided-book fix and the #101 parse-honesty fix). An empty book used to
+# fabricate best_bid=0.0 / best_ask=1.0 -> a bogus 100%-wide spread a strategy reads
+# as a real quote (strategies.py uses book.spread).
+# ============================================================
+
+def _client_with_book(book_data):
+    """A PolymarketClient whose CLOB _get returns a fixed book payload."""
+    c = _client()
+    c._get = lambda *a, **k: book_data  # type: ignore[assignment]
+    return c
+
+
+def test_order_book_empty_returns_none_no_fabricated_spread():
+    c = _client_with_book({"bids": [], "asks": []})
+    assert c.get_order_book("tok") is None
+
+
+def test_order_book_one_sided_returns_none():
+    # Bids only (no asks) must NOT fabricate best_ask=1.0 / spread~1.0.
+    c = _client_with_book({"bids": [{"price": "0.40", "size": "100"}], "asks": []})
+    assert c.get_order_book("tok") is None
+    # Asks only (no bids) is equally not a two-sided quote.
+    c2 = _client_with_book({"bids": [], "asks": [{"price": "0.60", "size": "100"}]})
+    assert c2.get_order_book("tok") is None
+
+
+def test_order_book_non_finite_level_is_dropped():
+    # An 'inf'/'nan' price must never enter the book. Here the only ask is inf -> the
+    # ask side is empty after cleaning -> one-sided -> None (no inf in best_ask/spread).
+    c = _client_with_book({
+        "bids": [{"price": "0.40", "size": "100"}],
+        "asks": [{"price": "inf", "size": "100"}],
+    })
+    assert c.get_order_book("tok") is None
+
+
+def test_order_book_out_of_range_and_bad_size_dropped():
+    # Price > 1 and non-positive size are invalid levels; dropped. With a valid level
+    # remaining on each side the book is honest.
+    c = _client_with_book({
+        "bids": [{"price": "1.50", "size": "100"}, {"price": "0.45", "size": "50"}],
+        "asks": [{"price": "0.55", "size": "0"}, {"price": "0.55", "size": "50"}],
+    })
+    book = c.get_order_book("tok")
+    assert book is not None
+    assert book.best_bid == 0.45 and book.best_ask == 0.55
+    assert book.spread == 0.55 - 0.45
+    assert all(0.0 <= b["price"] <= 1.0 and b["size"] > 0 for b in book.bids)
+    assert all(0.0 <= a["price"] <= 1.0 and a["size"] > 0 for a in book.asks)
+
+
+def test_order_book_valid_two_sided_preserved():
+    c = _client_with_book({
+        "bids": [{"price": "0.48", "size": "200"}],
+        "asks": [{"price": "0.52", "size": "150"}],
+    })
+    book = c.get_order_book("tok")
+    assert book is not None
+    assert book.best_bid == 0.48 and book.best_ask == 0.52
+    assert abs(book.spread - 0.04) < 1e-9
+
+
+def test_get_market_by_id_queries_the_id_filter_not_slug():
+    # Resolution stores the numeric Gamma id; get_market_by_id must query the ``id``
+    # filter (the field positions carry), not the slug filter.
+    c = _client()
+    seen = {}
+
+    def _fake_get(url, params=None):
+        seen["params"] = params
+        return None  # no market; we only assert the query param here
+
+    c._get = _fake_get  # type: ignore[assignment]
+    assert c.get_market_by_id("253591") is None
+    assert seen["params"] == {"id": "253591"}
+    # Empty id short-circuits without a query.
+    seen.clear()
+    assert c.get_market_by_id("") is None
+    assert "params" not in seen

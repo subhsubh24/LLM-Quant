@@ -332,8 +332,14 @@ class MarkToMarketEngine:
 
             # Check if market has resolved
             try:
-                # Check via Gamma API
-                market = client.get_market_by_slug(pos.market_id)
+                # Check via Gamma API. CRITICAL: positions store the Gamma numeric
+                # ``id`` (market_id=opp.market.id), NOT the URL slug — they are DISTINCT
+                # fields. The old ``get_market_by_slug(pos.market_id)`` queried Gamma's
+                # ``slug`` filter with a numeric id, which matched NOTHING, so this loop
+                # never settled a position in production (the unit tests passed only
+                # because their fakes ignore the argument — a BUILDS≠WORKS blind spot).
+                # Look the market up by the ``id`` filter, the field the position stores.
+                market = client.get_market_by_id(pos.market_id)
                 if market and market.resolved:
                     # Find the held outcome's settled price. CRITICAL (side-effect
                     # integrity, FACTORY_STANDARD §6 / ROADMAP F4.1): settle ONLY when
