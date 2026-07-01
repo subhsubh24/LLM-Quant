@@ -2,9 +2,13 @@
 Tests for the backend shared-secret bearer auth (security top_gap).
 
 Validates the PURE authorization decision (auth_core) — fastapi-free so it runs in the
-lightweight CI gate. Proves the EFFECT, not a message:
+lightweight CI gate. Proves the EFFECT, not a message. NOTE: this is the PRIMITIVE; the
+ENFORCED system policy is DEFAULT-CLOSED and lives in the auth.py adapter (an unset token
+DENIES unless BACKEND_AUTH_DISABLED is set). The "empty token -> True" branch here is the
+primitive's auth-disabled sentinel, which the adapter never reaches (it 401s first).
 
-  * token UNSET  -> every request allowed (degrades safely; unchanged paper/dev behaviour);
+  * token "" (empty) -> primitive returns True (auth-disabled sentinel; NOT the system
+                        default — the adapter denies an unset token);
   * token SET    -> only an exact `Authorization: Bearer <token>` is allowed; missing /
                     wrong / wrong-scheme / empty is denied;
   * comparison is value-based and constant-time (hmac.compare_digest).
@@ -58,7 +62,8 @@ def test_configured_token_degrades_on_settings_error(monkeypatch):
         raise RuntimeError("no settings")
 
     monkeypatch.setattr(cfg, "get_settings", _boom)
-    # Must not raise; treats as unset (open) — same as the documented default.
+    # Must not raise; returns "" (no token). Fails CLOSED at the adapter (an unset token
+    # denies with 401 unless BACKEND_AUTH_DISABLED is set) — see auth.py.
     assert auth_core.configured_token() == ""
 
     # NOTE: the end-to-end FastAPI 401 wiring (Header extraction + HTTPException) is
