@@ -111,6 +111,18 @@ class Settings(BaseSettings):
     max_total_loss_usd: float = 100.0    # env: MAX_TOTAL_LOSS_USD
     llm_spend_cap_usd: float = 20.0      # env: LLM_SPEND_CAP_USD
 
+    # ============ UNVALIDATED-STRATEGY GATE ============
+    # Some strategies are NOT tracked in ROADMAP/RESEARCH_MEMORY, have no B3 registry
+    # evidence, no backtest, and no forensic-audit proof they fire on real-shaped data —
+    # and the whale infrastructure historically shipped a FABRICATED hardcoded seed of
+    # "known whale" wallet addresses (removed 2026-07-01). Per FACTORY_STANDARD
+    # "no alpha ships while integrity is weak" + evidence-based-done, such strategies must
+    # NOT run in the default paper scan until validated. This flag (default OFF) keeps them
+    # out of the auto-configured scanner; flip it only to deliberately exercise them.
+    # The autonomous loop never sets this. See the whale/weather ROADMAP items + the
+    # 2026-07-01 Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
+    enable_unvalidated_strategies: bool = False  # env: ENABLE_UNVALIDATED_STRATEGIES — default off
+
     # ============ Live Broker Settings ============
     # Alpaca (US Stocks/ETFs) - Paper Trading
     alpaca_api_key: str = ""

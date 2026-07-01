@@ -20,14 +20,22 @@ from .polymarket_client import Market, PolymarketClient
 
 logger = logging.getLogger(__name__)
 
-# Well-known profitable wallets (public leaderboard data).
-# These are seeded on first run; the feed also discovers new whales
-# dynamically via the /holders endpoint.
-KNOWN_WHALES: List[Dict] = [
-    {"address": "0xf0a3ceb5db0a53c12e1e52e61a8e8e5b4e2e3fc9", "name": "Theo4", "pnl": 22_000_000, "win_rate": 0.889},
-    {"address": "0x23a1f4c7e3b8d5e9a6f0c3d2b1a0e9d8c7b6a5f4", "name": "Fredi9999", "pnl": 16_600_000, "win_rate": 0.82},
-    {"address": "0xa1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", "name": "SeriouslySirius", "pnl": 3_800_000, "win_rate": 0.85},
-]
+# Whale wallets are discovered ONLY from real public data at runtime — the live
+# Data-API /leaderboard (preferred) and per-market /holders discovery. There is NO
+# hardcoded seed.
+#
+# INTEGRITY NOTE (2026-07-01): this list previously hardcoded named "known profitable
+# whales" paired with wallet addresses that could NOT be verified against Polymarket's
+# public leaderboard — the real "Theo4" wallet is a different address, and one entry
+# ("SeriouslySirius", 0xa1b2c3d4e5f6…) was a self-evident sequential-hex PLACEHOLDER, not
+# a real address. A named, specific-looking "known whale" with an invented address is a
+# fabricated-legitimacy risk (the data analog of a fake fill): it gives false confidence
+# that the strategy is acting on real on-chain signal when it structurally is not. It is
+# removed rather than "corrected" because a corrected address is equally unverifiable from
+# this environment (Data-API egress is blocked). An empty seed is the honest default: the
+# feed contributes REAL discovered signal or NONE, never a fabricated seed. See the
+# 2026-07-01 Research Run 11 finding in docs/growth/RESEARCH_MEMORY.md.
+KNOWN_WHALES: List[Dict] = []
 
 # Minimum position size (in tokens) to consider someone a "whale"
 MIN_WHALE_POSITION = 5000.0

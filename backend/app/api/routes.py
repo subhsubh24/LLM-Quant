@@ -194,10 +194,7 @@ def _get_prediction_scanner():
             CrossMarketArbitrageStrategy,
             MarketMakingStrategy,
             FlashCrashStrategy,
-            WeatherArbitrageStrategy,
-            WhaleCopyTradingStrategy,
         )
-        from ..prediction_markets.noaa_weather import NOAAWeatherClient
 
         client = _get_polymarket_client()
         _prediction_scanner = PredictionMarketScanner(
@@ -226,7 +223,6 @@ def _get_prediction_scanner():
         _prediction_scanner.add_strategy(CrossMarketArbitrageStrategy(client, config))
         _prediction_scanner.add_strategy(MarketMakingStrategy(client, config))
         _prediction_scanner.add_strategy(FlashCrashStrategy(client, config))
-        _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
 
         # Advanced strategies
         try:
@@ -234,7 +230,6 @@ def _get_prediction_scanner():
                 NOPositionScanner,
                 LogicalImplicationDetector,
                 WalletBehaviorDivergence,
-                AdaptiveBuySignalThreshold,
             )
             _prediction_scanner.add_strategy(NOPositionScanner(client, config))
             _prediction_scanner.add_strategy(LogicalImplicationDetector(client, config))
@@ -242,15 +237,32 @@ def _get_prediction_scanner():
         except Exception as e:
             logger.warning(f"Advanced strategies not loaded: {e}")
 
-        # Weather arb needs NOAA forecasts
-        weather_strategy = WeatherArbitrageStrategy(client, config)
-        try:
-            noaa = NOAAWeatherClient()
-            forecasts = noaa.get_all_forecasts()
-            weather_strategy.update_forecasts(forecasts)
-        except Exception as e:
-            logger.warning(f"NOAA forecast fetch failed (weather arb degraded): {e}")
-        _prediction_scanner.add_strategy(weather_strategy)
+        # UNVALIDATED strategies (whale copy-trading, weather arb) — off by default.
+        # They are untracked in ROADMAP/RESEARCH_MEMORY, have no B3 registry evidence, and
+        # the whale feed historically shipped a fabricated hardcoded seed. Per
+        # FACTORY_STANDARD "no alpha ships while integrity is weak" they only load when the
+        # owner explicitly opts in via ENABLE_UNVALIDATED_STRATEGIES. See the 2026-07-01
+        # Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
+        if get_settings().enable_unvalidated_strategies:
+            from ..prediction_markets.strategies import (
+                WeatherArbitrageStrategy,
+                WhaleCopyTradingStrategy,
+            )
+            _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+            weather_strategy = WeatherArbitrageStrategy(client, config)
+            try:
+                from ..prediction_markets.noaa_weather import NOAAWeatherClient
+                noaa = NOAAWeatherClient()
+                forecasts = noaa.get_all_forecasts()
+                weather_strategy.update_forecasts(forecasts)
+            except Exception as e:
+                logger.warning(f"NOAA forecast fetch failed (weather arb degraded): {e}")
+            _prediction_scanner.add_strategy(weather_strategy)
+        else:
+            logger.info(
+                "Unvalidated strategies (whale copy-trading, weather arb) gated OFF "
+                "(ENABLE_UNVALIDATED_STRATEGIES not set)."
+            )
 
     return _prediction_scanner
 

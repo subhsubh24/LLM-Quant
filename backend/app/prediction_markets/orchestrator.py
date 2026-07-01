@@ -1464,9 +1464,18 @@ async def start_orchestrator(
 
 
 def _build_default_scanner() -> PredictionMarketScanner:
-    """Build a scanner with all strategies enabled."""
-    import os
+    """Build a scanner with the validated strategies enabled.
+
+    WhaleCopyTrading + WeatherArbitrage are UNVALIDATED (untracked in
+    ROADMAP/RESEARCH_MEMORY, no B3 registry evidence, no forensic-audit proof they fire
+    on real-shaped data — and the whale feed historically shipped a fabricated hardcoded
+    seed of "known whale" addresses). Per FACTORY_STANDARD "no alpha ships while integrity
+    is weak" + evidence-based-done, they are kept OUT of the default scan unless the owner
+    explicitly opts in via ENABLE_UNVALIDATED_STRATEGIES (default off). See the 2026-07-01
+    Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
+    """
     from .polymarket_client import PolymarketClient
+    from ..config import get_settings
     from .strategies import (
         StrategyConfig,
         NearCertaintyStrategy,
@@ -1474,7 +1483,6 @@ def _build_default_scanner() -> PredictionMarketScanner:
         CrossMarketArbitrageStrategy,
         MarketMakingStrategy,
         FlashCrashStrategy,
-        WhaleCopyTradingStrategy,
     )
     from .advanced_strategies import (
         NOPositionScanner,
@@ -1486,12 +1494,12 @@ def _build_default_scanner() -> PredictionMarketScanner:
     client = PolymarketClient()
     config = StrategyConfig(dry_run=True)
     scanner = PredictionMarketScanner(client)
+    enable_unvalidated = get_settings().enable_unvalidated_strategies
 
     # Register standalone strategies (not wrapped by adaptive)
     scanner.add_strategy(SameMarketArbitrageStrategy(client, config))
     scanner.add_strategy(MarketMakingStrategy(client, config))
     scanner.add_strategy(FlashCrashStrategy(client, config))
-    scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
 
     # Advanced standalone strategies
     scanner.add_strategy(LogicalImplicationDetector(client, config))
@@ -1505,15 +1513,21 @@ def _build_default_scanner() -> PredictionMarketScanner:
     adaptive.add_inner_strategy(NOPositionScanner(client, config))
     scanner.add_strategy(adaptive)
 
-    # Wire weather strategy if NOAA data available
-    try:
-        from .noaa_weather import NOAAWeatherClient
-        from .strategies import WeatherArbitrageStrategy
-        noaa = NOAAWeatherClient()
-        weather = WeatherArbitrageStrategy(client, config)
-        scanner.add_strategy(weather)
-    except Exception as e:
-        logger.warning(f"[ORCHESTRATOR] Weather strategy not loaded: {e}")
+    # UNVALIDATED strategies — off by default (see docstring + FACTORY_STANDARD).
+    if enable_unvalidated:
+        from .strategies import WhaleCopyTradingStrategy
+        scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
+        try:
+            from .noaa_weather import NOAAWeatherClient  # noqa: F401  (import-time availability check)
+            from .strategies import WeatherArbitrageStrategy
+            scanner.add_strategy(WeatherArbitrageStrategy(client, config))
+        except Exception as e:
+            logger.warning(f"[ORCHESTRATOR] Weather strategy not loaded: {e}")
+    else:
+        logger.info(
+            "[ORCHESTRATOR] Unvalidated strategies (whale copy-trading, weather arb) "
+            "gated OFF (ENABLE_UNVALIDATED_STRATEGIES not set)."
+        )
 
     logger.info(f"[ORCHESTRATOR] Auto-configured scanner with {len(scanner.strategies)} strategies")
     return scanner
