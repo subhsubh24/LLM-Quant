@@ -209,13 +209,24 @@ class RiskManager:
         # Track daily P&L impact (fees reduce P&L)
         if result.is_success:
             self._daily_pnl -= result.fees
-            strategy = result.raw_response.get("strategy", "") if result.raw_response else ""
-            if strategy:
-                self._strategy_trades[strategy] += 1
+        # NOTE: the per-strategy trade COUNT is incremented in ``record_pnl`` (position
+        # close), NOT here. ``result.raw_response`` is the raw VENUE / dry-run payload
+        # (e.g. ``{"simulated": True, "dry_run": True}`` or the CLOB/REST order response)
+        # and never carries a ``strategy`` tag, so counting it here was structurally dead
+        # (``_strategy_trades`` stayed 0) — which silently broke the drawdown auto-disable,
+        # whose ``trades >= strategy_disable_min_trades`` gate could then never pass.
 
     def record_pnl(self, strategy: str, pnl: float):
         """Record realized P&L for a strategy (called when position closes)."""
         self._daily_pnl += pnl
+
+        # Count this realized (closed) trade for the strategy. The drawdown-based
+        # auto-disable gates on ``trades >= strategy_disable_min_trades``, and this is
+        # the only call site that receives the real strategy name (the venue response in
+        # ``record_execution`` does not carry it), so the counter MUST advance here or the
+        # auto-disable never fires. Realized/closed trades are the right unit for a
+        # realized-drawdown circuit.
+        self._strategy_trades[strategy] += 1
 
         # Update strategy peak/current for drawdown tracking
         self._strategy_current_value[strategy] += pnl

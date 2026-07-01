@@ -977,7 +977,12 @@ class TestRiskManagerRecordExecution:
         rm.record_execution(result)
         assert rm._daily_pnl == -0.01
 
-    def test_record_execution_with_strategy(self):
+    def test_record_execution_does_not_track_strategy_trades(self):
+        # record_execution does NOT count per-strategy trades: the venue OrderResult has no
+        # `strategy` field (only OrderRequest/Position do), so the old
+        # `raw_response.get("strategy")` increment was structurally dead. The per-strategy
+        # trade counter is advanced in record_pnl (position close), which receives the real
+        # strategy name — see test_strategy_drawdown_disable.py.
         from app.prediction_markets.risk_manager import RiskManager
         from app.prediction_markets.execution import (
             OrderResult, Exchange, OrderSide, OrderType, OrderStatus,
@@ -991,6 +996,10 @@ class TestRiskManagerRecordExecution:
             fees=0.02, raw_response={"strategy": "near_certainty"},
         )
         rm.record_execution(result)
+        # No strategy is counted from the venue response (would break the drawdown gate).
+        assert rm._strategy_trades["near_certainty"] == 0
+        # record_pnl is the real per-strategy trade counter:
+        rm.record_pnl("near_certainty", -1.0)
         assert rm._strategy_trades["near_certainty"] == 1
 
     def test_record_execution_rejected_no_tracking(self):
