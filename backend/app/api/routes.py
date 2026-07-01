@@ -4,7 +4,7 @@ API routes for QuantLab.
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field, field_validator
-from typing import Dict, List, Optional, Any
+from typing import List, Optional
 from datetime import datetime
 import json
 import logging
@@ -13,7 +13,6 @@ from .auth import require_backend_token
 
 logger = logging.getLogger(__name__)
 
-from ..llm import QuantExplainer, QuantTutor
 from ..config import get_settings
 from .. import DISCLAIMER
 
@@ -47,109 +46,8 @@ async def debug_routes_loaded():
     return {
         "status": "ok",
         "message": "All routes loaded successfully",
-        "sections": ["learn", "status", "prediction-markets"],
+        "sections": ["status", "prediction-markets"],
     }
-
-
-# ============ Request/Response Models ============
-
-class ExplainRequest(BaseModel):
-    topic: str  # data, features, model, portfolio, backtest
-    context: Dict[str, Any] = {}
-
-
-# ============ Learning Endpoints ============
-
-@router.get("/learn/lessons")
-async def list_lessons(category: Optional[str] = None):
-    """List available lessons."""
-    tutor = QuantTutor()
-    lessons = tutor.list_lessons(category)
-
-    return [
-        {
-            "id": l.id,
-            "title": l.title,
-            "difficulty": l.difficulty,
-            "category": l.category,
-            "key_concepts": l.key_concepts
-        }
-        for l in lessons
-    ]
-
-
-@router.get("/learn/lesson/{lesson_id}")
-async def get_lesson(lesson_id: str):
-    """Get a specific lesson."""
-    tutor = QuantTutor()
-    lesson = tutor.get_lesson(lesson_id)
-
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-
-    return {
-        "id": lesson.id,
-        "title": lesson.title,
-        "difficulty": lesson.difficulty,
-        "category": lesson.category,
-        "content": lesson.content,
-        "key_concepts": lesson.key_concepts,
-        "pitfalls": lesson.pitfalls,
-        "next_lessons": lesson.next_lessons
-    }
-
-
-@router.get("/learn/glossary/{term}")
-async def get_glossary_term(term: str):
-    """Look up a glossary term."""
-    tutor = QuantTutor()
-    entry = tutor.get_glossary_term(term)
-
-    if not entry:
-        raise HTTPException(status_code=404, detail="Term not found")
-
-    return entry
-
-
-@router.post("/learn/explain")
-async def explain_topic(request: ExplainRequest):
-    """Get explanation for a topic."""
-    explainer = QuantExplainer()
-
-    method_map = {
-        "data": explainer.explain_data_ingestion,
-        "features": explainer.explain_features,
-        "model": explainer.explain_model,
-        "portfolio": explainer.explain_portfolio,
-        "backtest": explainer.explain_backtest,
-    }
-
-    method = method_map.get(request.topic)
-    if not method:
-        raise HTTPException(status_code=400, detail="Unknown topic")
-
-    # Build context based on topic
-    if request.topic == "data":
-        explanation = method(
-            tickers=request.context.get("tickers", []),
-            date_range=(
-                request.context.get("start_date", "2020-01-01"),
-                request.context.get("end_date", "2024-01-01")
-            ),
-            data_quality=request.context.get("data_quality", {})
-        )
-    else:
-        # Generic context handling
-        explanation = method(**request.context) if request.context else {}
-
-    return explanation
-
-
-@router.get("/learn/help/{context}")
-async def get_contextual_help(context: str):
-    """Get help based on current context."""
-    tutor = QuantTutor()
-    return tutor.get_contextual_help(context)
 
 
 # ============ Status Endpoints ============
