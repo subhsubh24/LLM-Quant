@@ -289,6 +289,27 @@ def test_no_quote_market_is_forced_untradeable_not_fabricated_5050():
     assert abs((m.outcomes[0].price + m.outcomes[1].price) - 1.0) < 1e-9
 
 
+def test_out_of_range_bid_ask_not_clamped_to_fabricated_certainty():
+    """An out-of-range cent quote (>100) must be REJECTED, not silently clamped to a
+    fabricated 1.0 certain-outcome price. yes_bid=150 (a glitch/contract change) with no
+    valid last_price -> untradeable, never a tradeable 100%-YES market invented from
+    garbage. Mirrors the last_price branch's existing (0,100] bound."""
+    raw = _make_raw_market(yes_bid=150, yes_ask=160, status="active")  # both out of range
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is False  # rejected -> has_quote False -> untradeable
+    # And it did NOT surface a fabricated certain-YES price.
+    assert m.outcomes[0].price != 1.0
+
+
+def test_out_of_range_bid_falls_back_to_valid_ask():
+    """One garbage side (yes_bid=150) must be dropped while the valid side (yes_ask=40)
+    still prices the market — the out-of-range value must never poison the midpoint."""
+    raw = _make_raw_market(yes_bid=150, yes_ask=40, status="active")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is True                       # the valid ask keeps it tradeable
+    assert abs(m.outcomes[0].price - 0.40) < 1e-9  # priced from the valid side alone
+
+
 # ---------------------------------------------------------------------------
 # fetched_at is timezone-aware UTC
 # ---------------------------------------------------------------------------

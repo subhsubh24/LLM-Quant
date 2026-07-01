@@ -218,8 +218,16 @@ class KalshiClient:
         yes_bid = _to_float(raw.get("yes_bid"))
         yes_ask = _to_float(raw.get("yes_ask"))
         last_price = _to_float(raw.get("last_price"))
-        bid_ok = yes_bid is not None and yes_bid > 0
-        ask_ok = yes_ask is not None and yes_ask > 0
+        # Bound bid/ask to the documented cent range (0, 100] — the SAME bound the
+        # last_price branch already applies below. Without the upper bound an
+        # out-of-range/garbage quote (e.g. yes_bid=150, an API glitch or contract
+        # change) would pass a bare `> 0`, feed yes_mid_cents, and CLAMP to a
+        # fabricated certain-outcome price (150/100 -> min(1.0) = 1.0 YES) — a
+        # tradeable market invented from garbage (the data analog of a fake fill /
+        # the #101 "a missing quote is not a 50/50 market" honesty rule). A rejected
+        # side falls through to has_quote=False -> untradeable, never a fabricated 1.0.
+        bid_ok = yes_bid is not None and 0 < yes_bid <= 100
+        ask_ok = yes_ask is not None and 0 < yes_ask <= 100
         has_quote = True
         if bid_ok and ask_ok:
             yes_mid_cents = (yes_bid + yes_ask) / 2.0
