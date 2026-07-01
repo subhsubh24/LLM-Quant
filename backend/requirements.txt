@@ -8,7 +8,6 @@ pydantic-settings>=2.1.0
 # Data & Computation
 pandas>=2.1.0
 numpy>=1.26.0
-yfinance>=0.2.36          # still imported by backtest/strategy_tester.py (asset-agnostic infra)
 requests>=2.31.0
 
 # Machine Learning

@@ -35,9 +35,6 @@ pytest>=7.0.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
 
-# Optional but useful
-yfinance>=0.2.30
-
 # Alternative Data (all optional - providers fall back gracefully)
 pytrends>=4.9.0          # Google Trends data (free, no key)
 pandas-datareader>=0.10  # FRED data without API key
