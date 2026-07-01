@@ -393,3 +393,24 @@ work NEVER triggers it. When triggered:
 - This SUBSUMES the VISION ≥2-refuter panel (GTM_STANDARD §3) — a VISION pivot runs this protocol.
 - **Cost-gated:** it is expensive; spending it on routine work is a FAILURE (it violates the value
   bar). When unsure whether a decision qualifies, it does not — default to single-path + review.
+
+## 22. Computation integrity — every number comes from executed code, never mental arithmetic
+The anti-fabrication rule guarantees a number is REAL and SOURCED (a figure no connected source
+reported stays 0/null); this rule guarantees it is CORRECTLY COMPUTED. Every quantitative claim —
+statistical (significance, CI, sample size), unit-economics (LTV, CAC, payback, margin, MRR/ARR),
+pricing/elasticity, the business-case number (§9), and the Channel-Plan economics (GTM_STANDARD §9
+/ §21) — MUST be produced by EXECUTED, reproducible code (you have Bash), never arithmetic done in
+your head.
+- **Compute it, don't eyeball it.** A figure derived by mental arithmetic is treated exactly like an
+  unsourced one — not allowed. Generalizes the significance rule (ANALYSIS_PLAYBOOK: "you have Bash;
+  compute it, don't eyeball") to ALL numbers.
+- **Reproducible + committed.** The computation lives in a committed script (under `scripts/` or the
+  analysis dir) whose output IS the cited number; anyone can re-run it and get the same value.
+  Deterministic inputs → deterministic output (stamp any date/seed; no `Math.random`).
+- **The doc figure MUST match the script output** — a mismatch is a bug, and a figure left stale
+  after its inputs changed is the same bug. Recompute on every real change (LIVING).
+- **maker ≠ checker (§4) re-runs it.** The independent reviewer for any change carrying a
+  quantitative claim RE-RUNS the computation and confirms the figure before merge — the
+  deterministic backstop.
+- Same anti-gaming rule as the number: never round, flatter, or hand-tune a computed result. A
+  figure must be both SOURCED and CORRECTLY COMPUTED — either failing is a release-blocking lie.
