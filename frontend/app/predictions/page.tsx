@@ -141,6 +141,10 @@ function Toast({ message, type }: { message: string; type: "success" | "error" |
 
 export default function PredictionsPage() {
   const [strategies, setStrategies] = useState<StrategyConfig[]>(DEFAULT_STRATEGIES);
+  // Have we received real per-strategy data from the backend yet? Until we have, the
+  // strategy strip must NOT render the DEFAULT_STRATEGIES' placeholder pnl:0 as a real
+  // "+$0.00" (a fabricated value) — it shows "—" instead (the portfolio-tab honesty bar).
+  const [strategiesLoaded, setStrategiesLoaded] = useState(false);
   const [markets, setMarkets] = useState<PredictionMarket[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [livePositions, setLivePositions] = useState<Position[]>([]);
@@ -201,6 +205,9 @@ export default function PredictionsPage() {
         setScanCount(data.total_scans || 0);
         setIsLive(true);
       }
+      // A successful backend response means the strip's numbers are now REAL (even a
+      // genuine 0), so it may leave the "—" not-yet-loaded state.
+      setStrategiesLoaded(true);
     } catch {}
   };
 
@@ -426,7 +433,6 @@ export default function PredictionsPage() {
   // ----------------------------------------------------------------
 
   const positionCount = livePositions.length;
-  const totalPnl = portfolioSummary?.total_pnl ?? strategies.reduce((sum, s) => sum + s.pnl, 0);
   const unrealizedPnl = useMemo(() => livePositions.reduce((s, p) => s + p.pnl, 0), [livePositions]);
   // The bot runs all known strategies server-side (there is no per-strategy on/off
   // loop yet — see ROADMAP), so "active" = the full set, not a user-toggled subset.
@@ -564,8 +570,10 @@ export default function PredictionsPage() {
             ))
           ) : (
             <>
-              <StatCard label="Total P&L" value={`${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`}
-                color={totalPnl >= 0 ? "text-green-500" : "text-red-500"} icon={DollarSign}
+              <StatCard label="Total P&L"
+                value={portfolioSummary?.total_pnl != null ? `${portfolioSummary.total_pnl >= 0 ? "+" : ""}$${portfolioSummary.total_pnl.toFixed(2)}` : "—"}
+                color={portfolioSummary?.total_pnl == null ? "text-muted-foreground" : (portfolioSummary.total_pnl >= 0 ? "text-green-500" : "text-red-500")}
+                icon={DollarSign}
                 sub={portfolioSummary?.total_exposure ? `$${portfolioSummary.total_exposure.toFixed(2)} exposure` : null} />
               <StatCard label="Open Positions" value={String(positionCount)} color="text-foreground" icon={Activity}
                 sub={positionCount > 0 ? `${new Set(livePositions.map(p => p.strategy)).size} strategies` : null} />
@@ -593,10 +601,16 @@ export default function PredictionsPage() {
                 <div className="min-w-0">
                   <span className="text-[11px] font-semibold text-foreground whitespace-nowrap">{strategy.name}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground tabular-nums">{strategy.positions} pos</span>
-                    <span className={cn("text-[10px] font-semibold tabular-nums", strategy.pnl >= 0 ? "text-green-500" : "text-red-500")}>
-                      {strategy.pnl >= 0 ? "+" : ""}${strategy.pnl.toFixed(2)}
-                    </span>
+                    {strategiesLoaded ? (
+                      <>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">{strategy.positions} pos</span>
+                        <span className={cn("text-[10px] font-semibold tabular-nums", strategy.pnl >= 0 ? "text-green-500" : "text-red-500")}>
+                          {strategy.pnl >= 0 ? "+" : ""}${strategy.pnl.toFixed(2)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground tabular-nums">—</span>
+                    )}
                   </div>
                 </div>
               </div>
