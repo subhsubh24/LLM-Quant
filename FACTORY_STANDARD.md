@@ -361,3 +361,35 @@ commands, and default branch · the concrete security model (e.g. the tenant-iso
 mechanism) · the ship target (app-store submission vs production deploy vs go-live edge) ·
 the file paths for preflight, the journey suite, the scorecard, growth status · the design
 bar specifics · the human-core handoff list.
+
+## 20. Success-pattern library (reuse what worked — not just avoid what failed)
+The dead-end ledger (§10b) stops you REPEATING failures; this makes you REPEAT successes.
+Maintain `docs/autonomous-loop/SUCCESS_PATTERNS.md`: a curated, deduplicated list of proven
+approaches. Each entry is one line of real signal — the PATTERN (what you did), the CONTEXT it
+worked in, WHY it worked, and a pointer to the EVIDENCE (the merged PR / measured result).
+- **Read it FIRST** each run (alongside loop-memory): before solving a task, check for a matching
+  proven pattern and REUSE it rather than reinventing the approach.
+- **Write sparingly.** Add an entry ONLY when a change worked notably well AND the approach is
+  genuinely reusable — not every change (that is noise, and noise is churn).
+- **Compress it** (the memory-compression discipline): merge near-duplicate patterns into one
+  higher-level pattern and cap the file. A bloated library is an unusable library — fewer, sharper
+  patterns beat many specific ones.
+- **Honest only.** A pattern recorded as "worked" MUST cite real evidence (a merged PR, a measured
+  improvement) — never an aspirational or unproven claim. Same anti-gaming rule as the number.
+
+## 21. High-stakes decisions — branch-and-explore + ensemble judge (rare, cost-gated)
+The default is ONE approach through maker ≠ checker (§4) — correct for routine features/fixes. A
+FEW decisions warrant more. TRIGGER this protocol ONLY when a decision is: (a) hard to reverse,
+(b) a VISION / north-star pivot, (c) an architecture-level or cross-cutting design choice,
+(d) security-critical design, or (e) a large irreversible roadmap/resource commitment. Routine
+work NEVER triggers it. When triggered:
+- **Branch-and-explore:** generate ≥3 DIVERSE independent approaches (fresh-context Task subagents,
+  each a genuinely different angle — e.g. conservative / aggressive / simplest-that-works), not one
+  answer defended.
+- **Ensemble judge:** score every approach with ≥2 INDEPENDENT judge subagents (never the
+  generators), on explicit stated criteria; pick the highest-consensus approach, or SYNTHESIZE the
+  winner by grafting the strongest elements of the runners-up.
+- **Record it:** in the PR / decision note, state the alternatives considered and why the winner won.
+- This SUBSUMES the VISION ≥2-refuter panel (GTM_STANDARD §3) — a VISION pivot runs this protocol.
+- **Cost-gated:** it is expensive; spending it on routine work is a FAILURE (it violates the value
+  bar). When unsure whether a decision qualifies, it does not — default to single-path + review.
