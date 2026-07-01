@@ -59,13 +59,13 @@ SELF_VALIDATION:
       ci_validatable: true             # exercised against in-memory SQLite; no secret needed to validate
       status: validated
     - id: backend_route_auth
-      desc: "shared-secret bearer token on state-mutating routes (kill-switch/config/execute/bot/scan); risk-config bounds-validated (a non-positive loss cap can't disable the control)"
-      validates_via: "test_backend_auth.py (pure decision: open when BACKEND_API_TOKEN unset, exact-Bearer + constant-time when set) + test_risk_config_validation.py (pure bounds: reject non-positive/NaN/inf/absurd risk limits) in the CI gate; test_backend_auth_fastapi.py exercises the FastAPI adapter (the /scan guard + market_limit/risk-config/search bounds return 401/422) where fastapi is installed (importorskip — CI-skipped, run locally)"
-      mode: degrades_without_key
-      requires_env: [BACKEND_API_TOKEN]  # unset => auth disabled (open), unchanged paper/dev behaviour
+      desc: "shared-secret bearer token on state-mutating routes (kill-switch/config/execute/bot/scan), DEFAULT-CLOSED: no token => DENY (401) unless BACKEND_AUTH_DISABLED=1 dev opt-out; risk-config bounds-validated (a non-positive loss cap can't disable the control)"
+      validates_via: "test_backend_auth.py (pure token decision: exact-Bearer + constant-time when set) + test_risk_config_validation.py (pure bounds: reject non-positive/NaN/inf/absurd risk limits) in the CI gate; test_backend_auth_fastapi.py exercises the FastAPI adapter POLICY (default-closed 401 when no token + no opt-out; open on BACKEND_AUTH_DISABLED; enforced when a token is set; /scan guard + bounds return 401/422) where fastapi is installed (importorskip — CI-skipped, run locally)"
+      mode: fail_closed
+      requires_env: [BACKEND_API_TOKEN]  # unset => DENY (default-closed); BACKEND_AUTH_DISABLED=1 is the dev opt-out (never honoured with live money — config refuses to boot)
       active: true
-      ci_validatable: true             # the no-token (open) AND the enforced decision are both tested without any secret; the token only ACTIVATES protection
-      status: degrades_safely            # absent token => open (as today); set => enforced. Owner activates (OA-14).
+      ci_validatable: true             # the default-closed DENY, the dev-opt-out OPEN, AND the enforced-token decision are all tested without any secret; the token only sets the credential
+      status: degrades_safely            # absent token => CLOSED (deny), the SAFE degradation; set => enforced; BACKEND_AUTH_DISABLED => open (dev only). Owner activates (OA-14).
     - id: live_trading_path
       desc: "real-order placement on Polymarket (the gated live path)"
       validates_via: "runtime_harness asserts the live gate + kill switch BLOCK real orders deterministically"

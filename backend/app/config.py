@@ -94,7 +94,16 @@ class Settings(BaseSettings):
     # so the backend control surface is credential-protected server-side, not merely
     # network-isolated. Server-side only; the autonomous loop never sets it. See
     # backend/app/api/auth.py + PENDING_OPS OA-14.
-    backend_api_token: str = ""  # env: BACKEND_API_TOKEN — owner-set; default off (open)
+    backend_api_token: str = ""  # env: BACKEND_API_TOKEN — owner-set; protects control routes (default CLOSED)
+
+    # Dev/paper opt-out for the default-CLOSED control auth. By DEFAULT (this flag False) the
+    # state-mutating routes REQUIRE a token — so a public paper deploy that forgets to set
+    # BACKEND_API_TOKEN is NOT silently unauthenticated: it denies mutating requests with 401
+    # rather than exposing the kill-switch/execute/bot-control surface. Set
+    # BACKEND_AUTH_DISABLED=1 to deliberately run OPEN on a trusted single-user dev/paper host.
+    # It can NEVER be active with real money — `_require_control_auth_in_live` refuses to boot
+    # if it is set while LIVE_TRADING_ENABLED is on. The autonomous loop never sets either.
+    backend_auth_disabled: bool = False  # env: BACKEND_AUTH_DISABLED — dev opt-out (run open)
 
     # TEST-ONLY bypass. The CI functional gate may set E2E_DISABLE_RATE_LIMIT=1 so a single
     # CI-runner IP cannot trip rate limits while exercising endpoints. PRODUCTION MUST NEVER
@@ -175,15 +184,24 @@ class Settings(BaseSettings):
         """Real money on the line ⇒ the control surface MUST be authenticated.
 
         The backend's state-mutating routes (kill-switch, execute, bot start/stop, risk
-        config, portfolio reset) degrade-safely to OPEN when BACKEND_API_TOKEN is unset —
-        correct for paper/dev, but a deploy that flips LIVE_TRADING_ENABLED while leaving
-        the token empty would expose an unauthenticated kill-switch/execute surface on a
-        real-money bot (a deep-audit footgun). So when live trading is on, an empty token
-        HARD-REFUSES to boot. This can NEVER affect paper/dev/CI (live defaults false and
-        the autonomous loop never flips it) — it only binds the owner's real-money host,
-        mirroring `_forbid_test_bypass_in_live`. See PENDING_OPS OA-14 (the control-token
-        owner action); the live master gate itself is LIVE_RUNBOOK §6.
+        config, portfolio reset) are default-CLOSED: they require BACKEND_API_TOKEN unless
+        BACKEND_AUTH_DISABLED=1 is explicitly set (a trusted-host dev/paper opt-out). Either
+        an empty token OR the dev opt-out while LIVE_TRADING_ENABLED is on would expose an
+        unauthenticated kill-switch/execute surface on a real-money bot (a deep-audit
+        footgun), so both HARD-REFUSE to boot when live trading is on. This can NEVER affect
+        paper/dev/CI (live defaults false and the autonomous loop never flips it) — it only
+        binds the owner's real-money host, mirroring `_forbid_test_bypass_in_live`. See
+        PENDING_OPS OA-14 (the control-token owner action); the live master gate is
+        LIVE_RUNBOOK §6.
         """
+        if self.live_trading_enabled and self.backend_auth_disabled:
+            raise ValueError(
+                "LIVE_TRADING_ENABLED is true but BACKEND_AUTH_DISABLED is set — the dev "
+                "opt-out would leave the state-mutating control routes (kill-switch, execute, "
+                "bot start/stop) UNAUTHENTICATED on a real-money deploy. Refusing to boot. "
+                "Unset BACKEND_AUTH_DISABLED and set BACKEND_API_TOKEN to a strong random "
+                "secret on the live host (see PENDING_OPS OA-14 / LIVE_RUNBOOK §6)."
+            )
         if self.live_trading_enabled and not (self.backend_api_token or "").strip():
             raise ValueError(
                 "LIVE_TRADING_ENABLED is true but BACKEND_API_TOKEN is empty — the "
