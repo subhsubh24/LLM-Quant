@@ -3,7 +3,7 @@ API routes for QuantLab.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
@@ -470,14 +470,18 @@ def _get_prediction_executor():
 
 
 class PlaceOrderRequest(BaseModel):
-    exchange: str = "polymarket"
-    market_id: str
-    token_id: str
-    side: str = "BUY"            # "BUY" or "SELL"
-    order_type: str = "LIMIT"    # "MARKET", "LIMIT", "GTC", "FOK"
-    size: float = 10.0           # Number of contracts
-    price: Optional[float] = None  # Limit price (0.01-0.99)
-    strategy: str = ""
+    # §12 input bounds: /execute is a state-mutating (auth-guarded) route whose payload
+    # flows straight into the executor + quant sizing. Without bounds a caller could send
+    # size=inf / price=NaN (poisoning risk math + the loss-cap counters) or a multi-MB
+    # market_id (resource exhaustion). allow_inf_nan=False rejects non-finite floats.
+    exchange: str = Field("polymarket", max_length=50)
+    market_id: str = Field(..., min_length=1, max_length=200)
+    token_id: str = Field(..., min_length=1, max_length=200)
+    side: str = Field("BUY", max_length=8)            # "BUY" or "SELL"
+    order_type: str = Field("LIMIT", max_length=8)    # "MARKET", "LIMIT", "GTC", "FOK"
+    size: float = Field(10.0, gt=0.0, le=1_000_000.0, allow_inf_nan=False)   # contracts
+    price: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)  # limit price 0..1
+    strategy: str = Field("", max_length=100)
 
 
 @router.post("/prediction-markets/execute", dependencies=_MUTATING_AUTH)
@@ -659,8 +663,19 @@ async def get_prediction_live_prices():
 
 
 class SubscribeRequest(BaseModel):
-    exchange: str = "polymarket"
-    identifiers: List[str] = []  # token_ids for Polymarket
+    # §12 input bounds: an unbounded identifiers list let a caller POST millions of
+    # token_ids, fanning out unbounded WebSocket subscriptions (resource exhaustion).
+    # Cap the list length and each identifier's length.
+    exchange: str = Field("polymarket", max_length=50)
+    identifiers: List[str] = Field(default_factory=list, max_length=1000)
+
+    @field_validator("identifiers")
+    @classmethod
+    def _bound_identifier_lengths(cls, v: List[str]) -> List[str]:
+        for ident in v:
+            if len(ident) > 200:
+                raise ValueError("identifier too long (max 200 chars)")
+        return v
 
 
 @router.post("/prediction-markets/feeds/subscribe", dependencies=_MUTATING_AUTH)
