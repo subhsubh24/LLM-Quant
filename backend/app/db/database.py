@@ -87,7 +87,8 @@ def init_db():
     # no-op'd (BUILDS≠WORKS, caught by an adversarial auditor). Importing them here
     # registers their `table=True` classes so create_all actually builds them. All three
     # use extend_existing=True, so this eager import is dual-import-safe.
-    from ..db import models as _db_models  # noqa: F401 — equity/paper trading models
+    # (The legacy equity/paper-trading `db.models` stack was removed 2026-07-01 as
+    # stock-era dead residue — ROADMAP A1; nothing in the prediction-markets app read it.)
     from ..prediction_markets import models as _pm_models  # noqa: F401 — prediction market models
     from ..prediction_markets import audit_log as _pm_audit  # noqa: F401 — durable audit log (G3)
     from ..prediction_markets import strategy_registry_store as _pm_reg  # noqa: F401 — alpha lifecycle (B3)
