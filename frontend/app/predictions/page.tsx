@@ -27,6 +27,15 @@ import {
   XCircle,
   ChevronDown,
 } from "lucide-react";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 import { cn } from "@/lib/utils";
 import { MetricsPanel } from "@/components/metrics/MetricsPanel";
 
@@ -428,13 +437,29 @@ export default function PredictionsPage() {
     (!searchQuery || m.question.toLowerCase().includes(searchQuery.toLowerCase()) || m.category.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const equityBounds = useMemo(() => {
-    if (equityCurve.length === 0) return { min: 0, max: 100, range: 1 };
-    const values = equityCurve.map((x: any) => x.total_value_usd || 100);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    return { min, max, range: max - min || 1 };
-  }, [equityCurve]);
+  // Equity-curve data for a labeled line chart. A prior design-taste gap: the old
+  // hand-rolled bars scaled height as (value − seriesMin)/range with NO axis labels,
+  // so a $5 move on a $1000 portfolio (0.5%) rendered as a ~50% bar — a fabricated
+  // read of volatility. A zoomed line WITH a labeled $-axis discloses the real scale
+  // (the standard, honest equity-curve representation), so the y-axis is no longer a
+  // hidden non-zero baseline that exaggerates small moves.
+  const equityChartData = useMemo(
+    () =>
+      equityCurve.map((s: any) => ({
+        t:
+          s.snapshot_at != null
+            ? new Date(s.snapshot_at).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "",
+        value:
+          typeof s.total_value_usd === "number" ? s.total_value_usd : null,
+      })),
+    [equityCurve]
+  );
 
   const timeAgo = lastUpdated
     ? `${Math.round((Date.now() - lastUpdated.getTime()) / 1000)}s ago`
@@ -902,17 +927,56 @@ export default function PredictionsPage() {
 
             <div className="glass-card p-5">
               <h2 className="text-sm font-semibold text-foreground mb-4">Equity Curve</h2>
-              {equityCurve.length > 0 ? (
-                <div className="h-44 flex items-end gap-px">
-                  {equityCurve.map((s: any, i: number) => {
-                    const height = ((s.total_value_usd - equityBounds.min) / equityBounds.range) * 100;
-                    const isPositive = (s.unrealized_pnl + s.realized_pnl) >= 0;
-                    return (
-                      <div key={i} className={cn("flex-1 rounded-t transition-all hover:opacity-70", isPositive ? "bg-green-500/70" : "bg-red-500/70")}
-                        style={{ height: `${Math.max(height, 2)}%` }}
-                        title={`$${s.total_value_usd?.toFixed(2)} | ${new Date(s.snapshot_at).toLocaleString()}`} />
-                    );
-                  })}
+              {equityChartData.length > 0 ? (
+                <div className="h-44">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={equityChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                      <XAxis
+                        dataKey="t"
+                        tick={{ fontSize: 10 }}
+                        className="text-muted-foreground"
+                        minTickGap={32}
+                      />
+                      <YAxis
+                        // Zoomed to the value range but with VISIBLE $ tick labels so the
+                        // scale is disclosed (the fix for the old no-axis-label baseline
+                        // that exaggerated small moves). Null values are ignored by recharts.
+                        domain={["dataMin", "dataMax"]}
+                        tick={{ fontSize: 10 }}
+                        tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
+                        width={56}
+                        label={{
+                          value: "Value ($)",
+                          angle: -90,
+                          position: "insideLeft",
+                          style: { fontSize: 10, textAnchor: "middle", fill: "hsl(var(--muted-foreground))" },
+                        }}
+                        className="text-muted-foreground"
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                          fontSize: "11px",
+                        }}
+                        formatter={(value) => [
+                          typeof value === "number" ? `$${value.toFixed(2)}` : "—",
+                          "Portfolio value",
+                        ]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth={1.5}
+                        dot={{ r: 2 }}
+                        connectNulls={false}
+                        name="value"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               ) : (
                 <div className="h-44 flex items-center justify-center">
