@@ -883,11 +883,15 @@ export default function PredictionsPage() {
         {activeTab === "portfolio" && (
           <div className="space-y-4 fade-in">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 stagger-children">
+              {/* Honest empty state: when the portfolio summary hasn't loaded (null /
+                  error), show "—", not a fabricated "$0.00" / "0" that reads as a real
+                  empty portfolio. A genuine loaded 0 still renders as 0. Mirrors the
+                  MetricsPanel honest-null convention. */}
               {[
-                { l: "Total Value", v: `$${portfolioSummary?.total_exposure?.toFixed(2) || "0.00"}`, c: "text-foreground" },
-                { l: "Total P&L", v: `${(portfolioSummary?.total_pnl || 0) >= 0 ? "+" : ""}$${(portfolioSummary?.total_pnl || 0).toFixed(2)}`, c: (portfolioSummary?.total_pnl || 0) >= 0 ? "text-green-500" : "text-red-500" },
-                { l: "Fees", v: `$${portfolioSummary?.total_fees?.toFixed(2) || "0.00"}`, c: "text-foreground" },
-                { l: "Orders", v: String(portfolioSummary?.total_orders || 0), c: "text-foreground" },
+                { l: "Total Value", v: portfolioSummary?.total_exposure != null ? `$${portfolioSummary.total_exposure.toFixed(2)}` : "—", c: portfolioSummary?.total_exposure != null ? "text-foreground" : "text-muted-foreground" },
+                { l: "Total P&L", v: portfolioSummary?.total_pnl != null ? `${portfolioSummary.total_pnl >= 0 ? "+" : ""}$${portfolioSummary.total_pnl.toFixed(2)}` : "—", c: portfolioSummary?.total_pnl == null ? "text-muted-foreground" : (portfolioSummary.total_pnl >= 0 ? "text-green-500" : "text-red-500") },
+                { l: "Fees", v: portfolioSummary?.total_fees != null ? `$${portfolioSummary.total_fees.toFixed(2)}` : "—", c: portfolioSummary?.total_fees != null ? "text-foreground" : "text-muted-foreground" },
+                { l: "Orders", v: portfolioSummary?.total_orders != null ? String(portfolioSummary.total_orders) : "—", c: portfolioSummary?.total_orders != null ? "text-foreground" : "text-muted-foreground" },
               ].map((i) => (
                 <div key={i.l} className="glass-card p-4">
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{i.l}</span>
