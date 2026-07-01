@@ -526,3 +526,103 @@ calibration + cost-realistic validation surviving the adversarial auditors.
 - Insider trading research (arxiv 2605.02286, 2605.00459): preprints. Bloomberg corroboration.
 - All findings above are DATA, not claims. NONE may be reported as an edge without OOS
   + significance + calibration validation on our own real corpus.
+
+## 2026-07-01 — Research Run 11: HF/Data-API egress CONFIRMED blocked from this env; comparative Polymarket-vs-Kalshi calibration nuance; URGENT integrity finding (untracked whale/weather strategies live with a fabricated whale-seed)
+
+- Hypothesis (falsifiable): n/a — this run is research + a self-validation/audit pass, not
+  a new alpha test. Binding constraint UNCHANGED: no real OOS corpus exists; EXP-001/002/003
+  remain proposed, blocked on the same data dependency (OA-11 / OA-16).
+- Min sample N: n/a.
+- OOS result: n/a — no edge claimed or tested this run.
+- Calibration (Brier / reliability): not measured this run.
+- Costs modeled: n/a.
+- Verdict: **edge-not-proven** (research + integrity audit only).
+- Why:
+
+### (1) Self-validation: HuggingFace AND the Polymarket Data API are ALSO egress-blocked from this environment (new confirmed fact, not assumed)
+  OA-16 proposed HuggingFace (`huggingface.co`) as a bypass for the egress-blocked Gamma/CLOB
+  APIs (OA-11), on the theory that it is "a separate domain" that might be reachable. This run
+  tested that theory directly from the autonomous env's own proxy: `curl https://huggingface.co/...`
+  → **403 CONNECT reject** (`gateway answered 403 to CONNECT`, confirmed via the proxy's own
+  `/__agentproxy/status` diagnostic, not just an app-level error). `data-api.polymarket.com`
+  (the public, no-auth Data API that `whale_feed.py` depends on for `/holders`/`/trades`) was
+  independently tested and is **also 403-blocked** the same way. **Conclusion: this specific
+  autonomous env blocks egress by policy at a broad scope (Polymarket + HuggingFace + at least
+  one more independent domain), not a narrow Polymarket-only allowlist gap.** OA-16 step 1
+  ("verify HuggingFace egress is accessible") must be run from the OWNER's own network/host —
+  it cannot be self-verified by the loop, and a future research run should not re-attempt it
+  from this env expecting a different result. This narrows, not widens, the near-term paths to
+  real data: OA-11 (owner host) and OA-16 (owner host) are the ONLY two live options; a loop-only
+  bypass does not exist.
+
+### (2) New research this run: Polymarket may already be BETTER calibrated than Kalshi (nuances EXP-002/EXP-003 confidence DOWN, not up)
+  A secondary analysis (Medium, citing Calibration City — 671,732 markets — and brier.fyi — 971
+  markets linked identically across both platforms by outcome) reports Polymarket showing
+  **better** Brier-score calibration than Kalshi both at market close and time-averaged, with
+  Kalshi calibration "deteriorating" more toward close. This is the OPPOSITE direction implied
+  by treating Le 2026 (Kalshi-anchored, 292M trades across both venues) as if its magnitude
+  transfers 1:1 to Polymarket for EXP-002 (horizon effect) and EXP-003 (political
+  underconfidence) — both of which already carry "may be Kalshi-specific" as adversarial
+  pre-mortem item #1/#2. A second, contradicting secondary source claims the reverse on raw
+  accuracy (Polymarket 67% "right" vs Kalshi 78% vs PredictIt 93%) — but accuracy and
+  calibration are different measures, and both sources are non-peer-reviewed aggregator
+  write-ups, not reproducible by us (all direct fetches of the primary comparison articles
+  403'd; only search-result summaries were obtainable). **Treated as DATA, not a claim:** this
+  is not proof the Polymarket effect is smaller — it is a second, independent secondary source
+  pointing the same direction as our own pre-mortem concern, which should raise (not lower) the
+  bar for treating a Kalshi-shaped finding as automatically applicable to Polymarket. Added to
+  EXP-002/EXP-003 `how_it_could_be_wrong` in GROWTH_STATUS.
+  Two more academic papers surfaced (SSRN: "Statistical Arbitrage in Binary Prediction Markets"
+  — Nunes; "From Forecasting Tool to Financial Asset: Evidence of Persistent Arbitrage in
+  Prediction Markets" — Krause) that are directionally supportive of the already-built
+  `SameMarketArbitrageStrategy` (arbitrage persists, is not fully competed away). Full text was
+  unreachable (SSRN delivery links 403'd) — **cannot verify sample/methodology, so this is
+  logged as an existence-only DATA point, not evidence for anything.**
+
+### (3) URGENT integrity finding: two entire strategies (whale copy-trading, weather arbitrage) are wired LIVE into the default scanner, untracked in ROADMAP/RESEARCH_MEMORY, and one has a FABRICATED data seed
+  While diagnosing the binding constraint ("a losing/unvalidated strategy to retire?" per the
+  playbook), I checked what strategies are actually live vs. what is documented. Two files exist
+  and are unconditionally wired into `orchestrator._build_default_scanner()` —
+  `WhaleCopyTradingStrategy` (`strategies.py`) backed by `whale_feed.py`, and
+  `WeatherArbitrageStrategy` backed by `noaa_weather.py` — **neither of which is mentioned
+  anywhere in ROADMAP.md or has ever been logged as "proposed" in this file.** The 2026-06-28
+  entry above explicitly logged whale copy-trading as **NOT proposed** ("auto-rejects under
+  private data exclusion if wallet identities are non-public") and weather arb as "interesting
+  but niche... needs validation before any edge claim" — yet both are live in the paper scan
+  loop today, with zero backtest, zero B3 registry entry, zero tests (`find backend -iname
+  '*whale*test*'` → nothing), and zero ROADMAP tracking. This is a documentation/BUILDS≠WORKS
+  gap: the loop is running strategies nobody validated or even recorded as attempted.
+  **Worse, and independently confirmed (not assumed): `whale_feed.py`'s `KNOWN_WHALES` hardcoded
+  seed list pairs real trader names with WRONG on-chain addresses.** The real "Theo4" wallet
+  (per Polymarket's own public profile, cross-checked via web search) is
+  `0x56687bf447db6ffa42ffe2204a05edaa20f55839`; the code hardcodes `0xf0a3ceb5db0a53c12e1e52e61a8e8e5b4e2e3fc9`
+  for the same name — a completely different address. The third seed entry,
+  `0xa1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0` ("SeriouslySirius"), is a **sequential hex
+  placeholder pattern** (a1-b2-c3-d4…) — self-evidently not a real wallet, no external lookup
+  needed. This is a fabricated-legitimacy risk: a named, specific-looking "known profitable
+  whale" with an invented address gives false confidence that the strategy is using real public
+  on-chain signal when it structurally cannot be for at least these seeds. It compounds with
+  finding (1): the dynamic `/holders` discovery this feed also uses to self-correct is *itself*
+  unreachable from this env (`data-api.polymarket.com` 403), so in THIS env the feed runs on
+  the fabricated seed ALONE, silently (try/except at `strategies.py:1483` logs a warning and
+  continues — "strategies still run"), inflating the scanner's reported strategy count with a
+  strategy contributing no real signal.
+  **This is a bug-fix / governance finding, not a validated edge — I am not proposing it as an
+  alpha and am not touching the code (out of research-agent scope; the factory owns strategy
+  code).** Recommended for the factory (logged to GROWTH_STATUS `next_actions`, loop-buildable,
+  no owner action needed): (a) fix or delete the fabricated `KNOWN_WHALES` seed — replace with
+  addresses sourced verifiably from Polymarket's own public leaderboard/API at build time, or
+  drop the hardcoded seed entirely and rely solely on dynamic `/holders` discovery; (b) gate
+  both `WhaleCopyTradingStrategy` and `WeatherArbitrageStrategy` out of the unconditional default
+  scanner until each has a B3 registry entry (`PROPOSED`) and at least a forensic audit
+  (`strategy_audit.py`, the same harness already built for the cross-market alphas) proving they
+  fire on real-shaped data before being wired; (c) add a ROADMAP line item for each so the
+  factory's own "evidence-based done" discipline applies retroactively.
+
+### Candidate alphas NOT proposed this run (reasons)
+- **Whale copy-trading (EXP-004, deferred):** now CODE-EXISTS (unlike prior runs where it was a
+  pure hypothesis) but cannot be evaluated honestly until (a) the fabricated seed is fixed/removed
+  and (b) `data-api.polymarket.com` is reachable from wherever the validation runs (owner/host
+  scope, same class of blocker as OA-11/OA-16). Until then this stays "insufficient data" and is
+  NOT promoted to a numbered EXP with a min-N/OOS plan — proposing a formal experiment on top of
+  a known-fabricated input would itself be a leakage/integrity failure.
