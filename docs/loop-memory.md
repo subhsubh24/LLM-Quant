@@ -22,6 +22,13 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
      A→A+ top_gap; the real cure is standardizing the import path repo-wide).**
 - Regression test reproduces the bug locally with SQLite + `PRAGMA foreign_keys=ON` (order insert raises
   IntegrityError without the portfolio, succeeds with `_ensure_default_portfolio`). Gate green.
+- **CORRECTION (the next re-run STILL showed 8 FK errors):** the persistence.save_order/save_position fix
+  was NOT enough — the paper cycle persists orders via a DIFFERENT writer, `orchestrator._persist_order`
+  (a direct `PredictionOrder` insert), which the first fix didn't touch. **Real fix: seed the default
+  portfolio ONCE in `init_db()`** (after create_all; it already imports the models) so the parent row exists
+  for EVERY writer. **Lesson: when a table has multiple independent writers, fix the invariant at the SOURCE
+  (seed the parent at DB-init) — don't chase each `.add()` site; I found the second writer only by grepping
+  "who inserts prediction_orders" against the real INSERT SQL in the log.**
 
 ## 2026-07-02 (owner-directed) — OA-17 applied + the live tier's FIRST real run caught a real thing (deep-diagnosis)
 
