@@ -488,3 +488,23 @@ standing work until every real run reports its true end-to-end spend:
   a cost figure — §22).
 Pre-launch, real runs are rare and near-free; the payoff is post-launch when every request is real
 spend and the biggest-$ stage is the clearest margin lever.
+
+## 26. Actively STRENGTHEN the evals over time (not just defend them)
+§23 fixes RED evals; this makes the suite GET STRONGER every cycle — the loop's own regression net
+widening as the product grows. Standing work, bounded by the value bar and the paid-validation cost
+rule (smallest/fewest fixtures, cheapest capable model, cache):
+- **Grow coverage where it matters:** each cycle, add eval/gold cases for the highest-value gaps —
+  newly-shipped features, real edge cases, and the parts of the input space the current fixtures
+  don't span — with REVIEWED-correct expected outputs (never captured-as-gold; that is circular and
+  passes by definition).
+- **Every real bug earns a regression case.** When a bug is found — by the live eval, a deep audit,
+  a user report, or any fix — add the test/eval that WOULD have caught it, in the SAME PR as the fix.
+  A fix without a regression guard is incomplete: the bug can silently return. (Example: a provider
+  that stopped resolving → a test that loads it; a mis-computed figure → a case that pins the value.)
+- **Tighten loose assertions:** an eval that asserts existence but not correctness, or uses too wide
+  a tolerance, is theater — a green that cannot fail. Sharpen it so it catches a plausible real
+  failure.
+- **Prioritize via the rubric, honestly:** the quality rubric grades eval coverage — drive a sub-A
+  eval/coverage dimension up as ship-critical work. But NEVER pad eval count to look busy, and NEVER
+  "strengthen" by making an eval pass more easily (that is the §23 anti-gaming line). Strengthening
+  means it catches MORE real failures, not fewer.
