@@ -645,3 +645,165 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   re-validation, where the strategy's whole logic is re-derived — recorded here so it isn't lost.
 - Why: still additionally blocked on `data-api.polymarket.com` reachability (egress) to feed real
   wallets at all — same owner/host class as OA-11/OA-15/OA-16.
+
+## 2026-07-02 — Research Run 12: URGENT — the live forward-paper track record (OA-17) is being silently corrupted by a Postgres FK bug in an UNPATCHED write path; the D2 category cap has become a de facto global freeze; first live fires of `logical_implication`/`adaptive_threshold` on real question text (insufficient data)
+
+- Hypothesis (falsifiable): n/a — this run is a self-validation / production-forensics pass, not a
+  new alpha test. Per the playbook's step 3 ("diagnose the binding constraint... a data/latency/cost
+  issue?"), I audited the now-live `live-validation.yml` GitHub Actions workflow (runs every 6h on a
+  network-permitted GH-hosted runner, confirmed reaching real Gemini + real Polymarket + a Neon
+  Postgres `DATABASE_URL` secret since OA-17 was applied) to see whether the forward paper track
+  record it was built to produce is actually accumulating usable evidence. It is not — for a
+  structural, currently-active reason, not a data-availability one.
+- Min sample N: n/a.
+- OOS result: n/a — no edge claimed or tested this run.
+- Calibration (Brier / reliability): not measured this run.
+- Costs modeled: n/a.
+- Verdict: **edge-not-proven** (production-integrity audit; a real, currently-active bug, not an
+  alpha finding). Findings below are DATA, self-validated by directly reading GitHub Actions job
+  logs (run IDs + timestamps cited) and cross-referencing the exact code paths — not speculation.
+
+### (1) URGENT — every order the live forward-paper loop executes fails to persist (Postgres FK violation), confirmed live today, despite two prior "fixes" landing before this run
+  `scripts/run_paper_cycle.py` → `orchestrator.scan_and_execute()` → `orchestrator._persist_order()`
+  (`backend/app/prediction_markets/orchestrator.py:1034-1104`) builds `PredictionOrder(portfolio_id=1,
+  ...)` and `PredictionPosition(portfolio_id=1, ...)` directly and calls `session.add(...)` with NO
+  call to `_ensure_default_portfolio()` — the guard added in PR #139 that seeds the parent
+  `PredictionPortfolio(id=1)` row before insert. That guard lives ONLY in
+  `prediction_markets/persistence.py`'s `save_order`/`save_position` — functions the live forward
+  loop never calls (verified: zero call sites for `persistence.save_order`/`save_position` outside
+  `persistence.py` and its own tests). A SECOND, broader fix (PR #140, "Seed the default portfolio in
+  init_db — real fix, covers ALL order writers") added a best-effort seed of `PredictionPortfolio(id=1)`
+  inside `init_db()` (`backend/app/db/database.py:106-117`), which `run_paper_cycle.py` does call
+  before scanning. **Despite both fixes being present in the exact commit these runs used
+  (`af7c730`, confirmed via `git show af7c730:...`), the FK violation is happening live, today:**
+  workflow run [28563250362](https://github.com/subhsubh24/LLM-Quant/actions/runs/28563250362)
+  (2026-07-02T03:28–03:31 UTC) logged **6 consecutive** identical failures —
+  `psycopg2.errors.ForeignKeyViolation: insert or update on table "prediction_orders" violates
+  foreign key constraint "prediction_orders_portfolio_id_fkey" — Key (portfolio_id)=(1) is not
+  present in table "prediction_portfolios"` — for every one of that scan's 8 "executed" orders
+  (strategies `logical_implication` and `adaptive_threshold`, real markets: Fed rate decision,
+  LeBron James team markets, Strait of Hormuz, Argentina/Cabo Verde, Croatia). Each failure is caught
+  by a bare `except Exception as e: logger.error(...)` in `_persist_order` and the loop continues
+  silently — so `run_paper_cycle.py --json`'s own reported `"executed": 8` count and the `"executions"`
+  list are **NOT a lie about what was decided, but ARE a lie about what got durably recorded** — none
+  of those 8 fills exist in the Neon DB after the process exits. No "init_db: default-portfolio seed
+  skipped" warning appears in the surrounding log (I fetched the full step output, not just a tail),
+  so the seed's own try/except did not visibly fire — the exact mechanism (a session/transaction
+  visibility gap, a swallowed warning at a suppressed log level, or something else) is **unconfirmed
+  and needs fresh RCA**, but the OBSERVED FACT — every execution in this run failed to persist,
+  in the exact commit both "fixes" were supposed to cover — is confirmed directly from raw logs, not
+  inferred.
+  **Why this matters:** OA-17 (owner-authorized, Neon `DATABASE_URL` secret set this week) exists
+  specifically to build a durable forward paper track record across restarts. If `_persist_order`
+  silently fails on every fill, **the accumulated evidence this mechanism was built to produce may
+  not exist at all** — GROWTH_STATUS's `total_trades: 0` / `weekly_pnl_paper: null` could remain
+  accurate not because no signal fires (it does — see finding 3) but because the fills that DO fire
+  are being silently discarded before they reach durable storage.
+  **A related, structural gap this exposes:** the whole bug class here is "SQLite doesn't enforce FK
+  constraints by default; Postgres does" — meaning the blocking CI gate, which runs exclusively
+  against SQLite, **cannot catch this class of bug by construction**. This is the SECOND time this
+  exact class of bug has needed a fix (#139, then #140 "covers ALL order writers") and it is STILL
+  live in the one code path that matters (the orchestrator's own `_persist_order`, never touched by
+  either fix). A cheap, durable closure: a test that runs the real order-persist path against a
+  SQLite engine with `PRAGMA foreign_keys=ON` (SQLite supports enforcing FKs per-connection; off by
+  default) — or a Postgres-backed CI job — so this class of regression fails the gate instead of
+  failing silently in production. (Independently confirmed via a 2026 web search: SQLite-vs-Postgres
+  FK-enforcement parity gaps in CI are a well-documented, common failure class — this is not a novel
+  problem, and the standard fix is exactly the PRAGMA/Postgres-parity test named above.)
+  **Recommended for the factory (loop-buildable, no data/egress/owner action needed):** (a) make
+  `orchestrator._persist_order` call `persistence.save_order`/`save_position` (or `_ensure_default_portfolio`
+  directly) instead of maintaining a third, parallel, unguarded write implementation — one persist path,
+  not three; (b) add the FK-pragma-enforced SQLite (or Postgres) regression test named above to the
+  blocking gate so this class of bug cannot silently ship again; (c) once fixed, treat all
+  forward-paper data collected before the fix lands as **unreliable / do not read edge into it** (the
+  same caution ROADMAP D8 already states for the pre-D8 era, now extended for a different reason).
+
+### (2) The D2 per-category exposure cap has become a de facto GLOBAL cap, freezing the forward loop
+  `risk_manager.py:157` computes `category = opportunity.market.category or "General"`, but
+  `polymarket_client.py:799` parses `category=raw.get("category", "")` — Polymarket's Gamma API market
+  objects do not reliably populate a plain `category` field (confirmed empirically: real markets ingested
+  live today — Bitcoin price, all 2026 FIFA World Cup winner candidates, Fed rate decisions, LeBron
+  James team markets, a Brazilian presidential election market — were ALL bucketed as `"General"` in
+  today's live logs, despite spanning crypto/sports/macro/politics). Compounding this, `_market_categories`
+  (the map `_get_category_exposure` uses to bucket EXISTING `executor.positions`, including ones
+  rehydrated from the DB per D8) is a plain in-memory dict re-initialized empty on every fresh process
+  — and the GH Actions forward-paper cycle IS a fresh process every 6h. So rehydrated positions ALSO
+  default to `"General"` (as ROADMAP D8 already flagged as an "accuracy note"), stacking with the
+  above to mean essentially ALL exposure, from ALL markets, in ALL runs, is counted against the single
+  `$200` `"General"` bucket (`risk_manager.py:43`). **Confirmed effect, live, today:** by workflow run
+  [28580282836](https://github.com/subhsubh24/LLM-Quant/actions/runs/28580282836) (2026-07-02T09:36,
+  the most recent scheduled run), `"General"` exposure sat at `$164.18`, and **every one of that run's
+  98 scanned opportunities was skipped** with reason `"Category 'General' exposure: $164.18 + $50.00 >
+  $200.0"` — 0 executed, 0 evidence added. Since open positions don't decay until resolution (most of
+  the fired markets — FIFA World Cup winner, Fed decision, elections — resolve weeks to months out),
+  this is not a one-run blip: **the loop will likely keep finding real opportunities and skipping
+  100% of them until either a position resolves or the categorization bug is fixed.** This is a
+  DIFFERENT, deeper bug than the one D8's proof already named (D8 only flagged rehydrated positions
+  defaulting to General; this finding shows FRESHLY-SCANNED markets do too, because the upstream
+  `Market.category` field is unpopulated by the venue data itself) — the per-category diversification
+  design (D2) is not just inaccurate post-rehydration, it is **structurally non-functional on real
+  Polymarket data** and now the single active bottleneck starving the forward-paper track record of
+  new evidence. **Recommended for the factory:** derive `category` from a real signal Polymarket does
+  populate for most markets (e.g. `raw.get("tags")`, event/series grouping, or a keyword-based
+  fallback classifier) rather than a field that is empty in practice; and/or persist `_market_categories`
+  (or the category on the `PredictionPosition` row itself, which IS in the schema per `orchestrator.py:1091`
+  — already stored, just not READ back on rehydration) so cross-process category exposure is accurate,
+  not reset to "General" every restart.
+
+### (3) First live fires of `logical_implication` and `adaptive_threshold` on real question text — a genuine mechanism confirmation, still "insufficient data" for any edge claim
+  The 2026-06-29 forensic audit (`strategy_audit.py`) found `LogicalImplicationDetector` fired **0**
+  signals on the committed 54-record sterile fixture (no real question text/grouping). Today, on LIVE
+  Polymarket markets with real question text, it fires repeatedly and plausibly: e.g. `"Will LeBron
+  James play for the Los Angeles Lakers/Miami Heat/Golden State Warriors in 2026-27"` (a genuinely
+  mutually-exclusive candidate set) and the 2026 FIFA World Cup winner candidates (also MECE) — a
+  believable real-world use of the B5-hardened content-token relatedness screen, not an obvious
+  repeat of the boilerplate-phantom-signal bug from 2026-06-29 (these are substantively different,
+  content-rich questions, not template text). **This is NOT an edge claim** — no resolutions exist yet
+  (all fired positions are still open), N is under 10 real fills across the runs inspected, there is no
+  OOS split, and per finding (1) most of these fills likely never even reached durable storage. A
+  second, notable risk flag: every fired `logical_implication` trade seen today bought a **near-zero
+  price longshot** (`$0.0025`–`$0.0165`, i.e. 0.25¢–1.65¢) with a large reported edge (21%–35%) — this
+  is exactly the "near-certainty-NO / deep longshot" regime EXP-002's pre-mortem already flagged as
+  having the highest real-slippage risk (thin book depth on far-OTM contracts; the modeled 0.5%
+  slippage may be a significant underestimate there). **Treated as "insufficient data," per playbook
+  discipline** — worth watching once (1) and (2) are fixed and a real accumulating track record exists,
+  but not worth a formal EXP-00N proposal yet (no resolutions, no OOS, and the underlying persistence
+  is currently broken so the "track record" isn't really accumulating).
+
+### (4) Confirmed (not just theorized): GitHub Actions runners have working Polymarket + Gemini egress — de-risks OA-13 Option B
+  `live-validation.yml`'s `live_integration_smoke.py` step reports `[OK] polymarket: parsed 3 real
+  resolved markets` on every run inspected, and `run_paper_cycle.py` successfully scans real live
+  Polymarket markets each time. This is DIRECT, repeated, operational proof (not a one-off test) that
+  GitHub-hosted runners are NOT subject to the autonomous loop's own egress block (confirmed
+  Polymarket/HuggingFace/Data-API 403 in Research Run 11, 2026-07-01). This resolves the network-side
+  uncertainty in OA-13 Option B (a scheduled `refresh-polymarket-data.yml` data-refresh workflow,
+  staged in `docs/ci/PROPOSED_DATA_REFRESH.md` but never applied) in the affirmative — the egress
+  works, proven by every `live-validation.yml` run since #143. The only remaining step is the owner
+  applying the staged workflow file (the loop cannot write `.github/`).
+
+### Self-validation (sources this run)
+- All findings (1)-(2)-(4) are from directly reading GitHub Actions job logs via the `github` MCP
+  tool for `subhsubh24/llm-quant` `live-validation.yml` runs
+  [28562734388](https://github.com/subhsubh24/LLM-Quant/actions/runs/28562734388),
+  [28563250362](https://github.com/subhsubh24/LLM-Quant/actions/runs/28563250362),
+  [28563706937](https://github.com/subhsubh24/LLM-Quant/actions/runs/28563706937),
+  [28580282836](https://github.com/subhsubh24/LLM-Quant/actions/runs/28580282836) (2026-07-02), cross
+  referenced against the exact code at `orchestrator.py:1034-1104`, `persistence.py:37-64`,
+  `database.py:106-117`, `risk_manager.py:43,157-160,294-298`, `polymarket_client.py:799`, and `git
+  show`/`git log` to confirm which fixes were/weren't present in the commit those runs executed.
+  Nothing here is inferred without a log line or a code line backing it.
+- Finding (3)'s "logical_implication fired 0 on the sterile fixture" baseline is the existing
+  2026-06-29 RESEARCH_MEMORY entry (re-cited, not re-verified this run).
+- External web search this run (generic Polymarket-strategy blog content, 2026) added no
+  evidence-grade findings beyond what's already in this file — SEO/marketing-tier sources, not
+  academic. Not cited as data. One useful corroboration: independent 2026 sources confirm the
+  SQLite-vs-Postgres FK-enforcement CI gap is a well-known failure class with a standard fix
+  (PRAGMA-enforced SQLite or Postgres-parity tests in CI) — supports the recommendation in (1).
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N proposed. This run's highest-EV action is fixing (1) and (2) so the existing
+  EXP-002/EXP-003 mechanism (`CalibrationBucketStrategy`) AND the newly-observed `logical_implication`/
+  `adaptive_threshold` live fires (finding 3) can actually accumulate a real, durable, evaluable
+  forward track record — proposing a new numbered experiment on top of a currently-broken persistence
+  layer would itself be an integrity failure (the same discipline applied to the 2026-07-01
+  whale-seed finding).

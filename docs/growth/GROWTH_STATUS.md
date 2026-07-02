@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-07-01
+  as_of: 2026-07-02
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -219,8 +219,58 @@ GROWTH_STATUS:
     - "C5 dashboard UI BUILT (frontend/components/metrics/*): MetricsPanel + Weekly/Floor/Calibration/PerStrategy/EvaluationWindows cards render all /prediction-markets/metrics/* endpoints under a new Metrics tab; honest degenerate rendering (floor NOT MET with real avg, calibration note verbatim + Brier '—', drift 'not enough data', nulls as '—', a 0-trades banner). npm run build clean. F5 Playwright visual-verification of these states still pending."
     - "GATE STRENGTHENED again: test_calibration_bucket_strategy.py added to the blocking preflight list."
     - "Research Run 10 (2026-06-30): academic synthesis. Le 2026 (292M trades, Kalshi+Polymarket) confirms domain-specific calibration decomposition: political markets show PERSISTENT underconfidence (compression toward 50%) at ALL horizons — the dominant calibration component (bilateral partisan cancellation). EXP-003 proposed. Prediction Arena 2026: ALL 6 frontier LLMs lost money live-trading on Kalshi (-16% to -30.8%); Polymarket only -1.1% avg. PolyBench 2026: only 2/7 LLMs positive (MiMo-V2-Flash +17.6% CWR, Gemini-3-Flash +6.2%) — Gemini models show positive calibration, relevant for B4 design. MAJOR DATA FINDING: Polymarket-v1 HuggingFace dataset (arxiv 2606.04217, June 2026) — 1.3M markets, 1.2B trades, CC-BY-4.0, Parquet, includes market metadata + outcomes in daily_aligned layer — could bypass OA-11 entirely (proposed OA-16). Insider trading on Polymarket: ~25% of large longshot bets ($2500+, <35%) resolve YES vs 14% baseline; proposed as a DEFENSIVE adverse selection filter (avoid these markets), not an edge to copy. Cross-venue arb: confirmed bot-dominated (Kalshi now #1 by volume at $14.8B/mo April 2026). Binding constraint UNCHANGED: no validated OOS edge; OA-11/OA-15 (egress) OR new OA-16 (HuggingFace download) needed."
+    - "Research Run 12 (2026-07-02): production-forensics on the now-live OA-17 forward-paper cycle
+      (live-validation.yml, every 6h on GH Actions, Neon DATABASE_URL secret set). URGENT finding:
+      the orchestrator's real order-persist path (_persist_order) has no default-portfolio guard and
+      fails EVERY order with a Postgres ForeignKeyViolation, confirmed live today — despite two prior
+      fixes (#139/#140) believed to cover this; the guarded path (persistence.save_order/save_position)
+      is never called by the live loop. The forward-paper track record this mechanism was built to
+      produce may not be durably accumulating. SECOND finding: the D2 per-category $200 cap has become
+      a de facto GLOBAL cap because Market.category is empty on real Polymarket data (everything
+      buckets as 'General') plus the in-memory category map resets every fresh process — confirmed
+      live: 98/98 opportunities skipped in the most recent scheduled run. Both are loop-buildable code
+      fixes, no data/egress/owner action needed. THIRD (insufficient data): logical_implication +
+      adaptive_threshold fired real signals on live MECE question sets (LeBron team markets, FIFA WC
+      winners) for the first time — not an edge claim, no resolutions yet. FOURTH: confirmed (not just
+      theorized) that GitHub Actions runners have working Polymarket/Gemini egress, de-risking OA-13
+      Option B. Full detail: RESEARCH_MEMORY 2026-07-02."
     - "Research Run 11 (2026-07-01): SELF-VALIDATION — tested OA-16's premise directly from the autonomous env's own proxy: huggingface.co is 403-blocked (confirmed via the proxy's own diagnostic, not just an app error), and data-api.polymarket.com (the whale-feed's dependency) is ALSO 403-blocked. The egress block is broad-scope (Polymarket + HuggingFace + Data API), not a narrow allowlist gap — OA-16 step 1 can only be verified from the OWNER's own network, never from this env. A secondary comparative-calibration source (Calibration City 671K markets + brier.fyi 971 cross-linked markets) reports Polymarket calibration beating Kalshi's — the opposite direction a Kalshi-anchored effect (Le 2026) needs to transfer cleanly to Polymarket; added as a pre-mortem caution to EXP-002/EXP-003 (not a refutation — non-peer-reviewed, unreproduced by us). URGENT INTEGRITY FINDING (not an alpha claim): `WhaleCopyTradingStrategy` + `WeatherArbitrageStrategy` are wired UNCONDITIONALLY into `orchestrator._build_default_scanner()` (live in the paper scan loop today) despite NEVER being logged as proposed/tracked in ROADMAP or RESEARCH_MEMORY, and with zero tests. Worse: `whale_feed.py`'s hardcoded `KNOWN_WHALES` seed pairs the real trader name 'Theo4' with a WRONG on-chain address (verified against Theo4's actual public Polymarket profile address, which differs completely), and a third seed address is a self-evidently fake sequential-hex placeholder (`0xa1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0`). Since the feed's dynamic `/holders` self-correction is also unreachable here (Data API 403), in this env the strategy runs on the fabricated seed alone, silently (logged warning, strategy continues), inflating the reported strategy count with a contributor producing no real signal. Full detail + recommended factory fix in RESEARCH_MEMORY 2026-07-01."
   next_actions:
+    - "URGENT, loop-buildable, no owner/data action needed (Research Run 12, 2026-07-02): the live
+      OA-17 forward-paper cycle's real write path (orchestrator._persist_order, orchestrator.py:1034)
+      has NO _ensure_default_portfolio guard and fails EVERY order persist with a Postgres
+      ForeignKeyViolation — confirmed live in today's GitHub Actions logs (run 28563250362, 6/6
+      executions failed to save), despite two prior fixes (#139, #140) that were believed to cover
+      this. persistence.py's guarded save_order/save_position are never called by the live loop; the
+      init_db() seed (#140) does not appear sufficient in production (root cause of WHY still needs
+      RCA). Fix: route _persist_order through the guarded persistence.save_order/save_position (one
+      write path, not three) AND add a PRAGMA-foreign_keys-ON SQLite (or Postgres-parity) regression
+      test to the blocking gate — the current SQLite-only CI cannot catch this bug class by
+      construction, which is why it has now recurred. Until fixed, do not read edge into any
+      forward-paper numbers collected since OA-17 went live. Full detail: RESEARCH_MEMORY 2026-07-02."
+    - "URGENT, loop-buildable (Research Run 12, 2026-07-02): the D2 per-category exposure cap has
+      become a de facto GLOBAL $200 cap, not a per-category one — Market.category is empty on real
+      Polymarket data (polymarket_client.py:799 parses raw.get('category','')), so risk_manager.py:157
+      buckets every real market as 'General', and the in-memory _market_categories map resets empty
+      every fresh GH-Actions process, so rehydrated positions ALSO default to 'General'. Confirmed
+      live: the 2026-07-02T09:36 scheduled run skipped 98/98 real opportunities on 'General exposure
+      $164.18 > $200'. Since these positions won't resolve for weeks/months, this freezes the forward
+      loop until fixed. Fix: derive category from a real Polymarket field (tags/event grouping) instead
+      of the empty 'category' key, and/or read the category already stored on PredictionPosition rows
+      back on rehydration instead of re-defaulting to General. Full detail: RESEARCH_MEMORY 2026-07-02."
+    - "NOTABLE, insufficient data (Research Run 12, 2026-07-02): LogicalImplicationDetector
+      ('logical_implication') and AdaptiveBuySignalThreshold ('adaptive_threshold') fired real signals
+      live today for the first time (0 signals on the 2026-06-29 sterile fixture) on genuinely
+      MECE real-world question sets (LeBron James team markets, FIFA World Cup winner candidates) —
+      a plausible confirmation the B5-hardened relatedness screen generalizes to real text. NOT an
+      edge claim: no resolutions yet, N<10, and per the finding above most fills likely never
+      persisted. All fired trades bought near-zero-price longshots (0.25-1.65 cents) — the highest
+      real-slippage-risk regime per EXP-002's pre-mortem. Revisit once persistence (above) is fixed
+      and a real track record can accumulate."
+    - "CONFIRMED (Research Run 12, 2026-07-02): GitHub Actions runners have working Polymarket +
+      Gemini egress (proven repeatedly by live-validation.yml, not just theorized) — de-risks OA-13
+      Option B (the staged-but-unapplied refresh-polymarket-data.yml). The only remaining step is the
+      owner applying that staged workflow file."
     - "HIGHEST-EV owner action (two paths, either unblocks all calibration alphas at once): PATH A (new OA-16, PREFERRED) — verify HuggingFace egress is accessible, download Polymarket-v1 daily_aligned Parquet (1.3M markets, CC-BY-4.0, no Polymarket API key needed, broader corpus than OA-11); PATH B (existing OA-11) — re-run `python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500 --max-pages 3 --min-volume 1000 --merge --out data/polymarket_history_7d.json` from a network-permitted host. Either path produces the corpus needed for EXP-002 + EXP-003 (same CalibrationBucketStrategy mechanism, already built)."
     - "LOOP-BUILDABLE (no data needed): build polymarket_v1_hf_fetcher.py — reads the daily_aligned Parquet from HuggingFace (huggingface_hub Python library, dataset TimeSeventeen/Polymarket-v1) and assembles leakage-safe HistoricalMarket records with the same structural anti-leakage guarantee as polymarket_history_fetcher.py. Once built, OA-16 step 2 (owner runs it) can bypass OA-11 entirely."
     - "EXP-002 + EXP-003 share the same BUILT mechanism (calibration_bucket_strategy.py) and differ only in the corpus: EXP-002 uses all price ranges at 7-day lead; EXP-003 filters to politics/elections category. Once the corpus arrives, both can be tested in one run: fit on oldest 60%, OOS on newest 40%, B2 significance gate with Bonferroni correction across the two strategies."
