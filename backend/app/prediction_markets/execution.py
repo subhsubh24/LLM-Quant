@@ -132,6 +132,11 @@ class Position:
     unrealized_pnl: float
     realized_pnl: float
     strategy: str = ""
+    # Correlation-risk bucket (see market_category.py). Carried on the in-memory Position
+    # so a position REHYDRATED from the DB across the fresh-process paper cycle still
+    # counts against its real category — otherwise the risk manager's per-market-category
+    # map is empty on a fresh process and every rehydrated position defaults to "General".
+    category: str = ""
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

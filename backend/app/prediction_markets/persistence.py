@@ -228,6 +228,11 @@ def load_positions_into_executor(executor: PredictionMarketExecutor):
                 unrealized_pnl=db_pos.unrealized_pnl,
                 realized_pnl=db_pos.realized_pnl,
                 strategy=db_pos.strategy,
+                # Carry the persisted correlation bucket so the risk manager counts this
+                # rehydrated position against its REAL category, not "General" (the
+                # per-category cap otherwise silently degrades to a global cap across the
+                # fresh-process paper cycle — a confirmed live freeze, 2026-07-02).
+                category=db_pos.category or "",
                 opened_at=db_pos.opened_at,
                 updated_at=db_pos.updated_at,
             )
