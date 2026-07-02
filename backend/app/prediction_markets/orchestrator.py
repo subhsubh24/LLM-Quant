@@ -1036,8 +1036,20 @@ class PredictionMarketOrchestrator:
         try:
             from ..db.database import get_session
             from .models import PredictionOrder, PredictionPosition
+            from .persistence import _ensure_default_portfolio
 
             with get_session() as session:
+                # Make the default portfolio (id=1) exist IN THIS TRANSACTION before the
+                # order/position inserts reference it. This is the LIVE write path (the
+                # orchestrator's own persister; persistence.save_order/save_position are
+                # never called by the running loop) and it hardcodes portfolio_id=1.
+                # SQLite doesn't enforce FKs so dev tolerated a missing parent, but Neon
+                # Postgres DOES — a boot-time seed that ever fails/rolls back would make
+                # EVERY order here raise ForeignKeyViolation. Ensuring the parent in the
+                # same transaction makes this path self-sufficient rather than relying on
+                # the boot seed having succeeded (idempotent — a no-op once seeded).
+                _ensure_default_portfolio(session)
+
                 # Save order
                 db_order = PredictionOrder(
                     portfolio_id=1,
