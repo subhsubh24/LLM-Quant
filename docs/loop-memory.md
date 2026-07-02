@@ -2,6 +2,31 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (owner-directed AUDIT) — FINDING: forward paper record is INCOHERENT across runs (filed D8, factory to fix)
+
+- Owner asked to verify whether the scheduled paper cycle rehydrates open positions across the
+  fresh-process-per-run (CI) model. **Verified from code — it does NOT, and the consequence is worse
+  than double-counting:**
+  - `persistence.load_positions_into_executor()` EXISTS (docstring: "call on startup to resume") but has
+    **ZERO call sites**. `get_executor` rehydrates only SAFETY state (kill-switch + loss counters), not
+    positions; `executor.positions` starts `{}` every run.
+  - `check_resolutions` reads in-memory `executor.positions` (`if not positions: return`) → on a fresh run
+    it sees nothing → **positions opened in a prior run are ORPHANED in the DB and never settle** → realized
+    PnL never books. So `resolutions=null` is not just "markets unresolved" — the resolving process starts
+    BLIND. The forward record can't progress.
+  - No scan-path "skip a market already held" dedup (only data-quality + risk gates) → each run re-opens/
+    scales the same markets → double-counting.
+  - Cross-ref: the #108 audit already noted `executor.positions` is never rehydrated (correctly deemed
+    non-safety-critical — loss-caps/kill-switch persist independently). The forward-record incoherence is a
+    DISTINCT gap, only material once the scheduled cycle went live on durable Neon.
+- **Did NOT solo-patch it.** The fix is coupled (rehydrate + open-filter + scan dedup) and changes
+  trading-loop + exposure semantics — that belongs in the two-gate adversarial review (maker≠checker), not a
+  single interactive maker. Filed as **ROADMAP D8** with the exact spec + tests to write.
+- **Lesson:** an "on startup to resume" helper that is never called is a silent BUILDS≠WORKS — grep for CALL
+  SITES, not just the definition. And for a fresh-process-per-run loop, persistence is only half the job:
+  state must be REHYDRATED on the way in, or every run starts blind. **Do not read edge into the accumulated
+  CI paper numbers until D8 lands.**
+
 ## 2026-07-02 (owner-directed) — DATABASE_URL secret set → durable Neon persistence surfaced a real FK bug SQLite hid
 
 - Owner set the `DATABASE_URL` (Neon) Actions secret → the live-validation paper cycle now connects to
