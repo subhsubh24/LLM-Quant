@@ -427,3 +427,24 @@ NEVER "fix" a red eval by deleting the case, skipping the test, or weakening the
 turn it green — that games the eval and defeats its purpose (same anti-gaming rule as the number).
 Track it via an `eval-regression` issue; a red live-eval that persists across runs is a `stuck`
 signal (§10b).
+
+## 24. Unit economics — actively optimize BOTH sides of the margin (revenue ↑, COGS ↓)
+The governing number (§9) is PROFIT, not revenue alone: contribution margin = revenue − variable
+cost (COGS). BOTH sides are continuous, standing work — never one and not the other, and never by
+trading away quality or honesty.
+- **Revenue ↑ (GTM-led):** activation, conversion, pricing/packaging, retention/LTV, the revenue
+  model — the GTM Factory's core mission (`GTM_STANDARD`); steer the roadmap on high-confidence,
+  real-data, revenue-linked findings. NEVER invent, flatter, or inflate a revenue/PMF metric to
+  look better (§22 + the anti-gaming rule) — a padded number is the worst failure.
+- **COGS ↓ (product-led):** the dominant variable cost is model inference. Each cycle, read the
+  metered by-stage / by-model spend (`lib/observability/cost-meter.ts` — `withCostLedger` /
+  `recordUsage`), find the biggest driver, and reduce it: caching, prompt-slimming, batching,
+  dropping redundant calls, or a cheaper tier — **ONLY where output quality holds.** HARD BOUND:
+  never downgrade a protected HIGH task (the tiers with no cheap verifier — apartment/room
+  understanding, diagnosis, area-analysis, floor-plan) and never relax the LLM cost-contract
+  ratchet; optimize elsewhere. A cost cut that costs quality is a FAILURE, not a win.
+- **Reconcile in the business case:** recompute contribution margin from REAL data as it arrives
+  (computed, never eyeballed — §22); when the economics contradict the model, the metrics win (§9).
+  Surface the metered runtime cost into a `cost:` block in `GROWTH_STATUS` so it feeds the dashboard
+  and seeds the next optimization pass.
+Pre-launch both are largely latent (no funnel, ~0 COGS); post-launch this is where profit is won.
