@@ -65,6 +65,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_strategy_audit.py \
            backend/tests/test_self_validation.py \
            backend/tests/test_validate_gtm.py \
+           backend/tests/test_live_validation_tiers.py \
            backend/tests/test_scorecard.py \
            backend/tests/test_calibration.py \
            backend/tests/test_data_quality.py \
