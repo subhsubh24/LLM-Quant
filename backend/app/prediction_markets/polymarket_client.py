@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from .market_category import derive_market_category
+
 logger = logging.getLogger(__name__)
 
 # API endpoints
@@ -790,13 +792,25 @@ class PolymarketClient:
                 except (ValueError, TypeError):
                     pass
 
+        # Derive a real correlation-risk bucket. Real Polymarket Gamma markets ship an
+        # EMPTY top-level `category`, which collapsed every market into the risk
+        # manager's "General" bucket and turned the per-category cap into a de-facto
+        # GLOBAL cap that froze the live loop (2026-07-02). Derive a coarse but real
+        # category from the tags + question so exposure spreads across buckets again.
+        # Deterministic + pure (never enters a backtest seed_hash — the walk-forward uses
+        # a separate HistoricalMarket type, and this only feeds live risk bucketing).
+        question_text = raw.get("question", "")
+        category = derive_market_category(
+            question_text, raw.get("category", ""), tags
+        )
+
         return Market(
             id=raw.get("id", ""),
             condition_id=raw.get("conditionId", ""),
-            question=raw.get("question", ""),
+            question=question_text,
             slug=raw.get("slug", ""),
             description=raw.get("description", ""),
-            category=raw.get("category", ""),
+            category=category,
             end_date=end_date,
             outcomes=outcomes,
             total_volume=volume,

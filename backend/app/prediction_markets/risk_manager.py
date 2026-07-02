@@ -292,10 +292,21 @@ class RiskManager:
         return True
 
     def _get_category_exposure(self, category: str, executor: PredictionMarketExecutor) -> float:
-        """Calculate total exposure for a category."""
+        """Calculate total exposure for a category.
+
+        Category resolution order for each held position: the live per-market map
+        (populated by ``check_opportunity`` this process) first, then the category
+        carried on the Position itself (set at entry and REHYDRATED from the DB across
+        the fresh-process paper cycle), then ``"General"``. Reading the Position's own
+        category is what keeps a rehydrated position counted against its REAL bucket
+        instead of collapsing every restart's positions into "General".
+        """
         return sum(
             p.market_value for p in executor.positions.values()
-            if (self._market_categories.get(p.market_id, "General") == category)
+            if (
+                self._market_categories.get(p.market_id)
+                or getattr(p, "category", "") or "General"
+            ) == category
         )
 
     def _calculate_risk_score(
