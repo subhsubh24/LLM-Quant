@@ -190,6 +190,31 @@ def test_horizon_and_confidence_buckets_partition_correctly():
     assert conf == ["0-10%", "10-25%", "25-50%", "50-75%", "75-90%", "90-100%"]
 
 
+def test_bucket_boundaries_are_exact():
+    """Pin the EXACT edge values so a future `<=`→`<` flip (or an edge reorder) is caught.
+    The `<=`-chains make each edge fall into the LOWER bucket; a hair above crosses up."""
+    from app.prediction_markets.regime_slice import _confidence_label, _horizon_label
+
+    def hz(days):
+        return _horizon_label(_trade("x", 1.0, horizon_days=days))
+
+    # horizon edges (1, 3, 7, 30) — inclusive of the lower bucket
+    assert hz(1.0) == "<=1d" and hz(1.0001) == "1-3d"
+    assert hz(3.0) == "1-3d" and hz(3.0001) == "3-7d"
+    assert hz(7.0) == "3-7d" and hz(7.0001) == "7-30d"
+    assert hz(30.0) == "7-30d" and hz(30.0001) == ">30d"
+
+    def cf(p):
+        return _confidence_label(_trade("x", 1.0, entry=p))
+
+    # confidence edges (0.1, 0.25, 0.5, 0.75, 0.9) — inclusive of the lower bucket
+    assert cf(0.1) == "0-10%" and cf(0.1001) == "10-25%"
+    assert cf(0.25) == "10-25%" and cf(0.2501) == "25-50%"
+    assert cf(0.5) == "25-50%" and cf(0.5001) == "50-75%"
+    assert cf(0.75) == "50-75%" and cf(0.7501) == "75-90%"
+    assert cf(0.9) == "75-90%" and cf(0.9001) == "90-100%"
+
+
 def test_report_is_deterministic():
     trades = [
         _trade("big", +300.0),

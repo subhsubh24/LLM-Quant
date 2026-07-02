@@ -40,7 +40,7 @@ from .walk_forward import BacktestTrade
 # ---------------------------------------------------------------------------
 # Named, defensible thresholds (no magic numbers). A dimension is "concentrated"
 # when a SINGLE bucket holds more than this share of the total NET PnL; a single
-# market holding more than TOP_MARKET_PNL_SHARE of net PnL is a few-correlated-
+# market holding more than TOP_MARKET_PNL_CONCENTRATION of net PnL is a few-correlated-
 # markets red flag. LEAVE_ONE_OUT flips the edge if removing the top CATEGORY
 # takes the remaining net PnL to <= 0 (the edge lives entirely in one category).
 # ---------------------------------------------------------------------------
