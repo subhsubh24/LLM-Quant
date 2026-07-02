@@ -552,3 +552,32 @@ having validated nothing, and per-PR CI (fully mocked) proves code SHAPE, not fu
   assertions, and the capability manifest — but the REQUIRED CI gate itself lives in `.github`, which
   the loop never edits (§27); promoting a real lane to blocking goes through the owner / the one
   harness-improvement proposal. Ties to §23 (action a red live-eval) and §26 (strengthen, don't defend).
+
+
+## 29. Computer-use functional validation — drive the REAL app like a human (exploratory, non-blocking)
+The realest anti-synthetic-green signal: a Gemini computer-use agent that navigates the DEPLOYED app
+through real user flows end to end, like a human — catching broken flows, dead ends, and UX defects
+that mocked unit tests and scripted happy-path e2e never see. It EXPLORES and FILES findings; it does
+NOT gate merges.
+- **Exploratory + NON-BLOCKING.** Computer-use is non-deterministic — a FINDER, never a required gate
+  (a gate would flake, stall merges, and break the determinism contract). Runs scheduled: a smoke set
+  of core flows often + a full-flow sweep periodically, cost-capped.
+- **Findings → triaged → factory work.** Each candidate defect / UX issue / improvement is triaged by
+  an INDEPENDENT pass (maker≠checker) to drop false positives, then filed as an issue for the factory
+  (bugs must reproduce; UX notes labeled as such). No raw-finding spam into the queue.
+- **Safety rails are non-negotiable (it acts on a LIVE app):**
+  - **Dedicated TEST accounts only** — never real user data; creds live in the env, never held by the
+    agent or committed.
+  - **Paid flows validated WITHOUT real charges by DEFAULT:** Stripe TEST mode / test card exercises
+    the full checkout→webhook→entitlement path with zero real money. Live-charge validation is a
+    separate, explicitly-enabled mode — capped (≤1 purchase/plan/sweep), auto-refunded/cancelled after
+    verify, and it NOTIFIES the owner on ANY spend. Never card-test at a rate that trips the processor.
+  - **Never destructive** beyond the test account's own data — no deleting/mutating shared or
+    other-user state; no real outbound messages to real people.
+  - **Bounded** by the §16 brakes: per-run step + wall-clock + spend caps; a stuck/looping session aborts.
+- **Web first; mobile deferred.** Drive the web build now (Browserbase-style). Mobile is a separate
+  harness (emulator + a mobile driver) and web→mobile is NOT automatic — shared backend helps, native
+  flows need their own pass. Track mobile as a later capability; never mark it covered when it isn't.
+- **Reuse, don't reinvent:** AptDesignerAI `lib/agents/computer-use/` (with `safety.ts`) is the
+  reference; `computer_use` already routes Gemini-only via the provider factory. New factories build on
+  their existing e2e/browser infra. Cost-governed (§24/§25); a red finding is actioned like §23.
