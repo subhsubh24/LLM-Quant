@@ -128,18 +128,21 @@ OWNER_ACTIONS:
         price, and category must be verified on the first download — the factory will build the
         parser once the schema is confirmed.
     - id: OA-17
-      title: "Apply the non-blocking live-validation workflow (real Gemini + Polymarket smoke + forward paper cycle)"
+      title: "Live-validation workflow APPLIED; optional: add Neon DATABASE_URL secret for durable forward persistence"
       priority: medium
-      status: open
+      status: in_progress
       why: "The 'real' self-validation tier (mock -> real). scripts/live_integration_smoke.py + scripts/run_paper_cycle.py are built + tested; they exercise the REAL Gemini + real public Polymarket + a FORWARD paper-trading cycle on live markets (paper fills only, never a real order). They can't run in the deterministic required gate (live data is non-deterministic; an outage must not freeze merges) or in the egress-blocked cloud loop — they need a network-permitted runner. The loop can't write .github/ headlessly."
       how: >
-        Add .github/workflows/live-validation.yml (staged verbatim in docs/ci/PROPOSED_LIVE_VALIDATION.md)
-        — a NON-BLOCKING scheduled job on GitHub runners (open internet). It consumes the existing
-        GEMINI_API_KEY secret. For a DURABLE forward paper track record, also add DATABASE_URL (your Neon
-        connection string) as an Actions secret — this is the DB string, NOT a trading key. NEVER add
-        POLYMARKET_* trading keys to CI (real orders are human-core). Do NOT add this job to
-        required_status_checks. Fuller always-on alternative: the deployed Railway backend running the
-        orchestrator loop (OA-10).
+        DONE (workflow applied, owner-authorized): .github/workflows/live-validation.yml is live — a
+        NON-BLOCKING scheduled job (every 6h + manual dispatch) on GitHub runners; it consumes the existing
+        GEMINI_API_KEY secret and is NOT a required check. REMAINING (optional, owner-only — the value must
+        never pass through chat/logs): for a DURABLE forward paper track record across runs, add your Neon
+        connection string as an Actions secret from your own terminal:
+          gh secret set DATABASE_URL --repo subhsubh24/LLM-Quant   # then paste the Neon URL at the prompt
+        This is the DB connection string, NOT a trading key. WITHOUT it the cycle still runs but persists to
+        an ephemeral SQLite that resets each run. NEVER add POLYMARKET_* trading keys (real orders are
+        human-core). Fuller always-on alternative: the deployed Railway backend running the orchestrator
+        loop (OA-10). Trigger a first run now: `gh workflow run live-validation.yml`.
 ```
 
 ## Quick reference
@@ -160,7 +163,7 @@ OWNER_ACTIONS:
 | OA-14 | Set `BACKEND_API_TOKEN` (+ frontend proxy) to protect control routes on a public deploy — routes are now default-CLOSED (#129); local/paper with no token needs `BACKEND_AUTH_DISABLED=1` | 🟡 medium | pending |
 | OA-15 | Run the Kalshi history fetcher on a network-permitted host (real Kalshi OOS corpus; verify the live status/price contract) | 🟡 medium | pending |
 | OA-16 | Download Polymarket-v1 HuggingFace dataset (1.3M markets, CC-BY-4.0) — preferred bypass for OA-11 | 🟠 high | pending |
-| OA-17 | Apply non-blocking live-validation workflow (real Gemini/Polymarket smoke + forward paper cycle); optional Neon `DATABASE_URL` secret | 🟡 medium | pending |
+| OA-17 | Live-validation workflow APPLIED (#PR); optional Neon `DATABASE_URL` secret for durable persistence | 🟡 medium | in progress |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 
