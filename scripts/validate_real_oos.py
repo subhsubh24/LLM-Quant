@@ -72,52 +72,74 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
     }
 
 
+def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
+    """Fetch leakage-safe HistoricalMarket records for a venue. Returns (markets, status).
+    NEVER raises on egress/empty (returns []+note); only a genuine code bug returns a 'code-error'
+    status. For Kalshi this doubles as the OA-15 live-contract check: real records = contract holds."""
+    try:
+        if venue == "polymarket":
+            m = _imp("backend.app.prediction_markets.polymarket_history_fetcher",
+                     "app.prediction_markets.polymarket_history_fetcher")
+            f = m.PolymarketHistoryFetcher()
+            resolved = f.fetch_resolved_markets(limit=limit, max_pages=max_pages, order="volumeNum")
+        else:  # kalshi (public market data — no credentials)
+            m = _imp("backend.app.prediction_markets.kalshi_history_fetcher",
+                     "app.prediction_markets.kalshi_history_fetcher")
+            f = m.KalshiHistoryFetcher()
+            resolved = f.fetch_resolved_markets(limit=limit, max_pages=max_pages)
+        markets = f.build_historical_markets(resolved, timedelta(days=lead_days))
+        if markets:
+            return markets, "ok"
+        return [], "N/A — 0 leakage-safe records (egress-blocked / contract-unconfirmed / lead too large)"
+    except Exception as e:  # a real code break in the fetcher/parser (NOT egress)
+        return [], f"code-error {type(e).__name__}: {e}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--limit", type=int, default=250)
     ap.add_argument("--max-pages", type=int, default=2)
     ap.add_argument("--decision-lead-days", type=float, default=2.0)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--venues", default="polymarket,kalshi", help="comma-separated: polymarket,kalshi")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
-    fetch_mod = _imp("backend.app.prediction_markets.polymarket_history_fetcher",
-                     "app.prediction_markets.polymarket_history_fetcher")
-    wf_mod = _imp("backend.app.prediction_markets.walk_forward",
-                  "app.prediction_markets.walk_forward")
+    wf_mod = _imp("backend.app.prediction_markets.walk_forward", "app.prediction_markets.walk_forward")
     cal_mod = _imp("backend.app.prediction_markets.calibration_bucket_strategy",
                    "app.prediction_markets.calibration_bucket_strategy")
 
-    # 1) Fetch real resolved history (public, no creds). Distinguish egress-block from a code bug.
-    try:
-        f = fetch_mod.PolymarketHistoryFetcher()
-        resolved = f.fetch_resolved_markets(limit=args.limit, max_pages=args.max_pages, order="volumeNum")
-        markets = f.build_historical_markets(resolved, timedelta(days=args.decision_lead_days))
-    except Exception as e:  # a real code break in the fetcher/parser
-        print(f"  validate-real-oos: FAIL (fetcher code error) {type(e).__name__}: {e}", file=sys.stderr)
-        return 1
+    per_venue, all_markets, code_error = {}, [], False
+    for venue in [v.strip() for v in args.venues.split(",") if v.strip()]:
+        markets, status = fetch_venue(venue, args.limit, args.max_pages, args.decision_lead_days)
+        if status.startswith("code-error"):
+            code_error = True
+        if markets:
+            per_venue[venue] = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
+                                        decision_lead_days=args.decision_lead_days)
+            all_markets.extend(markets)
+        else:
+            per_venue[venue] = {"status": status}
 
-    if not markets:
-        # No leakage-safe records — most likely egress-blocked (403) or a too-large lead. Not a code failure.
-        print("  validate-real-oos: N/A — 0 leakage-safe records (egress-blocked, or lead too large). "
-              "Run where Polymarket is reachable (GitHub runner / permitted host).")
-        return 0
-
-    report = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
-                      decision_lead_days=args.decision_lead_days)
-    alpha_res = report["calibration_alpha_b4a"]
+    combined = (evaluate(all_markets, wf_mod, cal_mod, seed=args.seed,
+                         decision_lead_days=args.decision_lead_days)
+                if all_markets else {"status": "no records from any venue (egress-blocked / run on a permitted host)"})
+    out = {"per_venue": per_venue, "combined": combined}
 
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(out, indent=2))
     else:
-        c = report["corpus"]
-        b = report["crowd_baseline"]
-        print(f"REAL-DATA OOS VALIDATION  (n={c['n_markets']} real resolved markets)")
-        print(f"  crowd Brier={c['crowd_brier']}  pinned={c['price_pinned_pct']:.0%}  YES-rate={c['yes_base_rate']}")
-        print(f"  crowd baseline : {b['trades']} trades  ${b['total_pnl_usd']:,.2f}  (hash {b['seed_hash']})")
-        print(f"  B4a alpha      : {alpha_res['trades']} trades  ${alpha_res['total_pnl_usd']:,.2f}  (hash {alpha_res['seed_hash']})")
-        print(f"  VERDICT: {report['verdict']}")
-    return 0
+        for venue, r in per_venue.items():
+            if "corpus" in r:
+                c, b, a = r["corpus"], r["crowd_baseline"], r["calibration_alpha_b4a"]
+                print(f"[{venue}] n={c['n_markets']} Brier={c['crowd_brier']} pinned={c['price_pinned_pct']:.0%} "
+                      f"| baseline {b['trades']}tr ${b['total_pnl_usd']:,.2f} | B4a {a['trades']}tr ${a['total_pnl_usd']:,.2f}")
+            else:
+                print(f"[{venue}] {r['status']}")
+        if "corpus" in combined:
+            c, a = combined["corpus"], combined["calibration_alpha_b4a"]
+            print(f"[COMBINED] n={c['n_markets']} | B4a {a['trades']}tr ${a['total_pnl_usd']:,.2f} — {combined['verdict']}")
+    return 1 if code_error else 0
 
 
 if __name__ == "__main__":

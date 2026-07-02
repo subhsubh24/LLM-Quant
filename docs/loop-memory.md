@@ -2,6 +2,28 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (owner-directed) — dual-venue: added Kalshi to the real-oos lane; it caught a live-contract bug + filed the cross-venue edge
+
+- Extended `validate_real_oos.py` to fetch BOTH Polymarket AND Kalshi (public, no creds) — per-venue
+  + combined OOS report, with a graceful N/A per venue (never crashes on egress/contract issues).
+- **The OA-15 Kalshi contract check paid off on run 1 (evidence, not theory):** Kalshi market DISCOVERY
+  works (real settled tickers), but the per-market price fetch **404s** — the fetcher calls
+  `/trade-api/v2/markets/{ticker}/history`, which doesn't exist. The correct endpoint (VERIFIED live,
+  HTTP 200) is `/trade-api/v2/series/{series_ticker}/markets/{ticker}/candlesticks`. So Kalshi returns 0
+  leakage-safe records today; Polymarket flows. Filed the exact fix in OA-15 + A3 (loop-buildable, factory
+  two-gate — leakage-safe data code; verify the candlestick schema on a market that HAS candlesticks).
+- **Filed B8 — cross-VENUE coherence edge** (Polymarket ⟷ Kalshi same-event price disagreement): a
+  logical-consistency/arbitrage edge that does NOT require out-calibrating the crowd (unlike B4a, which
+  lost −$639 OOS). The hard part is a validated EVENT-MATCHER; possibly the more robust alpha. Gated
+  (DECISION COROLLARY): build the matcher + backtest first, live routing far downstream.
+- **Keys:** NONE needed — Kalshi public market data (like Polymarket) needs no credentials; keys would
+  only be for LIVE Kalshi trading (not being built). Decision: advance Kalshi as DATA + a cross-venue
+  edge candidate; do NOT wire it as a live trading venue (no validated edge on either venue yet).
+- **Lesson:** a multi-venue validation lane is the cheapest way to VERIFY a second venue's live contract —
+  it either adds data or surfaces the exact contract gap (here, a 404 endpoint) on the first real run,
+  with the correct endpoint discoverable in the same session. Verify contracts against the LIVE API, never
+  just the docs — the documented `/history` path was wrong.
+
 ## 2026-07-02 (owner-directed) — the "fetch + validate in place" data lane: FIRST real-data OOS test of the alpha
 
 - Built the data lane that closes the loop the egress-blocked factory can't: `scripts/validate_real_oos.py`
