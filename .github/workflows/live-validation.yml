@@ -1,0 +1,38 @@
+name: live-validation
+# NON-BLOCKING — deliberately NOT a required status check. This is the "real" self-validation
+# tier: it exercises the REAL Gemini + real public Polymarket integrations and runs a FORWARD
+# paper-trading cycle on live markets. External-service outages (Gemini/Polymarket) or a missing
+# secret must NEVER freeze merges, so this is scheduled + non-blocking; the deterministic
+# `code + safety gate (blocking)` job in preflight.yml remains the only required check.
+#
+# SAFETY: the paper cycle can never place a real order — dry-run executor + the
+# LIVE_TRADING_ENABLED gate + a runner-level refusal (scripts/run_paper_cycle.py). Public
+# Polymarket data needs no credentials. NEVER add POLYMARKET_* trading keys here.
+# See docs/ci/PROPOSED_LIVE_VALIDATION.md + PENDING_OPS OA-17.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"     # every 6h — accumulate a forward paper track record
+  workflow_dispatch:
+
+jobs:
+  live-smoke-and-paper:
+    runs-on: ubuntu-latest      # GitHub runners have open internet -> reach Gemini + Polymarket
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install full runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Live integration smoke (real Gemini + real Polymarket)
+        run: python scripts/live_integration_smoke.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Forward paper cycle on REAL markets (paper fills only; never places a real order)
+        run: python scripts/run_paper_cycle.py --json
+        env:
+          LIVE_TRADING_ENABLED: "false"                 # belt-and-suspenders; the runner also refuses if true
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}     # optional; durable Neon persistence for the forward record
