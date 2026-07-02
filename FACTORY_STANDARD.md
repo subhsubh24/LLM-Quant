@@ -448,3 +448,28 @@ trading away quality or honesty.
   Surface the metered runtime cost into a `cost:` block in `GROWTH_STATUS` so it feeds the dashboard
   and seeds the next optimization pass.
 Pre-launch both are largely latent (no funnel, ~0 COGS); post-launch this is where profit is won.
+
+## 25. End-to-end per-run cost instrumentation (the data §24 acts on)
+§24 assumes the loop can SEE what each run costs. Today the cost-meter
+(`lib/observability/cost-meter.ts`) meters only a couple of stages, in tokens, in-request and
+invisible to the loop — so a run's reported cost is a fraction of the truth. Building this out is
+standing work until every real run reports its true end-to-end spend:
+- **Full-pipeline coverage:** wrap each real pipeline entry in `withCostLedger` and call
+  `recordUsage` at EVERY model-calling stage — image/room understanding, diagnosis, product
+  search, mockup/output generation, refine — so ONE run accumulates the WHOLE flow, not a subset.
+  A stage that records nothing is invisible cost.
+- **Dollars + by provider/model (not just tokens):** keep a per-model price table and compute $
+  from tokens; attribute each stage's spend to its model/provider so the breakdown answers "which
+  provider/key drove this run's cost."
+- **Capture on real runs, INCLUDING the eval:** run the live eval (and any real pipeline run)
+  inside the ledger and record each case's total + by-stage + by-provider cost — so every
+  real-data run reports its SPEND, not only its quality.
+- **Persist to a factory-readable feed:** write the per-run breakdown to the `GROWTH_STATUS`
+  `cost:` block (and/or a committed cost report) so it survives the request and the factory +
+  dashboard can read it. Ephemeral in-request metering the loop cannot see is not enough.
+- **Close the loop (feeds §24):** each cycle read the per-run cost, find the biggest-$ stage /
+  provider, and prioritize a cost-reduction roadmap item when it is a material lever — bounded by
+  the cost contract (never downgrade a protected HIGH task) and computed honestly (never fabricate
+  a cost figure — §22).
+Pre-launch, real runs are rare and near-free; the payoff is post-launch when every request is real
+spend and the biggest-$ stage is the clearest margin lever.
