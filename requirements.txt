@@ -9,8 +9,11 @@ scipy>=1.10.0
 # NOTE (ROADMAP A1): the heavy deep-learning / boosting stack (tensorflow, xgboost,
 # lightgbm) was dropped when the stock/crypto ML modules were retired — NOTHING in the
 # prediction-markets app imports them (verified repo-wide). This mirrors the same cleanup
-# already applied to backend/requirements.txt; render.yaml installs THIS root file, so
-# leaving them here shipped ~1GB of dead deep-learning deps to the deploy for nothing.
+# already applied to backend/requirements.txt. SCOPE: this ROOT file is the LOCAL-DEV /
+# demo manifest (README setup, scripts/run_demo.sh) — the Render/Docker BACKEND deploy
+# installs backend/requirements.txt (render.yaml rootDir=backend; backend/Dockerfile), which
+# was already trimmed. So this cleanup leans out local installs + removes a misleading
+# phantom-ML-capability signal from the root manifest; it does not change the deploy bundle.
 
 # Web & API
 fastapi>=0.128.0
