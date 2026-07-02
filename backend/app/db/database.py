@@ -103,6 +103,19 @@ def init_db():
     from ..prediction_markets import executor_state_store as _pm_state  # noqa: F401 — kill-switch/PnL durability
     SQLModel.metadata.create_all(engine)
 
+    # Seed the default portfolio (id=1) so order/position inserts satisfy their portfolio FK.
+    # MULTIPLE writers reference portfolio_id=1 (persistence.save_order/save_position AND
+    # orchestrator._persist_order) — SQLite doesn't enforce FKs but Postgres (Neon) does, so
+    # without this parent row the durable writes raise ForeignKeyViolation. Idempotent +
+    # best-effort (never breaks boot). One place covers every writer.
+    try:
+        with Session(engine) as _s:
+            if _s.get(_pm_models.PredictionPortfolio, 1) is None:
+                _s.add(_pm_models.PredictionPortfolio(id=1, name="default", exchange="all"))
+                _s.commit()
+    except Exception as e:  # pragma: no cover - defensive; boot must not depend on the seed
+        logger.warning("init_db: default-portfolio seed skipped (%s)", e)
+
 
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
