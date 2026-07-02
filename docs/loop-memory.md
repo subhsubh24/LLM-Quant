@@ -2,6 +2,88 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (2nd factory run) — the BIG A→A+ convergence run: 5 file-disjoint PRs cleared BOTH remaining ship-critical correctness A→A+ gaps + a real parse-fabrication + dead code; the SQLModel dual-import fix (deferred ~4 runs) finally landed, PROVEN by a baseline reproduction
+
+- **Shipped 5 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep across tracks A–G, all
+  through maker≠checker. The engine is mature + egress-blocked, so the honest maximal set was QUALITY / CORRECTNESS
+  / HONESTY convergence — NOT new completeness. This is what "maximize the run" looks like on a hardened engine:
+  (#149) **F7 — a CORRECTNESS-only ruff gate** (`--select E9,F821,F811`) now ENFORCED in the required CI + `ruff`
+  in requirements-ci.txt (the named artifact/correctness A→A+ top_gap); cleared the 3 pre-existing F811.
+  (#150) **artifact freshness** — 4 dead root deps (redis/pytrends/pandas-datareader/feedparser, 0 imports) + the
+  dead `AUTO_CONNECT_BROKERS` env var scrubbed from 3 files (DEPLOYMENT/`.env.example`/render.yaml) + stale
+  README architecture (paper_simulator/trading//dashboard/bot all deleted). (#151) **A1 — 1055 lines of dead
+  stock-era code deleted** (`advanced_validators.py` + `monitoring/monitoring.py`, zero importers, not declared
+  capabilities). (#152) **parse honesty** — `raw.get("outcomePrices", "0.5,0.5")` fabricated a tradeable 50/50 on
+  an ABSENT field (the residual key-level gap the #101 index-level fix missed); folded in the sibling `outcomes`
+  label default too after the Opus auditor + Reviewer B flagged it. (#153) **the SQLModel dual-import fix** — the
+  ship-critical correctness A→A+ top_gap deferred ~4 runs: standardized 30 test files `backend.app.*` → `app.*`,
+  killing the DeclarativeMeta double-registration. No DoD/floor box ticked; the binding constraint stays
+  owner/egress-blocked (OA-11/15/16 all 403 again this run).
+- **THE headline lesson — a "recurring deferred A→A+" gap is worth a DEDICATED tractability scout; the mechanical
+  fix + the GATE as safety net + a BASELINE REPRODUCTION is what finally made it shippable.** The SQLModel
+  dual-import fix was deferred ~4 runs as "a ~22-file refactor outside the CI gate" and a prior run PROVED
+  `extend_existing` insufficient. This run I spent ONE of the 8 scouts purely on "is it tractable THIS run?" — it
+  came back with the exact file list, the conftest-canonical-path proof, and "the 657-test gate catches any break."
+  That de-risked it: the fix is a blind `backend.app.` → `app.` sed whose ONLY safety net is eager-import failure,
+  and both reviewers RAN the base branch to reproduce the 3 order-dependent failures + SAWarning, then confirmed
+  1168 passed / 0 failed / 0 warnings after (Reviewer A even ran pytest-randomly × 3 seeds for order-independence).
+  **Lesson: a gap that keeps getting deferred as "too big / outside the gate" deserves a dedicated tractability
+  scout BEFORE dismissing it again — the scout may prove it's a safe mechanical sweep. And for a mechanical sweep,
+  the credibility is the BASELINE reproduction (show the bug on `base`, show it gone on `branch`), not just a green
+  branch.**
+- **THE blind-sed trap — a mechanical `X → Y` sweep corrupts PROSE that DESCRIBES X, and BREAKS code whose sys.path
+  needs X.** The `backend.app.` → `app.` sed did two kinds of collateral damage the reviewers caught: (1) it
+  rewrote docstrings/comments that were *explaining the dual-import bug* ("`app.*` vs `backend.app.*`") into
+  self-contradictory "`app.*` vs `app.*`" nonsense (Reviewer B, 3 files); (2) it broke `test_durable_tables_created.py`'s
+  SUBPROCESS, which deliberately put the REPO ROOT on sys.path (needing `backend.app.*`) — the gate caught it
+  (the ONLY red in the first preflight run), fixed by pointing the subprocess at `backend/` so `app.*` resolves.
+  **Lesson: before a blanket string-sweep, enumerate (a) every place the OLD string appears in PROSE that describes
+  the very thing you're changing (reword those, don't sed them), and (b) every place the OLD string is REQUIRED
+  (a different sys.path root, a subprocess, an external contract). Run the FULL gate — a sed's breakage shows up as
+  an import/collection error, loudly.**
+- **THE governance catch — a reviewer's REQUEST_CHANGES can conflict with the factory's OWN rules; give the
+  re-review the missing governance context rather than silently overriding OR blindly complying.** #149's Reviewer B
+  returned REQUEST_CHANGES demanding the PR update ROADMAP F7 + QUALITY_SCORECARD *in the code branch* (§14 living
+  artifacts). But that violates TWO hard rules it didn't have in context: §1/§15 (ROADMAP tick-offs go ONLY in the
+  bookkeeping PR — putting them in a code branch breaks file-disjointness AND collides with the bookkeeping PR) and
+  §8 (the QUALITY_SCORECARD is maker≠checker — the factory NEVER writes it). I did NOT self-override; I re-spawned a
+  FRESH Reviewer B WITH the §1/§8/§15 citations and asked "given this governance, is deferring the ROADMAP F7 text
+  to the bookkeeping PR correct?" — it APPROVED, confirming the specific rule governs the general §14. And I DID
+  update ROADMAP F7 in THIS bookkeeping PR (resolving the staleness in-run, correctly located). **Lesson: when a
+  reviewer's fix would violate a factory rule, the honest move is a re-review armed with the rule citations, plus
+  actually doing the correct-location fix — not arguing the reviewer down and not blindly complying with a
+  rule-violating request.**
+- **THE fold-it-in call — an auditor's "INCOMPLETENESS: same bug class next door" on an APPROVED money-path change
+  is worth folding into the SAME PR (coherent, same function), not deferring.** #152's price fix was SOUND, but the
+  Opus side-effect auditor + Reviewer B both flagged the sibling `outcomes` label default fabricating on the same
+  schema-drift premise. Same file, same function, same fabrication principle → I folded the label fix (+ a `< 2
+  outcomes` degenerate-case guard) into the same PR within the review cycle, with its own proven-to-fail-pre-fix
+  test, and re-reviewed the delta. **Lesson: "same bug class, next line, same function" = fold it in (it's one
+  coherent unit); "same bug class, different file/subsystem" = separate disjoint PR. The auditor naming the exact
+  sibling is a gift, not scope-creep.**
+- **Anti-padding + anti-scarcity both held at FIVE PRs.** Five is a lot for a mature engine — but each cleared the
+  bar independently: two NAMED ship-critical A→A+ top_gaps (ruff correctness gate, SQLModel dual-import), a real
+  reachable side-effect-integrity fabrication (parse), 1055 lines of genuinely-dead code, and a §14 freshness pass.
+  DROPPED as below-bar/padding: the CrossMarketArbitrage `expected_value` semantics nit (cosmetic — doesn't drive
+  sizing; fires 0 on real data), the E6 `reconcile()` "unwired" finding (DELIBERATE deferral gated on a real alpha,
+  DECISION COROLLARY), the D2 category-rehydration accuracy follow-up (known, not safety). Two scout lenses
+  (security, risk/exec) returned NOTHING-GENUINE. NOT churning/stuck (0 reverts, 0 abandons, 5 durable PRs) → no
+  harness proposal; binding constraint surfaced to owner via notification.
+- **Process/env:** `pip install -r backend/requirements-ci.txt fastapi httpx` + `pandas scikit-learn` for the FULL
+  suite; `rm -f quantlab.db` before DB-backed tests. 11 review subagents (2 Sonnet/PR + 1 Opus side-effect auditor
+  on #152 + 1 governance re-review on #149 + 1 delta re-review on #152). Reviewers ran in isolated worktrees. Merged
+  via MCP squash on the green required check AFTER reviews (no `--admin`). The ruff gate change (#149) went GREEN in
+  the REAL required CI (conclusion: success) before merge — verified the gate-change didn't self-red-block.
+- **NEXT-RUN NOTES:** (1) render.yaml still has `ANTHROPIC_API_KEY` (the LLM is Gemini — stale) + a "Supabase
+  session-pooler" comment (DB is Neon) — deferred from #150 to avoid churning an approved PR; a small freshness
+  follow-up. (2) The ~146 remaining ruff HYGIENE findings (F401/E402/F841/E741) — drive to 0 module-by-module, then
+  widen the `--select` (F7 remaining work). (3) The correctness A→A+ SQLModel dual-import + the artifact/ruff A→A+
+  are now RESOLVED for the Quality Auditor's next scorecard pass (maker≠checker — surfaced, not self-graded). (4)
+  `test_alternative_data.py` at repo ROOT references a deleted `backend.app.data` and fails to import under a bare
+  repo-root `pytest` — a pre-existing dead root test, deletion candidate. (5) the `outcomes` label default is now
+  hardened but the parser still emits a degenerate market only caught by the `< 2` guard — confirm on the first real
+  Gamma fetch (egress-blocked).
+
 ## 2026-07-02 (1st factory run) — shipped the D8 forward-record-coherence headline the owner-directed audit filed; the regression suite CAUGHT a latent bug the fix itself needed (3-PR run)
 
 - **Shipped 3 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep, all through maker≠checker:
