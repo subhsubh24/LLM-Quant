@@ -31,6 +31,22 @@ from .execution import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PORTFOLIO_ID = 1
+
+
+def _ensure_default_portfolio(session) -> None:
+    """Ensure the default portfolio (id=1) row exists so order/position FKs resolve.
+
+    Orders and positions reference ``portfolio_id=1``. SQLite does NOT enforce foreign
+    keys by default, so a missing parent row was silently tolerated in dev; Neon Postgres
+    DOES enforce them, so inserts raised ForeignKeyViolation and the durable forward record
+    never persisted. Create the parent row (idempotent) in the SAME transaction as the insert.
+    """
+    from .models import PredictionPortfolio
+    if session.get(PredictionPortfolio, DEFAULT_PORTFOLIO_ID) is None:
+        session.add(PredictionPortfolio(id=DEFAULT_PORTFOLIO_ID, name="default", exchange="all"))
+        session.flush()
+
 
 # ============================================================
 # Order persistence
@@ -45,8 +61,9 @@ def save_order(
 ) -> Optional[int]:
     """Persist an order result to the database. Returns the row ID."""
     with get_session() as session:
+        _ensure_default_portfolio(session)
         order = PredictionOrder(
-            portfolio_id=1,
+            portfolio_id=DEFAULT_PORTFOLIO_ID,
             exchange=result.exchange.value,
             market_id=result.market_id,
             token_id=result.token_id,
@@ -95,6 +112,7 @@ def get_orders(
 def save_position(pos: Position, market_question: str = "", outcome_label: str = "", category: str = ""):
     """Upsert a position (insert or update by token_id)."""
     with get_session() as session:
+        _ensure_default_portfolio(session)
         # Check if position already exists
         stmt = select(PredictionPosition).where(PredictionPosition.token_id == pos.token_id)
         existing = session.exec(stmt).first()
@@ -110,7 +128,7 @@ def save_position(pos: Position, market_question: str = "", outcome_label: str =
             session.add(existing)
         else:
             db_pos = PredictionPosition(
-                portfolio_id=1,
+                portfolio_id=DEFAULT_PORTFOLIO_ID,
                 exchange=pos.exchange.value,
                 market_id=pos.market_id,
                 token_id=pos.token_id,

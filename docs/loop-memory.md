@@ -2,6 +2,27 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (owner-directed) — DATABASE_URL secret set → durable Neon persistence surfaced a real FK bug SQLite hid
+
+- Owner set the `DATABASE_URL` (Neon) Actions secret → the live-validation paper cycle now connects to
+  **real Postgres** (proven by `psycopg2` in the log). Two more real bugs surfaced + fixed, each debugged
+  from the CI log (deep-diagnosis, not guesses):
+  1. **`ForeignKeyViolation: prediction_orders_portfolio_id_fkey`** — `persistence.save_order`/`save_position`
+     insert with a hardcoded `portfolio_id=1`, but nothing created the parent `PredictionPortfolio` row.
+     **SQLite does NOT enforce FKs by default** so dev silently tolerated it; **Neon Postgres enforces them**
+     → orders/positions never durably persisted. Fix: `_ensure_default_portfolio(session)` (idempotent, in the
+     SAME transaction) called at the top of both saves. **Lesson: SQLite hides missing-parent FK bugs — the
+     durable Postgres path is the only place they show; validate persistence on the real engine.**
+  2. **The regression test itself triggered the dual-import metadata collision** (`Table
+     'prediction_portfolios' already defined`) because it imported the table models via `backend.app.*` while
+     the rest of the gate imports via `app.*` (conftest puts backend/ on sys.path). Two import paths ⇒ the
+     `table=True` classes register twice on the shared `SQLModel.metadata`. Fix: import via `app.*` to match
+     the convention. **Lesson: in gate tests, import the prediction-market table models via `app.*` ONLY —
+     a second path double-registers them (this is the same dual-import fragility tracked as the correctness
+     A→A+ top_gap; the real cure is standardizing the import path repo-wide).**
+- Regression test reproduces the bug locally with SQLite + `PRAGMA foreign_keys=ON` (order insert raises
+  IntegrityError without the portfolio, succeeds with `_ensure_default_portfolio`). Gate green.
+
 ## 2026-07-02 (owner-directed) — OA-17 applied + the live tier's FIRST real run caught a real thing (deep-diagnosis)
 
 - Applied `.github/workflows/live-validation.yml` (non-blocking, every 6h + dispatch) — owner-authorized,
