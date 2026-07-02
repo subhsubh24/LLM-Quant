@@ -1,13 +1,16 @@
 # Core Data Science & ML
+# numpy/pandas/scikit-learn/scipy stay: still used (function-locally) by the kept
+# asset-agnostic backtest + monitoring modules.
 numpy>=2.0.0
 pandas>=3.0.0
 scikit-learn>=1.3.0
 scipy>=1.10.0
 
-# ML Libraries
-lightgbm>=4.0.0
-xgboost>=3.0.0
-tensorflow>=2.13.0
+# NOTE (ROADMAP A1): the heavy deep-learning / boosting stack (tensorflow, xgboost,
+# lightgbm) was dropped when the stock/crypto ML modules were retired — NOTHING in the
+# prediction-markets app imports them (verified repo-wide). This mirrors the same cleanup
+# already applied to backend/requirements.txt; render.yaml installs THIS root file, so
+# leaving them here shipped ~1GB of dead deep-learning deps to the deploy for nothing.
 
 # Web & API
 fastapi>=0.128.0
