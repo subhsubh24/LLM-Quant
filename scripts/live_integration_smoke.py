@@ -36,20 +36,48 @@ def _imp(path_a, path_b):
 
 
 def check_gemini() -> dict:
-    """Real Gemini call if the key is present; else a clean skip (degrade-safe path)."""
+    """Real Gemini call if the key is present; else a clean skip (degrade-safe path).
+
+    Calls the client DIRECTLY (not through analyst._call_llm, which swallows exceptions to
+    None) so a genuine SDK/signature break RAISES and is caught here as a real CODE failure.
+    An empty .text (no exception) is NOT a code failure — gemini-2.5-flash is a THINKING model
+    that can consume a small budget on thinking and return no text; llm_analysis degrades to
+    templates in that case (safe). Uses a realistic token budget (256) + a hard timeout.
+    """
     cfg = _imp("backend.app.config", "app.config")
     settings = cfg.get_settings()
     if not getattr(settings, "has_llm_key", False):
         return {"path": "gemini", "status": "skipped", "detail": "no GEMINI_API_KEY (degrade-safe path)"}
     try:
+        import concurrent.futures
         analyst_mod = _imp("backend.app.llm.analyst", "app.llm.analyst")
         Analyst = getattr(analyst_mod, "MarketAnalyst", None) or getattr(analyst_mod, "Analyst", None)
         analyst = Analyst() if Analyst else None
-        resp = analyst._call_llm("Reply with the single word: OK", max_tokens=8) if analyst else None
-        if resp and isinstance(resp, str) and resp.strip():
-            return {"path": "gemini", "status": "ok", "detail": f"live response ({len(resp)} chars)"}
-        return {"path": "gemini", "status": "fail", "detail": "key present but empty/None response — wrapper may be broken"}
-    except Exception as e:  # our wrapper broke against the live SDK → real bug
+        client = analyst._get_client() if analyst else None
+        if client is None:
+            return {"path": "gemini", "status": "unavailable",
+                    "detail": "client not constructed (google-genai missing or key rejected at init)"}
+        from google.genai import types as gt
+        model = settings.gemini_model
+        conf = gt.GenerateContentConfig(max_output_tokens=256)  # headroom for a 2.5 thinking model to emit text
+
+        def _do():
+            return client.models.generate_content(model=model, contents="Reply with the single word: OK", config=conf)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            resp = ex.submit(_do).result(timeout=30)  # hard timeout (factory rule: every external call is bounded)
+        text = getattr(resp, "text", None)
+        if text and text.strip():
+            return {"path": "gemini", "status": "ok", "detail": f"live response via {model} ({len(text)} chars)"}
+        # Reached the API, no text -> the degrade-safe path (templates), NOT a code break.
+        fr = None
+        try:
+            fr = resp.candidates[0].finish_reason
+        except Exception:
+            pass
+        return {"path": "gemini", "status": "unavailable",
+                "detail": f"reached {model} but empty text (finish_reason={fr}); llm_analysis degrades to templates — safe, not a code break"}
+    except Exception as e:  # our wrapper/SDK call actually raised → real integration break
         return {"path": "gemini", "status": "fail", "detail": f"{type(e).__name__}: {e}"}
 
 

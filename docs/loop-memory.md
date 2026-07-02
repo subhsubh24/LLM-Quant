@@ -2,6 +2,29 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (owner-directed) — OA-17 applied + the live tier's FIRST real run caught a real thing (deep-diagnosis)
+
+- Applied `.github/workflows/live-validation.yml` (non-blocking, every 6h + dispatch) — owner-authorized,
+  interactive session (gh token has `workflow` scope). Triggered a first run.
+- **The live tier did its job on run #1** — it surfaced what mocks never could. Debugged from the LOG,
+  not a guess: `GEMINI_API_KEY: ***` present, `[OK] polymarket: parsed 3 real markets`, but
+  `[FAIL] gemini: key present but empty/None response`.
+- **Root cause (evidence, not theory):** the smoke called `analyst._call_llm(..., max_tokens=8)`.
+  `gemini-2.5-flash` is a THINKING model — it spends a tiny `max_output_tokens` budget on internal
+  thinking and returns EMPTY `.text`. The real analyst uses 1000–1500 tokens, so PRODUCTION IS FINE — the
+  bug was in my SMOKE (unrealistic 8-token budget), not the analyst.
+- **Two-part fix:** (1) realistic budget (256) + a hard 30s timeout; (2) call the genai client DIRECTLY
+  (not via `_call_llm`, which swallows exceptions to None) so a genuine SDK/signature break RAISES and is
+  caught as a real code failure, while an empty `.text` (no exception) is correctly classified as the
+  **degrade-safe** path (`llm_analysis` → templates), NOT a code break — with `finish_reason` surfaced.
+- **Lessons:** (1) when smoke-testing a 2.5-class thinking model, give real token headroom — a tiny
+  `max_output_tokens` yields empty text and reads as a false break. (2) A validation check must classify
+  honestly: "reached the API, got no text" is degrade-safe, not "wrapper broken" — only an EXCEPTION is a
+  code failure. (3) Don't validate a real integration THROUGH a wrapper that swallows exceptions to None —
+  call the client directly so real breaks are visible. (4) The non-blocking live tier earned its keep on
+  its very first run — this is exactly the class of "builds+mocks-green but real-integration-surprises" bug
+  it exists to catch.
+
 ## 2026-07-01 (owner-directed) — "real" self-validation tier: live smoke + FORWARD paper-trading on real markets
 
 - **Ask:** upgrade self-validation from mock → real; the bot should paper-trade on its own against real
