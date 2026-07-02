@@ -527,3 +527,28 @@ tries) even after they've stopped working. Detecting stuck is not enough; the re
   harness-improvement-proposal issue (§10b); the evaluator stays un-editable by the thing it grades.
 - If a diverse pass still can't move it, THAT is the `stuck` escalation: open the ONE
   harness-improvement-proposal issue (§10b) and STOP re-attempting — don't spin.
+
+
+## 28. Real-service validation FAILS, not skips — a green that never ran the real thing is a lie
+Audit-confirmed #1 synthetic-green pattern across every factory: the ONLY checks that hit REAL
+services (LLM / DB / billing) are gated behind a flag (`RUN_EVALS`, `EVAL_MODE`, `-m live`) and SKIP
+to green when the key is absent — so a rotated-away or never-set key makes the "real" lane pass
+having validated nothing, and per-PR CI (fully mocked) proves code SHAPE, not function. Close it:
+- **A real-service lane that is EXPECTED to run MUST redden when its key is missing — never skip-green.**
+  Key present ⇒ run it. Key expected-but-absent ⇒ FAIL loudly. Key intentionally-absent ⇒ an explicit
+  written allowlist says so. Anything absent and NOT on that allowlist is a failure, not a silent skip.
+- **App code fails loud, never silent-no-op.** A missing CORE key ⇒ throw / 503 / explicitly-logged
+  "disabled: KEY missing" — NEVER an empty result or a success value. `passed:true` / `delivered:true`
+  may be emitted ONLY when the real check actually ran; a dry-run/no-op returns a DISTINCT `dryRun` /
+  `skipped` flag and MUST NOT feed any "real" counter, metric, or claim (the anti-fabrication rule).
+- **Security-shaped keys fail CLOSED in prod.** A missing captcha / entitlement / HMAC-signing key must
+  DENY or refuse-boot — never fail-open (grant paid tier to everyone, sign forgeable tokens, bypass the
+  bot-check). A silent hardcoded-secret fallback in a prod path is a defect, not a default.
+- **Declare-and-verify capabilities** — the proven pattern (a REQUIRED self-validation job, e.g.
+  GroceryManager `check-self-validation.mjs`): every declared capability names the REAL check that
+  exercises it; the job REDDENS if that check doesn't actually run in CI, needs an unwired secret, or
+  hides behind an undeclared env-gated skip. Generalize it to every factory.
+- **Enforcement wiring stays human-gated.** The loop implements fail-loud behavior in app code, test
+  assertions, and the capability manifest — but the REQUIRED CI gate itself lives in `.github`, which
+  the loop never edits (§27); promoting a real lane to blocking goes through the owner / the one
+  harness-improvement proposal. Ties to §23 (action a red live-eval) and §26 (strengthen, don't defend).
