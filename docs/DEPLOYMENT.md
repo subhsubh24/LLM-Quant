@@ -32,24 +32,28 @@ splitting Vercel + Railway — same code, no serverless refactor.
 ### "But Vercel supports FastAPI now" — yes, and it still doesn't fit (yet)
 
 Vercel can deploy FastAPI, but [their docs](https://vercel.com/docs/frameworks/backend/fastapi)
-are explicit that the app **"becomes a single Vercel Function"** (serverless), and
-two of their stated limits disqualify *this* app today:
+are explicit that the app **"becomes a single Vercel Function"** (serverless). The
+**500MB function bundle limit** used to be an independent hard stop — the stock/crypto
+era shipped `torch`/`tensorflow`/`xgboost`/`lightgbm` (~1GB) and `routes.py` imported the
+ML `..models` (`ModelTrainer`/`EnsembleRanker`) at module load. That is **no longer
+true**: ROADMAP A1 retired the stock/crypto ML stack — the ML modules/routes are deleted
+(`routes.py` no longer imports them) and the deep-learning/boosting deps are dropped from
+`requirements.txt`. The prediction-markets bundle now carries only the lightweight
+`numpy`/`pandas`/`scikit-learn`/`scipy` still used by the kept backtest/monitoring code,
+so the ML-bundle size is no longer the blocker it was. The remaining, and by itself
+sufficient, disqualifier is:
 
-1. **500MB function bundle limit** — `torch` alone is ~400MB installed; with
-   `pandas`/`scipy`/`scikit-learn`/`xgboost`/`lightgbm` the bundle is ~1GB. `routes.py`
-   imports `..models` (`ModelTrainer`, `EnsembleRanker`) at module load, so the ML
-   stack can't simply be left uninstalled. **Hard stop regardless of architecture.**
-2. **Serverless execution model** — the continuous 120s scan loop, the persistent
-   Polymarket/crypto WebSocket feeds, and in-memory positions/risk/activity state
-   cannot survive in a request-scoped function. "Fluid compute" keeps instances warm
-   and concurrent but is **not a persistent daemon**; the 500ms shutdown cap +
-   function timeouts confirm it's request-scoped.
+- **Serverless execution model** — the continuous 120s scan loop, the persistent
+  Polymarket WebSocket feeds, and in-memory positions/risk/activity state cannot survive
+  in a request-scoped function. "Fluid compute" keeps instances warm and concurrent but
+  is **not a persistent daemon**; the 500ms shutdown cap + function timeouts confirm it's
+  request-scoped.
 
-**Future path (not now):** if the bot is trimmed to prediction-markets-only (drops
-torch/xgboost → fits 500MB) AND refactored to be stateless (state in Postgres,
-scanning via Vercel Cron, no WebSocket-server feeds), the request-serving API could
-live on Vercel — but you'd still need a persistent worker for the scan loop, so it
-adds a moving part rather than removing one. Until then: persistent host.
+**Path to a Vercel-hosted API (now that the bundle stop is gone):** the request-serving
+API *could* live on Vercel if the bot were refactored to be stateless (state in Postgres,
+scanning via Vercel Cron, no WebSocket-server feeds) — but you would still need a
+persistent worker for the scan loop, so it adds a moving part rather than removing one.
+Until then: persistent host.
 
 ---
 
