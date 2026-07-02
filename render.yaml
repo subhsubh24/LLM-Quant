@@ -8,15 +8,16 @@
 # env vars (marked sync:false) in the dashboard. The frontend goes on Vercel
 # (see docs/DEPLOYMENT.md); to run it here too, add a second web service.
 #
-# NOTE: the backend bundles heavy ML deps (torch/xgboost/lightgbm) used by the
-# stock/crypto side, so it needs ~1GB+ RAM — the free tier will OOM. `starter` is
-# the safe minimum until those deps are trimmed (ROADMAP A1, prediction-markets-only).
+# NOTE: the heavy stock/crypto ML stack (torch/xgboost/lightgbm) has been REMOVED
+# (ROADMAP A1, prediction-markets-only). The backend still pulls scientific deps
+# (numpy/scipy/pandas/scikit-learn/cvxpy), so `starter` (~1GB RAM) remains the safe
+# minimum; the free tier may still be tight.
 
 services:
   - type: web
     name: llm-quant-backend
     runtime: python
-    plan: starter            # >= 1GB RAM; free tier OOMs on torch. ~$7/mo.
+    plan: starter            # >= 1GB RAM (scientific deps); free tier may be tight. ~$7/mo.
     rootDir: backend
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.api.main:app --host 0.0.0.0 --port $PORT"
@@ -31,11 +32,11 @@ services:
       - key: DEBUG
         value: "false"
       # --- Secrets / per-deploy (set these in the Render dashboard) ---
-      - key: DATABASE_URL       # Supabase session-pooler string (port 5432)
+      - key: DATABASE_URL       # Neon Postgres pooled connection string (?sslmode=require)
         sync: false
       - key: CORS_ALLOW_ORIGINS # your Vercel origin, e.g. https://llm-quant.vercel.app
         sync: false
-      - key: ANTHROPIC_API_KEY  # optional (LLM features)
+      - key: GEMINI_API_KEY     # optional (LLM analysis; degrades to templates if unset)
         sync: false
       - key: FRED_API_KEY       # optional (market data)
         sync: false

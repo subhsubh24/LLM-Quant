@@ -1,15 +1,15 @@
 """
 Database connection and session management.
 
-Supports SQLite (default, local dev) and Postgres (Supabase / any Postgres) via the
-DATABASE_URL setting. The engine is dialect-aware so SQLite-only options
-(check_same_thread) are never sent to Postgres, and Postgres gets pooling that
-survives Supabase's connection poolers (Supavisor) dropping idle connections.
+Supports SQLite (default, local dev) and Postgres (production: Neon, or any Postgres)
+via the DATABASE_URL setting. The engine is dialect-aware so SQLite-only options
+(check_same_thread) are never sent to Postgres, and Postgres gets pooling
+(pool_pre_ping + pool_recycle) that survives a managed pooler dropping idle connections.
 
-To use Supabase, set DATABASE_URL to your Supabase connection string (see
-backend/.env.example). For a persistent backend prefer the DIRECT connection
-(IPv6) or the SESSION POOLER (IPv4, port 5432). Avoid the transaction pooler
-(port 6543) for a long-running server.
+For production, set DATABASE_URL to the Neon POOLED connection string from the Neon
+Console (it includes ?sslmode=require); see backend/.env.example. Any other managed
+Postgres works too — prefer a session/pooled endpoint suited to a long-running server
+over a short-lived transaction pooler.
 """
 
 import logging
@@ -28,8 +28,9 @@ settings = get_settings()
 def _normalize_url(url: str) -> str:
     """Normalize a Postgres URL for SQLAlchemy 2.x + psycopg2.
 
-    Supabase (and Heroku) hand out `postgres://...`, which SQLAlchemy 2.x rejects.
-    Pin the psycopg2 driver explicitly so the dialect is unambiguous.
+    Some hosts (Heroku, and older Postgres URLs) hand out `postgres://...`, which
+    SQLAlchemy 2.x rejects. Pin the psycopg2 driver explicitly so the dialect is
+    unambiguous.
     """
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
@@ -52,7 +53,7 @@ def _make_engine(url: str):
 
     if url.startswith("postgresql"):
         connect_args: dict = {}
-        # Supabase requires SSL. Only set it if the URL doesn't already specify it.
+        # Managed Postgres (Neon) requires SSL. Only set it if the URL doesn't specify it.
         if "sslmode=" not in url:
             connect_args["sslmode"] = "require"
         engine = create_engine(
