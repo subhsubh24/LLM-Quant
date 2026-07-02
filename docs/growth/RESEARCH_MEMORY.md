@@ -626,3 +626,22 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   scope, same class of blocker as OA-11/OA-16). Until then this stays "insufficient data" and is
   NOT promoted to a numbered EXP with a min-N/OOS plan — proposing a formal experiment on top of
   a known-fabricated input would itself be a leakage/integrity failure.
+
+---
+
+## 2026-07-02 — WhaleCopyTradingStrategy: consensus dilution (factory-surfaced, NOT a research run)
+- Context: a factory deep-audit scout (correctness lens) found that `WhaleCopyTradingStrategy.scan`
+  computes `buy_consensus = len(buy_wallets) / n_tracked`, but `buy_wallets` can include wallets
+  NOT in `self.tracked_wallets`: `record_trade` adds ANY wallet's trade to `_recent_whale_trades`
+  (strategies.py ~1104) while only appending to the tracked list if the wallet is tracked (~1109),
+  so `scan`'s last-hour filter can populate `buy_wallets` with untracked whales.
+- Effect (if wired): dilutes the "proven-wallet" consensus signal with unproven wallets — weakens
+  whatever alpha tracking high-performers was supposed to give. Suggested fix: filter to
+  `t["wallet"].lower() in self.tracked_wallets` when building `buy_wallets`.
+- Verdict: edge-not-proven — NOT fixed standalone. WhaleCopyTradingStrategy is GATED OFF (B7,
+  `ENABLE_UNVALIDATED_STRATEGIES`) and B7 mandates a B3 `PROPOSED` entry → `strategy_audit.py`
+  forensic pass → OOS `walk_forward` validation before re-enabling. Polishing gated-off code fails
+  the value bar (2026-07-01 anti-padding lesson); this correctness fix belongs INSIDE that B7
+  re-validation, where the strategy's whole logic is re-derived — recorded here so it isn't lost.
+- Why: still additionally blocked on `data-api.polymarket.com` reachability (egress) to feed real
+  wallets at all — same owner/host class as OA-11/OA-15/OA-16.
