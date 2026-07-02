@@ -634,3 +634,20 @@ is the concrete rubric for the graded `design_taste` dimension.
   built, edited, and judged by taste. Product-specific brand / voice / visual language lives in VISION
   (§19), not here; this is the universal bar every factory holds. Same anti-slop rule as §11's "never
   obviously AI" — now applied to the PRODUCT UI, not just the marketing.
+
+
+## 32. A non-essential side-effect must NEVER hard-block a core user action
+Traces to a real outage: a signup trigger's insert into `public.profiles` threw in prod and rolled back
+the whole `auth.users` insert — so NEITHER the app signup NOR the Supabase dashboard could create ANY
+account. The product couldn't onboard a single user, and it surfaced only as a generic "something went
+wrong." A non-essential side effect (the profile row) was allowed to abort the core action (the account).
+- **The core action succeeds even if the side-effect fails.** Creating the account is core; the profile
+  row / welcome email / analytics write is a side-effect. Wrap side-effects so a failure is LOGGED and
+  swallowed (or queued for backfill) — never allowed to abort the core write. DB triggers:
+  `begin ... exception when others then raise warning ...; end;`. App code: try/catch that degrades.
+- **Applies to EVERY critical-write path,** not just signup — any trigger / webhook / post-write hook
+  that can throw is a latent full outage of the thing it hangs off of.
+- **Swallow the BLOCK, not the SIGNAL (§28):** still log/alert the side-effect failure so the broken
+  profile-insert / email / analytics gets fixed — a silently-degraded side-effect no one notices is its
+  own §28 violation.
+- Reviewer check: "can any non-essential side-effect on this path abort the core action?" If yes, harden it.
