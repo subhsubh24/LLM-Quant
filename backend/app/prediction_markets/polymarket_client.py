@@ -659,7 +659,14 @@ class PolymarketClient:
 
         # Parse outcomes from parallel arrays
         # Gamma API returns these as JSON-encoded strings: '["Yes","No"]' or CSV: "Yes,No"
-        outcome_labels = raw.get("outcomes", "Yes,No")
+        # A genuinely MISSING outcomes field must NOT be fabricated as "Yes,No" either: a
+        # non-Yes/No market (e.g. "Republican"/"Democrat") that dropped the outcomes key
+        # would otherwise go ACTIVE with real prices/tokens but INVENTED labels, which can
+        # misassign trade direction/semantics for a label-parsing strategy. Absent -> []
+        # -> length mismatch (or the <2-outcomes guard) -> parse_incomplete -> active=False.
+        outcome_labels = raw.get("outcomes")
+        if outcome_labels is None:
+            outcome_labels = []
         if isinstance(outcome_labels, str):
             try:
                 parsed = _json.loads(outcome_labels)
@@ -713,6 +720,11 @@ class PolymarketClient:
         # invented data and the discrepancy surfaces on the first real fetch.
         n_labels = len(outcome_labels)
         parse_incomplete = (len(token_ids) != n_labels) or (len(outcome_prices) != n_labels)
+        # A prediction market needs >= 2 outcomes; 0 or 1 (e.g. every array absent, so all
+        # length 0 and the mismatch check above passes vacuously) is degenerate/incomplete
+        # and must never be emitted as a tradeable active market.
+        if n_labels < 2:
+            parse_incomplete = True
         outcomes = []
         for i, label in enumerate(outcome_labels):
             tok = token_ids[i] if i < len(token_ids) else ""

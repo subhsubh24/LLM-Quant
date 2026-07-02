@@ -214,3 +214,28 @@ def test_present_outcomePrices_still_parsed_normally():
     m = _client()._parse_market(_base_raw())
     assert m.active is True
     assert [round(o.price, 6) for o in m.outcomes] == [0.62, 0.38]
+
+
+def test_missing_outcomes_field_marks_untradeable_no_fabricated_labels():
+    # outcomePrices + clobTokenIds present + consistent (2 each) but the ``outcomes``
+    # KEY is ABSENT. PRE-FIX: raw.get("outcomes", "Yes,No") fabricated ["Yes","No"] ->
+    # length-matched -> active=True with INVENTED labels (a non-Yes/No market would be
+    # mislabeled, misassigning trade semantics). POST-FIX: absent -> [] -> mismatch ->
+    # untradeable.
+    raw = _base_raw()
+    del raw["outcomes"]
+    m = _client()._parse_market(raw)
+    assert m.active is False
+
+
+def test_all_outcome_arrays_absent_is_untradeable_not_empty_active():
+    # Every parallel array absent: pre-fix defaults ("Yes,No" + "0.5,0.5" + []) produced a
+    # mismatch already, but the <2-outcomes guard also pins the degenerate case where all
+    # three are absent/empty (n_labels==0) so it can never emit active=True with 0 outcomes.
+    raw = _base_raw()
+    del raw["outcomes"]
+    del raw["outcomePrices"]
+    del raw["clobTokenIds"]
+    m = _client()._parse_market(raw)
+    assert m.active is False
+    assert len(m.outcomes) < 2
