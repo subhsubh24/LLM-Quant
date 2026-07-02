@@ -45,6 +45,7 @@ deps (absent from CI).
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Sequence
@@ -236,48 +237,76 @@ class KalshiHistoryFetcher:
         ticker: str,
         start_ts: int,
         end_ts: int,
+        *,
+        period_interval: int = 60,
     ) -> List[dict]:
         """Fetch price-history ticks for ``ticker`` over [start_ts, end_ts].
 
-        Uses the Kalshi /markets/{ticker}/history endpoint.
-        Returns a list of ticks ``[{"t": <unix_seconds>, "p": <price 0..1>}, ...]``
-        or ``[]`` on failure.
+        Uses the Kalshi **candlesticks** endpoint
+        ``/series/{series_ticker}/markets/{ticker}/candlesticks`` — the correct one
+        (VERIFIED HTTP 200 live via the real-oos lane, OA-15). The previously-used
+        ``/markets/{ticker}/history`` path **404s** (it does not exist), so the fetcher
+        returned 0 records and every Kalshi OOS run reported N/A. ``series_ticker`` is the
+        prefix of the market ticker before the first ``-`` (e.g. ``KXBTC`` from
+        ``KXBTC-25DEC-T50000``). ``period_interval`` is the candle width in MINUTES
+        (Kalshi requires it); the default 60 (hourly) is ample for a decision sampled ~a
+        day or more before resolution.
 
-        Kalshi's history endpoint returns prices as probabilities (0.0-1.0) or cents
-        (0-100); we normalise to [0, 1] (divide by 100 if > 1.0).
+        Returns a list of ticks ``[{"t": <unix_seconds>, "p": <price 0..1>}, ...]`` or
+        ``[]`` on failure. Prices are normalised to [0, 1] (Kalshi cents 0-100 -> /100).
+
+        HONESTY CAVEAT: the exact candlestick field names are per Kalshi's documented API
+        but were probed on a market that returned an EMPTY candlestick list, so the price
+        extraction accepts BOTH a flat tick (``p``/``yes_price``/``close``) AND the
+        documented nested ``price`` / ``yes_ask`` / ``yes_bid`` candle objects (in cents);
+        the OWNER/loop verifies the field names on the first market that HAS candlesticks.
 
         Args:
-            ticker: Kalshi market ticker.
+            ticker: Kalshi market ticker (e.g. "KXBTC-25DEC-T50000").
             start_ts: Start of window as Unix seconds.
             end_ts: End of window as Unix seconds.
+            period_interval: Candle width in minutes (Kalshi-required).
 
         Returns:
             List of normalised tick dicts with keys "t" (unix seconds) and "p" (0..1).
         """
+        series_ticker = _series_ticker(ticker)
         params = {
             "start_ts": int(start_ts),
             "end_ts": int(end_ts),
+            "period_interval": int(period_interval),
         }
-        data = self._get(f"{self.base_url}/markets/{ticker}/history", params=params)
+        data = self._get(
+            f"{self.base_url}/series/{series_ticker}/markets/{ticker}/candlesticks",
+            params=params,
+        )
         if not isinstance(data, dict):
             return []
 
-        # Try common Kalshi response shapes.
-        history: Any = data.get("history") or data.get("candlesticks") or []
+        # Candlesticks under "candlesticks"; a flat "history" shape is also accepted so
+        # the offline fixtures + any simplified response still parse.
+        history: Any = data.get("candlesticks")
+        if history is None:
+            history = data.get("history")
         if not isinstance(history, list):
             return []
 
         ticks = []
         for item in history:
+            if not isinstance(item, dict):
+                continue
             # Use explicit None-presence (NOT `a or b`): a legitimate tick with t==0 or
             # p==0 is falsy and would be silently dropped by an `or`-chain (a deep-audit
             # finding). p==0 (YES≈0¢) is a valid extreme price that must survive.
             t = _to_float(_first_present(item, ("t", "ts", "end_period_ts")))
-            p_raw = _to_float(_first_present(item, ("p", "yes_price", "close")))
-            if t is None or p_raw is None:
+            # _candle_price returns a UNIT-AWARE price already normalised to [0,1]
+            # (nested cents objects /100 unconditionally; flat ticks by magnitude), so a
+            # 1¢ longshot is 0.01, never a fabricated 1.0 (the cents-boundary fix).
+            p = _candle_price(item)
+            if t is None or p is None:
                 continue
-            # Normalise: Kalshi may return prices as cents (>1.0) or fractions.
-            p = p_raw / 100.0 if p_raw > 1.0 else p_raw
+            if not math.isfinite(t):
+                continue
             if not (0.0 <= p <= 1.0):
                 continue
             ticks.append({"t": t, "p": p})
@@ -395,6 +424,42 @@ def _first_present(d: dict, keys: Sequence[str]) -> Any:
     return None
 
 
+def _series_ticker(ticker: str) -> str:
+    """Derive the Kalshi SERIES ticker from a market ticker: the prefix before the first
+    ``-`` (e.g. ``KXBTC`` from ``KXBTC-25DEC-T50000``). A ticker with no ``-`` is its own
+    series. Used to build the candlesticks endpoint path."""
+    return ticker.split("-", 1)[0] if "-" in ticker else ticker
+
+
+def _candle_price(item: dict) -> Optional[float]:
+    """Extract the YES price from a Kalshi candlestick (or a flat tick), NORMALISED to
+    [0, 1]. None if absent/unparseable.
+
+    UNIT-AWARE normalisation (the fix for the cents-boundary fabrication bug an auditor
+    found): a Kalshi candlestick's nested ``price``/``yes_ask``/``yes_bid`` objects are in
+    CENTS (0-100), so they are divided by 100 UNCONDITIONALLY — a 1¢ longshot becomes 0.01,
+    NEVER 1.0. Applying the ``>1.0`` fraction heuristic to the cents domain would emit a 1¢
+    price as a fabricated 100%-certain tick (it passes the [0,1] range check silently). A
+    FLAT tick (``p``/``yes_price``/``close`` — the offline fixtures + any simplified shape)
+    may be a fraction OR cents, so it keeps the magnitude heuristic (``/100`` only when
+    ``>1.0``). Presence, not truthiness, so a legit 0¢ survives. The nested candlestick
+    objects are checked FIRST (a real candle has no top-level price field); the documented
+    field NAMES are verified on the first market with real candlesticks (OA-15), but the
+    UNIT (cents for the nested objects) is part of the documented contract."""
+    # Nested candlestick objects are always CENTS → divide by 100 unconditionally.
+    for key in ("price", "yes_ask", "yes_bid"):
+        obj = item.get(key)
+        if isinstance(obj, dict):
+            v = _to_float(_first_present(obj, ("mean", "close", "open")))
+            if v is not None:
+                return v / 100.0
+    # Flat tick — fraction (fixtures) or cents; disambiguate by magnitude.
+    v = _to_float(_first_present(item, ("p", "yes_price", "close")))
+    if v is not None:
+        return v / 100.0 if v > 1.0 else v
+    return None
+
+
 def _to_float(value: Any) -> Optional[float]:
     try:
         return float(value)
@@ -433,6 +498,11 @@ def _last_pre_decision_price(
         t = _to_float(tick.get("t"))
         p = _to_float(tick.get("p"))
         if t is None or p is None:
+            continue
+        if not math.isfinite(t):
+            # A NaN/inf timestamp fails every ordered comparison silently: NaN would pin
+            # best_t=NaN and block all later real ticks, returning a fabricated decision
+            # price. Reject it up front (the A6/A7/A3 finiteness hardening; regression-tested).
             continue
         if t > decision_ts:
             continue

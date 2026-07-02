@@ -21,7 +21,9 @@ from app.prediction_markets.kalshi_history_fetcher import (
     KALSHI_BASE_URL,
     KalshiHistoryFetcher,
     KalshiResolvedMarket,
+    _candle_price,
     _last_pre_decision_price,
+    _series_ticker,
 )
 from app.prediction_markets.walk_forward import (
     HistoricalMarket,
@@ -104,7 +106,7 @@ def test_parses_yes_and_no_resolved_markets():
     ]
 
     def router(url, params):
-        if "history" in url:
+        if "candlesticks" in url:
             return {}
         offset = (params or {}).get("cursor") or None
         if offset is None:
@@ -222,7 +224,7 @@ def test_fetch_uses_settled_status_filter():
     value) — NOT 'finalized', which Kalshi does not accept (would return nothing)."""
     session = FakeSession(lambda url, params: {"markets": [], "cursor": None})
     KalshiHistoryFetcher(session=session).fetch_resolved_markets(limit=10, max_pages=1)
-    markets_calls = [c for c in session.calls if "history" not in c["url"]]
+    markets_calls = [c for c in session.calls if "candlesticks" not in c["url"]]
     assert markets_calls, "no /markets request was made"
     assert markets_calls[0]["params"]["status"] == "settled"
 
@@ -400,7 +402,7 @@ def test_every_get_uses_timeout_15():
     tick = int((decision_time - timedelta(minutes=30)).timestamp())
 
     def router(url, params):
-        if "history" in url:
+        if "candlesticks" in url:
             return {"history": [{"t": tick, "p": 0.5}]}
         return {"markets": [], "cursor": None}
 
@@ -419,7 +421,7 @@ def test_fetch_loop_respects_max_pages():
     full_page = [_kalshi_market(f"KX{i}-25MAR", result="yes") for i in range(200)]
 
     def router(url, params):
-        if "history" in url:
+        if "candlesticks" in url:
             return {}
         return {"markets": full_page, "cursor": "next"}  # always returns a cursor
 
@@ -427,7 +429,7 @@ def test_fetch_loop_respects_max_pages():
     fetcher = KalshiHistoryFetcher(session=session)
     fetcher.fetch_resolved_markets(limit=200, max_pages=3)
 
-    markets_calls = [c for c in session.calls if "/markets" in c["url"] and "history" not in c["url"]]
+    markets_calls = [c for c in session.calls if c["url"].endswith("/markets")]
     assert len(markets_calls) == 3
 
 
@@ -526,3 +528,92 @@ def test_assembled_records_are_reproducible():
     assert hm_a.outcome == hm_b.outcome
     assert hm_a.decision_time == hm_b.decision_time
     assert hm_a.resolution_time == hm_b.resolution_time
+
+
+# ---------------------------------------------------------------------------
+# A3 / OA-15 — correct candlesticks endpoint (the /history 404 fix)
+# ---------------------------------------------------------------------------
+def test_fetch_price_history_hits_candlesticks_endpoint():
+    """The price fetch MUST call /series/{series}/markets/{ticker}/candlesticks (the
+    endpoint that returns HTTP 200) — NOT /markets/{ticker}/history (which 404s and
+    returned 0 records). series_ticker is the prefix before the first '-'."""
+    session = FakeSession(lambda url, params: {"candlesticks": [{"end_period_ts": 100, "price": {"mean": 55}}]})
+    fetcher = KalshiHistoryFetcher(session=session)
+    fetcher.fetch_price_history("KXBTC-25DEC-T50000", 0, 1000)
+
+    assert len(session.calls) == 1
+    url = session.calls[0]["url"]
+    assert url == f"{BASE_URL}/series/KXBTC/markets/KXBTC-25DEC-T50000/candlesticks"
+    assert "/history" not in url                      # the dead 404 endpoint is gone
+    assert session.calls[0]["params"]["period_interval"] == 60   # Kalshi-required
+
+
+def test_series_ticker_derivation():
+    assert _series_ticker("KXBTC-25DEC-T50000") == "KXBTC"
+    assert _series_ticker("KXPRES-2028") == "KXPRES"
+    assert _series_ticker("SINGLE") == "SINGLE"       # no '-' → its own series
+
+
+def test_candlestick_nested_price_object_in_cents():
+    """A real Kalshi candlestick carries a nested `price` object in CENTS; _candle_price
+    normalises cents→[0,1] UNCONDITIONALLY for the nested objects (returns [0,1] directly)."""
+    assert _candle_price({"price": {"mean": 62, "close": 60}}) == 0.62    # 62¢ → 0.62, mean preferred
+    assert _candle_price({"yes_ask": {"close": 40}}) == 0.40              # 40¢ ask fallback
+    assert _candle_price({"p": 0.33}) == 0.33                             # flat fraction shape
+    assert _candle_price({"price": {}}) is None                          # nothing usable
+    # p==0 (0¢) must SURVIVE (presence, not truthiness)
+    assert _candle_price({"price": {"mean": 0}}) == 0.0
+
+    session = FakeSession(lambda url, params: {"candlesticks": [
+        {"end_period_ts": 500, "price": {"mean": 62}},   # 62¢ → 0.62
+        {"end_period_ts": 600, "price": {"mean": 0}},    # 0¢  → 0.0 (survives)
+    ]})
+    ticks = KalshiHistoryFetcher(session=session).fetch_price_history("KXABC-1", 0, 1000)
+    assert ticks == [{"t": 500.0, "p": 0.62}, {"t": 600.0, "p": 0.0}]
+
+
+def test_one_cent_nested_price_not_fabricated_as_certainty():
+    """REGRESSION (auditor break): a 1¢ nested candle price (0.01 probability, a legit
+    longshot) must normalise to 0.01 — NOT a fabricated 1.0. Proven to FAIL on pre-fix code,
+    where the flat >1.0 heuristic left the raw cents value 1 → p=1.0 (a fabricated 100%
+    -certain crowd price that passes the [0,1] DQV gate silently)."""
+    assert _candle_price({"price": {"mean": 1}}) == 0.01
+    assert _candle_price({"yes_bid": {"close": 1}}) == 0.01
+    assert _candle_price({"price": {"mean": 0.5}}) == 0.005   # sub-cent mean, still cents
+    session = FakeSession(lambda url, params: {"candlesticks": [
+        {"end_period_ts": 500, "price": {"mean": 1}},        # 1¢ → 0.01, NOT 1.0
+    ]})
+    ticks = KalshiHistoryFetcher(session=session).fetch_price_history("KXABC-1", 0, 1000)
+    assert ticks == [{"t": 500.0, "p": 0.01}]
+
+
+def test_candlestick_endpoint_feeds_leakage_safe_record():
+    """End-to-end: a candlestick pre-decision tick becomes the leakage-safe market_price,
+    and a tick at resolution is excluded."""
+    decision_lead = timedelta(days=3)
+    decision_time = RESOLUTION - decision_lead
+    pre = int((decision_time - timedelta(hours=1)).timestamp())
+
+    def router(url, params):
+        assert "candlesticks" in url
+        return {"candlesticks": [
+            {"end_period_ts": pre, "price": {"mean": 44}},                 # 0.44 pre-decision
+            {"end_period_ts": int(RESOLUTION.timestamp()), "price": {"mean": 100}},  # settled — ignore
+        ]}
+
+    hm = KalshiHistoryFetcher(session=FakeSession(router)).to_historical_market(
+        _resolved(outcome=1), decision_lead
+    )
+    assert hm.market_price == 0.44
+    assert hm.outcome == 1
+
+
+def test_nan_timestamp_does_not_poison_decision_price():
+    """A NaN candlestick timestamp must not pin best_t=NaN and block real ticks (the
+    finiteness hardening). Proven to FAIL on pre-fix code (returns 0.99)."""
+    hist = [
+        {"t": float("nan"), "p": 0.99},
+        {"t": 1000.0, "p": 0.55},
+        {"t": 1200.0, "p": 0.62},
+    ]
+    assert _last_pre_decision_price(hist, decision_ts=1300.0, resolution_ts=1500.0) == 0.62
