@@ -29,9 +29,6 @@ sqlalchemy>=2.0.0
 sqlmodel>=0.0.32
 python-dotenv>=1.0.0
 
-# Database (optional, for persistence)
-redis>=7.0.0
-
 # Utilities
 pytz>=2023.3
 websockets>=16.0
@@ -41,7 +38,9 @@ pytest>=7.0.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
 
-# Alternative Data (all optional - providers fall back gracefully)
-pytrends>=4.9.0          # Google Trends data (free, no key)
-pandas-datareader>=0.10  # FRED data without API key
-feedparser>=6.0.0        # RSS news feed parsing
+# NOTE (ROADMAP A1 dead-dep cleanup, 2026-07-02): redis, pytrends, pandas-datareader,
+# and feedparser were removed — NOTHING in the current app imports them (verified
+# repo-wide: 0 import sites). They were stock/crypto-era "alternative data" + a
+# never-wired persistence cache; keeping them here misrepresented the app's real
+# dependencies and bloated local installs. Same SCOPE as the ML-stack note above:
+# this ROOT file is the LOCAL-DEV/demo manifest; the deploy uses backend/requirements.txt.

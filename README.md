@@ -70,16 +70,15 @@ LLM-Quant/
 │   └── app/
 │       ├── api/                   # routes + app entrypoint (app.api.main:app)
 │       ├── prediction_markets/    # the core: scanner, strategies, orchestrator,
-│       │                          #   Kelly sizing, paper simulator, risk manager,
+│       │                          #   Kelly sizing, risk manager, walk-forward,
 │       │                          #   execution (kill switch + LIVE gate), feeds
 │       ├── backtest/ + simulation/ + portfolio/  # asset-agnostic quant infra (kept)
-│       ├── trading/               # legacy stock/crypto engine (being retired — A1)
 │       ├── llm/                   # Google Gemini analysis (optional)
 │       ├── config.py              # settings (env-driven)
 │       └── db/                    # SQLModel — SQLite (dev) / Neon Postgres (prod)
 │
 └── frontend/                      # Next.js monitoring/control panel (the only UI)
-    └── app/  dashboard · predictions · bot · login   # password-gated
+    └── app/  predictions · login   # password-gated
 ```
 
 - **DB:** SQLite locally; **Neon Postgres** in production (`DATABASE_URL`).
