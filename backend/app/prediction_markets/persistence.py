@@ -160,10 +160,23 @@ def delete_position(token_id: str):
 def get_positions(
     exchange: Optional[str] = None,
     strategy: Optional[str] = None,
+    open_only: bool = True,
 ) -> List[PredictionPosition]:
-    """Get all open positions with optional filters."""
+    """Get positions with optional filters.
+
+    ``open_only`` (default True) excludes rows already settled
+    (``is_resolved == True``) — the correct behaviour for rehydrating live
+    state (ROADMAP D8): a resolved position has already booked its realized PnL
+    and been removed from the executor, so reloading it would resurrect a dead
+    position that ``check_resolutions`` would try to re-settle. The docstring
+    of this function always claimed "open positions" but it returned ALL rows;
+    this makes code match contract. Pass ``open_only=False`` to include closed
+    rows (e.g. for a full history view).
+    """
     with get_session() as session:
         stmt = select(PredictionPosition).order_by(PredictionPosition.updated_at.desc())
+        if open_only:
+            stmt = stmt.where(PredictionPosition.is_resolved == False)  # noqa: E712
         if exchange:
             stmt = stmt.where(PredictionPosition.exchange == exchange)
         if strategy:
@@ -176,26 +189,52 @@ def load_positions_into_executor(executor: PredictionMarketExecutor):
     Restore persisted positions into the executor's in-memory state.
 
     Call this on startup to resume from where we left off.
+
+    Loads OPEN positions only (``is_resolved == False``) — a resolved position
+    has already booked its PnL and must not be resurrected. Idempotent: a token
+    already present in memory (a fresher in-process position) is not clobbered,
+    so a redundant call is a safe no-op.
+
+    The rows are read and the ``Position`` objects are built INSIDE the open
+    session. ``get_session()`` uses the default ``expire_on_commit=True``, so a
+    returned-and-detached ORM row would raise ``DetachedInstanceError`` on the
+    first attribute access after the session closes — the exact latent bug that
+    hid here because this helper had ZERO call sites until ROADMAP D8 wired it.
     """
-    db_positions = get_positions()
-    for db_pos in db_positions:
-        executor.positions[db_pos.token_id] = Position(
-            exchange=Exchange(db_pos.exchange),
-            market_id=db_pos.market_id,
-            token_id=db_pos.token_id,
-            market_question=db_pos.market_question,
-            outcome_label=db_pos.outcome_label,
-            side=db_pos.side,
-            size=db_pos.size,
-            avg_entry_price=db_pos.avg_entry_price,
-            current_price=db_pos.current_price,
-            unrealized_pnl=db_pos.unrealized_pnl,
-            realized_pnl=db_pos.realized_pnl,
-            strategy=db_pos.strategy,
-            opened_at=db_pos.opened_at,
-            updated_at=db_pos.updated_at,
+    loaded = 0
+    total_open = 0
+    with get_session() as session:
+        stmt = (
+            select(PredictionPosition)
+            .where(PredictionPosition.is_resolved == False)  # noqa: E712
+            .order_by(PredictionPosition.updated_at.desc())
         )
-    logger.info(f"Loaded {len(db_positions)} prediction market positions from DB")
+        db_positions = list(session.exec(stmt).all())
+        total_open = len(db_positions)
+        for db_pos in db_positions:
+            if db_pos.token_id in executor.positions:
+                continue
+            loaded += 1
+            executor.positions[db_pos.token_id] = Position(
+                exchange=Exchange(db_pos.exchange),
+                market_id=db_pos.market_id,
+                token_id=db_pos.token_id,
+                market_question=db_pos.market_question,
+                outcome_label=db_pos.outcome_label,
+                side=db_pos.side,
+                size=db_pos.size,
+                avg_entry_price=db_pos.avg_entry_price,
+                current_price=db_pos.current_price,
+                unrealized_pnl=db_pos.unrealized_pnl,
+                realized_pnl=db_pos.realized_pnl,
+                strategy=db_pos.strategy,
+                opened_at=db_pos.opened_at,
+                updated_at=db_pos.updated_at,
+            )
+    logger.info(
+        f"Rehydrated {loaded} open prediction-market position(s) from DB "
+        f"({total_open} open row(s) found)"
+    )
 
 
 # ============================================================

@@ -886,6 +886,40 @@ class PredictionMarketOrchestrator:
             token_id = outcome.token_id if outcome else ""
             outcome_label = outcome.label if outcome else ""
 
+            # Already-held dedup (ROADMAP D8). The scan→execute loop has only
+            # data-quality + risk gates, so without this a fresh run (or any
+            # re-scan) that sees the same market would re-open/scale the SAME
+            # outcome token every cycle → double-counting the forward record.
+            # SCALE-IN POLICY (default, documented): ONE position per outcome
+            # token until it resolves — we do NOT scale into an outcome we already
+            # hold. `executor.positions` is keyed by token_id (and is now
+            # rehydrated from the DB at startup, D8), so this holds across the
+            # fresh-process-per-run paper cycle, not just within one process. For
+            # the deployed single-outcome strategies this is effectively one
+            # position per market; tightening to market-level dedup (block the
+            # opposite outcome too) is a possible future policy, deliberately not
+            # taken here to keep the change minimal + faithful to the token key.
+            if token_id and token_id in self.executor.positions:
+                skipped.append({
+                    "market": opp.market.question[:60],
+                    "reason": "already holding this outcome (no scale-in)",
+                })
+                self.total_skipped += 1
+                try:
+                    self._audit.record_decision(
+                        "skip_held",
+                        strategy=opp.strategy,
+                        market_id=opp.market.id,
+                        market_question=opp.market.question[:200],
+                        side=opp.side,
+                        edge=opp.edge,
+                        confidence=opp.confidence,
+                        reason="already holding this outcome token; one position per market until it resolves",
+                    )
+                except Exception:
+                    pass
+                continue
+
             # Build order
             order = OrderRequest(
                 exchange=exchange,

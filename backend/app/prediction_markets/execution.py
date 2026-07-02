@@ -1174,4 +1174,21 @@ def get_executor(
                 _executor.attach_state_store(_NoOpExecutorStateStore())
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("[EXECUTOR STATE] persistence unavailable: %s", e)
+
+        # Rehydrate OPEN positions from the durable store (ROADMAP D8). The
+        # scheduled paper cycle runs as a FRESH PROCESS each run; without this,
+        # `executor.positions` starts empty every run, so positions opened in a
+        # prior run are ORPHANED in the DB and `check_resolutions` (which reads
+        # in-memory `executor.positions`) never settles them → realized PnL never
+        # books and the forward record can't progress. Runs AFTER the state-store
+        # attach so a rehydrated position sees the restored kill-switch/loss
+        # counters. Best-effort + lazy import (persistence imports execution, so a
+        # module-level import would be circular): a persistence problem can never
+        # break executor construction. In CI the DB is an empty ephemeral SQLite,
+        # so this loads nothing and the executor stays fresh + deterministic.
+        try:
+            from . import persistence
+            persistence.load_positions_into_executor(_executor)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("[EXECUTOR STATE] position rehydrate skipped: %s", e)
     return _executor
