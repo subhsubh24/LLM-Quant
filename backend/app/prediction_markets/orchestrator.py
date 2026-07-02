@@ -107,6 +107,28 @@ def kelly_size(
     Returns:
         Optimal bet size in USD (0 if no bet should be placed)
     """
+    # NON-FINITE GUARD (fail closed). A NaN input defeats the `x < threshold` pre-filters
+    # below (NaN comparisons are always False). Verified concrete leaks without this guard:
+    # a NaN `confidence` BYPASSES the min-confidence gate and a real bet is placed on a
+    # signal whose confidence is undefined; a NaN `bankroll` yields a NaN-sized order; an
+    # inf `bankroll` yields a max bet. (Edge/win_probability NaN happen to be caught by the
+    # market_price/`b>0` guards, but relying on that is fragile.) A strategy calc bug that
+    # emits a non-finite edge/confidence/probability must never poison order sizing or the
+    # loss-cap counters — reject any non-finite input up front and place no bet.
+    # Regression-tested (test_prediction_markets::test_non_finite_inputs_return_zero).
+    if not (
+        math.isfinite(edge)
+        and math.isfinite(confidence)
+        and math.isfinite(win_probability)
+        and math.isfinite(bankroll)
+    ):
+        logger.warning(
+            "kelly_size: rejecting non-finite input "
+            "(edge=%s confidence=%s win_probability=%s bankroll=%s)",
+            edge, confidence, win_probability, bankroll,
+        )
+        return 0.0
+
     # Pre-filters
     if edge < config.min_edge:
         return 0.0
