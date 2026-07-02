@@ -2,7 +2,7 @@
 API routes for QuantLab.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Path
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 from datetime import datetime
@@ -609,7 +609,7 @@ async def subscribe_prediction_feeds(req: SubscribeRequest):
 
 @router.get("/prediction-markets/price-history/{token_id}")
 async def get_prediction_price_history(
-    token_id: str,
+    token_id: str = Path(..., min_length=1, max_length=200),
     limit: int = Query(100, ge=1, le=1000),
     exchange: str = Query("polymarket", min_length=1, max_length=50),
 ):
@@ -718,7 +718,10 @@ def _get_orchestrator():
 
 @router.post("/prediction-markets/bot/start", dependencies=_MUTATING_AUTH)
 async def start_prediction_bot(
-    scan_interval_sec: int = 120,
+    # Bound the scan interval: a non-positive value would spin the scan loop with no delay
+    # (CPU exhaustion / venue hammering); cap at 1 day. Guards the authed control surface
+    # against a compromised/fat-fingered token holder (extends the #99/#109 §12 bounds).
+    scan_interval_sec: int = Query(120, gt=0, le=86400),
     dry_run: bool = True,
 ):
     """
@@ -1166,7 +1169,7 @@ async def kill_switch_status():
 # ============ Prediction Markets — Quant Model Diagnostics ============
 
 @router.get("/prediction-markets/quant/vpin")
-async def get_vpin_metrics(token_id: Optional[str] = None):
+async def get_vpin_metrics(token_id: Optional[str] = Query(None, max_length=200)):
     """Get VPIN (Volume-synchronized Probability of Informed Trading) metrics."""
     try:
         scanner = _get_prediction_scanner()

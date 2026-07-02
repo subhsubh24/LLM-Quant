@@ -223,3 +223,35 @@ def test_subscribe_request_bounds():
         SubscribeRequest(identifiers=["x"] * 1001)           # too many identifiers
     with pytest.raises(ValidationError):
         SubscribeRequest(identifiers=["y" * 201])            # a single identifier too long
+
+
+def test_vpin_token_id_is_bounded(monkeypatch):
+    # §12: the /quant/vpin read route took an UNBOUNDED token_id string (its sibling
+    # /quant/avellaneda-stoikov already bounds token_id to max_length=200). An over-long
+    # string is rejected by validation (422) BEFORE the scanner is touched — no work, no
+    # network. A short token is accepted by validation (the handler may still 200/404/500
+    # depending on scanner state; we only assert the bound fired, not the body).
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.get("/prediction-markets/quant/vpin?token_id=" + "x" * 201).status_code == 422
+    assert client.get("/prediction-markets/quant/vpin?token_id=abc").status_code != 422
+
+
+def test_bot_start_scan_interval_is_bounded(monkeypatch):
+    # §12: scan_interval_sec drives the scan loop's sleep. A non-positive value would spin
+    # with no delay (CPU / venue hammering). Bound gt=0, le=86400 — rejected at validation
+    # (422) before the orchestrator starts. Auth is opened (dev opt-out) so we exercise the
+    # BOUND, not the guard (the guard is covered by test_scan_route_requires_token_when_set).
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.post("/prediction-markets/bot/start?scan_interval_sec=0").status_code == 422
+    assert client.post("/prediction-markets/bot/start?scan_interval_sec=-1").status_code == 422
+    assert client.post("/prediction-markets/bot/start?scan_interval_sec=999999").status_code == 422
+
+
+def test_price_history_token_id_path_is_bounded(monkeypatch):
+    # §12: the {token_id} PATH segment was unbounded. Bound it (max_length=200) so a
+    # multi-MB path can't be pushed into the query layer. 422 before the handler.
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.get("/prediction-markets/price-history/" + "x" * 201).status_code == 422
