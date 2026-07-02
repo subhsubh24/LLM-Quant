@@ -2,6 +2,84 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (4th factory run) — the DATA/INTEGRITY-cluster run: 5 file-disjoint PRs advanced the lowest-incomplete loop-buildable items attacking the binding constraint (A6 volume + A7 headroom + A3 2nd-venue + F10 anti-overfitting) + a real money-path fix; the adversarial gate BROKE 2 of them (real bugs) and I fixed through the gate
+
+- **Shipped 5 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep, all maker≠checker
+  (2 Sonnet/PR + Opus leakage auditors on the 3 leakage-core PRs + 3 Opus re-audits on the 2 that broke):
+  (#169) **A7** point-in-time / earlier-life sampling (`to_historical_market_at_fraction` — decision at a
+  fraction of `[start,resolution]`, the answer to the 70%-pinned corpus); (#170) **A3/OA-15** the Kalshi
+  candlesticks endpoint fix (the live-verified `/history` 404 → `/series/{s}/markets/{t}/candlesticks`);
+  (#171) **F10** a new pure `regime_slice.py` anti-overfitting report (slice OOS PnL by category/horizon/
+  confidence/time + concentration map + `fragile` flag); (#168) **A6** the HuggingFace Polymarket-v1 fetcher
+  (the 1.3M-market VOLUME unlock, lazy-`datasets`, pure fixture-tested assembly, wired as the opt-in
+  `polymarket_v1_hf` venue); (#172) a **kelly_size non-finite (NaN/inf) input guard** (fail closed). No
+  DoD/floor box ticked — the VALIDATED-OOS-EDGE binding constraint stays owner/egress-blocked, but this run
+  built BOTH orthogonal unblocks (A6 volume + A7 headroom) as loop-buildable code + the A3 2nd-venue contract
+  fix + F10 the net that will catch a fragile edge once a real corpus/alpha produce trades.
+
+- **THE headline lesson — the adversarial Opus gate EARNED ITS KEEP HARD: it broke 2 of 5 PRs on REAL bugs the
+  2-Sonnet review + my own tests passed over, and the fix went THROUGH the gate (≤2 cycles), not around it.**
+  (a) **A3 cents fabrication:** `_candle_price` returned raw cents and `fetch_price_history` normalised with a
+  `>1.0` heuristic, so a 1¢ nested candle (`price.mean=1`) became a fabricated `p=1.0` (a 100%-certain crowd
+  price that PASSES the [0,1] DQV gate silently) — the data analog of a fake fill. Fixed: unit-aware `/100`
+  for the nested cents objects. (b) **A6 jittered-resolution LEAK:** `_assemble_one` used `max(resolution_time)`
+  across a market's daily rows as BOTH the decision + leakage cutoff, so a tick after the EARLIEST true
+  resolution but before the max leaked as the decision price (proven 0.99 vs the honest 0.50). Fixed: use
+  `min(res_times)` (the earliest plausible resolution) as the safe cutoff. (c) **A6 null-outcome survivorship
+  (2nd cycle):** a void market's NULL outcome value was treated as an absent field by `_first_present` → the
+  void row silently dropped (market assembled from clean survivors) OR strict-raised the whole corpus if it
+  landed first (order-dependent). Fixed: `_has_key` distinguishes a null VALUE from an absent COLUMN → a
+  present-but-null outcome is a KEPT contested marker that skips the whole market. **Lesson: an adversarial
+  auditor that RUNS the code on hostile inputs finds fabrication/leakage that green unit tests + a diff-read
+  review miss — especially normalisation UNIT bugs (cents vs fraction), reconciliation-under-jitter (min vs
+  max cutoff), and null-vs-absent encoding. Each break became a proven-fail-pre-fix regression test; the fix
+  stayed within the ≤2-cycle brake (A6 took both cycles → one FINAL re-audit gated merge-vs-abandon).**
+
+- **THE scope-seam lesson — a cross-cutting scout finding (NaN-timestamp poisoning) that touched THREE
+  fetchers' identical `_last_pre_decision_price` was FOLDED into each owning PR, not shipped as a 4th colliding
+  PR.** The data-parser scout found a NaN timestamp pins `best_t=NaN` and blocks all later real ticks →
+  fabricated decision price, present in `polymarket_history_fetcher`, `kalshi_history_fetcher`, AND the new HF
+  fetcher. Rather than a separate PR touching all three (collides with A7+A3), the `math.isfinite(t)` guard went
+  into A7 (owns polymarket), A3 (owns kalshi), and A6 (baked into the new file) — each with its own
+  proven-fail-pre-fix regression. **Lesson: a defect shared across N files each OWNED by a different in-flight
+  PR folds into those PRs (coherent, disjoint), never a separate PR that collides with all of them.**
+
+- **THE honesty-reconcile lesson — a scout's finding HEADLINE was partly inaccurate; I verified the REAL leak
+  before shipping + worded the fix precisely (no overclaim).** The correctness scout claimed "NaN edge → NaN
+  order size" for kelly_size, but tracing the code, `edge=NaN` is actually caught by the `b>0` guard → 0.0. The
+  GENUINE leaks (verified by executing the pre-fix arithmetic) were `confidence=NaN` (bypasses the min-confidence
+  gate → a real $50 bet), `bankroll=NaN` (→NaN size), `bankroll=inf` (→max bet) — 3 of 6 cases, not all. The
+  commit + test docstring state exactly that (3 leak, 3 already-0.0-pinned-as-belt-and-suspenders). Both Sonnet
+  reviewers independently re-derived the table and confirmed the framing is precise. **Lesson: a scout/auditor
+  finding is a HYPOTHESIS — verify the actual failure (execute the pre-fix path), fix the REAL gap, and word
+  the claim to match (an inaccurate-but-plausible finding shipped verbatim is the same honesty failure as an
+  inflated number).**
+
+- **Anti-padding held.** DROPPED the FK defense-in-depth on the 2 remaining `portfolio_id=1` writers
+  (`_take_snapshot`, `routes.py:445`) the anti-scarcity scout flagged — DOUBLE-protected already (init_db seeds
+  the default portfolio + both writers wrap the insert in a swallowing try/except), so it was marginal vs the
+  genuinely-reachable kelly NaN guard; noted next-run. DROPPED the Kalshi-category-verbatim consistency nit
+  (degrades safely). Security + correctness scouts on the mature engine each returned mostly NOTHING-GENUINE.
+  NOT churning/stuck (0 reverts, 0 abandons, 5 durable PRs, 3 fix cycles all resolved through the gate) → no
+  harness proposal; binding constraint surfaced to owner.
+
+- **NEXT-RUN NOTES:** (1) Once OA-16/OA-15 run in the permitted lane: the A6 HF fetcher (opt-in
+  `validate_real_oos.py --venues polymarket_v1_hf`, needs `pip install datasets`) + A7 fraction sampling can
+  feed a real less-pinned corpus, and F10 `analyze_regime_slices` should be wired over the resulting
+  `WalkForwardResult.trades` in the go-live audit (the anti-overfitting check). (2) B8 cross-venue event-matcher
+  becomes buildable once both venues yield real corpora (Kalshi now does, via #170). (3) the 2 FK
+  defense-in-depth writers remain a marginal next-run tidy (do only if a real FK failure is observed). (4)
+  `kalshi_client.py` stamps raw category verbatim — route through `derive_market_category` if Kalshi is scanned
+  live. (5) A6's `daily_aligned` schema (field names + units) is verified on the FIRST real download (logs
+  columns, RAISES on absent column or whole-corpus wipeout; auto-detects ms epochs) — adjust `HFFieldSpec` if
+  the real columns differ.
+
+- **Process/env:** `pip install -r backend/requirements-ci.txt fastapi httpx pandas scikit-learn`; `rm -f
+  quantlab.db` before DB-backed tests. Reviewers/auditors ran in isolated `/tmp` copies or worktrees (no
+  shared-tree mutation). Merged via MCP squash on the green required check AFTER reviews (A7/kelly auto-merge;
+  A3/F10/A6 direct-squash once clean) — never `--admin`. All preflight runs green; every fix carried a
+  proven-fail-pre-fix regression test.
+
 ## 2026-07-02 (owner-directed) — dual-venue: added Kalshi to the real-oos lane; it caught a live-contract bug + filed the cross-venue edge
 
 - Extended `validate_real_oos.py` to fetch BOTH Polymarket AND Kalshi (public, no creds) — per-venue
