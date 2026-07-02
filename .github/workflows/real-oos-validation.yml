@@ -1,0 +1,26 @@
+name: real-oos-validation
+# NON-BLOCKING — never a required check. The "fetch + validate in place" data lane: pulls a
+# fresh REAL resolved-Polymarket corpus on the runner (open internet — the autonomous factory
+# env is egress-blocked) and runs the leakage-safe walk-forward with BOTH the crowd baseline
+# AND the B4a calibration alpha, reporting the honest OOS result. No credentials (public data),
+# no money, no trade. See ROADMAP F10/D8 + PENDING_OPS OA-13/OA-16.
+
+on:
+  schedule:
+    - cron: "41 5 * * *"      # daily — surface "is there a real edge yet?" on fresh real data
+  workflow_dispatch:
+
+jobs:
+  validate-real-oos:
+    runs-on: ubuntu-latest     # GitHub runners reach Polymarket's public Gamma/CLOB APIs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+      - name: Fetch REAL resolved history + validate the edge OOS (crowd baseline vs B4a alpha)
+        run: python scripts/validate_real_oos.py --json

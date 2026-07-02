@@ -2,6 +2,30 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (owner-directed) — the "fetch + validate in place" data lane: FIRST real-data OOS test of the alpha
+
+- Built the data lane that closes the loop the egress-blocked factory can't: `scripts/validate_real_oos.py`
+  fetches a fresh REAL resolved-Polymarket corpus on a permitted host (GitHub runner / local — public,
+  no creds) and runs the leakage-safe walk-forward with BOTH the crowd baseline AND the **B4a
+  CalibrationBucketStrategy** (the real `model_prob != crowd` alpha), reporting an honest verdict. Wired as
+  a daily NON-BLOCKING workflow `real-oos-validation.yml`.
+- **FIRST real-data OOS result of the alpha (honest, un-dressed-up):** on 54 real resolved markets (crowd
+  Brier 0.093, **70% pinned**), the crowd baseline traded 0/$0 (tautology) and the **B4a alpha traded 4,
+  net −$639 OOS** — i.e. NO edge on this liquid, near-resolution sample (it slightly mis-bets vs. a sharp
+  crowd + costs). Reported AS a null/negative result, never dressed up.
+- **Two orthogonal unblocks, now both filed:** volume (**A6** — the HuggingFace Polymarket-v1 fetcher,
+  1.3M markets; GitHub runners reach HF even though the factory env doesn't) and QUALITY (**A7** —
+  earlier-life / point-in-time sampling so the corpus isn't 70% pinned junk). BOTH are needed; more data
+  alone won't help if it's all pinned.
+- **Gate-safe validation of the validator:** `test_validate_real_oos.py` (3 deterministic tests, no network)
+  proves `evaluate()` (a) recovers a KNOWN injected edge (so a positive result means something) and
+  (b) reports NO-EDGE on a well-calibrated crowd (no fabrication). This is the pattern: a validation
+  harness must be shown to detect an edge when one exists AND to stay silent when one doesn't.
+- **Lesson:** the historical-data problem was never "get the data" — the data is PUBLIC and reachable from
+  GitHub runners; only the autonomous factory env is egress-blocked. So the fix is a permitted LANE
+  (a runner) + a real ALPHA + the right SAMPLING, not owner heroics. The alpha now has its first honest
+  real-data verdict: not yet an edge, and exactly why (pinned sample + tiny N).
+
 ## 2026-07-02 (2nd factory run) — the BIG A→A+ convergence run: 5 file-disjoint PRs cleared BOTH remaining ship-critical correctness A→A+ gaps + a real parse-fabrication + dead code; the SQLModel dual-import fix (deferred ~4 runs) finally landed, PROVEN by a baseline reproduction
 
 - **Shipped 5 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep across tracks A–G, all
