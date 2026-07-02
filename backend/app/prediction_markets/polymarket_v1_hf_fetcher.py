@@ -122,7 +122,7 @@ class HFDailyRow:
     timestamp: datetime
     price_yes: float
     resolution_time: datetime
-    outcome: int
+    outcome: Optional[int]        # 0/1 when cleanly settled; None = present-but-ambiguous (contested)
     category: str = ""
     question: str = ""
 
@@ -182,7 +182,6 @@ class PolymarketV1HFFetcher:
         decision_lead: timedelta,
         max_rows: Optional[int] = 100_000,
         categories: Optional[Sequence[str]] = None,
-        buffer: timedelta = timedelta(days=2),
         split: str = "train",
     ) -> List[HistoricalMarket]:
         """Stream the archive and assemble leakage-safe ``HistoricalMarket`` records.
@@ -197,7 +196,6 @@ class PolymarketV1HFFetcher:
             decision_lead=decision_lead,
             field_spec=self.field_spec,
             categories=categories,
-            buffer=buffer,
         )
 
 
@@ -210,17 +208,18 @@ def assemble_historical_markets(
     decision_lead: timedelta,
     field_spec: Optional[HFFieldSpec] = None,
     categories: Optional[Sequence[str]] = None,
-    buffer: timedelta = timedelta(days=2),
 ) -> List[HistoricalMarket]:
     """Group daily rows by market and assemble one leakage-safe ``HistoricalMarket``
     per market. Pure: operates on plain row dicts, no network, no heavy deps.
 
-    A market is SKIPPED (loud warning), never guessed, when: it has no resolvable
-    market id / timestamp / price / resolution time / unambiguous outcome, or no
-    price tick survives the anti-leakage guard (no tick at-or-before ``decision_time``
-    AND strictly before ``resolution_time``). A required-field schema mismatch on the
-    FIRST parseable row RAISES with the actual keys, so a real run surfaces the true
-    ``daily_aligned`` schema immediately.
+    A market is SKIPPED (loud warning), never guessed, when: it has no resolvable market
+    id / timestamp / price / resolution time, has a present-but-ambiguous (contested)
+    outcome, or no price tick survives the anti-leakage guard. TWO schema-surfacing guards
+    make a real first-download mismatch LOUD rather than a silent empty corpus: (1) a
+    required-field ABSENCE on the FIRST parseable row RAISES with the actual keys; (2) if
+    rows were seen but ZERO markets assembled, RAISE — a whole-corpus wipeout is almost
+    always a schema UNIT/format mismatch (ms epochs, percent prices, wrong column names),
+    not a legitimately-empty result.
     """
     spec = field_spec or HFFieldSpec()
     if decision_lead <= timedelta(0):
@@ -230,21 +229,39 @@ def assemble_historical_markets(
     # 1. Normalize daily rows, grouped by market id.
     by_market: Dict[str, List[HFDailyRow]] = {}
     seen_any = False
+    n_rows = 0
+    first_row_keys: List[str] = []
     for raw in rows:
         if not isinstance(raw, dict):
             continue
+        if not seen_any:
+            first_row_keys = sorted(raw.keys())
         row = _parse_daily_row(raw, spec, strict=not seen_any)
         seen_any = True
+        n_rows += 1
         if row is None:
             continue
         by_market.setdefault(row.market_id, []).append(row)
+
+    # Whole-corpus wipeout guard: rows arrived but nothing usable was parsed → almost
+    # certainly a value UNIT/format mismatch the per-field ABSENCE check can't see (e.g.
+    # millisecond epochs overflowing _parse_dt, or 0-100 percent prices failing the [0,1]
+    # range). Fail LOUD (the "verify schema on first download" promise) instead of silently
+    # returning []. When a category filter is applied it can legitimately empty the set, so
+    # the guard only fires when NO category filter is in play.
+    if seen_any and not by_market and cats is None:
+        raise ValueError(
+            f"parsed {n_rows} Polymarket-v1 rows but 0 were usable — likely a schema "
+            f"UNIT/format mismatch (ms epoch timestamps? percent prices? wrong column "
+            f"names?). First-row columns: {first_row_keys}. Adjust HFFieldSpec / verify units."
+        )
 
     # 2. Per market: reconcile market-level fields + apply the anti-leakage core.
     out: List[HistoricalMarket] = []
     skipped = 0
     for market_id, drows in by_market.items():
         try:
-            hm = _assemble_one(market_id, drows, decision_lead, buffer, cats)
+            hm = _assemble_one(market_id, drows, decision_lead, cats)
         except _CategoryFiltered:
             continue
         except (ValueError, AssertionError) as e:
@@ -269,7 +286,6 @@ def _assemble_one(
     market_id: str,
     drows: Sequence[HFDailyRow],
     decision_lead: timedelta,
-    buffer: timedelta,
     cats: Optional[set],
 ) -> Optional[HistoricalMarket]:
     """Build one leakage-safe HistoricalMarket from a market's daily rows.
@@ -277,16 +293,27 @@ def _assemble_one(
     RAISES ValueError (skip in the batch) if the outcome/resolution are inconsistent
     or no pre-resolution price tick exists. Never uses the settled outcome as a price.
     """
-    # Resolution time: the daily rows repeat it; require a single consistent value
-    # (take the max as canonical, but reject if they disagree beyond a day — a data
-    # inconsistency we will not paper over).
+    # Resolution time: the daily rows repeat it. Use the EARLIEST (min) as the canonical
+    # resolution + leakage cutoff — NOT the max. With max, a row whose true resolution is
+    # earlier could still contribute a tick that falls after that earlier resolution but
+    # before the max, and it would be admitted as the decision price (a LEAK an auditor
+    # demonstrated under jittered resolution_time). Min is the safe cutoff: any tick
+    # at-or-after the earliest plausible resolution is potentially contaminated and excluded.
+    # Reject rows that disagree beyond a day — a data inconsistency we will not paper over.
     res_times = sorted({r.resolution_time for r in drows})
-    resolution_time = res_times[-1]
     if (res_times[-1] - res_times[0]) > timedelta(days=1):
         raise ValueError(f"inconsistent resolution_time across daily rows: {res_times}")
+    resolution_time = res_times[0]
 
-    # Outcome: must be unanimous + unambiguous across the rows.
+    # Outcome: unanimous, clean, and NON-contested. A row whose outcome field was PRESENT
+    # but ambiguous carries outcome=None — its presence SKIPS the whole market (never
+    # assemble an outcome from only the clean-looking survivors; the survivorship-honesty fix).
     outcomes = {r.outcome for r in drows}
+    if None in outcomes:
+        raise ValueError(
+            f"market {market_id} has a present-but-ambiguous outcome row "
+            f"(contested / schema mismatch) — refusing to assemble from survivors"
+        )
     if len(outcomes) != 1:
         raise ValueError(f"inconsistent outcome across daily rows: {sorted(outcomes)}")
     outcome = next(iter(outcomes))
@@ -300,8 +327,13 @@ def _assemble_one(
         raise ValueError("decision_time must be strictly before resolution_time")
 
     # Anti-leakage price selection: last tick at-or-before decision_time and strictly
-    # before resolution_time. The settled outcome NEVER enters this.
-    history = [{"t": r.timestamp.timestamp(), "p": r.price_yes} for r in drows]
+    # before resolution_time. The settled outcome NEVER enters this. Ticks are SORTED by
+    # (timestamp, price) so a shard delivering intra-day rows in a different order yields
+    # the SAME market_price (determinism — an auditor's duplicate-timestamp finding).
+    history = sorted(
+        ({"t": r.timestamp.timestamp(), "p": r.price_yes} for r in drows),
+        key=lambda x: (x["t"], x["p"]),
+    )
     decision_ts = decision_time.timestamp()
     resolution_ts = resolution_time.timestamp()
     market_price = _last_pre_decision_price(history, decision_ts, resolution_ts)
@@ -354,18 +386,25 @@ def _parse_daily_row(raw: dict, spec: HFFieldSpec, *, strict: bool) -> Optional[
     timestamp = _parse_dt(ts_raw)
     resolution_time = _parse_dt(res_raw)
     price = _to_float(price_raw)
-    outcome = _settled_outcome(out_raw)
-    if timestamp is None or resolution_time is None or price is None or outcome is None:
+    # An unparseable/out-of-range required VALUE (not just an absent column) skips the row.
+    # A whole-corpus empty result is then caught loudly by assemble_historical_markets so a
+    # schema UNIT/format mismatch (ms epochs, percent prices) can't silently return [].
+    if timestamp is None or resolution_time is None or price is None:
         return None
-    if not (0.0 <= price <= 1.0) or not math.isfinite(price):
+    if not math.isfinite(price) or not (0.0 <= price <= 1.0):
         return None
 
+    # Outcome is PRESENT (out_raw not None). A clean 0/1 → the outcome; a present-but-
+    # AMBIGUOUS value → None, a CONTESTED / schema-mismatch marker. The row is KEPT (not
+    # silently dropped) so _assemble_one skips the WHOLE market rather than assembling an
+    # outcome from only the clean-looking survivors (the survivorship-honesty fix).
+    outcome = _settled_outcome(out_raw)
     return HFDailyRow(
         market_id=str(mid),
         timestamp=timestamp,
         price_yes=price,
         resolution_time=resolution_time,
-        outcome=outcome,
+        outcome=outcome,   # Optional[int]; None = present-but-ambiguous (contested)
         category=str(pick(spec.category) or ""),
         question=str(pick(spec.question) or ""),
     )
@@ -418,17 +457,22 @@ def _settled_outcome(value: Any) -> Optional[int]:
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
-    """Parse an ISO-8601 string (with trailing 'Z') OR a unix-seconds number into a
-    UTC-aware datetime. Returns None on anything unparseable."""
+    """Parse an ISO-8601 string (with trailing 'Z') OR a unix epoch number (SECONDS or
+    MILLISECONDS) into a UTC-aware datetime. Returns None on anything unparseable."""
     if value is None:
         return None
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    # Numeric unix seconds (int/float or a numeric string).
+    # Numeric unix epoch (int/float or a numeric string).
     num = _to_float(value)
     if num is not None and math.isfinite(num) and not isinstance(value, bool):
-        # Heuristic: a plausible unix-seconds timestamp (after ~2001). A bare small
-        # integer that is really an ISO year would not reach here as a number.
+        # Heuristic: a plausible unix timestamp (after ~2001). Unix SECONDS never reach 1e11
+        # until ~year 5138, whereas MILLISECONDS epochs are ~1e12-1e13 (year 2001-2286) — a
+        # very common format in trade archives — so a value > 1e11 is almost certainly ms;
+        # scale it to seconds rather than overflowing to None (a schema-drift format the
+        # reviewer flagged as a likely first-download surprise).
+        if num > 1e11:
+            num = num / 1000.0
         if num > 1_000_000_000:
             try:
                 return datetime.fromtimestamp(num, tz=timezone.utc)

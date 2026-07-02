@@ -119,10 +119,14 @@ def test_inf_timestamp_rejected():
 # ---------------------------------------------------------------------------
 # Reconciliation / honesty guards
 # ---------------------------------------------------------------------------
-def test_skips_ambiguous_outcome():
-    # A daily row whose outcome is 0.6 (neither settled 0 nor 1) parses to None → the
-    # market has zero valid rows → not assembled.
-    rows = [dict(_row("m1", 6, 0.6), outcome=0.6)]
+def test_present_but_ambiguous_outcome_skips_whole_market():
+    # A daily row whose outcome is 0.6 (a present-but-ambiguous value) is KEPT with an
+    # outcome=None contested marker → the whole market is skipped (never assembled from
+    # the clean survivors), even when other rows of the same market look cleanly settled.
+    rows = [
+        _row("m1", 8, 0.5, outcome="yes"),   # clean
+        dict(_row("m1", 6, 0.6), outcome=0.6),  # present-but-ambiguous → contests the market
+    ]
     out = assemble_historical_markets(rows, decision_lead=LEAD)
     assert out == []
 
@@ -143,6 +147,67 @@ def test_strict_first_row_schema_mismatch_raises_with_keys():
     bad = {"wrong": "shape", "cols": 1}
     with pytest.raises(ValueError, match="missing a 'market_id' field"):
         assemble_historical_markets([bad], decision_lead=LEAD)
+
+
+# ---------------------------------------------------------------------------
+# Anti-leakage under JITTERED resolution_time (the auditor's break — min-cutoff fix)
+# ---------------------------------------------------------------------------
+def test_jittered_resolution_does_not_leak_post_resolution_tick():
+    """Daily rows disagree on resolution_time (within the 1-day tolerance). Using MAX as
+    the cutoff would admit a tick that is AFTER the earliest true resolution but before the
+    max → a post-resolution price leaks as the decision price. Using MIN (the fix), the
+    later tick is excluded and the honest pre-resolution 0.50 is chosen. Proven to return
+    0.99 (the leak) on the pre-fix max-cutoff code."""
+    T = RES
+    rows = [
+        # tick at T-2h, resolution=T
+        _row("m1", 2 / 24, 0.50, res=T),
+        # tick at T+10h (10h AFTER the earliest resolution T), resolution=T+20h (jitter)
+        _row("m1", 10 / 24, 0.99, res=T + timedelta(hours=20)),
+    ]
+    out = assemble_historical_markets(rows, decision_lead=timedelta(hours=1))
+    assert len(out) == 1
+    assert out[0].market_price == pytest.approx(0.50)   # NOT the post-resolution 0.99
+    assert out[0].resolution_time == T                  # the EARLIEST (safe) resolution
+
+
+def test_empty_corpus_raises_on_schema_format_mismatch():
+    """Rows arrive but every one fails to parse (here: PERCENT prices 0-100 that fail the
+    [0,1] range) → 0 usable → RAISE loudly rather than silently returning [] (so a real
+    first-download unit/format mismatch surfaces, per the 'verify schema on first download'
+    promise). Absent columns are already caught by the strict-first-row check; this covers
+    present-but-wrong-UNIT values."""
+    rows = [dict(_row(f"m{i}", 6, 0.5), price=55.0) for i in range(3)]
+    with pytest.raises(ValueError, match="0 were usable"):
+        assemble_historical_markets(rows, decision_lead=LEAD)
+
+
+def test_millisecond_epoch_timestamps_parse():
+    """Millisecond-epoch timestamps (a very common trade-archive format) are auto-detected
+    and scaled to seconds rather than overflowing to a silent all-skip."""
+    def ms(dt):
+        return int(dt.timestamp() * 1000)
+
+    row = {
+        "market_id": "m1",
+        "date": ms(RES - timedelta(days=7)),
+        "price": 0.6,
+        "resolution_time": ms(RES),
+        "outcome": "yes",
+        "category": "X",
+    }
+    out = assemble_historical_markets([row], decision_lead=LEAD)
+    assert len(out) == 1 and out[0].market_price == pytest.approx(0.6)
+
+
+def test_duplicate_timestamp_selection_is_deterministic():
+    """Two ticks at the SAME timestamp with different prices, delivered in both orders,
+    yield the SAME market_price (ticks are sorted by (t, p) before selection)."""
+    r1 = _row("m1", 6, 0.30)
+    r2 = _row("m1", 6, 0.70)
+    a = assemble_historical_markets([r1, r2], decision_lead=LEAD)
+    b = assemble_historical_markets([r2, r1], decision_lead=LEAD)
+    assert a[0].market_price == b[0].market_price
 
 
 def test_multiple_markets_assembled_independently():

@@ -77,6 +77,23 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
     NEVER raises on egress/empty (returns []+note); only a genuine code bug returns a 'code-error'
     status. For Kalshi this doubles as the OA-15 live-contract check: real records = contract holds."""
     try:
+        if venue == "polymarket_v1_hf":
+            # ROADMAP A6 — the HuggingFace Polymarket-v1 archive (~1.3M markets). Streams +
+            # assembles directly (no separate resolved-market step). LAZY-imports `datasets`;
+            # a MISSING optional dep is reported N/A (not a code bug), so the default cron
+            # (which doesn't install `datasets`) never reddens — this venue is OPT-IN, run on
+            # a permitted host with `pip install datasets`.
+            m = _imp("backend.app.prediction_markets.polymarket_v1_hf_fetcher",
+                     "app.prediction_markets.polymarket_v1_hf_fetcher")
+            try:
+                markets = m.PolymarketV1HFFetcher().build_historical_markets(
+                    decision_lead=timedelta(days=lead_days), max_rows=limit * max_pages,
+                )
+            except ImportError as e:
+                return [], f"N/A — {e} (install `datasets` on a permitted host to run the HF lane)"
+            if markets:
+                return markets, "ok"
+            return [], "N/A — 0 leakage-safe records (HF egress-blocked / schema-unconfirmed / lead too large)"
         if venue == "polymarket":
             m = _imp("backend.app.prediction_markets.polymarket_history_fetcher",
                      "app.prediction_markets.polymarket_history_fetcher")
@@ -101,7 +118,10 @@ def main() -> int:
     ap.add_argument("--max-pages", type=int, default=2)
     ap.add_argument("--decision-lead-days", type=float, default=2.0)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--venues", default="polymarket,kalshi", help="comma-separated: polymarket,kalshi")
+    ap.add_argument("--venues", default="polymarket,kalshi",
+                    help="comma-separated: polymarket,kalshi,polymarket_v1_hf "
+                         "(polymarket_v1_hf = A6 HuggingFace archive, opt-in; needs `datasets` "
+                         "installed on a permitted host — omitted from the default cron)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
