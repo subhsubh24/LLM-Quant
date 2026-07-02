@@ -329,6 +329,15 @@ the Quality Auditor — never write them.
 - Circuit breaker: a command failing the same way twice, or a diff that stops changing →
   ABANDON (clean tree). 3 abandonments/failures in a row → stop selecting, go to bookkeeping.
 - Spend discipline: smallest implementation that fully delivers each change.
+- **Paid validation is cost-governed:** real evals / paid validation runs cost real money — treat
+  spend as a first-class constraint. Run them on a COST-AWARE cadence (a periodic safety net +
+  ON-SIGNAL when the validated code/model changes) — never a blind frequent timer, never a per-PR
+  paid gate. SPLIT cheap vs expensive checks and GATE the expensive ones behind an explicit flag
+  (run rarely / on-change / manual only). Enforce a PER-RUN COST CEILING that ABORTS a runaway.
+  MINIMIZE (smallest/fewest fixtures, cheapest capable model, cache). VERIFY the eval/validation
+  code locally (type-check / lint / dry-run) BEFORE spending on a real paid run — never iterate via
+  repeated paid runs. Provider spend caps are the hard backstop; this is the soft layer that keeps
+  normal spend near zero.
 - Blast radius: app/product/marketing source + docs + tests + scripts only. NEVER `.claude/`
   or `.github/` or CI (editing them hangs a headless run); NEVER the guard tests; NEVER run a
   prod migration or touch live infra/secrets. Nothing outside the repo.
