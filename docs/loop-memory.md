@@ -2,6 +2,40 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-01 (owner-directed) — "real" self-validation tier: live smoke + FORWARD paper-trading on real markets
+
+- **Ask:** upgrade self-validation from mock → real; the bot should paper-trade on its own against real
+  live markets ("assume the trades were executed but don't actually execute") — that's live validation
+  with paper money. Owner added GEMINI_API_KEY to repo secrets.
+- **Key correction recorded:** reading Polymarket market data is PUBLIC (no creds); a Polymarket secret is
+  NOT needed and must NOT be added. The live TRADING keys (POLYMARKET_*) are human-core real-money — NEVER
+  in CI. The GEMINI_API_KEY sat inert until a workflow referenced it (no job used secrets before).
+- **Design decision — TWO tiers (don't make the required gate hit real services):** the required
+  `code + safety gate` stays deterministic/mocked/no-secrets (a Gemini rate-limit or Polymarket outage must
+  not freeze merges). "Real" lives in a SEPARATE, NON-BLOCKING scheduled tier.
+- **Built + tested (through the gate):**
+  - `scripts/live_integration_smoke.py` — real Gemini (if key) + real public Polymarket read; exit 1 only
+    on a genuine CODE break, exit 0 (reported) on external unavailability (no key / egress). Distinguishes
+    "our wrapper broke" from "service down" — the honest non-blocking semantics.
+  - `scripts/run_paper_cycle.py` — one FORWARD paper cycle: `init_db()` → real scanner + dry_run executor →
+    `scan_and_execute()` on live markets → `check_resolutions()` books realized PnL on settle. DOUBLY safe:
+    refuses if `LIVE_TRADING_ENABLED` (found the config ALSO refuses to boot live w/o BACKEND_API_TOKEN —
+    defense in depth) + dry_run executor. Cost-aware fills (C2/C3), PnL only on real resolution (no fabrication).
+  - `test_live_validation_tiers.py` (6 tests, in the required gate) — the safety belt + smoke exit
+    classification, all DETERMINISTIC (no network in the gate).
+  - Manifest: +`paper_trading_forward` (11 total); `llm_analysis` + `polymarket_market_data` now
+    dual-validated (mock in gate + real in smoke). Staged the non-blocking workflow
+    (`docs/ci/PROPOSED_LIVE_VALIDATION.md`, OA-17); durable forward record wants Neon DATABASE_URL as a CI
+    secret (the DB string, not a trading key).
+- **Lesson:** "mock → real" is not uniformly good — keep the BLOCKING gate deterministic (mocks are a
+  feature there: fast, no secrets, no flakiness), and put REAL integration + the forward paper run in a
+  NON-BLOCKING scheduled tier so third-party uptime never gates merges. For a trading bot the deepest
+  "self-validate all flows" IS the forward paper cycle on live markets — and it's honest precisely because
+  it never places a real order and only books PnL on real resolution.
+- **Still owner-scope (unchanged):** a network-permitted host to actually RUN the forward cycle
+  continuously — the deployed Railway backend (OA-10) or the scheduled GitHub Action (OA-17); the cloud
+  loop stays egress-blocked. The UI-flow tier (dashboard renders) remains F5.
+
 ## 2026-07-01 (4th run) — the biggest run of the day: 4 file-disjoint PRs (A1 dead-code + D2 dead-safety-feature + design honesty + default-closed auth); the gate caught 2 real regressions; 2 scout findings correctly DROPPED + 1 ABANDONED after proving the fix insufficient
 
 - **Shipped 4 file-disjoint code PRs + 1 bookkeeping** from an 8-Haiku scout sweep across tracks A/C/D/F + the QUALITY_SCORECARD's named A→A+ gaps: (#126) **A1** — deleted the dead `/learn` teaching surface (`llm/{explainer,tutor,memo}.py` + the `/learn/*` routes) + dead `paper_simulator.py`, advancing the LOWEST incomplete ROADMAP item; (#127) **D2** — revived the structurally-DEAD per-strategy drawdown auto-disable counter; (#128) **design_taste** — `—` not a fabricated `+$0.00` on the header P&L + strategy strip pre-load; (#129) **security A→A+** — control auth DEFAULT-CLOSED with a `BACKEND_AUTH_DISABLED=1` dev opt-out. engine_pct stays 74. No DoD/floor box ticked.

@@ -77,12 +77,12 @@ SELF_VALIDATION:
       status: gated_off
     - id: llm_analysis
       desc: "Gemini-driven market/research analysis"
-      validates_via: "config.has_llm_key gates use; without the key it falls back to templates (no fake output)"
+      validates_via: "MOCK/degraded (required gate): config.has_llm_key gates use; without the key it falls back to templates (no fake output). REAL (non-blocking): scripts/live_integration_smoke.py makes a real Gemini call when GEMINI_API_KEY is set (scheduled job) — dual-validated."
       mode: degrades_without_key
       requires_env: [GEMINI_API_KEY]
       active: true
-      ci_validatable: true          # the degraded (no-key) path is the one that runs in CI and is validated
-      real_flow_note: "analysis is advisory, never an order side-effect; the no-key template path is exercised, and a real key only enriches text (enhancement, not a critical path)."
+      ci_validatable: true          # the degraded (no-key) path is validated in the required gate; the REAL path is exercised by the non-blocking live smoke (not the deterministic gate)
+      real_flow_note: "analysis is advisory, never an order side-effect; the no-key template path is exercised in-gate, the real Gemini path in the live smoke; a real key only enriches text (enhancement, not a critical path)."
       status: degrades_safely       # absent key => templates, never a fabricated analysis
     - id: db_persistence
       desc: "audit log + state persisted to Neon (prod) / SQLite (dev)"
@@ -94,12 +94,21 @@ SELF_VALIDATION:
       status: validated
     - id: polymarket_market_data
       desc: "read public Gamma + CLOB market data (no auth)"
-      validates_via: "fetcher + client tested offline with FakeSession; live reads are egress-gated (OA-13)"
+      validates_via: "MOCK (required gate): fetcher + client tested offline with FakeSession. REAL (non-blocking): scripts/live_integration_smoke.py reads real public markets on a network-permitted runner — dual-validated. Live reads in the cloud loop are egress-gated (OA-13)."
       mode: mocked_offline
       requires_env: []
       active: true
-      ci_validatable: true          # no secret needed; the logic-critical part is parsing/anti-leakage, tested on realistic fixtures
-      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, incl. the real fetch run in OA-11); the live HTTP read is a thin GET with no business logic and no side-effect."
+      ci_validatable: true          # no secret needed; the logic-critical part is parsing/anti-leakage, tested on realistic fixtures; the REAL read is exercised by the live smoke
+      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures + the live smoke's real read + the OA-11 real fetch); the live HTTP read is a thin GET with no business logic and no side-effect."
+      status: validated
+    - id: paper_trading_forward
+      desc: "FORWARD paper-trading on REAL live markets — scan real open markets, decide, record AS-IF filled (cost-aware, NO venue call), book realized PnL on resolution. 'Live trading validation with paper money.'"
+      validates_via: "MOCK/deterministic (required gate): scripts/runtime_harness.py proves a paper order really fills + the live gate blocks real orders, reproducibly. REAL/forward (non-blocking scheduled): scripts/run_paper_cycle.py drives orchestrator.scan_and_execute() + check_resolutions() against live markets on a network-permitted host. Safety belt: test_live_validation_tiers.py asserts it REFUSES to run when LIVE_TRADING_ENABLED is true."
+      mode: gated_off_proven          # runs ONLY in dry_run/paper mode; real order placement is human-core, never automated
+      requires_env: []                # public data, NO credentials; durable forward record wants DATABASE_URL (Neon) on the runner
+      active: true
+      ci_validatable: true            # the deterministic paper fill + gate-block is validated in-gate with no secret; the forward run is the non-blocking scheduled tier
+      real_flow_note: "NEVER places a real order: uses the dry_run executor + the LIVE_TRADING_ENABLED gate (doubly enforced) + a runner-level refusal if live is on. Fills are cost-aware (C2/C3), not fantasy mid. PnL is only booked when a market actually resolves — an honest forward test, not a fabricated number."
       status: validated
     - id: kalshi_market_data
       desc: "read public Kalshi market data + assemble leakage-safe resolved history (no auth)"
@@ -122,7 +131,7 @@ SELF_VALIDATION:
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 10
+    capabilities_total: 11
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
