@@ -1508,10 +1508,8 @@ def _build_default_scanner() -> PredictionMarketScanner:
     explicitly opts in via ENABLE_UNVALIDATED_STRATEGIES (default off). See the 2026-07-01
     Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
     """
-    from .polymarket_client import PolymarketClient
     from ..config import get_settings
     from .strategies import (
-        StrategyConfig,
         NearCertaintyStrategy,
         SameMarketArbitrageStrategy,
         CrossMarketArbitrageStrategy,

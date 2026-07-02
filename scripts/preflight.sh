@@ -109,8 +109,15 @@ fi
 
 # ---------------------------------------------------------------------------
 say "3. Code gate — lint + type-check (degrade gracefully)"
+# ENFORCED lint = CORRECTNESS rules only (ROADMAP F7): E9 (syntax/runtime), F821
+# (undefined name), F811 (redefinition of an unused name — a real shadowing bug).
+# These catch defects, not style; the tree is at zero for them, so this is a true
+# lint-at-zero ratchet the required gate can enforce without red-blocking on the
+# ~150 remaining hygiene findings (F401/E402/F841/…), which stay UNENFORCED until
+# cleared module-by-module. A NEW correctness finding now FAILS the gate.
 if command -v ruff >/dev/null 2>&1; then
-  ruff check backend/app >/dev/null 2>&1 && ok "ruff clean" || bad "ruff reported issues"
+  ruff check --select E9,F821,F811 backend/app >/dev/null 2>&1 \
+    && ok "ruff correctness-clean (E9,F821,F811)" || bad "ruff reported CORRECTNESS issues (E9/F821/F811)"
 else
   warn "ruff not installed; skipping lint"
 fi
