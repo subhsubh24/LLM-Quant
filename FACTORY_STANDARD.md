@@ -414,3 +414,16 @@ your head.
   deterministic backstop.
 - Same anti-gaming rule as the number: never round, flatter, or hand-tune a computed result. A
   figure must be both SOURCED and CORRECTLY COMPUTED — either failing is a release-blocking lie.
+
+## 23. Live-eval is a first-class quality signal — action a red run
+The scheduled `live-eval` workflow (real model round-trips vs the gold set) can go red between
+runs, and a red eval is NOT just an Actions notification — it is SHIP-CRITICAL quality work. Each
+run, check the latest live-eval status (`gh run list --workflow=live-eval.yml -L 1`; if no such
+workflow exists, skip — not every product has one). If the latest run FAILED, diagnose and fix it
+THIS run, at the same priority as a sub-A quality dimension:
+- a real PIPELINE regression or WIRING bug (e.g. a provider/module that stopped resolving) → fix the code;
+- a genuinely wrong or over-strict GOLD expectation → correct it with a REVIEWED-correct value.
+NEVER "fix" a red eval by deleting the case, skipping the test, or weakening the assertion just to
+turn it green — that games the eval and defeats its purpose (same anti-gaming rule as the number).
+Track it via an `eval-regression` issue; a red live-eval that persists across runs is a `stuck`
+signal (§10b).
