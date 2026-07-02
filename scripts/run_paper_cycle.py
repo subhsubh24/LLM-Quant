@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def _settings():
     try:
         from backend.app.config import get_settings
-    except Exception:
+    except ImportError:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
         from app.config import get_settings  # type: ignore
     return get_settings()
@@ -54,10 +54,13 @@ async def _run() -> dict:
     settings = _settings()
     assert_paper_safe(settings)
 
+    # Only ImportError falls back to the backend/-cwd layout — a REAL error (e.g. a bad
+    # DATABASE_URL raising at db.database import time) must propagate with its true message,
+    # not be masked into a confusing ModuleNotFoundError.
     try:
         from backend.app.db.database import init_db
         from backend.app.prediction_markets.orchestrator import init_orchestrator, get_orchestrator
-    except Exception:
+    except ImportError:
         from app.db.database import init_db  # type: ignore
         from app.prediction_markets.orchestrator import init_orchestrator, get_orchestrator  # type: ignore
 
