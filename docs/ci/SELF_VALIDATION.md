@@ -93,13 +93,13 @@ SELF_VALIDATION:
       ci_validatable: true          # same ORM path exercised against SQLite; Postgres is the same SQLAlchemy dialect surface
       status: validated
     - id: polymarket_market_data
-      desc: "read public Gamma + CLOB market data (no auth)"
-      validates_via: "MOCK (required gate): fetcher + client tested offline with FakeSession. REAL (non-blocking): scripts/live_integration_smoke.py reads real public markets on a network-permitted runner — dual-validated. Live reads in the cloud loop are egress-gated (OA-13)."
+      desc: "read public Polymarket market data + assemble leakage-safe resolved history — Gamma/CLOB live reads AND the HuggingFace Polymarket-v1 archive (daily_aligned), no auth"
+      validates_via: "MOCK (required gate): the Gamma/CLOB fetcher + client tested offline with FakeSession (test_history_fetcher.py, test_polymarket_parse.py); the HuggingFace Polymarket-v1 fetcher's pure leakage-safe assembly tested offline on realistic daily_aligned rows with NO heavy deps (test_polymarket_v1_hf_fetcher.py). REAL (non-blocking): scripts/live_integration_smoke.py reads real public markets on a network-permitted runner. The HF archive is WIRED into scripts/validate_real_oos.py as the OPT-IN venue `polymarket_v1_hf` (NOT in the default cron venue set polymarket,kalshi) — run on a permitted host with `datasets` installed (`validate_real_oos.py --venues polymarket_v1_hf`); a missing `datasets` dep reports N/A, never a false red. Live reads in the cloud loop are egress-gated (OA-13/OA-16)."
       mode: mocked_offline
-      requires_env: []
+      requires_env: []              # NO credentials — Gamma/CLOB are public, the HF dataset is CC-BY-4.0 public
       active: true
-      ci_validatable: true          # no secret needed; the logic-critical part is parsing/anti-leakage, tested on realistic fixtures; the REAL read is exercised by the live smoke
-      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures + the live smoke's real read + the OA-11 real fetch); the live HTTP read is a thin GET with no business logic and no side-effect."
+      ci_validatable: true          # no secret needed; the logic-critical part is parsing/anti-leakage, tested on realistic fixtures; the REAL reads are exercised by the live smoke / permitted lane
+      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures + the live smoke's real read + the OA-11 real fetch); the HF fetcher LAZY-imports datasets only on a real download (never in CI) and its leakage-safe assembly is pure + offline-tested; the exact daily_aligned schema is VERIFIED on the first real download (logs the columns, RAISES with the actual keys on a required-field mismatch — no silent mis-parse)."
       status: validated
     - id: paper_trading_forward
       desc: "FORWARD paper-trading on REAL live markets — scan real open markets, decide, record AS-IF filled (cost-aware, NO venue call), book realized PnL on resolution. 'Live trading validation with paper money.'"
