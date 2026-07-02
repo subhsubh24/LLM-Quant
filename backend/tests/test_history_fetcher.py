@@ -21,6 +21,7 @@ from app.prediction_markets.polymarket_history_fetcher import (
     GAMMA_API,
     PolymarketHistoryFetcher,
     ResolvedMarket,
+    _last_pre_decision_price,
 )
 from app.prediction_markets.walk_forward import (
     HistoricalMarket,
@@ -301,6 +302,160 @@ def test_fetch_loop_respects_max_pages():
 
     gamma_calls = [c for c in session.calls if c["url"] == f"{GAMMA_API}/markets"]
     assert len(gamma_calls) == 3
+
+
+# ---------------------------------------------------------------------------
+# A7 — POINT-IN-TIME / earlier-life sampling
+# ---------------------------------------------------------------------------
+START = RESOLUTION - timedelta(days=8)   # an 8-day market life
+
+
+def _resolved_with_start(*, start=START, token="yes-1", outcome=1):
+    return ResolvedMarket(
+        market_id="1", condition_id="cond-1", question="Q?", category="politics",
+        yes_token_id=token, no_token_id="no-1", resolution_time=RESOLUTION,
+        outcome=outcome, volume=1000.0, liquidity=50.0, start_date=start,
+    )
+
+
+def test_startdate_parsed_into_resolved_market():
+    """The Gamma startDate is captured on ResolvedMarket (None when absent)."""
+    with_start = dict(
+        _gamma_market("1", ["1", "0"]),
+        startDate=START.isoformat().replace("+00:00", "Z"),
+    )
+    fetcher = PolymarketHistoryFetcher(session=FakeSession(lambda u, p: [with_start] if (p and p.get("offset", 0) == 0) else []))
+    out = fetcher.fetch_resolved_markets(limit=500, max_pages=2)
+    assert len(out) == 1 and out[0].start_date == START
+    # and a market with NO startDate parses to start_date=None (honest, no fabrication)
+    fetcher2 = PolymarketHistoryFetcher(session=FakeSession(lambda u, p: [_gamma_market("2", ["1", "0"])] if (p and p.get("offset", 0) == 0) else []))
+    out2 = fetcher2.fetch_resolved_markets(limit=500, max_pages=2)
+    assert len(out2) == 1 and out2[0].start_date is None
+
+
+def test_fraction_zero_samples_at_market_open():
+    """fraction=0.0 → decision_time == start_date (maximum edge headroom)."""
+    tick = int((START - timedelta(hours=1)).timestamp())  # a tick just before open
+    fetcher = PolymarketHistoryFetcher(
+        session=FakeSession(lambda u, p: {"history": [{"t": tick, "p": 0.50}]})
+    )
+    hm = fetcher.to_historical_market_at_fraction(_resolved_with_start(), fraction=0.0)
+    assert hm.decision_time == START
+    assert hm.market_price == 0.50
+
+
+def test_fraction_midpoint_samples_earlier_than_a_short_lead():
+    """fraction=0.5 draws the decision at the MIDDLE of the market's life; the price is
+    still the last PRE-decision tick, and a later (closer-to-resolution) tick is ignored."""
+    decision_time = START + 0.5 * (RESOLUTION - START)   # == RESOLUTION - 4d
+    pre = int((decision_time - timedelta(days=1)).timestamp())   # before decision
+    post = int((decision_time + timedelta(days=1)).timestamp())  # after decision — ignore
+    settled = int(RESOLUTION.timestamp())                        # at resolution — ignore
+
+    def router(url, params):
+        assert url == f"{CLOB_API}/prices-history"
+        return {"history": [
+            {"t": pre, "p": 0.62},
+            {"t": post, "p": 0.88},
+            {"t": settled, "p": 1.0},
+        ]}
+
+    hm = PolymarketHistoryFetcher(session=FakeSession(router)).to_historical_market_at_fraction(
+        _resolved_with_start(), fraction=0.5
+    )
+    assert hm.decision_time == decision_time
+    assert hm.market_price == 0.62          # last PRE-decision tick, not 0.88 and not 1.0
+    assert hm.decision_time < hm.resolution_time
+
+
+def test_fraction_leakage_guard_holds_even_when_sampled_early():
+    """No tick at/after resolution is ever used, regardless of how early decision_time is."""
+    decision_time = START + 0.1 * (RESOLUTION - START)
+    pre = int((decision_time - timedelta(hours=6)).timestamp())
+
+    def router(url, params):
+        return {"history": [
+            {"t": pre, "p": 0.30},
+            {"t": int(RESOLUTION.timestamp()), "p": 1.0},   # settled — must NOT be used
+        ]}
+
+    hm = PolymarketHistoryFetcher(session=FakeSession(router)).to_historical_market_at_fraction(
+        _resolved_with_start(), fraction=0.1
+    )
+    assert hm.market_price == 0.30
+
+
+def test_fraction_without_start_date_raises():
+    """A market with no captured start_date cannot be life-fraction sampled — RAISES,
+    never fabricates a start."""
+    fetcher = PolymarketHistoryFetcher(
+        session=FakeSession(lambda u, p: {"history": [{"t": 0, "p": 0.5}]})
+    )
+    with pytest.raises(ValueError, match="no start_date"):
+        fetcher.to_historical_market_at_fraction(_resolved_with_start(start=None), fraction=0.5)
+
+
+def test_fraction_out_of_range_raises():
+    fetcher = PolymarketHistoryFetcher(
+        session=FakeSession(lambda u, p: {"history": [{"t": 0, "p": 0.5}]})
+    )
+    for bad in (-0.1, 1.0, 1.5):
+        with pytest.raises(ValueError, match="fraction must be"):
+            fetcher.to_historical_market_at_fraction(_resolved_with_start(), fraction=bad)
+
+
+def test_build_at_fraction_skips_markets_without_start_or_price():
+    """Batch helper keeps only leakage-safe fraction records, skipping no-start /
+    no-pre-decision-tick markets (loud warning)."""
+    decision_time = START + 0.5 * (RESOLUTION - START)
+    good_tick = int((decision_time - timedelta(hours=1)).timestamp())
+    good = _resolved_with_start(token="yes-good")
+    no_start = ResolvedMarket("2", "c", "q", "politics", "yes-2", "no-2", RESOLUTION,
+                              1, 100.0, 10.0)  # start_date defaults None
+
+    def router(url, params):
+        if params.get("market") == "yes-good":
+            return {"history": [{"t": good_tick, "p": 0.44}]}
+        return {"history": [{"t": int(RESOLUTION.timestamp()), "p": 0.0}]}
+
+    out = PolymarketHistoryFetcher(session=FakeSession(router)).build_historical_markets_at_fraction(
+        [good, no_start], fraction=0.5
+    )
+    assert [m.market_id for m in out] == ["1"]
+    assert out[0].market_price == 0.44
+
+
+def test_fraction_sampling_is_reproducible():
+    decision_time = START + 0.25 * (RESOLUTION - START)
+    tick = int((decision_time - timedelta(hours=2)).timestamp())
+    fetcher = PolymarketHistoryFetcher(
+        session=FakeSession(lambda u, p: {"history": [{"t": tick, "p": 0.55}]})
+    )
+    hm = fetcher.to_historical_market_at_fraction(_resolved_with_start(), fraction=0.25)
+    r1 = walk_forward_backtest([hm], train_min_days=0, test_window_days=7)
+    r2 = walk_forward_backtest([hm], train_min_days=0, test_window_days=7)
+    assert r1.seed_hash == r2.seed_hash and r1.total_pnl_usd == r2.total_pnl_usd
+
+
+# ---------------------------------------------------------------------------
+# NaN-timestamp finiteness hardening of the anti-leakage core (data-integrity)
+# ---------------------------------------------------------------------------
+def test_nan_timestamp_does_not_poison_decision_price():
+    """A NaN timestamp fails every ordered comparison silently; WITHOUT the finiteness
+    guard it pins best_t=NaN and blocks every later real tick → returns the fabricated
+    0.99. This test is proven to FAIL on pre-fix code (returns 0.99 instead of 0.62)."""
+    hist = [
+        {"t": float("nan"), "p": 0.99},   # malformed API tick
+        {"t": 1000.0, "p": 0.55},
+        {"t": 1200.0, "p": 0.62},         # the true last pre-decision tick
+    ]
+    price = _last_pre_decision_price(hist, decision_ts=1300.0, resolution_ts=1500.0)
+    assert price == 0.62
+
+
+def test_inf_timestamp_rejected_from_decision_price():
+    hist = [{"t": float("inf"), "p": 0.99}, {"t": 900.0, "p": 0.44}]
+    assert _last_pre_decision_price(hist, decision_ts=1000.0, resolution_ts=1500.0) == 0.44
 
 
 def test_order_param_forwarded_default_and_override():

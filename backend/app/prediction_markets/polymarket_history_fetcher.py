@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Sequence
@@ -101,6 +102,13 @@ class ResolvedMarket:
     outcome: int
     volume: float
     liquidity: float
+    # Market START time (Gamma ``startDate``), captured for POINT-IN-TIME / earlier-life
+    # sampling (ROADMAP A7): the decision point can be drawn at a FRACTION of the market's
+    # [start_date, resolution_time] life, where the crowd can still be miscalibrated —
+    # instead of only a fixed lead before resolution (which lands ~70% of liquid markets
+    # already price-pinned, leaving no edge headroom). Optional/defaulted so every existing
+    # positional/keyword construction (tests + fetch path) is unchanged.
+    start_date: Optional[datetime] = None
 
 
 class PolymarketHistoryFetcher:
@@ -244,6 +252,9 @@ class PolymarketHistoryFetcher:
             outcome=outcome,
             volume=_to_float(raw.get("volume")) or 0.0,
             liquidity=_to_float(raw.get("liquidity")) or 0.0,
+            # Market start (for A7 point-in-time sampling). Missing/unparseable => None;
+            # fraction sampling then RAISES rather than fabricating a start (honest skip).
+            start_date=_parse_dt(raw.get("startDate")) or _parse_dt(raw.get("startDateIso")),
         )
 
     # ------------------------------------------------------------------
@@ -364,6 +375,116 @@ class PolymarketHistoryFetcher:
         )
         return out
 
+    # ------------------------------------------------------------------
+    # POINT-IN-TIME / earlier-life sampling (ROADMAP A7)
+    # ------------------------------------------------------------------
+    def to_historical_market_at_fraction(
+        self,
+        resolved: ResolvedMarket,
+        fraction: float,
+        *,
+        buffer: timedelta = timedelta(days=2),
+        fidelity: int = 60,
+    ) -> HistoricalMarket:
+        """Build a leakage-safe ``HistoricalMarket`` whose decision point is drawn at
+        ``fraction`` of the market's life instead of a fixed lead before resolution.
+
+        ``decision_time = start_date + fraction * (resolution_time - start_date)``, so
+        ``fraction=0`` samples at market open (maximum edge headroom, the crowd least
+        settled) and ``fraction→1`` samples near resolution (like a tiny lead — usually
+        pinned). This is the A7 answer to the OA-11 finding that a fixed 2-day lead lands
+        ~70% of liquid markets already price-pinned (no edge to find): earlier-life
+        sampling gives a model room to out-calibrate a not-yet-sharp crowd.
+
+        SELECTION-PROFILE DISCLOSURE: sampling earlier changes the corpus's bias profile
+        — earlier decision points include more genuinely-uncertain (and more eventually-
+        surprising) markets, so a calibration eval on a fraction-sampled corpus measures a
+        DIFFERENT population than a fixed-lead one. Choose + PRE-REGISTER the fraction; do
+        not sweep it post-hoc on the test set (a p-hacking lever, like ``decision_lead``).
+
+        ANTI-LEAKAGE IS UNCHANGED: ``market_price`` is still ONLY a CLOB tick at-or-before
+        the (earlier) ``decision_time`` AND strictly before ``resolution_time`` — the SAME
+        ``_last_pre_decision_price`` guard. The settled outcome is never the price. If the
+        market has no captured ``start_date``, or no pre-decision tick exists, this RAISES
+        rather than fabricating.
+        """
+        if not (0.0 <= fraction < 1.0):
+            # fraction==1.0 would put the decision AT resolution (zero holding period, and
+            # the leakage guard would reject every tick) — a degenerate, non-tradeable point.
+            raise ValueError(f"fraction must be in [0.0, 1.0): {fraction}")
+        if resolved.start_date is None:
+            raise ValueError(
+                f"market {resolved.market_id} has no start_date; cannot sample at a life "
+                f"fraction (refusing to fabricate a market start)"
+            )
+        if resolved.start_date >= resolved.resolution_time:
+            raise ValueError(
+                f"market {resolved.market_id} start_date {resolved.start_date} is not before "
+                f"resolution_time {resolved.resolution_time}"
+            )
+
+        life = resolved.resolution_time - resolved.start_date
+        decision_time = resolved.start_date + fraction * life
+        assert decision_time < resolved.resolution_time, (
+            "decision_time must be strictly before resolution_time"
+        )
+
+        start_ts = int((decision_time - buffer).timestamp())
+        end_ts = int(resolved.resolution_time.timestamp())
+        history = self.fetch_price_history(
+            resolved.yes_token_id, start_ts, end_ts, fidelity=fidelity
+        )
+
+        decision_ts = decision_time.timestamp()
+        resolution_ts = resolved.resolution_time.timestamp()
+        market_price = _last_pre_decision_price(history, decision_ts, resolution_ts)
+        if market_price is None:
+            raise ValueError(
+                f"no pre-resolution price tick at/before life-fraction decision_time for "
+                f"market {resolved.market_id} (yes_token={resolved.yes_token_id}, "
+                f"fraction={fraction}); refusing to fabricate decision-time price"
+            )
+
+        return HistoricalMarket(
+            market_id=resolved.market_id,
+            decision_time=decision_time,
+            resolution_time=resolved.resolution_time,
+            market_price=market_price,
+            model_prob=market_price,   # naive crowd baseline; a real strategy overrides it
+            outcome=resolved.outcome,
+        )
+
+    def build_historical_markets_at_fraction(
+        self,
+        resolved_list: Sequence[ResolvedMarket],
+        fraction: float,
+        *,
+        buffer: timedelta = timedelta(days=2),
+        fidelity: int = 60,
+    ) -> List[HistoricalMarket]:
+        """Batch ``to_historical_market_at_fraction``, SKIPPING (loud warning) any market
+        with no captured start_date or no leakage-safe pre-decision tick. Returns only
+        leakage-safe records sampled at the pre-registered life ``fraction``."""
+        out: List[HistoricalMarket] = []
+        skipped = 0
+        for rm in resolved_list:
+            try:
+                out.append(
+                    self.to_historical_market_at_fraction(
+                        rm, fraction, buffer=buffer, fidelity=fidelity
+                    )
+                )
+            except (ValueError, AssertionError) as e:
+                skipped += 1
+                logger.warning(
+                    "skipping market %s (no leakage-safe fraction record): %s", rm.market_id, e
+                )
+        logger.info(
+            "built %d leakage-safe HistoricalMarket records at life-fraction %.3f (%d skipped)",
+            len(out), fraction, skipped,
+        )
+        return out
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers (no I/O — exhaustively unit-testable)
@@ -439,6 +560,12 @@ def _last_pre_decision_price(
         t = _to_float(tick.get("t"))
         p = _to_float(tick.get("p"))
         if t is None or p is None:
+            continue
+        if not math.isfinite(t):
+            # A NaN/inf timestamp fails every ordered comparison silently: NaN would pin
+            # best_t=NaN and block all later real ticks, returning a fabricated price (a
+            # malformed API tick poisoning the decision price — the data analog of a fake
+            # fill). Reject it up front. Covered by a regression test proven to fail pre-fix.
             continue
         if t > decision_ts:
             continue
