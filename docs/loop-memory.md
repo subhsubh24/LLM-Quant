@@ -2,6 +2,66 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-02 (1st factory run) — shipped the D8 forward-record-coherence headline the owner-directed audit filed; the regression suite CAUGHT a latent bug the fix itself needed (3-PR run)
+
+- **Shipped 3 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep, all through maker≠checker:
+  (#143) **D8** — the LOWEST incomplete ROADMAP item, filed 2026-07-02 by the owner-directed audit (#141) as
+  explicit factory work: the fresh-process-per-run paper cycle never rehydrated OPEN positions
+  (`load_positions_into_executor` had ZERO call sites), so orphaned positions never settled + no scan dedup →
+  incoherent forward record. Coupled fix (open_only rehydrate + `get_executor` wiring + `scan_and_execute`
+  `skip_held` dedup). (#144) **§12 bounds** on 3 unbounded API params (vpin token_id unauth, bot/start
+  scan_interval_sec tight-loop, price-history path). (#145) **deploy-hygiene** — dead tensorflow/xgboost/lightgbm out
+  of root requirements.txt + fixed a stale DEPLOYMENT.md Vercel claim. No DoD/floor box ticked; the D8 forward record
+  can now progress but the validated-OOS-edge box is unchanged (owner/egress-blocked).
+- **THE headline lesson — writing the regression test for a never-called helper CAUGHT the bug the fix needed.**
+  `load_positions_into_executor` existed with a "call on startup to resume" docstring but ZERO call sites, so its
+  latent defect was never exercised: it called `get_positions()` (which returns detached ORM rows because
+  `get_session()` uses the default `expire_on_commit=True`) and then read `db_pos.token_id` etc. AFTER the session
+  closed → `DetachedInstanceError` in production. My first test failed with exactly that error, forcing the real fix
+  (build the `Position` objects INSIDE the open session). **Lesson: when you finally WIRE a zero-call-site "resume/
+  startup" helper, don't trust it — write the end-to-end test FIRST; a helper that was never called was never
+  actually run, so its happy path is unproven. The BUILDS≠WORKS trap hides in "exists but never invoked" code, and
+  the ORM detach-after-commit footgun is a recurring shape (durable stores here use `expire_on_commit=False` for
+  exactly this; the shared `get_session` does not).**
+- **THE scope-discipline win — a scout's cross-cutting finding was real but NOT a D8 regression; verify the BASELINE
+  before folding it in.** A correctness scout flagged that `risk_manager._get_category_exposure` reads a transient
+  `_market_categories` map populated only by `check_opportunity`, so D8's rehydrated positions default to "General"
+  → "cap bypass." Plausible + serious. But tracing the PRE-D8 baseline: pre-D8 `executor.positions` was EMPTY at
+  process start, so those positions weren't counted at ALL — D8 makes the sum count MORE (safe direction), never
+  looser. Both a Sonnet reviewer and the Opus auditor independently confirmed. So it is a pre-existing ACCURACY
+  limitation (filed as a D2 follow-up), NOT a D8-introduced safety regression, and folding a Position-schema change
+  into the coupled D8 PR would have been scope-sprawl. **Lesson: a "your change loosens X" finding is only a
+  regression if it's worse than the BASELINE your change replaces — compute the before/after, don't just note the
+  imperfection. "Not perfect" ≠ "regressed." An honestly-scoped D2 note beats a sprawling PR.**
+- **THE gate earned its keep on the DOC PR — a plausible cleanup shipped a FALSE, checkable justification.** #145's
+  first cut claimed "render.yaml installs THIS root requirements.txt, so ~1GB of dead deps shipped to the deploy."
+  BOTH deploy reviewers independently checked render.yaml and found `rootDir: backend` → it installs
+  `backend/requirements.txt` (already trimmed); the root file is consumed only by local-dev/demo (README,
+  run_demo.sh). The dep removal was still valid (the deps ARE dead repo-wide) but the STATED IMPACT was wrong.
+  Fixed the NOTE in 1 cycle. **Lesson: an artifact-freshness/cleanup PR must get its OWN factual claims right —
+  "this fixes the deploy" is a checkable assertion, and a wrong justification is the same honesty failure as an
+  inflated number even when the code change is harmless. Trace which config path actually consumes a file before
+  claiming an impact on it (`rootDir`/build-context matters).**
+- **THE precision nit (own it) — a "control" test is NOT a regression pin; don't say "all N tests fail on pre-fix
+  code."** The D8 commit body said the 7 regression tests are "each proven to FAIL on pre-fix code" — but one is an
+  explicit CONTROL (`test_scan_executes_when_not_held`) that passes on BOTH branches by design (that's the point of
+  a control: it proves the sibling's skip is the dedup, not a blanket reject). Reviewer B flagged it as a minor
+  overclaim, self-corrected in the very next clause. **Lesson: state it precisely — "the N regression tests fail
+  pre-fix; the control passes on both." A control test proves the discriminator, not the regression; lumping it in
+  is a small but real overclaim.**
+- **Anti-scarcity + anti-padding both held.** 8 scouts → 3 genuine shipped, the rest correctly dropped/deferred with
+  a proven reason: frontend `|| 0` (load-guarded, real-zero is honest), whale-consensus bug (gated-off B7 → fix in
+  re-validation), SQLModel dual-import (~22-file refactor, A→A+ outside the CI gate), ruff correctness-gate (F811 in
+  restricted files). Two scout lenses (data-parser, backtest) returned CLEAN — the engine is mature+hardened. The
+  binding constraint stays owner/egress-blocked (OA-11/15/16); NOT churning/stuck → no harness proposal, surfaced to
+  owner via notification.
+- **Process/env:** `pip install -r backend/requirements-ci.txt fastapi httpx`; `rm -f quantlab.db` before DB-backed
+  tests. In-memory SQLite fixtures must create tables via `__table__.create(checkfirst=True)` for the SPECIFIC tables
+  needed — a blanket `SQLModel.metadata.create_all` trips a duplicate `CREATE INDEX` in the FULL suite because of the
+  `app.*` vs `backend.app.*` dual-registration (the known correctness A→A+ gap). Reviewers ran in isolated
+  worktrees / git-archive snapshots (no shared-tree mutation). Merged via MCP squash on the green required check
+  AFTER reviews (sequencing held — no #117-style auto-merge race). All 3 preflight runs green.
+
 ## 2026-07-02 (owner-directed AUDIT) — FINDING: forward paper record is INCOHERENT across runs (filed D8, factory to fix)
 
 - Owner asked to verify whether the scheduled paper cycle rehydrates open positions across the

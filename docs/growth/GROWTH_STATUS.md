@@ -325,7 +325,7 @@ missing code — and remains the bulk of the missing %):
 **Exists (counts toward %):**
 - Polymarket ingestion + websocket feeds — `backend/app/prediction_markets/polymarket_client.py`, `websocket_feeds.py`
 - Strategies + edge/EV + Kelly sizing — `strategies.py`, `advanced_strategies.py`, `quant_models.py`, `orchestrator.py`
-- Paper simulator — `paper_simulator.py`
+- Paper/forward execution — the dry-run `execution.py` executor + the forward paper cycle `scripts/run_paper_cycle.py` (rehydrates OPEN positions across runs — ROADMAP D8, #143; the standalone `paper_simulator.py` was retired as dead code in #126)
 - Risk manager + category caps — `risk_manager.py`
 - Kill switch — `execution.py`
 - Backtest/validation/metrics infra — `backend/app/backtest/*`
