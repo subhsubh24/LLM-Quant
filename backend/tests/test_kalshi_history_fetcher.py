@@ -556,13 +556,13 @@ def test_series_ticker_derivation():
 
 def test_candlestick_nested_price_object_in_cents():
     """A real Kalshi candlestick carries a nested `price` object in CENTS; _candle_price
-    reads it and fetch_price_history normalises cents→[0,1]."""
-    assert _candle_price({"price": {"mean": 62, "close": 60}}) == 62      # mean preferred
-    assert _candle_price({"yes_ask": {"close": 40}}) == 40                # ask fallback
-    assert _candle_price({"p": 0.33}) == 0.33                             # flat shape
+    normalises cents→[0,1] UNCONDITIONALLY for the nested objects (returns [0,1] directly)."""
+    assert _candle_price({"price": {"mean": 62, "close": 60}}) == 0.62    # 62¢ → 0.62, mean preferred
+    assert _candle_price({"yes_ask": {"close": 40}}) == 0.40              # 40¢ ask fallback
+    assert _candle_price({"p": 0.33}) == 0.33                             # flat fraction shape
     assert _candle_price({"price": {}}) is None                          # nothing usable
     # p==0 (0¢) must SURVIVE (presence, not truthiness)
-    assert _candle_price({"price": {"mean": 0}}) == 0
+    assert _candle_price({"price": {"mean": 0}}) == 0.0
 
     session = FakeSession(lambda url, params: {"candlesticks": [
         {"end_period_ts": 500, "price": {"mean": 62}},   # 62¢ → 0.62
@@ -570,6 +570,21 @@ def test_candlestick_nested_price_object_in_cents():
     ]})
     ticks = KalshiHistoryFetcher(session=session).fetch_price_history("KXABC-1", 0, 1000)
     assert ticks == [{"t": 500.0, "p": 0.62}, {"t": 600.0, "p": 0.0}]
+
+
+def test_one_cent_nested_price_not_fabricated_as_certainty():
+    """REGRESSION (auditor break): a 1¢ nested candle price (0.01 probability, a legit
+    longshot) must normalise to 0.01 — NOT a fabricated 1.0. Proven to FAIL on pre-fix code,
+    where the flat >1.0 heuristic left the raw cents value 1 → p=1.0 (a fabricated 100%
+    -certain crowd price that passes the [0,1] DQV gate silently)."""
+    assert _candle_price({"price": {"mean": 1}}) == 0.01
+    assert _candle_price({"yes_bid": {"close": 1}}) == 0.01
+    assert _candle_price({"price": {"mean": 0.5}}) == 0.005   # sub-cent mean, still cents
+    session = FakeSession(lambda url, params: {"candlesticks": [
+        {"end_period_ts": 500, "price": {"mean": 1}},        # 1¢ → 0.01, NOT 1.0
+    ]})
+    ticks = KalshiHistoryFetcher(session=session).fetch_price_history("KXABC-1", 0, 1000)
+    assert ticks == [{"t": 500.0, "p": 0.01}]
 
 
 def test_candlestick_endpoint_feeds_leakage_safe_record():

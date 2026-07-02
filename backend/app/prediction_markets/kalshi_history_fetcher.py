@@ -299,13 +299,14 @@ class KalshiHistoryFetcher:
             # p==0 is falsy and would be silently dropped by an `or`-chain (a deep-audit
             # finding). p==0 (YES≈0¢) is a valid extreme price that must survive.
             t = _to_float(_first_present(item, ("t", "ts", "end_period_ts")))
-            p_raw = _candle_price(item)
-            if t is None or p_raw is None:
+            # _candle_price returns a UNIT-AWARE price already normalised to [0,1]
+            # (nested cents objects /100 unconditionally; flat ticks by magnitude), so a
+            # 1¢ longshot is 0.01, never a fabricated 1.0 (the cents-boundary fix).
+            p = _candle_price(item)
+            if t is None or p is None:
                 continue
             if not math.isfinite(t):
                 continue
-            # Normalise: Kalshi may return prices as cents (>1.0) or fractions.
-            p = p_raw / 100.0 if p_raw > 1.0 else p_raw
             if not (0.0 <= p <= 1.0):
                 continue
             ticks.append({"t": t, "p": p})
@@ -431,28 +432,31 @@ def _series_ticker(ticker: str) -> str:
 
 
 def _candle_price(item: dict) -> Optional[float]:
-    """Extract the YES price from a Kalshi candlestick (or a flat tick), returning a
-    number in cents-or-fraction (the caller normalises to [0,1]). None if absent.
+    """Extract the YES price from a Kalshi candlestick (or a flat tick), NORMALISED to
+    [0, 1]. None if absent/unparseable.
 
-    Accepts a FLAT tick first (``p``/``yes_price``/``close`` — the offline fixtures + any
-    simplified shape), then the DOCUMENTED nested Kalshi candlestick objects, in order:
-    ``price`` (mean/close/open), then ``yes_ask``/``yes_bid`` (close/mean/open). Presence,
-    not truthiness, so a legit 0¢ survives. Field names are verified on the first market
-    with real candlesticks (OA-15)."""
-    flat = _first_present(item, ("p", "yes_price", "close"))
-    if flat is not None:
-        return _to_float(flat)
-    price_obj = item.get("price")
-    if isinstance(price_obj, dict):
-        v = _first_present(price_obj, ("mean", "close", "open"))
-        if v is not None:
-            return _to_float(v)
-    for side in ("yes_ask", "yes_bid"):
-        obj = item.get(side)
+    UNIT-AWARE normalisation (the fix for the cents-boundary fabrication bug an auditor
+    found): a Kalshi candlestick's nested ``price``/``yes_ask``/``yes_bid`` objects are in
+    CENTS (0-100), so they are divided by 100 UNCONDITIONALLY — a 1¢ longshot becomes 0.01,
+    NEVER 1.0. Applying the ``>1.0`` fraction heuristic to the cents domain would emit a 1¢
+    price as a fabricated 100%-certain tick (it passes the [0,1] range check silently). A
+    FLAT tick (``p``/``yes_price``/``close`` — the offline fixtures + any simplified shape)
+    may be a fraction OR cents, so it keeps the magnitude heuristic (``/100`` only when
+    ``>1.0``). Presence, not truthiness, so a legit 0¢ survives. The nested candlestick
+    objects are checked FIRST (a real candle has no top-level price field); the documented
+    field NAMES are verified on the first market with real candlesticks (OA-15), but the
+    UNIT (cents for the nested objects) is part of the documented contract."""
+    # Nested candlestick objects are always CENTS → divide by 100 unconditionally.
+    for key in ("price", "yes_ask", "yes_bid"):
+        obj = item.get(key)
         if isinstance(obj, dict):
-            v = _first_present(obj, ("close", "mean", "open"))
+            v = _to_float(_first_present(obj, ("mean", "close", "open")))
             if v is not None:
-                return _to_float(v)
+                return v / 100.0
+    # Flat tick — fraction (fixtures) or cents; disambiguate by magnitude.
+    v = _to_float(_first_present(item, ("p", "yes_price", "close")))
+    if v is not None:
+        return v / 100.0 if v > 1.0 else v
     return None
 
 
