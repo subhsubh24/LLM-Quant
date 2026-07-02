@@ -33,6 +33,8 @@ Each entry: **PATTERN** — CONTEXT it worked in — WHY it worked — EVIDENCE.
   silently overriding nor blindly complying is right; a FRESH re-review given the §1/§8/§15 citations resolved it
   honestly, and the ROADMAP update was done in the correct place (bookkeeping). — Evidence: #149.
 
+- **Verify a cross-routine URGENT flag against the REAL logs before building — reconcile the evidence's commit vs the fix's commit.** — Research Run 12 (an independent maker≠checker routine) filed TWO urgent, loop-buildable flags. — Pulling the actual GH Actions logs (`mcp__github__get_job_logs`) reconciled both: one (a category-cap freeze) reproduced in the LATEST run → real, shipped; the other ("live persist still FK-fails EVERY order") was DISPROVEN as a current bug — its failure evidence was from a run BEFORE the seed fix landed (`git merge-base --is-ancestor`), and the latest run rehydrates $164 of positions (a downstream observable that PROVES the path works). Re-fixing an already-fixed bug is padding; the honest yield was the coverage gap the flag exposed (a missing FK-enforced test on the live writer). A cross-routine flag is a high-EV HYPOTHESIS, not a work order. — Evidence: #156 (freeze fix), #157 (FK-blind-gate test, not a re-fix).
+
 - **For missing external data, FAIL/skip — never fabricate a plausible in-range default (the recurring honesty class).**
   — Venue/API parsers that filled a missing price with `0.5` / a missing token with `""` / a missing outcome with a
   degenerate market. — An in-range fabrication PASSES the downstream quality gate (0.5 ∈ [0,1], sum≈1), so the parser

@@ -26,6 +26,76 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
   (a runner) + a real ALPHA + the right SAMPLING, not owner heroics. The alpha now has its first honest
   real-data verdict: not yet an edge, and exactly why (pinned sample + tiny N).
 
+## 2026-07-02 (3rd factory run) — UNFROZE the live forward loop: the headline was a loop-buildable production bug found in the REAL CI logs (empty category → per-category cap became a de-facto global cap → 154/154 opps skipped), verified from a cross-routine flag; disproved the OTHER half of that flag against the same logs
+
+- **Shipped 3 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep, all through maker≠checker
+  (8 reviewers: 2 Sonnet/PR + 1 Opus adversarial auditor on the two code PRs — ALL APPROVE/SAFE/SOUND first pass):
+  (#156) **THE LIVE-FREEZE FIX** — the scheduled OA-17 forward-paper cycle had gone dead: the latest GH Actions run
+  skipped **154/154** opportunities on `Category 'General' exposure: $164.18 + $50.00 > $200.0`. Real Polymarket
+  Gamma markets ship an EMPTY `category`, so `risk_manager` bucketed everything as `"General"` and the per-category
+  $200 cap became a de-facto GLOBAL cap below the $500 portfolio cap. New pure `market_category.py` derives a coarse
+  real correlation bucket (tags → punctuation-insensitive keyword scan of the question); the parser stamps it;
+  `Position` carries the category so rehydrated positions count in their real bucket across the fresh-process cycle.
+  (#157) hardened the LIVE `_persist_order` path (the real writer; `persistence.save_order` is dead code) with an
+  in-transaction `_ensure_default_portfolio` + an FK-enforced (`PRAGMA foreign_keys=ON`) regression test that closes
+  the SQLite-FK-blind coverage gap on the live writer. (#158) artifact freshness — Supabase→Neon, `ANTHROPIC_API_KEY`
+  →`GEMINI_API_KEY`, deleted the dead root `test_alternative_data.py`. No DoD/floor box ticked (operational unfreeze +
+  correctness/coverage/freshness, not a validated edge). VALIDATED-OOS-EDGE binding constraint stays owner/egress-blocked.
+- **THE headline lesson — VERIFY a cross-routine URGENT flag against the REAL live system before building; one of two
+  was live+loop-fixable, the OTHER was already fixed and would have been padding to "re-fix".** Research Run 12 (an
+  independent maker≠checker routine) filed TWO urgent, loop-buildable flags in GROWTH_STATUS `next_actions`. I did NOT
+  build both on faith — I pulled the ACTUAL GitHub Actions logs (`mcp__github__get_job_logs`) for the live-validation
+  runs. Flag A (category freeze) reproduced in the LATEST run (154/154 skipped) → real, shipped as #156. Flag B ("the
+  live persist path fails EVERY order with a Postgres FK violation") was DISPROVEN as a current bug: its 6/6-failure
+  evidence was from run #5 at sha `25d080c3` — which I confirmed via `git merge-base --is-ancestor` was BEFORE the
+  #140 portfolio-seed landed — and the latest run rehydrates **$164.18** of positions across fresh processes, which is
+  impossible if `_persist_order` still FK-failed (positions couldn't persist to be rehydrated). So the seed already
+  fixed it; the genuine remaining gap was a **missing FK-enforced test on the live writer** (the SQLite gate is FK-blind
+  by construction), shipped as #157 instead of re-fixing a non-bug. **Lesson: a cross-routine flag is a high-EV
+  HYPOTHESIS, not a work order — pull the real logs and reconcile against them (git-ancestry the evidence's commit vs
+  the fix's commit; look for a downstream observable like rehydrated exposure that PROVES the path works). "Re-fixing" an
+  already-fixed bug is padding; the honest yield is the coverage gap the flag exposed.**
+- **THE deep-diagnosis win — observe the REAL system FIRST (the run LOGS + a downstream data observable), don't theorize
+  from the seed code.** The `init_db` seed *looks* correct in code, so a code-only read couldn't tell whether Flag B was
+  live. The decisive evidence was operational: (a) the failing run's sha predated the seed commit; (b) the current run's
+  `$164.18 "General" exposure` proves positions ARE persisting + rehydrating. Both came from `get_job_logs`, not the
+  source. This is the DEEP_DIAGNOSIS discipline paying off: logs + a live data-store observable named the truth in
+  minutes where code-reading would have mis-concluded.
+- **THE scope-disjointness call — the full category fix spans 4 files but AVOIDS the orchestrator order path, keeping it
+  disjoint from the FK PR.** The category-coherence fix touches `market_category.py`(new)/`polymarket_client.py`/
+  `execution.py`(Position field)/`persistence.py`(rehydrate)/`risk_manager.py`(exposure) — but deliberately does NOT
+  plumb category through the executor's `OrderRequest→Position` at fill (that would touch `orchestrator.py`, colliding
+  with #157). The same-process case is covered by the `_market_categories` map (set in `check_opportunity` before
+  execution); only rehydrated positions need the field, and they get it from the DB row. So a genuinely coupled 4-file
+  change stayed file-disjoint from the FK PR by routing the live-fill category via the existing DB write, not a new
+  order-path arg. **Lesson: when two coherent changes both "want" the orchestrator, find the seam — here the DB row
+  already carried category, so the rehydration path needed no order-path change, and the two PRs merged in parallel.**
+- **Anti-padding held HARD.** DROPPED: a volume/liquidity `isfinite` guard (the data scout itself rated reachability
+  LOW; `json.loads`-accepts-`Infinity` is not demonstrable on real Polymarket data, and it collides with #156's file —
+  double reason); the executor SELL-floor-at-$0.01 + SHORT-PnL-inversion (both UNREACHABLE — the orchestrator never
+  routes SELL/short orders, confirmed by TWO independent scouts); the sub-2¢ market-impact underestimation (a DELIBERATE
+  C3 deferral awaiting a real order-book depth feed); two vacuous existence-only tests (not worth churning). Two scout
+  lenses (security, risk/exec) returned NOTHING-GENUINE on the hardened engine. NOT churning/stuck (0 reverts, 0
+  abandons, 3 durable PRs) → no harness proposal; binding constraint surfaced to owner via notification.
+- **Process/env:** `pip install -r backend/requirements-ci.txt fastapi httpx pandas scikit-learn`; `rm -f quantlab.db`
+  before DB-backed tests. Reviewer subagents that ran git ops in the SHARED cwd reset my local working tree mid-run —
+  harmless (my commits were already pushed; reviewers diff against origin refs, and I restored the branch from origin)
+  but a reminder that reviewers MUST use isolated `git worktree`s (both Opus auditors correctly did, and cleaned up).
+  Merged via MCP squash: #158 direct-on-green (CI already clean), #156/#157 via `enable_pr_auto_merge` (SQUASH) after
+  all reviews finished — never before (the #117 auto-merge-before-review race lesson holds). All 3 preflight runs green.
+- **NEXT-RUN NOTES:** (1) TWO more unguarded `portfolio_id=1` writers share the #157 FK pattern and want the same
+  one-line `_ensure_default_portfolio` guard: `orchestrator._take_snapshot` (~L1173, `PredictionPnLSnapshot`, fires on
+  the continuously-running backend's snapshot loop) and `api/routes.py:445` (the manual order-execution endpoint) — out
+  of scope for the OA-17 auto-cycle (which never triggers either) but a fast coherent follow-up PR. (2) `kalshi_client.py`
+  stamps `category=raw.get("category","")` verbatim (bypasses `derive_market_category`) — route it through the deriver
+  if Kalshi is ever scanned live (Kalshi categories are coarse venue categories, so not a per-market explosion, but
+  inconsistent). (3) the in-memory `Position` at live-fill entry (`execution.py` `_update_position`) still has
+  `category=""` — same-process bucketing is covered by the `_market_categories` map, only rehydration needs the field,
+  so this is fine; plumbing category through `OrderRequest` would make it self-consistent if ever refactored. (4)
+  VERIFY on the next live GH Actions run that opportunities now spread across Sports/Crypto/Politics buckets (not 154
+  skipped on "General") — the freeze-fix's real-world confirmation. (5) `ROADMAP F10` (backtest robustness/regime-slice
+  report, anti-overfitting) was filed by another routine (#159) this window — a new lowest-incomplete candidate to weigh.
+
 ## 2026-07-02 (2nd factory run) — the BIG A→A+ convergence run: 5 file-disjoint PRs cleared BOTH remaining ship-critical correctness A→A+ gaps + a real parse-fabrication + dead code; the SQLModel dual-import fix (deferred ~4 runs) finally landed, PROVEN by a baseline reproduction
 
 - **Shipped 5 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep across tracks A–G, all
