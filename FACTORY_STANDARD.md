@@ -580,9 +580,12 @@ NOT gate merges.
 - **Web first; mobile deferred.** Drive the web build now (Browserbase-style). Mobile is a separate
   harness (emulator + a mobile driver) and web→mobile is NOT automatic — shared backend helps, native
   flows need their own pass. Track mobile as a later capability; never mark it covered when it isn't.
-- **Reuse, don't reinvent:** AptDesignerAI `lib/agents/computer-use/` (with `safety.ts`) is the
-  reference; `computer_use` already routes Gemini-only via the provider factory. New factories build on
-  their existing e2e/browser infra. Cost-governed (§24/§25); a red finding is actioned like §23.
+- **Runs on the factory's OWN Claude agent (no extra API spend) — not Gemini.** Drive the browser with
+  Claude computer-use, the same subscription that already runs the factory (per §30's cost logic); do
+  NOT route this to a paid Gemini computer-use call. AptDesignerAI `lib/agents/computer-use/` (with
+  `safety.ts`) is the reference for the harness + safety patterns — its MODEL routing moves to Claude.
+  New factories build on their existing e2e/browser infra. Cost-governed (§24/§25); a red finding is
+  actioned like §23.
 
 
 ## 30. Deep-research tier — the factory's OWN Claude agent (subscription-covered), no extra API spend
