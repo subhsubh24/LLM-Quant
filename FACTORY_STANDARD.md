@@ -508,3 +508,22 @@ rule (smallest/fewest fixtures, cheapest capable model, cache):
   eval/coverage dimension up as ship-critical work. But NEVER pad eval count to look busy, and NEVER
   "strengthen" by making an eval pass more easily (that is the §23 anti-gaming line). Strengthening
   means it catches MORE real failures, not fewer.
+
+## 27. When STUCK, break your own priors before retrying (the safe half of a meta-loop)
+LOOP_HEALTH (§10b) flags `stuck` when the loop keeps failing the same way or not converging —
+usually because it keeps reaching for the SAME priors (the class of fix the model instinctively
+tries) even after they've stopped working. Detecting stuck is not enough; the response is:
+- **Force a DIVERSE, exploratory pass BEFORE retrying the same class of fix.** Generate ≥2–3
+  genuinely DIFFERENT approaches (the §21 branch-and-explore mechanism, right-sized) — deliberately
+  in directions the obvious first instinct avoids (a different layer of the stack, a different
+  root-cause hypothesis, a simpler or structurally different design) — and pick/verify the best
+  against the REAL gate. Re-running the same failing approach with minor tweaks IS stuck; changing
+  WHAT you explore is how you break out.
+- **Steer with memory:** away from the dead ends (§8 error library / `abandoned_reasons`) and toward
+  proven approaches (§20 success patterns) — never re-derive the same wall.
+- **This changes only what you EXPLORE — never what CHECKS or BOUNDS you.** It is the safe half of a
+  meta-loop: break stale search priors, YES; rewrite your own rules, gates, evaluators, guard tests,
+  routine, `.claude/`, or `.github/`, NEVER. A rule change goes ONLY through the human-gated
+  harness-improvement-proposal issue (§10b); the evaluator stays un-editable by the thing it grades.
+- If a diverse pass still can't move it, THAT is the `stuck` escalation: open the ONE
+  harness-improvement-proposal issue (§10b) and STOP re-attempting — don't spin.
