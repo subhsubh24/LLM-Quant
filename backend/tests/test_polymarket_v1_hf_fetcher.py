@@ -182,6 +182,51 @@ def test_empty_corpus_raises_on_schema_format_mismatch():
         assemble_historical_markets(rows, decision_lead=LEAD)
 
 
+def test_empty_corpus_raises_even_with_category_filter():
+    """The wipeout guard fires on a genuine parse failure EVEN with a category filter set
+    (the filter is applied per-market later, so it never empties by_market itself)."""
+    rows = [dict(_row(f"m{i}", 6, 0.5, category="Politics"), price=55.0) for i in range(3)]
+    with pytest.raises(ValueError, match="0 were usable"):
+        assemble_historical_markets(rows, decision_lead=LEAD, categories=["politics"])
+
+
+# ---------------------------------------------------------------------------
+# NULL / void outcome (a present column with a null value != an absent column)
+# ---------------------------------------------------------------------------
+def test_null_void_outcome_row_skips_whole_market():
+    """A void market whose outcome column is PRESENT but NULL (the natural void encoding)
+    must SKIP the whole market — never silently drop the void row and assemble an outcome
+    from the clean survivors (the re-opened survivorship hole an auditor found)."""
+    rows = [
+        _row("m1", 8, 0.4, outcome="yes"),        # clean survivor
+        _row("m1", 6, 0.5, outcome="yes"),        # clean survivor
+        dict(_row("m1", 4, 0.6), outcome=None),   # VOID: present column, null value
+    ]
+    out = assemble_historical_markets(rows, decision_lead=LEAD)
+    assert out == []
+
+
+def test_null_void_outcome_first_row_does_not_crash_corpus():
+    """A void (null-outcome) row landing FIRST must NOT strict-raise the whole corpus — its
+    market is skipped and OTHER markets still assemble (order-independence; the auditor's
+    order-dependent whole-corpus-crash finding)."""
+    rows = [
+        dict(_row("mvoid", 6, 0.5), outcome=None),   # void, FIRST (strict) — must not crash
+        _row("good", 6, 0.7, outcome="yes"),         # a clean market
+    ]
+    out = assemble_historical_markets(rows, decision_lead=LEAD)
+    assert [m.market_id for m in out] == ["good"]
+
+
+def test_missing_outcome_column_raises_on_first_row():
+    """An entirely ABSENT outcome column (not a null value) is a schema problem → strict
+    raise with the actual keys, distinct from a present-but-null void marker."""
+    r = _row("m1", 6, 0.5)
+    del r["outcome"]
+    with pytest.raises(ValueError, match="missing an 'outcome' field"):
+        assemble_historical_markets([r], decision_lead=LEAD)
+
+
 def test_millisecond_epoch_timestamps_parse():
     """Millisecond-epoch timestamps (a very common trade-archive format) are auto-detected
     and scaled to seconds rather than overflowing to a silent all-skip."""

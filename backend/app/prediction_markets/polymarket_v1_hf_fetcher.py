@@ -247,9 +247,10 @@ def assemble_historical_markets(
     # certainly a value UNIT/format mismatch the per-field ABSENCE check can't see (e.g.
     # millisecond epochs overflowing _parse_dt, or 0-100 percent prices failing the [0,1]
     # range). Fail LOUD (the "verify schema on first download" promise) instead of silently
-    # returning []. When a category filter is applied it can legitimately empty the set, so
-    # the guard only fires when NO category filter is in play.
-    if seen_any and not by_market and cats is None:
+    # returning []. The category filter does NOT affect by_market (it is applied per-market
+    # LATER in _assemble_one, so a category-filtered-to-empty run still has a populated
+    # by_market) — so this guard correctly fires only on a genuine parse wipeout, filtered or not.
+    if seen_any and not by_market:
         raise ValueError(
             f"parsed {n_rows} Polymarket-v1 rows but 0 were usable — likely a schema "
             f"UNIT/format mismatch (ms epoch timestamps? percent prices? wrong column "
@@ -379,8 +380,25 @@ def _parse_daily_row(raw: dict, spec: HFFieldSpec, *, strict: bool) -> Optional[
     ts_raw = require("timestamp", spec.timestamp)
     price_raw = require("price_yes", spec.price_yes)
     res_raw = require("resolution_time", spec.resolution_time)
-    out_raw = require("outcome", spec.outcome)
-    if mid is None or ts_raw is None or price_raw is None or res_raw is None or out_raw is None:
+    # OUTCOME: the COLUMN must EXIST (a missing column is a schema problem → strict-raise on
+    # the first row, else drop), but a NULL VALUE in a present column is a CONTESTED / void
+    # marker (the natural encoding for a voided market) — NOT an absent field. `pick`
+    # (first_present) cannot tell a null value from an absent column, so we test key
+    # PRESENCE explicitly: a present-but-null outcome is KEPT (out_raw stays None →
+    # _settled_outcome→None) so _assemble_one skips the WHOLE market rather than silently
+    # dropping the void row and assembling an outcome from the clean survivors (the
+    # survivorship-honesty fix), and it never order-dependently crashes the corpus.
+    if not _has_key(raw, spec.outcome):
+        if strict:
+            raise ValueError(
+                f"Polymarket-v1 daily_aligned row is missing an 'outcome' field "
+                f"(tried {spec.outcome}); actual columns: {sorted(raw.keys())}. "
+                f"Update HFFieldSpec.outcome to the real column name."
+            )
+        return None
+    out_raw = pick(spec.outcome)   # may be None — a void/contested market (a valid marker)
+
+    if mid is None or ts_raw is None or price_raw is None or res_raw is None:
         return None
 
     timestamp = _parse_dt(ts_raw)
@@ -394,10 +412,8 @@ def _parse_daily_row(raw: dict, spec: HFFieldSpec, *, strict: bool) -> Optional[
     if not math.isfinite(price) or not (0.0 <= price <= 1.0):
         return None
 
-    # Outcome is PRESENT (out_raw not None). A clean 0/1 → the outcome; a present-but-
-    # AMBIGUOUS value → None, a CONTESTED / schema-mismatch marker. The row is KEPT (not
-    # silently dropped) so _assemble_one skips the WHOLE market rather than assembling an
-    # outcome from only the clean-looking survivors (the survivorship-honesty fix).
+    # A clean 0/1 → the outcome; a present-but-ambiguous OR null value → None, a CONTESTED
+    # marker whose presence skips the whole market in _assemble_one.
     outcome = _settled_outcome(out_raw)
     return HFDailyRow(
         market_id=str(mid),
@@ -421,6 +437,13 @@ def _first_present(d: dict, keys: Sequence[str]) -> Any:
         if v is not None:
             return v
     return None
+
+
+def _has_key(d: dict, keys: Sequence[str]) -> bool:
+    """True if any candidate key EXISTS in the dict, regardless of its value — a present
+    key with a null value counts. Distinguishes a null/void VALUE from an absent COLUMN
+    (``_first_present`` cannot: it skips null values)."""
+    return any(k in d for k in keys)
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -473,7 +496,7 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         # reviewer flagged as a likely first-download surprise).
         if num > 1e11:
             num = num / 1000.0
-        if num > 1_000_000_000:
+        if num >= 1_000_000_000:   # >= so exactly-1e12-ms (→1e9, 2001-09-09) still parses
             try:
                 return datetime.fromtimestamp(num, tz=timezone.utc)
             except (ValueError, OverflowError, OSError):
