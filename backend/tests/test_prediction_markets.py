@@ -145,6 +145,32 @@ class TestKellySizing:
         )
         assert result <= 10.0
 
+    def test_non_finite_inputs_return_zero(self):
+        """Every NaN/inf sizing input must return 0.0 (fail closed). NaN defeats the
+        `x < threshold` pre-filters (NaN comparisons are always False). WITHOUT the guard,
+        3 of these 6 cases LEAK on pre-fix code (verified): confidence=NaN BYPASSES the
+        min-confidence gate and places a real $50 bet; bankroll=NaN returns a NaN-sized
+        order; bankroll=inf returns a max bet. (The edge=NaN / win_probability=NaN / edge=inf
+        cases already returned 0.0 via the market_price/`b>0` guards — pinned here as
+        belt-and-suspenders.) Post-fix ALL six return 0.0."""
+        import math
+
+        from app.prediction_markets.orchestrator import kelly_size, KellyConfig
+        config = KellyConfig()
+        nan, inf = float("nan"), float("inf")
+        cases = [
+            dict(edge=nan, confidence=0.8, win_probability=0.6, bankroll=1000.0),
+            dict(edge=0.1, confidence=nan, win_probability=0.6, bankroll=1000.0),
+            dict(edge=0.1, confidence=0.8, win_probability=nan, bankroll=1000.0),
+            dict(edge=0.1, confidence=0.8, win_probability=0.6, bankroll=nan),
+            dict(edge=inf, confidence=0.8, win_probability=0.6, bankroll=1000.0),
+            dict(edge=0.1, confidence=0.8, win_probability=0.6, bankroll=inf),
+        ]
+        for kwargs in cases:
+            result = kelly_size(config=config, **kwargs)
+            assert result == 0.0, f"expected 0.0, got {result} for {kwargs}"
+            assert math.isfinite(result)
+
     def test_fractional_kelly_reduces_bet(self):
         from app.prediction_markets.orchestrator import kelly_size, KellyConfig
         full = kelly_size(
