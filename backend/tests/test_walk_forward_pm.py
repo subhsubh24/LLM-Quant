@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.prediction_markets.walk_forward import (
+from app.prediction_markets.walk_forward import (
     HistoricalMarket,
     MarketView,
     TradeDecision,
@@ -215,7 +215,7 @@ def test_seed_hash_covers_all_pnl_inputs():
     """The seed_hash must change when ANY input that affects PnL changes — bankroll,
     cost rates, or window sizing — not just the markets+seed (an auditor proved the
     old hash falsely collided across these)."""
-    from backend.app.prediction_markets.cost_model import CostModel
+    from app.prediction_markets.cost_model import CostModel
 
     data = _edge_dataset(60)
     base = walk_forward_backtest(data, seed=42).seed_hash
@@ -291,7 +291,7 @@ def test_seed_hash_covers_impact_coeff():
     Two runs over the SAME liquidity-bearing data + seed but different impact_coeff must
     produce a DIFFERENT seed_hash AND a different PnL — otherwise the hash would certify
     two materially different results as identical (a reproducibility-invariant violation)."""
-    from backend.app.prediction_markets.cost_model import CostModel
+    from app.prediction_markets.cost_model import CostModel
     # liquidity=2000 keeps the impact UNSATURATED (below the 1.0 cap) so changing
     # impact_coeff genuinely moves PnL — at a very thin book both coeffs saturate at the
     # cap and PnL would coincide, hiding the effect.

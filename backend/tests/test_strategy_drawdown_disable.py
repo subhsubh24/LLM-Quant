@@ -12,7 +12,7 @@ receives the real strategy name). These tests pin the fixed behaviour and would 
 the pre-fix code (``trades`` never reaches ``min_trades`` -> never disabled).
 """
 
-from backend.app.prediction_markets.risk_manager import RiskManager, RiskConfig
+from app.prediction_markets.risk_manager import RiskManager, RiskConfig
 
 
 def _drawdown_sequence(rm: RiskManager, strategy: str):

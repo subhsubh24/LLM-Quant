@@ -19,8 +19,8 @@ from datetime import datetime, timezone, timedelta
 import pytest
 from sqlmodel import create_engine
 
-from backend.app.prediction_markets.execution import PredictionMarketExecutor
-from backend.app.prediction_markets.executor_state_store import (
+from app.prediction_markets.execution import PredictionMarketExecutor
+from app.prediction_markets.executor_state_store import (
     ExecutorStateStore,
     PredictionExecutorStateRow,
     init_db,
@@ -168,7 +168,7 @@ def test_rehydrate_failure_fails_closed(engine):
     assert ex.kill_switch_active is True
     assert ex._kill_switch_reason.startswith("state_rehydrate_failed")
     # And the gate honours it: any order is rejected while failed-closed.
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.execution import (
         OrderRequest, OrderSide, OrderType, Exchange,
     )
     res = ex.execute(OrderRequest(
@@ -222,7 +222,7 @@ def test_empty_token_order_is_rejected_no_phantom_fill():
     # Defense-in-depth: an order with an empty token_id has no tradeable token; the gate
     # must REJECT it so _simulate_fill (which fills unconditionally) can't book a phantom
     # empty-key position.
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.execution import (
         OrderRequest, OrderSide, OrderType, Exchange,
     )
     ex = PredictionMarketExecutor(dry_run=True, max_position_usd=1000.0, max_portfolio_usd=10000.0)
@@ -238,7 +238,7 @@ def test_malformed_loss_cap_env_falls_back_loud(monkeypatch, caplog):
     # A malformed MAX_DAILY_LOSS_USD must FAIL LOUD (logged) and fall back to the
     # conservative $25 — never silently swallowed, never loosened.
     import logging
-    import backend.app.config as cfg
+    import app.config as cfg
 
     class _S:
         max_daily_loss_usd = "not-a-number"

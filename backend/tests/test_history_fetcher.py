@@ -16,13 +16,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.prediction_markets.polymarket_history_fetcher import (
+from app.prediction_markets.polymarket_history_fetcher import (
     CLOB_API,
     GAMMA_API,
     PolymarketHistoryFetcher,
     ResolvedMarket,
 )
-from backend.app.prediction_markets.walk_forward import (
+from app.prediction_markets.walk_forward import (
     HistoricalMarket,
     walk_forward_backtest,
 )

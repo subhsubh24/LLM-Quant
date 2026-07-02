@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 
-from backend.app.prediction_markets.websocket_feeds import (
+from app.prediction_markets.websocket_feeds import (
     PolymarketWSFeed,
     _coerce_nonneg,
     _coerce_prob,

@@ -9,7 +9,7 @@ that calls it and raises 422 on any error. The headline safety property: a non-p
 
 import math
 
-from backend.app.prediction_markets.risk_config_validation import (
+from app.prediction_markets.risk_config_validation import (
     validate_risk_config_update,
 )
 

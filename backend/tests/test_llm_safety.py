@@ -14,7 +14,7 @@ import time
 import pytest
 
 # ---- module under test -------------------------------------------------------
-from backend.app.llm.analyst import (
+from app.llm.analyst import (
     QuantAnalyst,
     LLMBudgetExceeded,
     LLM_CALL_TIMEOUT_SEC,
@@ -33,7 +33,7 @@ def _make_analyst(fake_client, cap_usd: float = 20.0) -> QuantAnalyst:
     sharing the lru_cache'd Settings instance across tests.
     """
     from types import SimpleNamespace
-    from backend.app.config import get_settings
+    from app.config import get_settings
 
     real = get_settings()
     settings = SimpleNamespace(
@@ -107,7 +107,7 @@ def test_hanging_call_returns_none_within_timeout(monkeypatch):
     this test.
     """
     TEST_TIMEOUT = 1.0  # seconds — fast for CI
-    monkeypatch.setattr("backend.app.llm.analyst.LLM_CALL_TIMEOUT_SEC", TEST_TIMEOUT)
+    monkeypatch.setattr("app.llm.analyst.LLM_CALL_TIMEOUT_SEC", TEST_TIMEOUT)
 
     analyst = _make_analyst(_HangingClient(delay=60.0))
 

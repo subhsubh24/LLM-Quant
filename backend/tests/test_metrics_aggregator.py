@@ -23,9 +23,9 @@ from datetime import datetime
 
 import pytest
 
-from backend.app.prediction_markets.weekly_metrics import TradePnL
-from backend.app.prediction_markets.calibration import ResolvedPrediction
-from backend.app.prediction_markets.metrics_aggregator import (
+from app.prediction_markets.weekly_metrics import TradePnL
+from app.prediction_markets.calibration import ResolvedPrediction
+from app.prediction_markets.metrics_aggregator import (
     FLOOR_USD,
     compute_weekly_metrics,
     compute_floor_status,

@@ -17,13 +17,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.prediction_markets.kalshi_history_fetcher import (
+from app.prediction_markets.kalshi_history_fetcher import (
     KALSHI_BASE_URL,
     KalshiHistoryFetcher,
     KalshiResolvedMarket,
     _last_pre_decision_price,
 )
-from backend.app.prediction_markets.walk_forward import (
+from app.prediction_markets.walk_forward import (
     HistoricalMarket,
     walk_forward_backtest,
 )
@@ -499,8 +499,8 @@ def test_negative_decision_lead_raises():
 # Import check: HistoricalMarket comes from walk_forward (not redefined)
 # ---------------------------------------------------------------------------
 def test_imports_historical_market_from_walk_forward():
-    from backend.app.prediction_markets import walk_forward as wf
-    from backend.app.prediction_markets import kalshi_history_fetcher as khf
+    from app.prediction_markets import walk_forward as wf
+    from app.prediction_markets import kalshi_history_fetcher as khf
 
     assert khf.HistoricalMarket is wf.HistoricalMarket
 

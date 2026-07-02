@@ -4,7 +4,7 @@ Tests for ROADMAP C5 — prediction_markets/weekly_metrics.py
 All tests are deterministic (no randomness, no I/O, no network).
 
 The module lives in the CI-clean ``prediction_markets`` package (not
-``backend.app.backtest``, whose ``__init__`` pulls heavy ML deps absent from the
+``app.backtest``, whose ``__init__`` pulls heavy ML deps absent from the
 lightweight CI gate), so it imports directly with no shim.
 
 Coverage
@@ -25,7 +25,7 @@ from datetime import date, datetime
 
 import pytest
 
-from backend.app.prediction_markets.weekly_metrics import (
+from app.prediction_markets.weekly_metrics import (
     MetricsSummary,
     TradePnL,
     WeeklyMetrics,

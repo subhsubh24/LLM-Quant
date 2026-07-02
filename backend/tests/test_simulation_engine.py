@@ -19,7 +19,7 @@ from scipy.stats import norm
 class TestMonteCarloEngine:
     def test_gbm_expected_value(self):
         """E[S_T] = S0 * exp(mu*T) for GBM."""
-        from backend.app.simulation.monte_carlo import MonteCarloEngine
+        from app.simulation.monte_carlo import MonteCarloEngine
 
         engine = MonteCarloEngine(seed=42)
         S0, mu, sigma, T = 100.0, 0.08, 0.20, 1.0
@@ -29,7 +29,7 @@ class TestMonteCarloEngine:
         assert abs(result.mean_terminal - expected) < 2.0
 
     def test_gbm_terminal_shape(self):
-        from backend.app.simulation.monte_carlo import MonteCarloEngine
+        from app.simulation.monte_carlo import MonteCarloEngine
 
         engine = MonteCarloEngine(seed=42)
         result = engine.simulate_gbm(100, 0.05, 0.2, 1.0, n_steps=10, n_paths=1_000)
@@ -39,7 +39,7 @@ class TestMonteCarloEngine:
 
     def test_jump_diffusion_heavier_tails(self):
         """Jump-diffusion should have heavier tails than GBM."""
-        from backend.app.simulation.monte_carlo import MonteCarloEngine
+        from app.simulation.monte_carlo import MonteCarloEngine
 
         engine = MonteCarloEngine(seed=42)
         gbm = engine.simulate_gbm(100, 0.08, 0.20, 1.0, n_steps=50, n_paths=10_000)
@@ -56,7 +56,7 @@ class TestMonteCarloEngine:
 
     def test_ou_mean_reversion(self):
         """OU process terminal mean should be close to long-run mean."""
-        from backend.app.simulation.monte_carlo import MonteCarloEngine
+        from app.simulation.monte_carlo import MonteCarloEngine
 
         engine = MonteCarloEngine(seed=42)
         result = engine.simulate_ou(
@@ -67,7 +67,7 @@ class TestMonteCarloEngine:
 
     def test_binary_pricer_atm(self):
         """ATM binary option P(S_T > K) ~ 0.5 for zero drift."""
-        from backend.app.simulation.monte_carlo import BinaryContractPricer
+        from app.simulation.monte_carlo import BinaryContractPricer
 
         pricer = BinaryContractPricer()
         result = pricer.price_asset_binary(
@@ -77,7 +77,7 @@ class TestMonteCarloEngine:
         assert result.std_error < 0.01
 
     def test_binary_pricer_prediction_market(self):
-        from backend.app.simulation.monte_carlo import BinaryContractPricer
+        from app.simulation.monte_carlo import BinaryContractPricer
 
         pricer = BinaryContractPricer()
         result = pricer.price_prediction_market_binary(
@@ -87,7 +87,7 @@ class TestMonteCarloEngine:
         assert result.ci_95[0] < result.probability < result.ci_95[1]
 
     def test_multi_asset_correlation_preserved(self):
-        from backend.app.simulation.monte_carlo import MultiAssetSimulator
+        from app.simulation.monte_carlo import MultiAssetSimulator
 
         sim = MultiAssetSimulator(seed=42)
         result = sim.simulate_correlated_gbm(
@@ -99,7 +99,7 @@ class TestMonteCarloEngine:
         assert abs(realized[0][1] - 0.7) < 0.1
 
     def test_portfolio_var_is_loss(self):
-        from backend.app.simulation.monte_carlo import MultiAssetSimulator
+        from app.simulation.monte_carlo import MultiAssetSimulator
 
         sim = MultiAssetSimulator(seed=42)
         result = sim.simulate_portfolio_value(
@@ -118,7 +118,7 @@ class TestMonteCarloEngine:
 
 class TestImportanceSampling:
     def test_exponential_tilter_matches_analytical(self):
-        from backend.app.simulation.importance_sampling import ExponentialTilter
+        from app.simulation.importance_sampling import ExponentialTilter
 
         tilter = ExponentialTilter(seed=42)
         result = tilter.estimate_tail_probability(
@@ -128,7 +128,7 @@ class TestImportanceSampling:
         assert abs(result.estimate - analytical) < 3 * result.std_error
 
     def test_is_reduces_variance(self):
-        from backend.app.simulation.importance_sampling import ExponentialTilter
+        from app.simulation.importance_sampling import ExponentialTilter
 
         tilter = ExponentialTilter(seed=42)
         result = tilter.estimate_tail_probability(
@@ -137,7 +137,7 @@ class TestImportanceSampling:
         assert result.variance_reduction > 1.0
 
     def test_crash_probability(self):
-        from backend.app.simulation.importance_sampling import ExponentialTilter
+        from app.simulation.importance_sampling import ExponentialTilter
 
         tilter = ExponentialTilter(seed=42)
         result = tilter.estimate_crash_probability(
@@ -147,7 +147,7 @@ class TestImportanceSampling:
         assert result.std_error < result.estimate
 
     def test_rare_event_prediction_market_tail(self):
-        from backend.app.simulation.importance_sampling import RareEventEstimator
+        from app.simulation.importance_sampling import RareEventEstimator
 
         estimator = RareEventEstimator(seed=42)
         result = estimator.estimate_prediction_market_tail(
@@ -157,7 +157,7 @@ class TestImportanceSampling:
         assert result.std_error > 0
 
     def test_joint_tail(self):
-        from backend.app.simulation.importance_sampling import RareEventEstimator
+        from app.simulation.importance_sampling import RareEventEstimator
 
         estimator = RareEventEstimator(seed=42)
         result = estimator.estimate_joint_tail(
@@ -177,7 +177,7 @@ class TestImportanceSampling:
 
 class TestVarianceReduction:
     def test_antithetic_binary(self):
-        from backend.app.simulation.variance_reduction import AntitheticEngine
+        from app.simulation.variance_reduction import AntitheticEngine
 
         engine = AntitheticEngine(seed=42)
         result = engine.estimate_binary(
@@ -188,14 +188,14 @@ class TestVarianceReduction:
         assert abs(result.estimate - analytical) < 2 * result.std_error + 0.02
 
     def test_antithetic_reduces_variance(self):
-        from backend.app.simulation.variance_reduction import AntitheticEngine
+        from app.simulation.variance_reduction import AntitheticEngine
 
         engine = AntitheticEngine(seed=42)
         result = engine.estimate_binary(S0=100, K=100, mu=0.0, sigma=0.2, T=1.0)
         assert result.variance_reduction > 0.8
 
     def test_stratified_binary(self):
-        from backend.app.simulation.variance_reduction import StratifiedEngine
+        from app.simulation.variance_reduction import StratifiedEngine
 
         engine = StratifiedEngine(seed=42)
         result = engine.estimate_binary(
@@ -206,7 +206,7 @@ class TestVarianceReduction:
         assert result.std_error < 0.2
 
     def test_stacked_vr(self):
-        from backend.app.simulation.variance_reduction import StackedVarianceReduction
+        from app.simulation.variance_reduction import StackedVarianceReduction
 
         engine = StackedVarianceReduction(seed=42)
         result = engine.estimate_binary(
@@ -217,7 +217,7 @@ class TestVarianceReduction:
         assert result.std_error < 0.05
 
     def test_control_variate(self):
-        from backend.app.simulation.variance_reduction import ControlVariateEngine
+        from app.simulation.variance_reduction import ControlVariateEngine
 
         engine = ControlVariateEngine(seed=42)
         result = engine.estimate_binary_with_bs_control(
@@ -234,7 +234,7 @@ class TestVarianceReduction:
 
 class TestParticleFilters:
     def test_prediction_market_filter_converges(self):
-        from backend.app.simulation.particle_filter import PredictionMarketFilter
+        from app.simulation.particle_filter import PredictionMarketFilter
 
         pf = PredictionMarketFilter(
             n_particles=3000, prior_prob=0.50, process_vol=0.02,
@@ -249,7 +249,7 @@ class TestParticleFilters:
         assert abs(est - 0.65) < 0.08
 
     def test_multi_contract_filter(self):
-        from backend.app.simulation.particle_filter import MultiContractFilter
+        from app.simulation.particle_filter import MultiContractFilter
 
         mcf = MultiContractFilter(
             n_contracts=3, prior_probs=[0.5, 0.5, 0.5],
@@ -262,7 +262,7 @@ class TestParticleFilters:
         assert len(probs) == 3
 
     def test_multi_contract_sweep(self):
-        from backend.app.simulation.particle_filter import MultiContractFilter
+        from app.simulation.particle_filter import MultiContractFilter
 
         mcf = MultiContractFilter(
             n_contracts=2, prior_probs=[0.6, 0.6],
@@ -272,7 +272,7 @@ class TestParticleFilters:
         assert 0.0 < sweep < 1.0
 
     def test_trading_regime_filter(self):
-        from backend.app.simulation.particle_filter import TradingRegimeFilter
+        from app.simulation.particle_filter import TradingRegimeFilter
 
         rf = TradingRegimeFilter(n_particles=3000, seed=42)
         for _ in range(30):
@@ -291,7 +291,7 @@ class TestParticleFilters:
 
 class TestVineCopulas:
     def test_pair_copula_fit(self):
-        from backend.app.simulation.vine_copula import PairCopula
+        from app.simulation.vine_copula import PairCopula
 
         rng = np.random.default_rng(42)
         n = 500
@@ -305,7 +305,7 @@ class TestVineCopulas:
         assert abs(fit.tau) < 1.0
 
     def test_cvine_samples_uniform_marginals(self):
-        from backend.app.simulation.vine_copula import CVine
+        from app.simulation.vine_copula import CVine
 
         rng = np.random.default_rng(42)
         d = 3
@@ -322,7 +322,7 @@ class TestVineCopulas:
             assert 0.3 < samples[:, j].mean() < 0.7
 
     def test_correlated_simulator_sweep(self):
-        from backend.app.simulation.vine_copula import CorrelatedContractSimulator
+        from app.simulation.vine_copula import CorrelatedContractSimulator
 
         sim = CorrelatedContractSimulator(seed=42)
         corr = np.array([[1.0, 0.6], [0.6, 1.0]])
@@ -342,7 +342,7 @@ class TestVineCopulas:
 
 class TestAgentBasedModels:
     def test_market_price_converges(self):
-        from backend.app.simulation.agent_based import AgentBasedMarket
+        from app.simulation.agent_based import AgentBasedMarket
 
         market = AgentBasedMarket(initial_price=0.50, true_value=0.70, seed=42)
         market.add_informed_traders(10)
@@ -354,7 +354,7 @@ class TestAgentBasedModels:
         assert abs(summary["final_price"] - 0.70) < abs(0.50 - 0.70)
 
     def test_prediction_market_abm_brier(self):
-        from backend.app.simulation.agent_based import PredictionMarketABM
+        from app.simulation.agent_based import PredictionMarketABM
 
         pm = PredictionMarketABM(
             initial_price=0.50, true_prob=0.65,
@@ -364,7 +364,7 @@ class TestAgentBasedModels:
         assert 0 < pm.brier_score() < 0.5
 
     def test_prediction_market_info_efficiency(self):
-        from backend.app.simulation.agent_based import PredictionMarketABM
+        from app.simulation.agent_based import PredictionMarketABM
 
         pm = PredictionMarketABM(
             initial_price=0.50, true_prob=0.70,
@@ -374,7 +374,7 @@ class TestAgentBasedModels:
         assert pm.information_efficiency() > 0.0
 
     def test_trading_abm_tracks_fundamental(self):
-        from backend.app.simulation.agent_based import TradingABM
+        from app.simulation.agent_based import TradingABM
 
         abm = TradingABM(
             initial_price=100.0, fundamental_vol=0.01,
@@ -390,7 +390,7 @@ class TestAgentBasedModels:
 
 class TestSimulationIntegration:
     def test_enhanced_pricer_tail_uses_is(self):
-        from backend.app.prediction_markets.simulation_integration import EnhancedContractPricer
+        from app.prediction_markets.simulation_integration import EnhancedContractPricer
 
         pricer = EnhancedContractPricer(seed=42)
         result = pricer.price_contract(
@@ -400,7 +400,7 @@ class TestSimulationIntegration:
         assert 0 < result["probability"] < 0.5
 
     def test_enhanced_pricer_standard_uses_vr(self):
-        from backend.app.prediction_markets.simulation_integration import EnhancedContractPricer
+        from app.prediction_markets.simulation_integration import EnhancedContractPricer
 
         pricer = EnhancedContractPricer(seed=42)
         result = pricer.price_contract(
@@ -410,7 +410,7 @@ class TestSimulationIntegration:
         assert 0.2 < result["probability"] < 0.8
 
     def test_live_tracker_estimate_within_ci(self):
-        from backend.app.prediction_markets.simulation_integration import LiveProbabilityTracker
+        from app.prediction_markets.simulation_integration import LiveProbabilityTracker
 
         tracker = LiveProbabilityTracker(prior_prob=0.50, seed=42)
         for price in [0.52, 0.54, 0.56, 0.58, 0.60]:
@@ -421,7 +421,7 @@ class TestSimulationIntegration:
         assert ci[0] <= est <= ci[1]
 
     def test_correlated_portfolio_var(self):
-        from backend.app.prediction_markets.simulation_integration import CorrelatedPortfolioAnalyzer
+        from app.prediction_markets.simulation_integration import CorrelatedPortfolioAnalyzer
 
         analyzer = CorrelatedPortfolioAnalyzer(seed=42)
         corr = np.array([[1.0, 0.5], [0.5, 1.0]])
@@ -435,7 +435,7 @@ class TestSimulationIntegration:
         assert var_result["cvar"] <= var_result["var"]
 
     def test_microstructure_simulator(self):
-        from backend.app.prediction_markets.simulation_integration import MarketMicrostructureSimulator
+        from app.prediction_markets.simulation_integration import MarketMicrostructureSimulator
 
         sim = MarketMicrostructureSimulator(seed=42)
         result = sim.simulate_price_discovery(
@@ -445,7 +445,7 @@ class TestSimulationIntegration:
         assert "information_efficiency" in result
 
     def test_crash_contract_pricing(self):
-        from backend.app.prediction_markets.simulation_integration import EnhancedContractPricer
+        from app.prediction_markets.simulation_integration import EnhancedContractPricer
 
         pricer = EnhancedContractPricer(seed=42)
         result = pricer.price_crash_contract(
@@ -463,7 +463,7 @@ class TestSimulationIntegration:
 class TestHierarchicalBayesian:
     def test_shrinkage_toward_mean(self):
         """Extreme markets should be shrunk toward the group mean."""
-        from backend.app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
+        from app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
 
         model = HierarchicalBayesianModel(seed=42)
         # One outlier at 0.90, rest around 0.55
@@ -477,7 +477,7 @@ class TestHierarchicalBayesian:
             assert abs(result.group_estimates[i] - probs[i]) < 0.15
 
     def test_ci_contains_estimate(self):
-        from backend.app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
+        from app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
 
         model = HierarchicalBayesianModel(seed=42)
         probs = np.array([0.50, 0.55, 0.60, 0.45])
@@ -487,7 +487,7 @@ class TestHierarchicalBayesian:
             assert result.group_ci_lower[i] <= result.group_estimates[i] <= result.group_ci_upper[i]
 
     def test_acceptance_rate_reasonable(self):
-        from backend.app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
+        from app.simulation.hierarchical_bayesian import HierarchicalBayesianModel
 
         model = HierarchicalBayesianModel(seed=42)
         probs = np.array([0.50, 0.55, 0.60, 0.45, 0.52])
@@ -498,7 +498,7 @@ class TestHierarchicalBayesian:
 
     def test_swing_model_detects_shift(self):
         """If observed prices all shift up, swing should be positive."""
-        from backend.app.simulation.hierarchical_bayesian import NationalSwingModel
+        from app.simulation.hierarchical_bayesian import NationalSwingModel
 
         model = NationalSwingModel(seed=42)
         base = np.array([0.50, 0.45, 0.55, 0.40, 0.60])
@@ -511,7 +511,7 @@ class TestHierarchicalBayesian:
             assert result.adjusted_probs[i] > base[i]
 
     def test_category_pooling(self):
-        from backend.app.simulation.hierarchical_bayesian import CategoryPoolingModel
+        from app.simulation.hierarchical_bayesian import CategoryPoolingModel
 
         pooler = CategoryPoolingModel(seed=42)
         result = pooler.pool_probabilities(
@@ -530,7 +530,7 @@ class TestHierarchicalBayesian:
 class TestCorrelationStress:
     def test_uniform_stress_increases_var(self):
         """High uniform correlation should increase VaR (worse risk)."""
-        from backend.app.simulation.correlation_stress import CorrelationStressTester
+        from app.simulation.correlation_stress import CorrelationStressTester
 
         tester = CorrelationStressTester(seed=42)
         d = 4
@@ -548,7 +548,7 @@ class TestCorrelationStress:
         assert result.stressed_var <= result.base_var + 1.0
 
     def test_contagion_propagates_shock(self):
-        from backend.app.simulation.correlation_stress import CorrelationStressTester
+        from app.simulation.correlation_stress import CorrelationStressTester
 
         tester = CorrelationStressTester(seed=42)
         d = 3
@@ -568,7 +568,7 @@ class TestCorrelationStress:
         assert result.portfolio_impact < 0  # Negative shock -> negative impact
 
     def test_full_stress_report(self):
-        from backend.app.simulation.correlation_stress import CorrelationStressTester
+        from app.simulation.correlation_stress import CorrelationStressTester
 
         tester = CorrelationStressTester(seed=42)
         d = 3
@@ -585,7 +585,7 @@ class TestCorrelationStress:
         assert len(report.recommendation) > 0
 
     def test_block_correlation(self):
-        from backend.app.simulation.correlation_stress import CorrelationStressTester
+        from app.simulation.correlation_stress import CorrelationStressTester
 
         tester = CorrelationStressTester(seed=42)
         d = 4
@@ -605,7 +605,7 @@ class TestCorrelationStress:
         assert result.correlation_matrix.shape == (4, 4)
 
     def test_nearest_psd(self):
-        from backend.app.simulation.correlation_stress import _nearest_positive_semidefinite
+        from app.simulation.correlation_stress import _nearest_positive_semidefinite
 
         # Create an invalid correlation matrix
         bad = np.array([[1.0, 0.9, 0.9],
@@ -626,7 +626,7 @@ class TestCorrelationStress:
 
 class TestNewIntegration:
     def test_cross_market_pooler(self):
-        from backend.app.prediction_markets.simulation_integration import CrossMarketPooler
+        from app.prediction_markets.simulation_integration import CrossMarketPooler
 
         pooler = CrossMarketPooler(seed=42)
         result = pooler.pool_category(
@@ -638,7 +638,7 @@ class TestNewIntegration:
             assert "shrinkage" in v
 
     def test_portfolio_stress_tester(self):
-        from backend.app.prediction_markets.simulation_integration import PortfolioStressTester
+        from app.prediction_markets.simulation_integration import PortfolioStressTester
 
         tester = PortfolioStressTester(seed=42)
         result = tester.run_stress_test(
@@ -652,7 +652,7 @@ class TestNewIntegration:
         assert result["n_scenarios"] == 4
 
     def test_contagion_check(self):
-        from backend.app.prediction_markets.simulation_integration import PortfolioStressTester
+        from app.prediction_markets.simulation_integration import PortfolioStressTester
 
         tester = PortfolioStressTester(seed=42)
         d = 3

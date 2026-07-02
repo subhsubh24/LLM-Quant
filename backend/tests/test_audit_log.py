@@ -10,12 +10,12 @@ are best-effort (a DB failure never raises into the caller).
 import pytest
 from sqlmodel import create_engine
 
-from backend.app.prediction_markets.audit_log import (
+from app.prediction_markets.audit_log import (
     AuditLogger,
     PredictionAuditLog,
     init_db,
 )
-from backend.app.prediction_markets.execution import (
+from app.prediction_markets.execution import (
     Exchange,
     OrderResult,
     OrderSide,

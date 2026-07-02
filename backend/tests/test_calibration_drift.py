@@ -14,7 +14,7 @@ import random
 
 import pytest
 
-from backend.app.prediction_markets.calibration_drift import (
+from app.prediction_markets.calibration_drift import (
     CalibrationBaseline,
     DriftResult,
     DriftSeverity,
