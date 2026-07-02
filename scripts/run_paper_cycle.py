@@ -81,15 +81,23 @@ async def _run() -> dict:
 
     # 1) FORWARD: scan real open markets, decide, paper-execute (cost-aware, no venue call).
     scan = await orch.scan_and_execute()
-    # 2) SETTLE: book realized PnL on any paper positions whose markets have resolved.
-    resolved = orch.check_resolutions()
+    # 2) SETTLE: refresh live prices + book realized PnL on resolved paper positions. Mirror
+    #    the orchestrator's own _mtm_loop — the resolution logic lives on mtm_engine, not orch.
+    settled = None
+    mtm = getattr(orch, "mtm_engine", None)
+    if mtm is not None:
+        try:
+            mtm.update_prices()
+            settled = mtm.check_resolutions()
+        except Exception as e:  # settlement is best-effort; a scan already happened
+            settled = f"resolution check failed (non-fatal): {type(e).__name__}: {e}"
 
     return {
         "mode": "paper",
         "live_trading_enabled": bool(getattr(settings, "live_trading_enabled", False)),
         "dry_run": bool(getattr(orch.executor, "dry_run", True)),
         "scan": scan,
-        "resolutions": resolved,
+        "resolutions": settled,
         "total_scans": getattr(orch, "total_scans", None),
     }
 
