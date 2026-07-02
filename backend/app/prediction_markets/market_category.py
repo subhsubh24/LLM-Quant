@@ -87,7 +87,7 @@ _CANONICAL_ALIASES = {
 # checked before the broad "Sports" verbs (win/game/match) that would otherwise swallow
 # e.g. "win the presidential election". Each entry is (bucket, keywords). Keywords are
 # matched as whitespace-delimited substrings against a space-padded, lower-cased text so
-# that "btc" does not match inside "arbtc" — see `_contains_token`.
+# that "btc" does not match inside "arbtc" — see `_normalize` + `_match_keyword_rules`.
 _KEYWORD_RULES = [
     (CATEGORY_CRYPTO, [
         "bitcoin", "btc", "ethereum", "eth", "crypto", "solana", "sol", "dogecoin",
