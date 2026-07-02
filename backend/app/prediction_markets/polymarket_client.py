@@ -670,7 +670,15 @@ class PolymarketClient:
             except (ValueError, TypeError):
                 outcome_labels = outcome_labels.split(",")
 
-        outcome_prices = raw.get("outcomePrices", "0.5,0.5")
+        # A genuinely MISSING outcomePrices field must NOT be fabricated as "0.5,0.5"
+        # (an in-range 50/50 that passes DataQualityValidator — the data analog of a
+        # fake fill; the honesty guard below only caught a length-mismatch / bad VALUE,
+        # not an absent field defaulted to a plausible price). Absent -> empty list ->
+        # length mismatch -> parse_incomplete -> active=False, mirroring the label/token
+        # handling. See the honesty comment below + RESEARCH_MEMORY 2026-06-30/07-02.
+        outcome_prices = raw.get("outcomePrices")
+        if outcome_prices is None:
+            outcome_prices = []
         if isinstance(outcome_prices, str):
             try:
                 parsed = _json.loads(outcome_prices)

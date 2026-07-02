@@ -188,3 +188,29 @@ def test_get_market_by_id_queries_the_id_filter_not_slug():
     seen.clear()
     assert c.get_market_by_id("") is None
     assert "params" not in seen
+
+
+# ---------------------------------------------------------------------------
+# A genuinely MISSING outcomePrices field must NOT be fabricated as 50/50
+# ---------------------------------------------------------------------------
+def test_missing_outcomePrices_field_marks_untradeable_no_fabrication():
+    # outcomes + clobTokenIds are present + consistent (2 each), but the
+    # ``outcomePrices`` KEY is entirely ABSENT (Gamma schema drift / a partial row).
+    # PRE-FIX: raw.get("outcomePrices", "0.5,0.5") fabricated [0.5, 0.5] -> length
+    # matches labels -> parse_incomplete stayed False -> active=True with invented
+    # 50/50 prices that pass DataQualityValidator (the data analog of a fake fill).
+    # POST-FIX: absent -> [] -> length mismatch -> untradeable.
+    raw = _base_raw()
+    del raw["outcomePrices"]
+    m = _client()._parse_market(raw)
+    assert m.active is False
+    # no outcome carries a fabricated 0.5 as a real (tradeable) price
+    assert all(o.price != 0.5 for o in m.outcomes)
+
+
+def test_present_outcomePrices_still_parsed_normally():
+    # Control: when the field IS present the happy path is unchanged (guards against
+    # the fix over-reaching and breaking well-formed markets).
+    m = _client()._parse_market(_base_raw())
+    assert m.active is True
+    assert [round(o.price, 6) for o in m.outcomes] == [0.62, 0.38]
