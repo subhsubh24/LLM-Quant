@@ -38,8 +38,16 @@ def _normalize_url(url: str) -> str:
     return url
 
 
+_DEFAULT_SQLITE_URL = "sqlite:///./quantlab.db"
+
+
 def _make_engine(url: str):
     """Create a dialect-aware engine."""
+    # An empty / whitespace DATABASE_URL (e.g. an unset CI secret interpolates to "") must
+    # NOT crash boot with a SQLAlchemy parse error — fall back to the local SQLite default.
+    if not (url or "").strip():
+        logger.info("DATABASE_URL empty/unset — falling back to local SQLite default")
+        url = _DEFAULT_SQLITE_URL
     url = _normalize_url(url)
 
     if url.startswith("postgresql"):

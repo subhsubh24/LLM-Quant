@@ -32,6 +32,15 @@ def test_paper_cycle_allows_paper_mode():
     assert rpc.assert_paper_safe(paper) is None  # no raise
 
 
+def test_empty_database_url_falls_back_to_sqlite():
+    """An unset CI secret interpolates DATABASE_URL='' — the engine must fall back to the
+    local SQLite default, never crash boot with a SQLAlchemy parse error (live-tier regression)."""
+    from backend.app.db.database import _make_engine
+    for bad in ("", "   ", None):
+        eng = _make_engine(bad)  # type: ignore[arg-type]
+        assert eng.url.get_backend_name() == "sqlite"
+
+
 # --- live smoke: honest exit classification ---
 
 def test_smoke_fail_only_on_code_failure(monkeypatch):
