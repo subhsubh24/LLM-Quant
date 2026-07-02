@@ -659,7 +659,14 @@ class PolymarketClient:
 
         # Parse outcomes from parallel arrays
         # Gamma API returns these as JSON-encoded strings: '["Yes","No"]' or CSV: "Yes,No"
-        outcome_labels = raw.get("outcomes", "Yes,No")
+        # A genuinely MISSING outcomes field must NOT be fabricated as "Yes,No" either: a
+        # non-Yes/No market (e.g. "Republican"/"Democrat") that dropped the outcomes key
+        # would otherwise go ACTIVE with real prices/tokens but INVENTED labels, which can
+        # misassign trade direction/semantics for a label-parsing strategy. Absent -> []
+        # -> length mismatch (or the <2-outcomes guard) -> parse_incomplete -> active=False.
+        outcome_labels = raw.get("outcomes")
+        if outcome_labels is None:
+            outcome_labels = []
         if isinstance(outcome_labels, str):
             try:
                 parsed = _json.loads(outcome_labels)
@@ -670,7 +677,15 @@ class PolymarketClient:
             except (ValueError, TypeError):
                 outcome_labels = outcome_labels.split(",")
 
-        outcome_prices = raw.get("outcomePrices", "0.5,0.5")
+        # A genuinely MISSING outcomePrices field must NOT be fabricated as "0.5,0.5"
+        # (an in-range 50/50 that passes DataQualityValidator — the data analog of a
+        # fake fill; the honesty guard below only caught a length-mismatch / bad VALUE,
+        # not an absent field defaulted to a plausible price). Absent -> empty list ->
+        # length mismatch -> parse_incomplete -> active=False, mirroring the label/token
+        # handling. See the honesty comment below + RESEARCH_MEMORY 2026-06-30/07-02.
+        outcome_prices = raw.get("outcomePrices")
+        if outcome_prices is None:
+            outcome_prices = []
         if isinstance(outcome_prices, str):
             try:
                 parsed = _json.loads(outcome_prices)
@@ -705,6 +720,11 @@ class PolymarketClient:
         # invented data and the discrepancy surfaces on the first real fetch.
         n_labels = len(outcome_labels)
         parse_incomplete = (len(token_ids) != n_labels) or (len(outcome_prices) != n_labels)
+        # A prediction market needs >= 2 outcomes; 0 or 1 (e.g. every array absent, so all
+        # length 0 and the mismatch check above passes vacuously) is degenerate/incomplete
+        # and must never be emitted as a tradeable active market.
+        if n_labels < 2:
+            parse_incomplete = True
         outcomes = []
         for i, label in enumerate(outcome_labels):
             tok = token_ids[i] if i < len(token_ids) else ""
