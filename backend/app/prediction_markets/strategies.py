@@ -184,7 +184,6 @@ class WeatherArbitrageStrategy(BaseStrategy):
 
     def _parse_temp_range(self, label: str) -> Optional[tuple]:
         """Parse temperature range from outcome label like '40-45°F'."""
-        import re
         match = re.search(r'(\d+)\s*[-–]\s*(\d+)', label)
         if match:
             return (float(match.group(1)), float(match.group(2)))
