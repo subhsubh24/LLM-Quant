@@ -30,8 +30,6 @@ services:
         value: "true"
       - key: DEBUG
         value: "false"
-      - key: AUTO_CONNECT_BROKERS
-        value: "false"
       # --- Secrets / per-deploy (set these in the Render dashboard) ---
       - key: DATABASE_URL       # Supabase session-pooler string (port 5432)
         sync: false

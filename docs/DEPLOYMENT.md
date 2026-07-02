@@ -105,7 +105,6 @@ Railway → **New Project → Deploy from repo**. In the service settings set
 | `CORS_ALLOW_ORIGINS` | your Vercel origin, e.g. `https://llm-quant.vercel.app` (exact: scheme+host, no trailing slash; set after §3) |
 | `LIVE_TRADING_ENABLED` | leave **`false`** (owner-only; never enable at deploy) |
 | `DEMO_MODE` | `true` |
-| `AUTO_CONNECT_BROKERS` | `false` |
 | `GEMINI_API_KEY` | optional (LLM features); `GEMINI_MODEL` optional override (default `gemini-2.5-flash`) |
 | `FRED_API_KEY` | optional (market data) |
 | `ALPACA_*` / `BINANCE_*` | optional (paper defaults) |
@@ -149,7 +148,7 @@ RLS lockdown does not apply.)
 ## 5. Verify
 
 - Visit `https://your-app.vercel.app` → you should hit the **password screen**.
-- Log in → Dashboard / Predictions / Bot load with live data (the sidebar API dot
+- Log in → the **Predictions** panel loads with live data (the sidebar API dot
   turns green).
 - Backend health: `https://your-backend/health` → `{"status":"healthy"}`.
 - "API offline" on pages → check `NEXT_PUBLIC_API_URL` is correct and
