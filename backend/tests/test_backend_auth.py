@@ -18,7 +18,7 @@ Deterministic, no network, no fastapi.
 
 import pytest
 
-import backend.app.auth_core as auth_core
+import app.auth_core as auth_core
 
 
 def test_unset_token_allows_everything():
@@ -49,14 +49,14 @@ def test_configured_token_reads_settings(monkeypatch):
     class _S:
         backend_api_token = "from-settings"
 
-    # configured_token imports get_settings lazily from backend.app.config; patch there.
-    import backend.app.config as cfg
+    # configured_token imports get_settings lazily from app.config; patch there.
+    import app.config as cfg
     monkeypatch.setattr(cfg, "get_settings", lambda: _S())
     assert auth_core.configured_token() == "from-settings"
 
 
 def test_configured_token_degrades_on_settings_error(monkeypatch):
-    import backend.app.config as cfg
+    import app.config as cfg
 
     def _boom():
         raise RuntimeError("no settings")

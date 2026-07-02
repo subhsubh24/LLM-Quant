@@ -18,7 +18,7 @@ is stubbed so the test exercises ONLY the response-validation logic.
 
 import pytest
 
-from backend.app.prediction_markets.execution import (
+from app.prediction_markets.execution import (
     PolymarketExecutor,
     OrderRequest,
     OrderStatus,

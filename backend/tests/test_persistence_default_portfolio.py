@@ -15,7 +15,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 # Import via `app.*` (conftest puts backend/ on sys.path) — the convention the rest of the
 # prediction-market gate tests use. Importing the table models via a SECOND path
-# (backend.app.*) double-registers them on the shared SQLModel.metadata -> "Table already
+# (app.*) double-registers them on the shared SQLModel.metadata -> "Table already
 # defined" in the full suite. Match the convention to stay collision-free.
 from app.prediction_markets import models as m
 from app.prediction_markets.persistence import _ensure_default_portfolio, DEFAULT_PORTFOLIO_ID

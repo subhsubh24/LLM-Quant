@@ -13,9 +13,9 @@ strategies must stay OUT of the default scan unless the owner explicitly opts in
 These tests are pure (no network, no fastapi) so they run in the blocking preflight gate.
 """
 
-from backend.app.config import get_settings
-from backend.app.prediction_markets import orchestrator, whale_feed
-from backend.app.prediction_markets.whale_feed import WhaleDataFeed
+from app.config import get_settings
+from app.prediction_markets import orchestrator, whale_feed
+from app.prediction_markets.whale_feed import WhaleDataFeed
 
 
 # --- The fabricated seed is gone ---------------------------------------------
@@ -90,13 +90,13 @@ def test_flag_enables_unvalidated_strategies(monkeypatch):
 def test_default_flag_is_off():
     """Ship-safe default: the flag is off unless the owner sets it."""
     # A fresh Settings() (no env override) must default to off.
-    from backend.app.config import Settings
+    from app.config import Settings
     assert Settings().enable_unvalidated_strategies is False
 
 
 # NOTE: the API scanner (`routes._get_prediction_scanner`) gates identically via the same
-# `get_settings().enable_unvalidated_strategies` flag. It is NOT asserted here because
-# importing `backend.app.api.routes` inside the shared preflight test process triggers the
-# pre-existing `app.*` vs `backend.app.*` dual-import table-registration conflict (a known,
-# separately-tracked repo fragility — see docs/loop-memory.md). The gating logic in
-# routes.py mirrors the orchestrator path proven above.
+# `get_settings().enable_unvalidated_strategies` flag. It is NOT asserted here — importing
+# `app.api.routes` pulls in fastapi (absent in the lightweight CI gate), so this file stays
+# dependency-light and proves the orchestrator path. (It historically also tripped the
+# `app.*` vs `backend.app.*` dual-import table-registration conflict, now resolved by
+# standardizing every test on `app.*`.) The gating logic in routes.py mirrors the path above.

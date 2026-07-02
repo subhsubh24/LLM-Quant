@@ -8,7 +8,7 @@ the order boundary, not merely declared in config. Deterministic; no heavy deps.
 
 import pytest
 
-from backend.app.prediction_markets.execution import (
+from app.prediction_markets.execution import (
     PredictionMarketExecutor,
     OrderRequest,
     OrderStatus,
@@ -108,8 +108,8 @@ def test_resolution_loss_feeds_cap_and_auto_trips():
     switch — otherwise the dominant loss path bypasses the cap entirely (the exact
     hole an adversarial auditor found). Regression test for that fix.
     """
-    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
-    from backend.app.prediction_markets import polymarket_client as pmc
+    from app.prediction_markets.orchestrator import MarkToMarketEngine
+    from app.prediction_markets import polymarket_client as pmc
 
     ex = _executor(total_cap=10.0)
     ex.execute(_order("BUY", 100, 0.50))            # open long 100 @ 0.50

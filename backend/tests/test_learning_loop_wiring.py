@@ -16,11 +16,11 @@ Deterministic; no network. Uses in-memory SQLite for persistence.
 import pytest
 from datetime import datetime, timezone
 
-from backend.app.prediction_markets.per_strategy_metrics import StrategyTradePnL
-from backend.app.prediction_markets.metrics_aggregator import (
+from app.prediction_markets.per_strategy_metrics import StrategyTradePnL
+from app.prediction_markets.metrics_aggregator import (
     compute_per_strategy_metrics,
 )
-from backend.app.prediction_markets.strategy_registry import (
+from app.prediction_markets.strategy_registry import (
     StrategyRegistry,
     LifecycleState,
     Evidence,
@@ -90,7 +90,7 @@ def test_per_strategy_metrics_deterministic():
 
 def _mem_store():
     from sqlmodel import create_engine
-    from backend.app.prediction_markets.strategy_registry_store import (
+    from app.prediction_markets.strategy_registry_store import (
         StrategyRegistryStore,
         init_db,
     )
@@ -136,8 +136,8 @@ def test_registry_store_save_overwrites_singleton():
 
 def _orchestrator():
     # scanner=None → no deployed strategies seeded; executor dry-run paper.
-    from backend.app.prediction_markets.orchestrator import PredictionMarketOrchestrator
-    from backend.app.prediction_markets.execution import get_executor
+    from app.prediction_markets.orchestrator import PredictionMarketOrchestrator
+    from app.prediction_markets.execution import get_executor
     return PredictionMarketOrchestrator(
         scanner=None, executor=get_executor(dry_run=True)
     )
@@ -191,8 +191,8 @@ def test_orchestrator_illegal_jump_rejected():
 
 def test_orchestrator_seeds_deployed_strategies_as_proposed():
     # A scanner with named strategies → each seeded PROPOSED (honest: no evidence yet).
-    from backend.app.prediction_markets.orchestrator import PredictionMarketOrchestrator
-    from backend.app.prediction_markets.execution import get_executor
+    from app.prediction_markets.orchestrator import PredictionMarketOrchestrator
+    from app.prediction_markets.execution import get_executor
 
     class _S:
         def __init__(self, n):
@@ -223,12 +223,12 @@ def test_resolution_loss_feeds_strategy_drawdown_disable():
     Previously check_resolutions fed ONLY the executor loss caps, never the risk
     manager — a strategy could decay via resolutions and keep trading.
     """
-    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
-    from backend.app.prediction_markets import polymarket_client as pmc
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.orchestrator import MarkToMarketEngine
+    from app.prediction_markets import polymarket_client as pmc
+    from app.prediction_markets.execution import (
         PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
     )
-    from backend.app.prediction_markets.risk_manager import RiskManager, RiskConfig
+    from app.prediction_markets.risk_manager import RiskManager, RiskConfig
 
     ex = PredictionMarketExecutor(
         dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
@@ -279,9 +279,9 @@ def test_resolution_loss_feeds_strategy_drawdown_disable():
 def test_resolution_without_risk_manager_still_works():
     """The risk_manager wiring is optional/None-safe — resolution accounting must
     still work (and feed the executor caps) when no risk_manager is attached."""
-    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
-    from backend.app.prediction_markets import polymarket_client as pmc
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.orchestrator import MarkToMarketEngine
+    from app.prediction_markets import polymarket_client as pmc
+    from app.prediction_markets.execution import (
         PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
     )
 
@@ -324,10 +324,10 @@ def test_resolution_without_risk_manager_still_works():
 # ---------------------------------------------------------------------------
 
 def test_evaluation_windows_buckets_by_iso_week_and_honest_empty():
-    from backend.app.prediction_markets.metrics_aggregator import (
+    from app.prediction_markets.metrics_aggregator import (
         compute_evaluation_windows,
     )
-    from backend.app.prediction_markets.evaluation_window import ResolvedTrade
+    from app.prediction_markets.evaluation_window import ResolvedTrade
 
     # Two trades in the same ISO week, one in a later week.
     trades = [
@@ -354,14 +354,14 @@ def test_evaluation_windows_buckets_by_iso_week_and_honest_empty():
 # ---------------------------------------------------------------------------
 
 def _pred(prob, outcome):
-    from backend.app.prediction_markets.calibration import ResolvedPrediction
+    from app.prediction_markets.calibration import ResolvedPrediction
     return ResolvedPrediction(
         market_id="m", predicted_prob=prob, market_price=0.5, outcome=outcome
     )
 
 
 def test_calibration_drift_insufficient_data_no_false_alarm():
-    from backend.app.prediction_markets.metrics_aggregator import (
+    from app.prediction_markets.metrics_aggregator import (
         compute_calibration_drift,
     )
     # Far fewer than min_baseline + recent_window → honest insufficient_data.
@@ -373,7 +373,7 @@ def test_calibration_drift_insufficient_data_no_false_alarm():
 
 
 def test_calibration_drift_flags_real_degradation():
-    from backend.app.prediction_markets.metrics_aggregator import (
+    from app.prediction_markets.metrics_aggregator import (
         compute_calibration_drift,
     )
     # Baseline: well-calibrated (prob 0.9 → outcome 1 ~90% of the time, low Brier).
@@ -391,7 +391,7 @@ def test_calibration_drift_flags_real_degradation():
 
 
 def test_calibration_drift_stable_calibration_no_drift():
-    from backend.app.prediction_markets.metrics_aggregator import (
+    from app.prediction_markets.metrics_aggregator import (
         compute_calibration_drift,
     )
     # Baseline and recent both well-calibrated and identical in distribution → no drift.
@@ -404,7 +404,7 @@ def test_calibration_drift_stable_calibration_no_drift():
 
 
 def test_calibration_drift_is_deterministic():
-    from backend.app.prediction_markets.metrics_aggregator import (
+    from app.prediction_markets.metrics_aggregator import (
         compute_calibration_drift,
     )
     preds = [_pred(0.8, 1 if i % 5 != 0 else 0) for i in range(90)]
@@ -421,9 +421,9 @@ def test_resolution_absent_token_not_fabricated_as_loss():
     counters), and would cache the position resolved so it never reconciles. The fix:
     skip + leave UNCACHED so the next cycle retries once the venue data is consistent.
     """
-    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
-    from backend.app.prediction_markets import polymarket_client as pmc
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.orchestrator import MarkToMarketEngine
+    from app.prediction_markets import polymarket_client as pmc
+    from app.prediction_markets.execution import (
         PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
     )
 
@@ -503,9 +503,9 @@ def test_resolution_looks_up_market_by_id_not_slug():
     on the pre-fix code (no settlement -> no realized loss) and passes once resolution looks
     the market up by id.
     """
-    from backend.app.prediction_markets.orchestrator import MarkToMarketEngine
-    from backend.app.prediction_markets import polymarket_client as pmc
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.orchestrator import MarkToMarketEngine
+    from app.prediction_markets import polymarket_client as pmc
+    from app.prediction_markets.execution import (
         PredictionMarketExecutor, OrderRequest, OrderSide, OrderType, Exchange,
     )
 

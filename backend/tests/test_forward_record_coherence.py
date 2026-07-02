@@ -20,7 +20,8 @@ These tests prove the coupled fix end-to-end:
       the dedup, not an upstream reject).
 
 Import via ``app.*`` (conftest puts backend/ on sys.path) — importing the table models via a
-SECOND path (``backend.app.*``) double-registers them on the shared SQLModel.metadata.
+SECOND, non-canonical path (``backend.app.*``) would double-register them on the shared
+SQLModel.metadata; that is now avoided suite-wide since every test standardized on ``app.*``.
 """
 
 from __future__ import annotations
@@ -52,11 +53,11 @@ def db(monkeypatch):
     as test_executor_state_persistence).
 
     We create ONLY the specific tables these tests touch, via ``__table__.create(checkfirst=
-    True)`` — deliberately NOT a blanket ``SQLModel.metadata.create_all``. In the FULL suite
-    other tests import the models via ``backend.app.*`` while conftest puts them on ``app.*``,
-    so the shared metadata carries dual-registered tables; a blanket create_all then emits a
-    duplicate ``CREATE INDEX`` and errors. Creating each table object individually sidesteps
-    that known dual-import fragility (the correctness A→A+ gap tracked separately).
+    True)`` — deliberately NOT a blanket ``SQLModel.metadata.create_all``. Historically the
+    FULL suite imported the models via TWO paths (``app.*`` and ``backend.app.*``), so the
+    shared metadata carried dual-registered tables and a blanket create_all emitted a
+    duplicate ``CREATE INDEX`` and errored. Creating each table object individually sidesteps
+    that; the dual-import root cause is now resolved by standardizing every test on ``app.*``.
     """
     from app.db import database
     from app.prediction_markets.executor_state_store import PredictionExecutorStateRow

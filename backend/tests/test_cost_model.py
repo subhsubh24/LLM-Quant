@@ -11,18 +11,18 @@ import math
 
 import pytest
 
-from backend.app.prediction_markets.cost_model import (
+from app.prediction_markets.cost_model import (
     CostModel,
     DEFAULT_COST_MODEL,
     DEFAULT_FEE_RATE,
     DEFAULT_SLIPPAGE_RATE,
 )
-from backend.app.prediction_markets.orchestrator import (
+from app.prediction_markets.orchestrator import (
     KellyConfig,
     kelly_size,
     size_from_scan_result,
 )
-from backend.app.prediction_markets.polymarket_client import ScanResult
+from app.prediction_markets.polymarket_client import ScanResult
 
 
 # ---------------------------------------------------------------------------
@@ -50,14 +50,14 @@ def test_executor_imports_cost_model_rates_no_drift():
     cost_model single source of truth, not from duplicated literals. This binds the two
     so a future edit to one can't silently diverge from the other (which would make the
     backtest EV and realized PnL inconsistent and masquerade as overfit)."""
-    from backend.app.prediction_markets import execution as ex
+    from app.prediction_markets import execution as ex
 
     # The constants are imported into execution's namespace and are the SAME values.
     assert ex.DEFAULT_SLIPPAGE_RATE == DEFAULT_SLIPPAGE_RATE
     assert ex.DEFAULT_FEE_RATE == DEFAULT_FEE_RATE
 
     # And a simulated market BUY fill actually applies exactly those rates.
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.execution import (
         Exchange,
         OrderRequest,
         OrderSide,
@@ -271,7 +271,7 @@ def test_no_double_counting_cash_deployed_matches_budget():
     execution.py::_simulate_fill: if either cost formula changes without the other,
     this assertion breaks loudly.
     """
-    from backend.app.prediction_markets.execution import (
+    from app.prediction_markets.execution import (
         PredictionMarketExecutor, OrderRequest, Exchange, OrderSide, OrderType,
     )
 

@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from backend.app.prediction_markets.data_quality import (
+from app.prediction_markets.data_quality import (
     DataQualityValidator,
     QualityCheckResult,
     QualityIssue,
 )
-from backend.app.prediction_markets.polymarket_client import Market, Outcome
+from app.prediction_markets.polymarket_client import Market, Outcome
 
 
 # ============================================================
@@ -422,7 +422,7 @@ class TestFetchAgeStaleness:
         assert "stale" in result.reason.lower() or "old" in result.reason.lower()
 
     def test_parsed_market_carries_fetched_at(self):
-        from backend.app.prediction_markets.polymarket_client import PolymarketClient
+        from app.prediction_markets.polymarket_client import PolymarketClient
 
         client = PolymarketClient()
         raw = {
@@ -439,7 +439,7 @@ class TestFetchAgeStaleness:
         assert isinstance(m.fetched_at, datetime), "parse must stamp fetched_at"
 
     def test_parsed_market_with_injected_old_timestamp_is_stale(self):
-        from backend.app.prediction_markets.polymarket_client import PolymarketClient
+        from app.prediction_markets.polymarket_client import PolymarketClient
 
         now = datetime.now(timezone.utc)
         client = PolymarketClient()

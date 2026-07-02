@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from backend.app.config import Settings
+from app.config import Settings
 
 
 def test_bypass_with_live_trading_refuses_to_boot():

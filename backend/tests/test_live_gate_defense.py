@@ -28,7 +28,7 @@ backend_root = os.path.join(os.path.dirname(__file__), "..")
 if backend_root not in sys.path:
     sys.path.insert(0, backend_root)
 
-from backend.app.prediction_markets.execution import (
+from app.prediction_markets.execution import (
     Exchange,
     OrderRequest,
     OrderResult,
@@ -119,11 +119,11 @@ class TestVenueLiveGate:
         fake_settings.live_trading_enabled = False
 
         with patch(
-            "backend.app.prediction_markets.execution.PolymarketExecutor.place_order",
+            "app.prediction_markets.execution.PolymarketExecutor.place_order",
             wraps=poly.place_order,
         ):
             with patch(
-                "backend.app.config.get_settings",
+                "app.config.get_settings",
                 return_value=fake_settings,
             ):
                 result = poly.place_order(_req())
@@ -151,7 +151,7 @@ class TestVenueLiveGate:
             side_effect=RuntimeError("py-clob-client not available"),
         ):
             with patch(
-                "backend.app.config.get_settings",
+                "app.config.get_settings",
                 return_value=fake_settings,
             ):
                 result = poly.place_order(_req())
@@ -169,7 +169,7 @@ class TestVenueLiveGate:
         poly = _poly_executor()
 
         with patch(
-            "backend.app.config.get_settings",
+            "app.config.get_settings",
             side_effect=RuntimeError("settings unavailable"),
         ):
             result = poly.place_order(_req())
@@ -203,7 +203,7 @@ class TestVenueLiveGate:
         )
 
         with patch(
-            "backend.app.config.get_settings",
+            "app.config.get_settings",
             return_value=fake_settings,
         ):
             with patch.object(

@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backend.app.prediction_markets.kalshi_client import KalshiClient
-from backend.app.prediction_markets.polymarket_client import Market, Outcome
+from app.prediction_markets.kalshi_client import KalshiClient
+from app.prediction_markets.polymarket_client import Market, Outcome
 
 
 # ---------------------------------------------------------------------------
@@ -372,8 +372,8 @@ def test_every_get_uses_timeout_15():
 # ---------------------------------------------------------------------------
 def test_imports_market_outcome_from_polymarket_client():
     """KalshiClient must import (not redefine) Market and Outcome from polymarket_client."""
-    from backend.app.prediction_markets import polymarket_client as pm
-    from backend.app.prediction_markets import kalshi_client as kc
+    from app.prediction_markets import polymarket_client as pm
+    from app.prediction_markets import kalshi_client as kc
 
     # The Market/Outcome names used in kalshi_client must be the SAME objects.
     assert kc.Market is pm.Market

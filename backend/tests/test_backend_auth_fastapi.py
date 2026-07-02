@@ -2,9 +2,9 @@
 End-to-end FastAPI wiring check for the backend route auth (the adapter, not the decision).
 
 INTENTIONALLY OUTSIDE the curated CI list (scripts/preflight.sh): it imports the api
-package, which (a) needs fastapi — absent in the lightweight CI gate — and (b) triggers the
-`app.*` vs `backend.app.*` dual-import table-registration path that collides if run after
-`test_prediction_markets.py`. The CI gate validates the PURE decision in
+package, which needs fastapi — absent in the lightweight CI gate. (It also historically
+tripped the `app.*` vs `backend.app.*` dual-import table-registration collision, now
+resolved by standardizing every test on `app.*`.) The CI gate validates the PURE decision in
 `test_backend_auth.py`; this file proves the FastAPI adapter (Header extraction +
 HTTPException 401) where fastapi is installed. Run it standalone:
 
@@ -19,8 +19,8 @@ def test_fastapi_dependency_is_default_closed(monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi import FastAPI, Depends
     from fastapi.testclient import TestClient
-    from backend.app.api.auth import require_backend_token
-    import backend.app.config as cfg
+    from app.api.auth import require_backend_token
+    import app.config as cfg
 
     app = FastAPI()
 
@@ -55,14 +55,14 @@ def _router_client():
     pytest.importorskip("fastapi")
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from backend.app.api.routes import router
+    from app.api.routes import router
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)
 
 
 def _set_token(monkeypatch, token: str):
-    import backend.app.config as cfg
+    import app.config as cfg
 
     # Control auth is now DEFAULT-CLOSED. Tests that pass an empty token are exercising a
     # route's *validation/bounds* (or an unguarded read), not auth — so they run with the
@@ -189,7 +189,7 @@ def test_place_order_request_bounds():
     # the handler runs. (importorskip: routes.py imports fastapi at module load.)
     pytest.importorskip("fastapi")
     from pydantic import ValidationError
-    from backend.app.api.routes import PlaceOrderRequest
+    from app.api.routes import PlaceOrderRequest
 
     ok = PlaceOrderRequest(market_id="253591", token_id="t1", size=10.0, price=0.5)
     assert ok.size == 10.0 and ok.price == 0.5
@@ -215,7 +215,7 @@ def test_subscribe_request_bounds():
     # §12: an unbounded identifiers list = unbounded WS subscription fan-out.
     pytest.importorskip("fastapi")
     from pydantic import ValidationError
-    from backend.app.api.routes import SubscribeRequest
+    from app.api.routes import SubscribeRequest
 
     assert SubscribeRequest(identifiers=["a", "b"]).identifiers == ["a", "b"]
     assert SubscribeRequest().identifiers == []              # default is empty, mutable-safe

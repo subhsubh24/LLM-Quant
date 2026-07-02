@@ -15,7 +15,7 @@ import random
 
 import pytest
 
-from backend.app.prediction_markets.calibration import (
+from app.prediction_markets.calibration import (
     CalibrationResult,
     ReliabilityCurve,
     ResolvedPrediction,

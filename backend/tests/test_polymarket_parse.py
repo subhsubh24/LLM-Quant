@@ -12,7 +12,7 @@ market UNTRADEABLE (active=False) and logs loudly, mirroring the Kalshi one-side
 
 from __future__ import annotations
 
-from backend.app.prediction_markets.polymarket_client import PolymarketClient
+from app.prediction_markets.polymarket_client import PolymarketClient
 
 
 def _client() -> PolymarketClient:

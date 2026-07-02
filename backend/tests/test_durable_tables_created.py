@@ -29,14 +29,15 @@ DURABLE_TABLES = [
 
 def test_init_db_creates_durable_tables(tmp_path):
     db_path = tmp_path / "probe.db"
-    # repo root = two levels up from this test file (backend/tests/ -> repo root).
-    repo_root = __file__.rsplit("/backend/tests/", 1)[0]
+    # backend/ is the import root (canonical `app.*` path, matching conftest) — one level
+    # up from this test file's dir (backend/tests/ -> backend/).
+    backend_root = __file__.rsplit("/tests/", 1)[0]
     script = textwrap.dedent(
         f"""
         import os, sys, json
-        sys.path.insert(0, {repo_root!r})
+        sys.path.insert(0, {backend_root!r})
         os.environ["DATABASE_URL"] = "sqlite:///{db_path}"
-        from backend.app.db.database import init_db, engine
+        from app.db.database import init_db, engine
         from sqlmodel import Session, text
         init_db()
         with Session(engine) as s:
