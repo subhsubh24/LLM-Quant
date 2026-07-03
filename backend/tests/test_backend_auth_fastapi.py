@@ -277,3 +277,18 @@ def test_enable_strategy_name_path_is_bounded(monkeypatch):
     _set_token(monkeypatch, "")
     assert client.post("/prediction-markets/risk/enable-strategy/" + "x" * 101).status_code == 422
     assert client.post("/prediction-markets/risk/enable-strategy/NearCertainty").status_code != 422
+
+
+def test_cancel_exchange_query_is_bounded(monkeypatch):
+    # §12: the {order_id} path was bounded (#188) but the `exchange` QUERY param on the same
+    # cancel route was still unbounded — an authenticated caller could push a multi-MB
+    # string that echoes back in the 400 `detail` ("Unknown exchange: ...") and floods logs.
+    # Bound it Query(max_length=50). 422 before the handler; a valid exchange is not 422.
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.post(
+        "/prediction-markets/cancel/ord-1?exchange=" + "x" * 51
+    ).status_code == 422
+    assert client.post(
+        "/prediction-markets/cancel/ord-1?exchange=polymarket"
+    ).status_code != 422
