@@ -113,26 +113,36 @@ def test_adjacent_strikes_do_not_match():
     assert extract_threshold("above $100000").matches(extract_threshold("above $100k"))
 
 
-def test_negated_comparator_inverts_direction():
-    # Adversarial-audit break: "no more than $100k" (≤, down) was read as "up" and paired
-    # with "above $100k" (>, up) — near-opposite events. Negation must invert direction.
-    assert extract_threshold("Will Bitcoin be no more than $100k by December 2026?").direction == "down"
-    assert extract_threshold("Will Bitcoin be no fewer than 50 by December 2026?").direction == "up"
-    assert extract_threshold("Will Bitcoin be not above 50 percent in December 2026?").direction == "down"
-    # CONTRACTION forms (2nd audit break): the apostrophe tokenizer must not hide the
-    # negation — "won't exceed", "can't go above", "doesn't rise above", "isn't above".
-    assert extract_threshold("Bitcoin won't exceed $100000 in December 2026").direction == "down"
-    assert extract_threshold("Bitcoin can't go above $100000 in December 2026").direction == "down"
-    assert extract_threshold("Bitcoin doesn't rise above 50 percent in December 2026").direction == "down"
-    assert extract_threshold("Bitcoin isn't above 50 percent in December 2026").direction == "down"
-    # end-to-end: opposite-direction markets on the same strike must NOT match (both the
-    # word-form and the contraction form of the negation).
+def test_negated_comparator_voids_the_strike():
+    # Correctly INVERTING a negated bound is a regex rabbit hole (two audits found both a
+    # missed AND a spurious inversion), so a negation binding a comparator VOIDS the strike
+    # (returns None = no confident threshold). This is tightening-only: a voided strike can
+    # only cause a conservative reject/no-trade, NEVER a spurious match. Word forms:
+    assert extract_threshold("Will Bitcoin be no more than $100k by December 2026?") is None
+    assert extract_threshold("Will Bitcoin be not above 50 percent in December 2026?") is None
+    # CONTRACTION forms (the apostrophe tokenizer must still SEE the negation):
+    assert extract_threshold("Bitcoin won't exceed $100000 in December 2026") is None
+    assert extract_threshold("Bitcoin can't go above $100000 in December 2026") is None
+    assert extract_threshold("Bitcoin doesn't rise above 50 percent in December 2026") is None
+    assert extract_threshold("Bitcoin isn't above 50 percent in December 2026") is None
+    # THE SPURIOUS-INVERSION REGRESSION (final-audit break): a negation in a DIFFERENT
+    # clause must not fabricate a match. "no layoffs and unemployment above 4%" voids its
+    # strike, so it can never falsely pair with "unemployment below 4%".
+    assert extract_threshold("Will there be no layoffs and unemployment above 4% in 2026?") is None
+    # A NON-negated comparator is unaffected (control — still a confident strike).
+    assert extract_threshold("Will unemployment be above 4% in 2026?").direction == "up"
+    assert extract_threshold("Will unemployment be below 4% in 2026?").direction == "down"
+    # end-to-end: a negated market never matches a real-strike market (word, contraction,
+    # AND the cross-clause regression case).
+    real = _mkt("K1", "Will Bitcoin be above $100000 by December 2026?", 0.55)
     for neg_q in ("Will Bitcoin be no more than $100k by December 2026?",
                   "Will Bitcoin won't be above $100k by December 2026?",
                   "Will Bitcoin can't exceed $100000 by December 2026?"):
-        poly = _mkt("P1", neg_q, 0.20)
-        kalshi = _mkt("K1", "Will Bitcoin be above $100000 by December 2026?", 0.55)
-        assert match_markets(poly, kalshi) is None, neg_q
+        assert match_markets(_mkt("P1", neg_q, 0.20), real) is None, neg_q
+    # the cross-clause unemployment case (the final regression) also does not match
+    poly_unemp = _mkt("P2", "Will there be no layoffs and unemployment above 4% in 2026?", 0.30)
+    kalshi_unemp = _mkt("K2", "Will unemployment be below 4% in 2026?", 0.55)
+    assert match_markets(poly_unemp, kalshi_unemp) is None
 
 
 def test_no_threshold_pair_is_not_tradeable():

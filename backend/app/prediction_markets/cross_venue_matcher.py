@@ -236,25 +236,32 @@ def extract_threshold(text: str) -> Optional[Threshold]:
         # first comparator (up/down) OR the first intervening NUMBER. Stopping at a number
         # is what prevents "above $100000 on 2026-12-31" from binding "above" to the "12"
         # (the "$100000" between them breaks the chain).
-        # Strip apostrophes FIRST so contractions tokenize to their negation form
-        # ("won't"→"wont", "can't"→"cant", "doesn't"→"doesnt") — otherwise the `[a-z]+`
-        # tokenizer splits "won't"→["won","t"] and the negation is invisible (an
-        # adversarial-audit break: "won't exceed $100k" read as "up").
+        # Apostrophes are stripped FIRST so contractions tokenize to their negation form
+        # ("won't"→"wont") — otherwise "[a-z]+" splits "won't"→["won","t"].
         prefix = lowered[: m.start()].replace("'", "").replace("’", "")
         prefix_tokens = re.findall(r"[a-z]+|\d[\d,\.]*", prefix)
         direction = "none"
+        negated = False
         for i in range(len(prefix_tokens) - 1, -1, -1):
             w = prefix_tokens[i]
             if w in _UP_WORDS or w in _DOWN_WORDS:
                 direction = "up" if w in _UP_WORDS else "down"
-                # A negation binding this comparator INVERTS it ("no more than"/"won't
-                # exceed"/"can't go above" are all ≤). Scan back a few tokens for a
-                # negation, STOPPING at another comparator or a number (which breaks the
-                # binding, so a negation on a DIFFERENT clause can't leak in).
-                for j in range(i - 1, max(-1, i - 5), -1):
+                # NEGATION handling — the SAFE way. Correctly INVERTING a negated bound
+                # ("no more than" = ≤) is a regex rabbit hole: two prior audits showed both
+                # a MISSED inversion (contractions) and — worse — a SPURIOUS inversion
+                # (a negation from a different clause, "no layoffs and unemployment above
+                # 4%", flipping "above" and fabricating a match with "below 4%"). So we do
+                # NOT try to guess the true direction: if a negation plausibly binds this
+                # comparator, the strike's direction is UNRELIABLE and we VOID the strike
+                # (below). This is TIGHTENING-ONLY — a voided strike yields "no confident
+                # threshold", which can only cause a conservative reject / no-trade, NEVER a
+                # spurious match. A negated market is honestly surfaced (no threshold), never
+                # falsely paired. Generous detection is safe precisely because a false
+                # positive here only removes a match.
+                for j in range(i - 1, max(-1, i - 6), -1):
                     tj = prefix_tokens[j]
                     if tj in _NEGATIONS:
-                        direction = "down" if direction == "up" else "up"
+                        negated = True
                         break
                     if tj in _UP_WORDS or tj in _DOWN_WORDS or tj[:1].isdigit():
                         break
@@ -262,6 +269,11 @@ def extract_threshold(text: str) -> Optional[Threshold]:
             if w in _COMPARATOR_CONNECTORS:
                 continue
             break  # a non-connector, non-comparator token (incl. a number) breaks the chain
+        if negated:
+            # A negated comparator → direction unreliable → not a confident strike. Skip it
+            # (if it was the only number, extract_threshold returns None → the pair is
+            # rejected as one-sided or falls to the un-tradeable no-threshold cap).
+            continue
         has_unit = unit in ("percent", "currency") or suf is not None
         # Drop bare years (a date, not a strike): plain, no unit, integer in [1900, 2099].
         if not has_unit and value.is_integer() and 1900 <= value <= 2099:
