@@ -860,8 +860,11 @@ export default function PredictionsPage() {
           <div className="glass-card overflow-hidden fade-in">
             <div className="px-5 py-3 border-b border-border/60 flex items-center justify-between">
               <span className="text-sm font-semibold text-foreground">{positionCount} Open Positions</span>
-              <span className={cn("text-sm font-bold tabular-nums", unrealizedPnl >= 0 ? "text-green-500" : "text-red-500")}>
-                Unrealized: {unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}
+              <span className={cn("text-sm font-bold tabular-nums", portfolioSummary == null ? "text-muted-foreground" : (unrealizedPnl >= 0 ? "text-green-500" : "text-red-500"))}>
+                {/* Show "—" until positions have actually loaded (portfolioSummary set by
+                    fetchPositions), so an empty-before-load state is not rendered as a real
+                    "+$0.00" — mirrors the portfolio tab's null-honesty bar. */}
+                Unrealized: {portfolioSummary == null ? "—" : `${unrealizedPnl >= 0 ? "+" : ""}$${unrealizedPnl.toFixed(2)}`}
               </span>
             </div>
             {livePositions.length > 0 ? (
