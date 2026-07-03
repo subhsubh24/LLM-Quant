@@ -30,6 +30,7 @@ from typing import Any, List, Optional
 import requests
 
 # Re-use the canonical Market/Outcome model — do NOT redefine them.
+from .market_category import derive_market_category
 from .polymarket_client import Market, Outcome
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,15 @@ class KalshiClient:
 
         title: str = str(raw.get("title", ""))
         subtitle: str = str(raw.get("subtitle", ""))
-        category: str = str(raw.get("category", ""))
+        raw_category: str = str(raw.get("category", ""))
+        # Route the raw Kalshi category through the SAME coarse correlation-bucket deriver
+        # the Polymarket parser uses (ROADMAP A3 follow-up), so the per-category exposure
+        # cap buckets Kalshi markets consistently with Polymarket ones (Crypto/Politics/…)
+        # instead of stamping a raw venue label verbatim (which would silently sidestep the
+        # cap-coherence fix #156). Deterministic + pure; never enters a backtest seed_hash.
+        category: str = derive_market_category(
+            title, raw_category, tags=[raw_category] if raw_category else None
+        )
 
         # ---- Price conversion (cents -> probability) --------------------
         # Kalshi prices are integer cents [0, 100]. Derive the YES price from the best
@@ -314,7 +323,7 @@ class KalshiClient:
             closed=closed,
             resolved=resolved,
             resolution_source="kalshi",
-            tags=[category] if category else [],
+            tags=[raw_category] if raw_category else [],
             neg_risk=False,  # Kalshi binary markets: neg_risk is N/A
             fetched_at=fetched_at,
         )

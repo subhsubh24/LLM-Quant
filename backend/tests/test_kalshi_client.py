@@ -112,13 +112,48 @@ def test_parse_market_field_mapping():
     assert m.slug == "kxfoo-25jan"
     assert m.question == "Will foo happen?"
     assert m.description == "A description"
-    assert m.category == "sports"
+    # A3: the raw Kalshi category is routed through derive_market_category → a normalized
+    # coarse bucket ("sports" → "Sports"), so per-category exposure caps bucket Kalshi
+    # markets consistently with Polymarket. The raw label is preserved in tags.
+    assert m.category == "Sports"
+    assert m.tags == ["sports"]
     assert m.total_volume == 5000.0
     assert m.liquidity == 0.0
     assert m.resolution_source == "kalshi"
     assert m.neg_risk is False
     assert m.end_date is not None
     assert m.end_date.year == 2025
+
+
+def test_category_derived_from_question_when_raw_empty():
+    """A3 regression: when the venue ships an EMPTY category (the real Polymarket failure
+    that froze the live loop #156, and possible on Kalshi too), the category must be
+    DERIVED from the question text into a real correlation bucket — never left blank, which
+    would collapse every market into a single 'General' cap bucket."""
+    raw = _make_raw_market(
+        ticker="KXBTC-26DEC",
+        title="Will Bitcoin close above $100,000 by December 2026?",
+        category="",  # empty venue category — the failure mode
+        yes_bid=40, yes_ask=44, status="open",
+    )
+    client = KalshiClient(session=FakeSession(_markets_response(raw)))
+    m = client.get_markets(limit=10)[0]
+    assert m.category == "Crypto"   # derived from "Bitcoin" in the question, not ""
+    assert m.tags == []             # no raw category to preserve
+
+
+def test_category_unclassifiable_falls_to_general_not_fabricated():
+    """An genuinely unclassifiable market with no raw category flows to the honest shared
+    'General' bucket — the deriver never fabricates a confident category."""
+    raw = _make_raw_market(
+        ticker="KXMISC-26",
+        title="Will the annual widget festival proceed as planned?",
+        category="",
+        yes_bid=40, yes_ask=44, status="open",
+    )
+    client = KalshiClient(session=FakeSession(_markets_response(raw)))
+    m = client.get_markets(limit=10)[0]
+    assert m.category == "General"
 
 
 def test_parse_market_outcomes_well_formed():
