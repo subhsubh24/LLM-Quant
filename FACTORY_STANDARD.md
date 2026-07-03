@@ -415,8 +415,7 @@ work NEVER triggers it. When triggered:
 The anti-fabrication rule guarantees a number is REAL and SOURCED (a figure no connected source
 reported stays 0/null); this rule guarantees it is CORRECTLY COMPUTED. Every quantitative claim —
 statistical (significance, CI, sample size), unit-economics (LTV, CAC, payback, margin, MRR/ARR),
-pricing/elasticity, the business-case number (§9), and the Channel-Plan economics (GTM_STANDARD §9
-/ §21) — MUST be produced by EXECUTED, reproducible code (you have Bash), never arithmetic done in
+pricing/elasticity, the business-case number (§9), and the Channel-Plan economics (GTM_STANDARD §9) — MUST be produced by EXECUTED, reproducible code (you have Bash), never arithmetic done in
 your head.
 - **Compute it, don't eyeball it.** A figure derived by mental arithmetic is treated exactly like an
   unsourced one — not allowed. Generalizes the significance rule (ANALYSIS_PLAYBOOK: "you have Bash;
@@ -557,7 +556,8 @@ having validated nothing, and per-PR CI (fully mocked) proves code SHAPE, not fu
 
 
 ## 29. Computer-use functional validation — drive the REAL app like a human (exploratory, non-blocking)
-The realest anti-synthetic-green signal: a Gemini computer-use agent that navigates the DEPLOYED app
+The realest anti-synthetic-green signal: a computer-use agent — on the factory's own Claude agent (§29's
+cost rule below), NOT Gemini — that navigates the DEPLOYED app
 through real user flows end to end, like a human — catching broken flows, dead ends, and UX defects
 that mocked unit tests and scripted happy-path e2e never see. It EXPLORES and FILES findings; it does
 NOT gate merges.
@@ -613,33 +613,17 @@ paid deep-research API (e.g. Gemini Deep Research) for this; the agent does it n
   backtest input. Research shapes the ROADMAP, it does not auto-act.
 - **The ONLY unavoidable external (Gemini) spend is MEDIA generation** (image/video/music/voiceover, §11
   — Claude can't generate media), gated to when creative is actually produced. Everything TEXT — research,
-  reasoning, planning, synthesis — stays on the Claude agent already running. Computer-use (§29) needs a
-  vision model to drive the browser; prefer the factory's Claude agent there too where the harness allows.
+  reasoning, planning, synthesis — stays on the Claude agent already running. Computer-use (§29) also runs
+  on the factory's Claude agent — NOT Gemini; media generation is the sole sanctioned Gemini spend.
 
 
-## 31. Design taste — eliminate generic AI frontend (the real-designer bar)
-Function is table stakes (§28 makes it REAL); TASTE is the north star (VISION: "must not look
-vibe-coded"). Every layout / component / color / motion / copy decision must read as INTENTIONAL,
-premium, and clearly made by someone with taste — not assembled from the average of the internet. This
-is the concrete rubric for the graded `design_taste` dimension.
-- **The designer question — the gate before shipping ANY UI:** "Would an experienced product designer
-  INTENTIONALLY make this decision?" If no, improve it BEFORE proceeding. The maker asks it; the
-  INDEPENDENT design reviewer (maker≠checker) asks it again.
-- **Audit on every UI change:** visual hierarchy, typography system, spacing/rhythm, information
-  architecture, component quality, intentional color, navigation, interaction + motion, landing-page &
-  dashboard quality, responsiveness, accessibility, information density, conversion elements.
-- **Avoid by default (the AI-slop tells):** cookie-cutter SaaS dashboards, cards-everywhere, default
-  Tailwind look, weak typography, random spacing, visual noise, overengineered interfaces,
-  design-by-template, uninspired landing pages, generic startup-site patterns, random gradients /
-  decorative noise. If a choice exists only because the model has seen it a thousand times, cut it.
-- **Find the slop, fix by impact:** name what feels GENERATED — weak/inconsistent decisions, thin
-  hierarchy, generic shapes, overused trends, missed chances for stronger product design — and fix the
-  highest-leverage first (rank by gains to hierarchy / comprehension / trust / polish), like any §4
-  improvement.
-- **Final standard:** simplicity without blandness, functionality without clutter — interfaces that feel
-  built, edited, and judged by taste. Product-specific brand / voice / visual language lives in VISION
-  (§19), not here; this is the universal bar every factory holds. Same anti-slop rule as §11's "never
-  obviously AI" — now applied to the PRODUCT UI, not just the marketing.
+## 31. Design taste — the graded `design_taste` dimension is §6b's bar
+The `design_taste` quality dimension is graded against **§6b** (ELIMINATE generic-AI frontend) — the
+same DESIGNER QUESTION ("would an experienced product designer INTENTIONALLY make this?"), the same
+avoid-by-default AI-slop list, and the same "vibe-coded = release-blocking" bar — now scored A+→F by
+the independent Quality Auditor. Drive any below-A `design_taste` gap to A/A+ using §6b's audit lenses.
+(One rule, one place: §6b is the standard; this is just the graded framing. Same anti-slop rule as
+§11's "never obviously AI," applied to the product UI, not just marketing.)
 
 
 ## 32. A non-essential side-effect must NEVER hard-block a core user action
