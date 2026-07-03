@@ -523,7 +523,7 @@ async def get_prediction_orders(limit: int = Query(50, ge=1, le=1000)):
 @router.post("/prediction-markets/cancel/{order_id}", dependencies=_MUTATING_AUTH)
 async def cancel_prediction_order(
     order_id: str = Path(..., min_length=1, max_length=200),
-    exchange: str = "polymarket",
+    exchange: str = Query("polymarket", min_length=1, max_length=50),
 ):
     """Cancel an open prediction market order."""
     from ..prediction_markets.execution import Exchange
