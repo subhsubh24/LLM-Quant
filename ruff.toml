@@ -1,13 +1,18 @@
 # Lint standard for LLM-Quant (ROADMAP F7 — "lint-at-zero" ratchet).
 #
-# This PINS what "clean" means; it does NOT by itself enforce anything. Enforcement
-# happens in scripts/preflight.sh step 3 (`ruff check backend/app`, which fails the
-# blocking gate) — but ONLY once `ruff` is added to backend/requirements-ci.txt. That
-# add is deliberately withheld until `ruff check backend/app` is clean, so a required
-# check is never flipped red (see docs/ci/PROPOSED_CI.md §A2).
+# This file PINS what "clean" means for the FULL ruleset (the target the ratchet drives
+# toward). What is ENFORCED in CI today is NARROWER: scripts/preflight.sh step 3 runs
+# `ruff check --select E9,F821,F811 backend/app` (correctness-only — syntax/runtime
+# errors, undefined names, redefinition/shadowing) and `ruff` IS in
+# backend/requirements-ci.txt, so that correctness gate is LIVE in the required check
+# (#149, 2026-07-02). The tree is at zero for E9/F821/F811, so the gate can only ever red
+# on a genuinely NEW correctness defect — never on style.
 #
-# Keep the default rule selection (Pyflakes `F` + pycodestyle `E`/`W` essentials) so the
-# tracked finding count stays a stable, meaningful target.
+# The remaining ~130 findings under the full selection below are cosmetic HYGIENE
+# (F401/E402/F841/E741 — not correctness bugs); they stay UNENFORCED until driven to zero
+# module-by-module, at which point the `--select` widens to this full ruleset (F7). Until
+# then this file is the stable, meaningful TARGET count; preflight.sh enforces the
+# correctness subset. (See docs/ci/PROPOSED_CI.md §A2.)
 
 target-version = "py311"
 line-length = 100
