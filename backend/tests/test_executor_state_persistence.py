@@ -178,6 +178,60 @@ def test_rehydrate_failure_fails_closed(engine):
     assert res.status.name == "REJECTED"
 
 
+# ---------------------------------------------------------------------------
+# Production seam: durable safety state survives a restart through the REAL
+# get_executor() singleton (not only a hand-injected in-memory engine). This closes
+# the run_risk_readiness coverage nit — the prior tests wire ExecutorStateStore(engine=)
+# directly; this drives get_executor(), which constructs ExecutorStateStore() (no engine
+# -> the app's get_session -> database.engine) and rehydrates on construction.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def prod_db(monkeypatch):
+    """An in-memory DB wired as the engine ``get_session`` (hence a keyless
+    ``ExecutorStateStore()``) uses, plus a reset of the ``get_executor`` singleton before
+    and after so the production seam is exercised in isolation."""
+    from app.db import database
+    from app.prediction_markets import execution
+    from app.prediction_markets import models as m
+    from app.prediction_markets import persistence
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    init_db(eng)  # executor-state table
+    for tbl in (m.PredictionPortfolio, m.PredictionPosition, m.PredictionOrder):
+        tbl.__table__.create(eng, checkfirst=True)
+    from sqlmodel import Session
+    with Session(eng) as s:
+        s.add(m.PredictionPortfolio(id=persistence.DEFAULT_PORTFOLIO_ID, name="default", exchange="all"))
+        s.commit()
+    monkeypatch.setattr(database, "engine", eng)
+    execution._executor = None
+    yield eng
+    execution._executor = None
+
+
+def test_get_executor_rehydrates_kill_switch_and_counters_across_restart(prod_db):
+    from app.prediction_markets.execution import get_executor
+
+    # Boot 1: trip via a real loss-cap breach on the production singleton, so the
+    # kill switch + loss counters persist through ExecutorStateStore().
+    ex1 = get_executor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    ex1.max_total_loss_usd = 10.0  # tighten so a -$15 realized loss trips the cap
+    ex1.record_realized_pnl(-15.0)
+    assert ex1.kill_switch_active is True
+    assert ex1._realized_pnl_total == pytest.approx(-15.0)
+
+    # "Restart": drop the singleton so the next get_executor() constructs fresh + rehydrates.
+    from app.prediction_markets import execution
+    execution._executor = None
+
+    ex2 = get_executor(dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0)
+    assert ex2 is not ex1
+    # The halt + the accumulated loss budget survived the restart THROUGH THE REAL SEAM.
+    assert ex2.kill_switch_active is True
+    assert ex2._realized_pnl_total == pytest.approx(-15.0)
+
+
 def test_save_then_load_roundtrip_is_faithful(engine):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     store = ExecutorStateStore(engine=engine)
