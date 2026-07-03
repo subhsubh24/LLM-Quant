@@ -567,6 +567,12 @@ NOT gate merges.
 - **Findings → triaged → factory work.** Each candidate defect / UX issue / improvement is triaged by
   an INDEPENDENT pass (maker≠checker) to drop false positives, then filed as an issue for the factory
   (bugs must reproduce; UX notes labeled as such). No raw-finding spam into the queue.
+- **Publish the sweep as DATA (the dashboard reads it).** Write the last sweep to
+  `docs/autonomous-loop/VALIDATOR_STATUS.md` — a fenced `VALIDATOR_STATUS` block: `project`, `as_of`,
+  `last_sweep`, `target_url`, `flows_total` / `flows_passed` / `flows_failed`, `open_findings`, and
+  `findings[]` (each `flow`, `status` = pass|fail|skipped, `severity`, `note`, `issue_url`). REAL numbers
+  only — never a fabricated all-green; absent until the first real sweep. The AutoFactoryDashboard reads
+  this like LOOP_HEALTH / GROWTH_STATUS and lights up its Live-validation panel.
 - **Safety rails are non-negotiable (it acts on a LIVE app):**
   - **Dedicated TEST accounts only** — never real user data; creds live in the env, never held by the
     agent or committed.
