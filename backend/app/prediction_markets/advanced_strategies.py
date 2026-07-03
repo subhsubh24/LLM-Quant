@@ -196,10 +196,10 @@ class NOPositionScanner(BaseStrategy):
             if not market.is_binary:
                 skipped["not_binary"] += 1
                 continue
-            if market.total_volume < self.min_volume:
+            if market.volume_below(self.min_volume):
                 skipped["low_volume"] += 1
                 continue
-            if market.liquidity < self.min_liquidity:
+            if market.liquidity_below(self.min_liquidity):
                 skipped["low_liquidity"] += 1
                 continue
 
@@ -713,7 +713,7 @@ class LogicalImplicationDetector(BaseStrategy):
         for market in active_markets:
             if not market.is_multi or len(market.outcomes) < 3:
                 continue
-            if market.liquidity < self.config.min_liquidity:
+            if market.liquidity_below(self.config.min_liquidity):
                 continue
 
             price_sum = sum(o.price for o in market.outcomes)

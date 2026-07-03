@@ -260,7 +260,7 @@ class NearCertaintyStrategy(BaseStrategy):
             if not market.is_binary:
                 skipped["not_binary"] += 1
                 continue
-            if market.total_volume < self.min_volume:
+            if market.volume_below(self.min_volume):
                 skipped["low_volume"] += 1
                 continue
 
@@ -378,7 +378,7 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                 continue
             if not market.is_binary:
                 continue
-            if market.liquidity < self.config.min_liquidity:
+            if market.liquidity_below(self.config.min_liquidity):
                 continue
 
             # Prices are already CLOB-enriched by the scanner's enrichment pass
@@ -436,7 +436,7 @@ class SameMarketArbitrageStrategy(BaseStrategy):
                 continue
             if not getattr(market, "neg_risk", False):
                 continue  # non-MECE basket — "exactly one pays $1" not guaranteed
-            if market.liquidity < self.config.min_liquidity:
+            if market.liquidity_below(self.config.min_liquidity):
                 continue
 
             price_sum = sum(o.price for o in market.outcomes)
@@ -778,7 +778,7 @@ class MarketMakingStrategy(BaseStrategy):
             if not market.is_binary:
                 skipped["not_binary"] += 1
                 continue
-            if market.liquidity < self.min_liquidity:
+            if market.liquidity_below(self.min_liquidity):
                 skipped["low_liq"] += 1
                 continue
 
@@ -956,7 +956,7 @@ class FlashCrashStrategy(BaseStrategy):
                 continue
             if not market.is_binary:
                 continue
-            if market.total_volume < self.min_volume:
+            if market.volume_below(self.min_volume):
                 continue
 
             # Filter to crypto short-duration markets
@@ -1371,6 +1371,33 @@ class PredictionMarketScanner:
             return self.client.get_order_book(token_id)
         return None
 
+    def _mark_unavailable_data(self, markets: List[Market]) -> None:
+        """Flag markets whose volume/liquidity the venue did not return (issue #165).
+
+        When >80% of markets have zero volume/liquidity (``_volume_unavailable`` /
+        ``_liquidity_unavailable``, computed earlier in the scan), the data is
+        genuinely missing rather than truly zero. We set the per-market
+        ``volume_unavailable`` / ``liquidity_unavailable`` flags so each strategy's
+        ``market.volume_below(...)`` / ``market.liquidity_below(...)`` filter is
+        NEUTRALIZED for that dimension — preserving the intended "don't discard every
+        market when data is missing" behavior WITHOUT fabricating a passing value.
+
+        Only markets whose value is actually 0 (i.e. missing for THIS market) are
+        flagged; a market that carries a real, known volume/liquidity in an otherwise
+        degraded scan is still filtered on its real value. The real ``total_volume`` /
+        ``liquidity`` (0/unknown) is left untouched, so nothing downstream (spread
+        estimation, reason strings, EV) ever consumes an invented number.
+        """
+        vol_unavail = getattr(self, "_volume_unavailable", False)
+        liq_unavail = getattr(self, "_liquidity_unavailable", False)
+        if not (vol_unavail or liq_unavail):
+            return
+        for m in markets:
+            if vol_unavail and m.total_volume == 0:
+                m.volume_unavailable = True
+            if liq_unavail and m.liquidity == 0:
+                m.liquidity_unavailable = True
+
     def scan(self, market_limit: int = 200) -> List[ScanResult]:
         """
         Run all strategies against current markets.
@@ -1442,19 +1469,11 @@ class PredictionMarketScanner:
             except Exception as e:
                 logger.warning(f"[SCANNER] CLOB enrichment failed (using Gamma prices): {e}")
 
-        # When volume/liquidity data is unavailable, temporarily relax filters
-        # so strategies don't discard every market
+        # When volume/liquidity data is unavailable, relax the volume/liquidity
+        # filters so strategies don't discard every market — WITHOUT fabricating a
+        # passing value (issue #165).
         if all_markets:
-            vol_unavail = getattr(self, '_volume_unavailable', False)
-            liq_unavail = getattr(self, '_liquidity_unavailable', False)
-            if vol_unavail or liq_unavail:
-                for m in all_markets:
-                    if vol_unavail and m.total_volume == 0:
-                        # Assign a synthetic volume so strategies don't filter it out.
-                        # Use a conservative estimate based on the market being active.
-                        m.total_volume = 10000.0
-                    if liq_unavail and m.liquidity == 0:
-                        m.liquidity = 5000.0
+            self._mark_unavailable_data(all_markets)
 
         # Feed whale strategies with real Data API trades
         if all_markets and self.use_whale_feed:

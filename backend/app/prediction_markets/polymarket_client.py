@@ -74,6 +74,37 @@ class Market:
     # ingest timestamp, so that branch could NEVER fire on live data (a misleading
     # no-op). Optional/defaulted so every existing constructor is unaffected.
     fetched_at: Optional[datetime] = None
+    # Data-availability flags (issue #165). When the venue (Gamma) stops returning
+    # volume/liquidity for a market, the scanner sets these True so strategies
+    # NEUTRALIZE the volume/liquidity filter for this market WITHOUT fabricating a
+    # passing value. Previously the scanner injected total_volume=10000/liquidity=5000
+    # — synthetic numbers that exceed every filter threshold and thus flipped real
+    # BUY-gate decisions (reject->pass) on invented liquidity, and leaked into the
+    # spread/reason estimates. These flags keep the real (0/unknown) value honest while
+    # still preserving the intended "don't discard every market when data is missing"
+    # behavior. Defaulted so every existing constructor is unaffected; never enters a
+    # backtest seed_hash (the walk-forward uses a separate HistoricalMarket type).
+    volume_unavailable: bool = False
+    liquidity_unavailable: bool = False
+
+    def volume_below(self, floor: float) -> bool:
+        """True iff this market's volume is KNOWN and strictly below ``floor``.
+
+        When volume is unavailable (``volume_unavailable`` — the venue stopped
+        returning it), returns ``False`` so the volume filter is neutralized WITHOUT
+        fabricating a passing value (issue #165). A market with a real, known volume
+        is still filtered on that real value.
+        """
+        return not self.volume_unavailable and self.total_volume < floor
+
+    def liquidity_below(self, floor: float) -> bool:
+        """True iff this market's liquidity is KNOWN and strictly below ``floor``.
+
+        When liquidity is unavailable (``liquidity_unavailable``), returns ``False``
+        so the liquidity filter is neutralized without fabricating a passing value
+        (issue #165). A market with real, known liquidity is still filtered normally.
+        """
+        return not self.liquidity_unavailable and self.liquidity < floor
 
     @property
     def status(self) -> MarketStatus:
