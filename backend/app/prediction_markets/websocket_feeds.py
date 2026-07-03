@@ -265,24 +265,40 @@ class PolymarketWSFeed:
                 # Validate every incoming field before it touches the cache. If the
                 # primary `price` is malformed we SKIP the whole update for this token
                 # (keep the last good price) rather than poison the cache; bid/ask/spread
-                # are applied only when individually valid.
+                # are applied only when individually valid. `updated` tracks whether ANY
+                # valid field landed — mirrors the last_trade_price guard below.
+                updated = False
                 if "price" in change:
                     p = _coerce_prob(change["price"], "price", token_id)
                     if p is None:
                         continue
                     price.price = p
+                    updated = True
                 if "bid" in change:
                     b = _coerce_prob(change["bid"], "bid", token_id)
                     if b is not None:
                         price.bid = b
+                        updated = True
                 if "ask" in change:
                     a = _coerce_prob(change["ask"], "ask", token_id)
                     if a is not None:
                         price.ask = a
+                        updated = True
                 if "spread" in change:
                     s = _coerce_nonneg(change["spread"], "spread", token_id)
                     if s is not None:
                         price.spread = s
+                        updated = True
+
+                # Only refresh the timestamp, persist, and notify when SOMETHING valid
+                # landed. A book-level `price_change` carrying no valid field (e.g. a
+                # spurious/garbage update, or bid/ask that all fail coercion) must NOT
+                # renew the timestamp on a stale cached quote — that would defeat the
+                # 300s staleness eviction in _save_price_snapshot — nor create a phantom
+                # price=0.0 entry for a token never validly seen. Same honesty guard as
+                # the last_trade_price path.
+                if not updated:
+                    continue
 
                 price.timestamp = datetime.now(timezone.utc)
                 self._prices[token_id] = price
