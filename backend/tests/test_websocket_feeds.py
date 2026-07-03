@@ -104,6 +104,34 @@ def test_last_trade_price_validation():
     assert feed._prices["tokA"].last_trade_size == 12.0
 
 
+def test_garbage_price_change_does_not_refresh_timestamp():
+    # A book-level price_change carrying NO valid field (garbage bid/ask, no price) must NOT
+    # renew the timestamp on a stale cached quote — same 300s-staleness-eviction honesty guard
+    # the last_trade_price path already had. Previously price_change refreshed the timestamp
+    # UNCONDITIONALLY (only the last_trade_price path was guarded), so a garbage flood could
+    # keep a stale quote reportable-as-fresh indefinitely.
+    feed = PolymarketWSFeed()
+    feed._handle_message(_msg([{"asset_id": "tokA", "price": 0.4}]))
+    ts_after_good = feed._prices["tokA"].timestamp
+    # an all-garbage book update (no price, bad bid AND bad ask) leaves the timestamp untouched
+    feed._handle_message(_msg([{"asset_id": "tokA", "bid": "inf", "ask": 2.0}]))
+    assert feed._prices["tokA"].timestamp == ts_after_good
+    assert feed._prices["tokA"].price == 0.4
+    # a valid book update (a good bid) DOES refresh the timestamp and applies the field
+    feed._handle_message(_msg([{"asset_id": "tokA", "bid": 0.39}]))
+    assert feed._prices["tokA"].timestamp != ts_after_good
+    assert feed._prices["tokA"].bid == 0.39
+
+
+def test_garbage_price_change_never_creates_phantom_entry():
+    # A price_change for a NEVER-validly-seen token carrying only invalid fields must not
+    # create a phantom price=0.0 cache entry (which the parser treats as the missing-price
+    # sentinel and would otherwise sit in the cache with a fresh timestamp).
+    feed = PolymarketWSFeed()
+    feed._handle_message(_msg([{"asset_id": "tokNEW", "bid": "inf", "ask": "nan"}]))
+    assert "tokNEW" not in feed._prices
+
+
 def test_garbage_last_trade_does_not_refresh_timestamp():
     # A flood of all-invalid last-trade messages must NOT keep renewing the timestamp on a
     # stale cached quote (that would defeat the 300s staleness eviction). The timestamp only
