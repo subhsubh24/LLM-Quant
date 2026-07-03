@@ -333,18 +333,45 @@ class PolymarketClient:
     # Pricing (CLOB API)
     # ================================================================
 
+    @staticmethod
+    def _coerce_clob_price(raw, field_name: str, token_id: str) -> Optional[float]:
+        """Coerce a raw CLOB price field to a probability in [0, 1], or return None.
+
+        The polling price accessors used to do a bare ``float(data["price"])`` with NO
+        validation — unlike the live WebSocket path, which coerces every field through
+        ``websocket_feeds._coerce_prob`` (rejecting non-numeric / non-finite / out-of-[0,1]
+        values). That asymmetry was a real data-integrity hole: a malformed CLOB response
+        (``"mid": "nan"`` / ``"inf"`` / ``"1.5"``) flowed straight into
+        ``FlashCrashStrategy`` (``strategies.py`` overwrites ``outcome.price`` and appends
+        to its price-history buffer from ``get_midpoint`` AFTER the market-level
+        ``DataQualityValidator`` ran, so the validator can't catch it) — a NaN there
+        poisons the crash detector's rolling ``max``/``min`` for every future scan of that
+        token. Reject invalid values at the SOURCE and return None; every caller already
+        treats None as "no price this poll" and keeps the last good value (the data analog
+        of "no fake fill" — a missing quote is not a price).
+        """
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            logger.warning("[CLOB] %s for %s is non-numeric (%r) — rejected", field_name, token_id, raw)
+            return None
+        if not math.isfinite(val) or not (0.0 <= val <= 1.0):
+            logger.warning("[CLOB] %s for %s out of range/non-finite (%r) — rejected", field_name, token_id, val)
+            return None
+        return val
+
     def get_price(self, token_id: str, side: str = "BUY") -> Optional[float]:
-        """Get best price for a token."""
+        """Get best price for a token (validated to [0, 1]; None if missing/invalid)."""
         data = self._get(f"{CLOB_API}/price", params={"token_id": token_id, "side": side})
         if data and "price" in data:
-            return float(data["price"])
+            return self._coerce_clob_price(data["price"], "price", token_id)
         return None
 
     def get_midpoint(self, token_id: str) -> Optional[float]:
-        """Get midpoint price for a token."""
+        """Get midpoint price for a token (validated to [0, 1]; None if missing/invalid)."""
         data = self._get(f"{CLOB_API}/midpoint", params={"token_id": token_id})
         if data and "mid" in data:
-            return float(data["mid"])
+            return self._coerce_clob_price(data["mid"], "mid", token_id)
         return None
 
     def get_order_book(self, token_id: str) -> Optional[OrderBook]:

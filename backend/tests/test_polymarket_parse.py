@@ -239,3 +239,63 @@ def test_all_outcome_arrays_absent_is_untradeable_not_empty_active():
     m = _client()._parse_market(raw)
     assert m.active is False
     assert len(m.outcomes) < 2
+
+
+# ============================================================
+# CLOB polling-price honesty: get_price / get_midpoint validate to [0, 1]
+# (mirrors the WebSocket _coerce_prob guard; the polling accessors used to
+# return a bare float, so a malformed CLOB response — "nan"/"inf"/"1.5"/"-0.2"
+# — poisoned FlashCrashStrategy's price history AFTER DataQualityValidator ran).
+# ============================================================
+
+def _client_with_get(payload):
+    """A PolymarketClient whose CLOB _get returns a fixed payload."""
+    c = _client()
+    c._get = lambda *a, **k: payload  # type: ignore[assignment]
+    return c
+
+
+def test_get_midpoint_valid_price_passes_through():
+    assert _client_with_get({"mid": "0.62"}).get_midpoint("tok") == 0.62
+
+
+def test_get_midpoint_nan_rejected():
+    assert _client_with_get({"mid": "nan"}).get_midpoint("tok") is None
+
+
+def test_get_midpoint_inf_rejected():
+    assert _client_with_get({"mid": "inf"}).get_midpoint("tok") is None
+
+
+def test_get_midpoint_above_one_rejected():
+    assert _client_with_get({"mid": "1.5"}).get_midpoint("tok") is None
+
+
+def test_get_midpoint_negative_rejected():
+    assert _client_with_get({"mid": "-0.2"}).get_midpoint("tok") is None
+
+
+def test_get_midpoint_non_numeric_rejected():
+    assert _client_with_get({"mid": "n/a"}).get_midpoint("tok") is None
+
+
+def test_get_midpoint_missing_field_is_none():
+    assert _client_with_get({}).get_midpoint("tok") is None
+
+
+def test_get_price_valid_passes_through():
+    assert _client_with_get({"price": "0.41"}).get_price("tok") == 0.41
+
+
+def test_get_price_nan_rejected():
+    assert _client_with_get({"price": "nan"}).get_price("tok") is None
+
+
+def test_get_price_out_of_range_rejected():
+    assert _client_with_get({"price": "2.0"}).get_price("tok") is None
+
+
+def test_get_price_boundary_values_ok():
+    # 0.0 and 1.0 are valid probabilities (a resolved-loser / near-certain quote).
+    assert _client_with_get({"price": "0.0"}).get_price("tok") == 0.0
+    assert _client_with_get({"price": "1.0"}).get_price("tok") == 1.0
