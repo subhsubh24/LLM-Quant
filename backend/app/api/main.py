@@ -2,19 +2,20 @@
 FastAPI application entry point.
 """
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
-
-logger = logging.getLogger(__name__)
 
 from .. import __version__, DISCLAIMER
 from ..config import get_settings
 from ..db.database import init_db
 from ..prediction_markets.websocket_feeds import start_prediction_feeds, stop_prediction_feeds
-from ..prediction_markets.orchestrator import start_orchestrator, stop_orchestrator, init_orchestrator
+from ..prediction_markets.orchestrator import init_orchestrator, stop_orchestrator
 from .routes import router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -58,7 +59,6 @@ async def lifespan(app: FastAPI):
     # Initialize prediction market orchestrator (but don't start scanning)
     # User can start the bot from the Predictions UI or trigger manual scans
     try:
-        from ..prediction_markets.orchestrator import init_orchestrator
         init_orchestrator(scan_interval_sec=120)
         logger.info("Prediction market orchestrator initialized (idle — start from UI)")
     except Exception as e:
