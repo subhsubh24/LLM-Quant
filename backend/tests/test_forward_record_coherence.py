@@ -298,3 +298,118 @@ def test_scan_executes_when_not_held(db):
 
     assert summary["executed"] == 1
     assert "fresh1_yes" in ex.positions
+
+
+# ---------------------------------------------------------------------------
+# Settlement is counted into the loss caps AT MOST ONCE across a restart, even if
+# the DB persist FAILS. Before this fix, check_resolutions counted the PnL + removed
+# the position BEFORE persisting; a swallowed persist failure then left the row
+# is_resolved=False, so D8's rehydration re-settled it on the next process and
+# DOUBLE-COUNTED the realized PnL into the durable loss-cap/kill-switch counters.
+# ---------------------------------------------------------------------------
+
+def _resolved_loser_market(market_id: str, token_id: str) -> Market:
+    """A resolved market where the held ``token_id`` LOST (settles at 0.0)."""
+    return Market(
+        id=market_id, condition_id="c", question="Q?", slug="will-x", description="",
+        category="", end_date=None,
+        outcomes=[Outcome(token_id=token_id, label="Yes", price=0.0, midpoint=0.0, volume=0.0)],
+        total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+    )
+
+
+def _fake_client_returning(market: Market):
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_market_by_id(self, market_id):
+            return market if market_id == market.id else None
+
+    return _FakeClient
+
+
+def test_persist_failure_does_not_count_or_remove(db, monkeypatch):
+    """A FAILED resolution persist must NOT count PnL or drop the position (proven-fail
+    on pre-fix code, which counted+removed regardless of persist success)."""
+    _insert_position(db, "TOKL", "77", is_resolved=False, avg=0.9, size=10.0)  # a loser
+    ex = PredictionMarketExecutor(dry_run=True)
+    persistence.load_positions_into_executor(ex)
+    assert "TOKL" in ex.positions
+
+    from app.prediction_markets import polymarket_client as pmc
+    engine = MarkToMarketEngine(ex)
+    # Force the persist to fail (simulate a DB write error).
+    monkeypatch.setattr(engine, "_persist_resolution", lambda *a, **k: False)
+
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _fake_client_returning(_resolved_loser_market("77", "TOKL"))
+    try:
+        engine.check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+
+    # No PnL counted, position still OPEN (left to retry) — so a restart cannot double-count.
+    assert ex._realized_pnl_total == 0.0
+    assert "TOKL" in ex.positions
+    with Session(db) as s:
+        row = s.exec(select(m.PredictionPosition).where(m.PredictionPosition.token_id == "TOKL")).first()
+        assert row.is_resolved is False
+
+
+def test_settlement_counted_exactly_once_across_restart(db, monkeypatch):
+    """Persist fails on run 1 (nothing counted) → the position rehydrates on run 2 and
+    settles once. The loss hits the durable counters EXACTLY ONCE, never twice."""
+    _insert_position(db, "TOKL", "88", is_resolved=False, avg=0.9, size=10.0)
+    from app.prediction_markets import polymarket_client as pmc
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _fake_client_returning(_resolved_loser_market("88", "TOKL"))
+    try:
+        # --- run 1: persist FAILS -> nothing counted, row stays open ---
+        ex1 = PredictionMarketExecutor(dry_run=True)
+        persistence.load_positions_into_executor(ex1)
+        eng1 = MarkToMarketEngine(ex1)
+        monkeypatch.setattr(eng1, "_persist_resolution", lambda *a, **k: False)
+        eng1.check_resolutions()
+        assert ex1._realized_pnl_total == 0.0
+
+        # --- run 2 (fresh process): rehydrate the still-open row, persist SUCCEEDS ---
+        ex2 = PredictionMarketExecutor(dry_run=True)
+        persistence.load_positions_into_executor(ex2)
+        assert "TOKL" in ex2.positions, "the un-persisted position rehydrated for retry"
+        MarkToMarketEngine(ex2).check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+
+    # Counted ONCE: gross loss (0.0-0.9)*10 = -9.0, net of the 2%-notional entry fee on the
+    # $9.00 cost basis (-0.18) => -9.18. Not -18.36 (which a double-count would produce).
+    assert ex2._realized_pnl_total == pytest.approx(-9.18)
+    assert "TOKL" not in ex2.positions
+    with Session(db) as s:
+        row = s.exec(select(m.PredictionPosition).where(m.PredictionPosition.token_id == "TOKL")).first()
+        assert row.is_resolved is True
+
+
+def test_persist_resolution_returns_false_on_db_error(db, monkeypatch):
+    """_persist_resolution reports failure (False) when the DB write raises, and success
+    (True) on a clean write — the contract the caller relies on to avoid double-counting."""
+    _insert_position(db, "TOKX", "99", is_resolved=False, avg=0.4, size=10.0)
+    ex = PredictionMarketExecutor(dry_run=True)
+    persistence.load_positions_into_executor(ex)
+    engine = MarkToMarketEngine(ex)
+    pos = ex.positions["TOKX"]
+
+    # Clean write -> True + the row is marked resolved.
+    assert engine._persist_resolution(pos, realized_pnl=-1.0, settlement_price=0.0) is True
+    with Session(db) as s:
+        row = s.exec(select(m.PredictionPosition).where(m.PredictionPosition.token_id == "TOKX")).first()
+        assert row.is_resolved is True and row.realized_pnl == pytest.approx(-1.0)
+
+    # DB error -> False (never raises).
+    from app.db import database
+
+    def _boom():
+        raise RuntimeError("db unreachable")
+
+    monkeypatch.setattr(database, "get_session", _boom)
+    assert engine._persist_resolution(pos, realized_pnl=-1.0, settlement_price=0.0) is False
