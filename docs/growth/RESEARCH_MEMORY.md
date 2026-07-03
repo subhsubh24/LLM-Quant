@@ -807,3 +807,44 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   forward track record — proposing a new numbered experiment on top of a currently-broken persistence
   layer would itself be an integrity failure (the same discipline applied to the 2026-07-01
   whale-seed finding).
+
+## 2026-07-03 — EXP-004 (proposed): Cross-VENUE coherence edge (Polymarket ⟷ Kalshi) — matcher + backtest BUILT (factory run, ROADMAP B8)
+- Hypothesis (falsifiable): when the SAME real-world event is priced differently on Polymarket vs.
+  Kalshi, the disagreement beyond BOTH venues' round-trip costs is a tradeable, positive-EV
+  logical-consistency edge — one that does NOT require out-calibrating the crowd (unlike EXP-002/003 /
+  B4a, which lost −$639 OOS against a sharp crowd). Crowds can be individually well-calibrated yet
+  INCONSISTENT across venues, so this may be the more ROBUST alpha.
+- Min sample N: TBD on real data (needs enough genuinely-matched cross-venue pairs; venue overlap may
+  be small — a real risk to N, disclosed).
+- OOS result: **NONE YET — edge-not-proven.** This run built the MECHANISM (the matcher + cost-net
+  coherence primitive + a resolved-pair backtest), not a validated edge. No real dual-venue corpus has
+  been run (owner/egress-blocked, same OA-11/OA-15/OA-16 dependency as every other alpha).
+- Calibration: n/a (this is a consistency/arbitrage edge, not a calibration edge).
+- Costs modeled: YES — the cost-net `coherence_edge` charges BOTH venues' fees+slippage via the shared
+  `cost_model`; it is NEGATIVE when the venues agree (the double round-trip fee dominates) → no
+  fabricated edge on an efficient cross-venue market (verified, the analog of B4a's "0 trades on a
+  well-calibrated crowd").
+- Verdict: proposed / mechanism-built. `prediction_markets/cross_venue_matcher.py` (#179): an
+  adversarially-hardened event-matcher (content-overlap via the B5 `market_text` screen + numeric-STRIKE
+  consistency incl. comparator direction + resolution-timeframe overlap; a boolean MATCH separated from a
+  bounded `coherence_score`, and the TRADE gate rides the score) + the backtest that honestly models the
+  resolution-DIVERGENCE downside of a wrong match. NO orchestrator/executor wiring (DECISION COROLLARY).
+- How it could be wrong (pre-mortem):
+  - Venue overlap is small → too few genuinely-matched pairs for significance (the N risk).
+  - The event-MATCHER is the whole game: a FALSE pairing on markets that resolve on DIFFERENT criteria
+    (different resolution source / settlement time / wording) manufactures a fake disagreement, and if
+    the two legs resolve OPPOSITELY the position loses the whole stake. The matcher is deliberately
+    CONSERVATIVE (rejects on any unconfirmed strike/direction/timeframe); still, resolution-source
+    divergence on a genuinely-"same" event is the residual risk.
+  - Prices are venue MIDPOINTS, not executable asks — a fired match is a candidate to verify against
+    live depth, not locked profit; per-venue liquidity/impact is not yet modeled.
+  - Cross-venue arb is known bot-dominated (Research Run 10) — the gap may be gone by the time we route.
+- The adversarial gate broke the matcher 4× across 3 fix cycles (adjacent-strike tolerance; a
+  no-threshold pair reaching the trade bar; word-form + contraction + cross-clause negation
+  mis-parsing). The negation rabbit hole was ended by ELIMINATING the fragile inversion heuristic: a
+  negated comparator VOIDS the strike (tightening-only — can only reject, never fabricate a match). 2
+  Sonnet reviewers + 4 Opus adversarial audits (final: tightening-only holds, no tradeable false match).
+- Next action (loop-buildable is DONE; the rest is owner/egress + gated): once a real Polymarket ⟷
+  Kalshi corpus exists (OA-11/15/16), run the matcher over it, report the cost-net OOS coherence PnL +
+  the matched-pair count, and only if it clears the floor over sufficient N with ≥3 auditors unable to
+  break it does B8 become go-live-eligible (live routing far downstream, human-core).

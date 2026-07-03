@@ -2,6 +2,69 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-03 (factory run) — B8 cross-venue coherence matcher (the 2nd, more-robust alpha CANDIDATE) + F10 wiring + gate coverage; the adversarial gate broke B8 FOUR times across 3 fix cycles and I ended the rabbit hole by ELIMINATING the fragile heuristic, not tweaking it
+
+- **Shipped 3 file-disjoint code PRs + this bookkeeping**, all maker≠checker, from an 8-Haiku scout sweep across tracks A–G:
+  (#179) **B8** — the cross-VENUE coherence edge matcher + cost-net backtest (`prediction_markets/cross_venue_matcher.py`,
+  the LOWEST genuinely-incomplete NEW-capability item): an adversarially-hardened event-matcher (content-overlap + numeric-strike +
+  timeframe gates; boolean MATCH vs a bounded `coherence_score`) + a cost-net `coherence_edge` (buy YES cheaper venue + NO dearer →
+  $1 iff both resolve same → negative when venues agree, no fabricated edge) + a resolved-pair backtest modeling the resolution-
+  DIVERGENCE downside honestly. NO orchestrator/executor wiring (DECISION COROLLARY); a CANDIDATE edge, NOT validated.
+  (#180) **F10** — wired the built-but-uncalled `analyze_regime_slices` into `validate_real_oos.evaluate()` (anti-overfitting
+  concentration report on every real OOS run) + fixed a structurally-false category FRAGILE at the `regime_slice` root.
+  (#182) **F1/F7** — registered `test_market_category` (the #156 confirmed-outage fix, NOT previously in the required gate) +
+  `test_weekly_metrics` + `test_cross_venue_matcher` in the blocking preflight list (the single shared-resource edit this run).
+  No DoD/floor box ticked — the VALIDATED-OOS-EDGE binding constraint stays owner/egress-blocked (OA-11/15/16); B8 gives a second,
+  possibly-more-robust alpha candidate once real dual-venue corpora exist.
+
+- **THE headline lesson — when an adversarial-gate finding RECURS in the same sub-system across cycles, ELIMINATE the fragile
+  mechanism, don't keep tweaking it (the circuit-breaker's spirit).** B8's numeric-STRIKE direction parsing (needed to reject
+  same-subject/different-strike or opposite-direction pairs) was broken by the gate FOUR times: (1) Reviewer A — a 2% relative
+  tolerance matched adjacent strikes (50%/51%, $100k/$102k) → tightened to 1e-6 (format diffs still normalise equal, adjacent
+  strikes reject); (1b) Reviewer A — a spelled-out / no-threshold pair reached the 0.5 trade bar via content overlap alone → hard-
+  capped no-threshold coherence at 0.45<0.5 (surfaced, never traded); (2) Opus re-audit — word-form negation ("no more than") was
+  read as its opposite; my cycle-1 fix + cycle-2 apostrophe/contraction fix each closed one form but (3) the FINAL Opus audit caught
+  my cycle-2 loose backward negation scan SPURIOUSLY inverting a negation from a DIFFERENT clause ("no layoffs and unemployment above
+  4%" fabricating a match with "below 4%") — a NEW regression my own fix introduced. **The fix was not a 4th tweak of the inversion
+  logic — it was DELETING inversion entirely:** a negation binding a comparator now VOIDS the strike (extract_threshold→None), which
+  is TIGHTENING-ONLY (a voided strike yields a one-sided reject or an un-tradeable no-threshold pair — it can only REMOVE a match,
+  never fabricate one). The safety property became STRUCTURAL, not heuristic, so the whole class of inversion edge-cases is now
+  impossible. The final Sonnet confirmation verified tightening-only holds (the one-sided reject + the 0.45 cap are both
+  unconditional) → no tradeable false match. **Lesson: 3 fix cycles on one sub-mechanism is the circuit-breaker warning; the escape
+  is not a smarter heuristic (which spawns new edge cases — my cycle-2 fix REGRESSED) but a design where the dangerous direction
+  (a fabricated match) is structurally impossible, accepting a conservative miss instead.** (Honest: 3 fix cycles on B8 is a lot;
+  it CONVERGED on a safe design rather than churning — 0 reverts, the merge gated on a clean final confirmation.)
+
+- **THE anti-padding call — DROPPED A3 (Kalshi category routing) after the VALUE reviewer caught it was re-doing a nit the loop
+  itself already dropped.** A3 (route `kalshi_client` raw category through `derive_market_category`, like #156 did for Polymarket)
+  was technically correct + had a clean correctness APPROVE, but Reviewer B (value) showed: Kalshi is NOT wired into any live
+  scan/exposure path (`orchestrator.py`: `kalshi_value = 0.0 # Kalshi not yet integrated`), so the cap-collapse it "fixes" cannot
+  occur in the running system, AND loop-memory's own 2026-07-02 entry explicitly dropped this exact "Kalshi-category-verbatim
+  consistency nit (degrades safely)" one run earlier — with no new trigger (Kalshi still isn't live-scanned). I abandoned it
+  (classified review_value). **Lesson: a NEXT-RUN NOTE is a candidate, not an obligation — before building a deferred nit, check
+  whether the loop already CONSIDERED-AND-DROPPED it and whether its precondition (here: Kalshi live-scanning) actually changed.
+  The correctness reviewer approving the CODE does not override the value reviewer proving it's dormant-code padding.**
+
+- **THE design lesson — separate "could this be the same event?" (a boolean MATCH) from "how confident?" (a bounded score), and
+  make the TRADE gate ride the score, not the match.** B8's matcher returns a match for a plausible pairing but only TRADES it when
+  `coherence_score >= min_coherence` (0.5). This let the no-threshold hole be closed by CAPPING coherence at 0.45 (surface the weak
+  pairing, never size it) instead of hard-rejecting — the honest "surfaced candidate, not a booked trade" contract. The cost-net
+  coherence primitive also gives no fabricated edge on agreeing venues BY CONSTRUCTION (the double round-trip fee dominates), the
+  analog of B4a's "0 trades on a well-calibrated crowd".
+
+- **Process/env:** `pip install -r backend/requirements-ci.txt fastapi httpx pandas scikit-learn`; `rm -f quantlab.db` before
+  DB-backed tests. Reviewers/auditors ran in isolated `git worktree`s under /tmp (cleaned up). Base moved mid-run (#183 merged);
+  strict=false let the file-disjoint PRs merge without rebase. Merged via MCP squash on the green required check AFTER reviews:
+  F10 first (independent, 2 APPROVE), then B8 (after the final confirmation), then the gate PR (its cross_venue registration
+  non-dangling once B8 landed). Verified the MERGED default green end-to-end (preflight code + the 126 newly-relevant tests).
+  Subagents this run: 8 scouts + 9 first-pass reviewers + 3 re-reviews + 1 final audit + 1 final confirmation = 22 (< 50 cap).
+  NEXT-RUN NOTES: (1) B8 is buildable-further once real dual-venue corpora exist (OA-11/15/16): run the matcher over real Polymarket
+  ⟷ Kalshi markets, validate an OOS coherence edge ≥ floor through ≥3 auditors, THEN (far downstream) live routing. (2) F10: thread
+  real per-market categories through the walk-forward so the category dimension is assessed (today it's honestly not, on an unlabeled
+  corpus). (3) B8 accepted limitations (auditor-rated non-blocking, rare): a genuinely same-event NEGATED pair yields no strike →
+  surfaced but not traded (conservative miss); double-negation. (4) the 2 FK defense-in-depth writers + config.data_provider residue
+  remain marginal tidies (do only with a real trigger).
+
 ## 2026-07-02 (4th factory run) — the DATA/INTEGRITY-cluster run: 5 file-disjoint PRs advanced the lowest-incomplete loop-buildable items attacking the binding constraint (A6 volume + A7 headroom + A3 2nd-venue + F10 anti-overfitting) + a real money-path fix; the adversarial gate BROKE 2 of them (real bugs) and I fixed through the gate
 
 - **Shipped 5 file-disjoint code PRs + this bookkeeping** from an 8-Haiku scout sweep, all maker≠checker
