@@ -95,7 +95,10 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_websocket_feeds.py \
            backend/tests/test_unvalidated_strategy_gating.py \
            backend/tests/test_strategy_drawdown_disable.py \
-           backend/tests/test_forward_record_coherence.py; do
+           backend/tests/test_forward_record_coherence.py \
+           backend/tests/test_market_category.py \
+           backend/tests/test_weekly_metrics.py \
+           backend/tests/test_cross_venue_matcher.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done
   if [ -n "$_testfiles" ]; then
