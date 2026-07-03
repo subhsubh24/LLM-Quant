@@ -845,7 +845,7 @@ class PredictionMarketExecutor:
             self._loss_cap_day = today
             self._realized_pnl_daily = 0.0
 
-    def record_realized_pnl(self, pnl: float):
+    def record_realized_pnl(self, pnl: float, fees: float = 0.0):
         """Record realized PnL from a closed/reduced position and AUTO-TRIP the kill
         switch if a hard loss cap is breached (ROADMAP D3/D4).
 
@@ -853,10 +853,24 @@ class PredictionMarketExecutor:
         resolves). It accumulates the daily + total realized PnL the loss caps gate on,
         then enforces them immediately so the kill switch trips on the very trade that
         breaches the cap — not only on the next order attempt.
+
+        ``fees`` (>= 0) is the realized TRANSACTION COST tied to this realization — the
+        venue fee(s) actually paid on the round trip (the entry fill's fee, plus the exit
+        fill's fee on a reduce; resolution has no exit fill so only the entry fee). It is
+        SUBTRACTED so the counters — and therefore the hard loss caps + kill switch —
+        gate on the TRUE net cash PnL, not the gross price move. Fees are a definite cash
+        cost that ``_simulate_fill`` charges (2% of notional) and were previously tracked
+        only in the reporting-only ``total_fees`` field, NEVER against the loss cap — so
+        the cap undercounted the real cash loss by exactly the fees. Netting them here is
+        the CONSERVATIVE direction: it can only make the cap trip EARLIER (at a slightly
+        smaller gross loss), never later. ``abs()`` guards against a caller passing a
+        signed fee — a fee always reduces PnL. Default 0.0 keeps every existing caller
+        (and the direct-record tests) bit-identical.
         """
+        net_pnl = pnl - abs(fees)
         self._roll_daily_loss_window()
-        self._realized_pnl_total += pnl
-        self._realized_pnl_daily += pnl
+        self._realized_pnl_total += net_pnl
+        self._realized_pnl_daily += net_pnl
         was_tripped = self._kill_switch_active
         self._enforce_loss_caps()
         # Durably persist the updated loss counters so a restart cannot reset the
@@ -1045,8 +1059,16 @@ class PredictionMarketExecutor:
                 pnl = (result.filled_price - pos.avg_entry_price) * result.filled_size
                 pos.realized_pnl += pnl
                 # Feed the executor-level realized-PnL counters + auto-trip the kill
-                # switch if this realized loss breaches a hard cap (D3/D4).
-                self.record_realized_pnl(pnl)
+                # switch if this realized loss breaches a hard cap (D3/D4). NET the
+                # round-trip transaction cost so the caps gate on TRUE cash PnL: the exit
+                # fill fee (result.fees, just charged on this SELL) PLUS the entry fee
+                # attributable to the reduced size. The entry fee is exact — the venue fee
+                # is a flat rate on notional and avg_entry_price is the recorded fill
+                # price, so DEFAULT_FEE_RATE * avg_entry_price * filled_size reconstructs
+                # the fee actually paid to open this many contracts. Netting fees only ever
+                # trips the cap EARLIER (the conservative, safe direction).
+                entry_fee = DEFAULT_FEE_RATE * pos.avg_entry_price * result.filled_size
+                self.record_realized_pnl(pnl, fees=result.fees + entry_fee)
                 pos.size -= result.filled_size
                 if pos.size <= 0.001:
                     # Position closed

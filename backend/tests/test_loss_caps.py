@@ -145,8 +145,9 @@ def test_resolution_loss_feeds_cap_and_auto_trips():
     finally:
         pmc.PolymarketClient = orig
 
-    # ~ -$50 realized (0 - 0.50)*100, beyond the $10 cap.
-    assert ex._realized_pnl_total == pytest.approx(-50.0)
+    # Gross -$50 (0 - 0.50)*100, NET of the entry fee the caps now subtract (2% of the
+    # $50 cost basis = $1.00): -$51.00. Beyond the $10 cap either way.
+    assert ex._realized_pnl_total == pytest.approx(-51.0)
     assert ex.kill_switch_active                      # resolution loss AUTO-TRIPPED
     assert token_id not in ex.positions               # position closed
 
