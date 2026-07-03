@@ -216,6 +216,13 @@ def analyze_regime_slices(
     n = len(trades)
     total_pnl = round(sum(t.pnl_usd for t in trades), 6)
     total_budget = round(sum(t.budget_usd for t in trades), 6)
+    # Distinguish "no category labels were supplied" from "labels supplied, some unknown".
+    # When NONE are supplied every trade falls in the single UNCATEGORIZED bucket, so a
+    # category-concentration or leave-one-out flag would fire on EVERY profitable run
+    # regardless of the true diversification — a structurally false signal. In that case
+    # the category dimension carries NO information and is excluded from fragility (the
+    # horizon / confidence / time / single-market checks still apply).
+    categories_known = category_by_market_id is not None
     cat_map = dict(category_by_market_id or {})
 
     def cat_of(t: BacktestTrade) -> str:
@@ -263,13 +270,23 @@ def analyze_regime_slices(
                     f"('{top.label}') > {thresh:.0%} threshold"
                 )
 
-        _flag(by_category, CATEGORY_PNL_CONCENTRATION, "category")
+        # Category concentration + leave-one-out are only meaningful with real labels;
+        # with none supplied every trade is UNCATEGORIZED and these would fire spuriously.
+        if categories_known:
+            _flag(by_category, CATEGORY_PNL_CONCENTRATION, "category")
+        else:
+            reasons.append(
+                "category concentration + leave-one-out NOT assessed (no category labels "
+                "supplied for this corpus) — horizon/confidence/time/single-market still apply"
+            )
         _flag(by_horizon, HORIZON_PNL_CONCENTRATION, "horizon")
         _flag(by_confidence, CONFIDENCE_PNL_CONCENTRATION, "confidence")
         _flag(by_time, TIME_PNL_CONCENTRATION, "time-window")
 
-        # Leave-one-out on the top CATEGORY: does the edge survive dropping it?
-        if by_category:
+        # Leave-one-out on the top CATEGORY: does the edge survive dropping it? Only with
+        # real labels (otherwise "the top category" is the sole UNCATEGORIZED bucket and
+        # removing it trivially leaves 0 — a false alarm on every run).
+        if categories_known and by_category:
             top_cat = max(by_category, key=lambda s: s.net_pnl_usd)
             remaining = round(total_pnl - top_cat.net_pnl_usd, 6)
             if remaining <= 0:

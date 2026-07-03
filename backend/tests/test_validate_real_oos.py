@@ -61,6 +61,13 @@ def test_report_includes_regime_slice_and_flags_concentration():
     assert rs["fragile"] is True
     assert len(rs["fragile_reasons"]) > 0
     assert rs["has_positive_edge"] is True
+    # Fragility here is REAL (single price bucket → one confidence bucket; single 1-day
+    # horizon), NOT the false category signal: with no category labels the category /
+    # leave-one-out checks are explicitly NOT assessed (F10 review fix), so they must not
+    # be what trips the flag.
+    assert any(rr.startswith("confidence:") or rr.startswith("horizon:") for rr in rs["fragile_reasons"])
+    assert not any(rr.startswith("category:") for rr in rs["fragile_reasons"])
+    assert not any(rr.startswith("leave-one-out:") for rr in rs["fragile_reasons"])
     # With a positive edge the concentration shares are real numbers (not fabricated Nones).
     assert rs["top_confidence_bucket_pnl_share"] is not None
     # And the fragility is surfaced in the human-readable verdict.

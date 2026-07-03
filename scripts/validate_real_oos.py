@@ -54,9 +54,13 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
     # hide a FRAGILE edge concentrated in one horizon / confidence bucket / lucky window /
     # a few markets. Slice the alpha's realized OOS trades and FLAG concentration. This is
     # the go-live audit's regime-slice check, now produced automatically on every real run.
-    # HistoricalMarket carries no category (the resolved corpus does not label it), so we
-    # pass category_by_market_id=None (all "uncategorized" — never a fabricated label); the
-    # horizon / confidence / time slices + the single-market concentration check still apply.
+    # The alpha operates on HistoricalMarket records (market_id / price / outcome only) —
+    # the venue category is NOT threaded through the walk-forward here, so we pass
+    # category_by_market_id=None. With no labels, analyze_regime_slices explicitly does NOT
+    # assess category-concentration / leave-one-out (they would fire on every run and be a
+    # false signal); the horizon / confidence / time slices + single-market concentration
+    # DO apply. Threading real categories through is a future enhancement (would enable the
+    # category dimension too); until then the report is honest about what it did not assess.
     rs_mod = _imp("backend.app.prediction_markets.regime_slice",
                   "app.prediction_markets.regime_slice")
     alpha_regime = rs_mod.analyze_regime_slices(alpha.trades)
