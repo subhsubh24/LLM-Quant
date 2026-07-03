@@ -171,6 +171,37 @@ def test_absent_category_map_reports_uncategorized():
     assert labels == {UNCATEGORIZED}
 
 
+def test_absent_category_map_does_not_falsely_flag_category_fragility():
+    """Regression (F10 review): with NO category labels every trade falls in the single
+    UNCATEGORIZED bucket, so a category-concentration / leave-one-out flag would fire on
+    EVERY profitable run — a structurally false FRAGILE. A corpus that is BROAD across
+    horizon/confidence/time (only category is unknown) must NOT be flagged fragile, and the
+    report must disclose that category slicing was not assessed."""
+    # Spread across horizons, confidence bands, and weeks so no OTHER dimension concentrates.
+    trades = [
+        _trade("m0", +10.0, entry=0.15, horizon_days=0.5, res=_week(0)),
+        _trade("m1", +10.0, entry=0.35, horizon_days=2, res=_week(1)),
+        _trade("m2", +10.0, entry=0.60, horizon_days=5, res=_week(2)),
+        _trade("m3", +10.0, entry=0.85, horizon_days=20, res=_week(3)),
+    ]
+    rep = analyze_regime_slices(trades)  # no category_by_market_id
+    assert rep.has_positive_edge is True
+    assert rep.fragile is False, rep.fragile_reasons
+    assert not any(r.startswith("category:") for r in rep.fragile_reasons)
+    assert not any(r.startswith("leave-one-out:") for r in rep.fragile_reasons)
+    assert any("no category labels supplied" in r for r in rep.fragile_reasons)
+
+
+def test_supplied_category_map_still_flags_single_category():
+    """The fix must NOT weaken the real signal: when labels ARE supplied and all the edge
+    is one real category, it is still flagged (category + leave-one-out)."""
+    trades = [_trade("c0", +50.0, res=_week(0)), _trade("c1", +50.0, res=_week(1))]
+    rep = analyze_regime_slices(trades, category_by_market_id={"c0": "Crypto", "c1": "Crypto"})
+    assert rep.fragile is True
+    joined = " | ".join(rep.fragile_reasons)
+    assert "category:" in joined and "leave-one-out" in joined
+
+
 # ---------------------------------------------------------------------------
 # Bucketing correctness + determinism
 # ---------------------------------------------------------------------------
