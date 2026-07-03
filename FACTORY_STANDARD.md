@@ -456,8 +456,9 @@ trading away quality or honesty.
   metered by-stage / by-model spend (`lib/observability/cost-meter.ts` — `withCostLedger` /
   `recordUsage`), find the biggest driver, and reduce it: caching, prompt-slimming, batching,
   dropping redundant calls, or a cheaper tier — **ONLY where output quality holds.** HARD BOUND:
-  never downgrade a protected HIGH task (the tiers with no cheap verifier — apartment/room
-  understanding, diagnosis, area-analysis, floor-plan) and never relax the LLM cost-contract
+  never downgrade a protected HIGH task (the tiers with no cheap deterministic verifier — the
+  understanding / diagnosis / extraction tasks the cost contract + ROADMAP name for THIS product)
+  and never relax the LLM cost-contract
   ratchet; optimize elsewhere. A cost cut that costs quality is a FAILURE, not a win.
 - **Reconcile in the business case:** recompute contribution margin from REAL data as it arrives
   (computed, never eyeballed — §22); when the economics contradict the model, the metrics win (§9).
@@ -471,8 +472,8 @@ Pre-launch both are largely latent (no funnel, ~0 COGS); post-launch this is whe
 invisible to the loop — so a run's reported cost is a fraction of the truth. Building this out is
 standing work until every real run reports its true end-to-end spend:
 - **Full-pipeline coverage:** wrap each real pipeline entry in `withCostLedger` and call
-  `recordUsage` at EVERY model-calling stage — image/room understanding, diagnosis, product
-  search, mockup/output generation, refine — so ONE run accumulates the WHOLE flow, not a subset.
+  `recordUsage` at EVERY model-calling stage of THIS product's pipeline (per ROADMAP) — so ONE run
+  accumulates the WHOLE flow, not a subset.
   A stage that records nothing is invisible cost.
 - **Dollars + by provider/model (not just tokens):** keep a per-model price table and compute $
   from tokens; attribute each stage's spend to its model/provider so the breakdown answers "which
