@@ -386,7 +386,10 @@ class PolymarketExecutor:
                 price=req.price,
                 status=status,
                 filled_size=filled_size,
-                filled_price=req.price if filled_size > 0 else 0.0,
+                # The submitted limit is `req.price or 0.50` (line ~308), never None — mirror
+                # it so a None req.price (schema-valid) can't set filled_price=None and crash
+                # the downstream market_value / PnL math after a real order was placed.
+                filled_price=(req.price or 0.50) if filled_size > 0 else 0.0,
                 raw_response=resp,
             )
         except Exception as e:
@@ -518,13 +521,18 @@ class PolymarketExecutor:
                         size=req.size,
                         price=req.price,
                         filled_size=parsed,
-                        # A limit order fills at (or better than) its limit price, so the
-                        # fill price IS req.price — mirror the CLOB path (line ~389). Omitting
-                        # this defaulted filled_price to 0.0, so a live REST fill would build a
-                        # Position with avg_entry_price=0.0 (execution.py:1090), making realized
-                        # PnL = settlement*size (all gain, no cost basis) and the entry fee 0 —
-                        # the hard loss caps / kill switch would then gate on inflated net PnL.
-                        filled_price=req.price,
+                        # A limit order fills at (or better than) the limit that was actually
+                        # submitted — which is `req.price or 0.50` (the SAME expression the REST
+                        # body used at line ~447 / the CLOB path at line ~308), so it is never
+                        # None even when req.price is None (a schema-valid GTC/FOK input).
+                        # Omitting this defaulted filled_price to 0.0, so a live REST fill built
+                        # a Position with avg_entry_price=0.0 (execution.py:~1090), making
+                        # realized PnL = settlement*size (all gain, no cost basis) and the entry
+                        # fee 0 — the hard loss caps / kill switch would then gate on inflated
+                        # net PnL. (Using req.price directly would set None → a downstream
+                        # TypeError in market_value math AFTER a real order placed — the exact
+                        # crash the None-safe expression avoids.)
+                        filled_price=req.price or 0.50,
                         status=OrderStatus.FILLED,
                         raw_response=data,
                     )

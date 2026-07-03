@@ -117,6 +117,23 @@ def test_filled_result_carries_entry_price():
     assert req.price > 0.0  # guard the assertion is non-vacuous
 
 
+def test_filled_result_none_price_does_not_produce_none_fill():
+    # req.price is Optional[float] and None is schema-valid for GTC/FOK — the order is then
+    # submitted at the `req.price or 0.50` default (execution.py order-build). A FILLED result
+    # must reflect that effective submitted price, NEVER None: a None filled_price would build
+    # a Position with avg_entry_price=None and crash the downstream market_value / PnL math
+    # (float * None) AFTER a real order was placed. (Reviewer-A catch.)
+    ex = _executor({"success": True, "orderID": "abc", "status": "matched", "matchedAmount": 5})
+    req = OrderRequest(
+        exchange=Exchange.POLYMARKET, market_id="0xmkt", token_id="tok",
+        side=OrderSide.BUY, order_type=OrderType.GTC, size=5, price=None,
+    )
+    res = ex._place_via_rest(req)
+    assert res.status == OrderStatus.FILLED
+    assert res.filled_price is not None
+    assert res.filled_price == pytest.approx(0.50)  # the effective submitted limit
+
+
 def test_connection_exception_error_is_type_only_not_raw_internals():
     # Error-message hygiene (§12): when the venue call raises (a connection/timeout error),
     # OrderResult.error must expose only the exception TYPE, never the raw str (which leaks
