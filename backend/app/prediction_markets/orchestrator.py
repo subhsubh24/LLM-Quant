@@ -507,16 +507,25 @@ class MarkToMarketEngine:
             from sqlmodel import select
             from sqlalchemy import inspect as sa_inspect
 
-            # No positions table ⇒ no persistence ⇒ nothing can rehydrate ⇒ it is SAFE to
-            # count (the in-memory-only paper/test path). This is DISTINCT from a write
-            # failure on an existing row (handled by the except below): a missing schema
-            # can never produce a rehydratable row, so we must NOT block the settlement.
+            # A DEFINITIVE "no table" means no persistence is configured (the in-memory-only
+            # paper/test path) ⇒ nothing can rehydrate ⇒ it is SAFE to count. But an
+            # INSPECTION FAILURE (the DB is unreachable — a Neon idle-drop / transient
+            # partition / pool-checkout failure) is NOT "no table": a rehydratable row may
+            # exist and simply be unreachable right now, so we must DEFER (return False),
+            # exactly like a write failure below — never assume "safe to count" when we
+            # cannot confirm there is no rehydratable row. (has_table is the FIRST DB touch;
+            # swallowing its error as has_table=False would re-open the very cross-restart
+            # double-count this fix closes — an adversarial live-safety audit caught it.)
             try:
                 has_table = sa_inspect(database.engine).has_table(
                     PredictionPosition.__tablename__
                 )
-            except Exception:
-                has_table = False
+            except Exception as e:
+                logger.error(
+                    f"[MTM] positions-table probe failed for {pos.token_id}; DEFERRING "
+                    f"settlement (cannot confirm no rehydratable row → retry next cycle): {e}"
+                )
+                return False
             if not has_table:
                 return True
 

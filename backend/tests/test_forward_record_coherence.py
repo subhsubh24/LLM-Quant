@@ -413,3 +413,59 @@ def test_persist_resolution_returns_false_on_db_error(db, monkeypatch):
 
     monkeypatch.setattr(database, "get_session", _boom)
     assert engine._persist_resolution(pos, realized_pnl=-1.0, settlement_price=0.0) is False
+
+
+def test_has_table_probe_failure_defers_not_counts(db, monkeypatch):
+    """A DB outage during the has_table PROBE (the first DB touch) must DEFER (return
+    False), not be mistaken for 'no table → safe to count'. A rehydratable row EXISTS but
+    is unreachable; counting now would double-count on the next process. FAILS on the
+    swallow-to-False variant (which returned True)."""
+    _insert_position(db, "TOKP", "66", is_resolved=False, avg=0.9, size=10.0)
+    ex = PredictionMarketExecutor(dry_run=True)
+    persistence.load_positions_into_executor(ex)
+    engine = MarkToMarketEngine(ex)
+    pos = ex.positions["TOKP"]
+
+    import sqlalchemy
+
+    def _boom_inspect(*a, **k):
+        raise RuntimeError("db unreachable during inspect")
+
+    monkeypatch.setattr(sqlalchemy, "inspect", _boom_inspect)
+    assert engine._persist_resolution(pos, realized_pnl=-9.18, settlement_price=0.0) is False
+
+
+def test_outage_during_probe_does_not_double_count_across_restart(db, monkeypatch):
+    """End-to-end (the adversarial live-safety auditor's exact reproduction): a DB outage
+    during the has_table probe on run 1 must count NOTHING (the row stays open); run 2
+    (healthy) settles it ONCE. The durable loss counter is -9.18, not -18.36."""
+    _insert_position(db, "TOKO", "67", is_resolved=False, avg=0.9, size=10.0)
+    from app.prediction_markets import polymarket_client as pmc
+    import sqlalchemy
+
+    orig = pmc.PolymarketClient
+    real_inspect = sqlalchemy.inspect
+    pmc.PolymarketClient = _fake_client_returning(_resolved_loser_market("67", "TOKO"))
+    try:
+        # run 1: outage during the has_table probe → _persist_resolution returns False →
+        # nothing counted, position left OPEN.
+        ex1 = PredictionMarketExecutor(dry_run=True)
+        persistence.load_positions_into_executor(ex1)
+        monkeypatch.setattr(
+            sqlalchemy, "inspect",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db unreachable during inspect")),
+        )
+        MarkToMarketEngine(ex1).check_resolutions()
+        assert ex1._realized_pnl_total == 0.0
+        monkeypatch.setattr(sqlalchemy, "inspect", real_inspect)  # DB heals
+
+        # run 2 (fresh process): the still-open row rehydrates + settles ONCE.
+        ex2 = PredictionMarketExecutor(dry_run=True)
+        persistence.load_positions_into_executor(ex2)
+        assert "TOKO" in ex2.positions
+        MarkToMarketEngine(ex2).check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+
+    assert ex2._realized_pnl_total == pytest.approx(-9.18)  # counted ONCE, not -18.36
+    assert "TOKO" not in ex2.positions
