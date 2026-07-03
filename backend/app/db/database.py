@@ -130,9 +130,3 @@ def get_session() -> Generator[Session, None, None]:
         raise
     finally:
         session.close()
-
-
-def get_session_dependency() -> Generator[Session, None, None]:
-    """FastAPI dependency for database sessions."""
-    with get_session() as session:
-        yield session

@@ -395,35 +395,3 @@ def _regime_stats(
         "n_days": len(returns),
         "pct_of_total": round(len(returns) / total_days, 4),
     }
-
-
-def compute_rolling_metrics(
-    returns: pd.Series,
-    window: int = 252
-) -> pd.DataFrame:
-    """
-    Compute rolling performance metrics.
-
-    Returns DataFrame with rolling Sharpe, volatility, etc.
-    """
-    metrics = pd.DataFrame(index=returns.index)
-
-    # Rolling volatility
-    metrics["volatility"] = returns.rolling(window).std() * np.sqrt(252)
-
-    # Rolling Sharpe
-    rolling_mean = returns.rolling(window).mean() * 252
-    metrics["sharpe"] = rolling_mean / metrics["volatility"]
-
-    # Rolling max drawdown
-    def rolling_max_dd(rets):
-        if len(rets) < 2:
-            return 0
-        cumulative = (1 + rets).cumprod()
-        running_max = cumulative.expanding().max()
-        dd = (cumulative - running_max) / running_max
-        return dd.min()
-
-    metrics["max_drawdown"] = returns.rolling(window).apply(rolling_max_dd, raw=False)
-
-    return metrics
