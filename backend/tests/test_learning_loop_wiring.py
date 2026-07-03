@@ -549,7 +549,9 @@ def test_resolution_looks_up_market_by_id_not_slug():
     finally:
         pmc.PolymarketClient = orig
 
-    # Settlement actually fired: the losing position is closed and the ~-$50 loss realized.
+    # Settlement actually fired: the losing position is closed and the loss realized.
+    # Gross -$50 ((0-0.50)*100), NET of the entry fee the loss caps now subtract (2% of
+    # the $50 cost basis = $1.00) = -$51.00.
     assert token_id not in ex.positions, "position must settle when looked up by id"
-    assert ex._realized_pnl_total == pytest.approx(-50.0), \
+    assert ex._realized_pnl_total == pytest.approx(-51.0), \
         "the real resolution loss must be booked (dead on the pre-fix slug lookup)"

@@ -172,9 +172,11 @@ def test_check_resolutions_settles_rehydrated_position(db, monkeypatch):
     finally:
         pmc.PolymarketClient = orig
 
-    # Settled + removed from memory; realized PnL = (1.0 - 0.4) * 10 = +6.0.
+    # Settled + removed from memory; gross realized PnL = (1.0 - 0.4) * 10 = +6.0, NET of
+    # the entry fee the loss-cap counters now subtract (2% of the $4.00 cost basis =
+    # $0.08): +5.92. (The counter tracks true net cash PnL; a win is reduced by its fee.)
     assert "TOKW" not in ex.positions
-    assert ex._realized_pnl_total == pytest.approx(6.0)
+    assert ex._realized_pnl_total == pytest.approx(5.92)
 
     # DB row marked resolved so a subsequent run does NOT re-rehydrate/re-settle it.
     with Session(db) as s:

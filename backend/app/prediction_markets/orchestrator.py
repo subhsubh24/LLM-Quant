@@ -410,7 +410,16 @@ class MarkToMarketEngine:
                 # Resolution is the PRIMARY way binary-market positions take losses, so
                 # without this the loss caps would silently miss the dominant loss path
                 # (the gate reads the same counters) — caught by the adversarial audit.
-                self.executor.record_realized_pnl(pnl)
+                # NET the entry transaction fee so the caps gate on TRUE cash PnL: the
+                # position paid a venue fee to OPEN (a flat rate on notional) that was
+                # never counted against the loss cap, so a gross settlement loss
+                # UNDERCOUNTED the real cash loss by that fee. Resolution has NO exit fill
+                # (it redeems at the settled price without a market order), so only the
+                # entry fee applies. It is exact — avg_entry_price is the recorded fill
+                # price, so fee_rate * avg_entry_price * size reconstructs the fee paid.
+                # Netting it only ever trips the cap EARLIER (the conservative direction).
+                entry_fee = DEFAULT_COST_MODEL.fee_rate * pos.avg_entry_price * pos.size
+                self.executor.record_realized_pnl(pnl, fees=entry_fee)
 
                 # Feed the per-strategy DRAWDOWN circuit too (ROADMAP D2). Same bypass
                 # as above but for `risk_manager.record_pnl`: without this, a strategy's
