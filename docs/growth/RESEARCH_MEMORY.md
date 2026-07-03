@@ -848,3 +848,116 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   Kalshi corpus exists (OA-11/15/16), run the matcher over it, report the cost-net OOS coherence PnL +
   the matched-pair count, and only if it clears the floor over sufficient N with ≥3 auditors unable to
   break it does B8 become go-live-eligible (live routing far downstream, human-core).
+
+## 2026-07-03 — Research Run 13: OA-17 freeze fix CONFIRMED live (self-validation); new candidate data source (Dune Analytics) found + confirmed egress-blocked from this env like every prior candidate; secondary favorite-longshot-bias sources are internally contradictory — no new EXP proposed
+
+- Hypothesis (falsifiable): n/a — this run is a self-validation follow-up on Research Run 12's two
+  URGENT findings + a research sweep for alternative real-data paths. No new alpha tested.
+- Min sample N: n/a.
+- OOS result: n/a — no edge claimed or tested this run.
+- Calibration (Brier / reliability): not measured this run — still no resolved trades in the forward
+  paper track record (see finding 1).
+- Costs modeled: n/a.
+- Verdict: **edge-not-proven** (self-validation + research only).
+- Why:
+
+### (1) SELF-VALIDATION: both Research Run 12 URGENT findings are CONFIRMED FIXED, live, on real data
+  Directly inspected `live-validation.yml` job logs (not the factory's own claim) for runs spanning
+  2026-07-02T09:36 through 2026-07-03T09:37 (run IDs 28580282836, 28598027672, 28617675741,
+  28637890271, 28652046234). **The de-facto-global category-exposure freeze (finding 2, 2026-07-02) is
+  FIXED and stayed fixed:** the 09:36 and 14:31 runs were still fully frozen (98/98 and 154/154
+  skipped, `Category 'General' exposure: $164.18 + $50.00 > $200.0`), but the 19:55 run onward executed
+  real trades (10/94, then 6/57, then 6/108 opportunities) across genuinely diverse categories (FIFA
+  World Cup, Fed rate decision, MLB, esports, geopolitics, NVIDIA) — the fix landed same-day between
+  14:31 and 19:55 on 2026-07-02, earlier than the commit-message framing suggested. **The Postgres
+  FK-persist failure (finding 1, 2026-07-02) shows NO recurrence:** grepped the full log content (not
+  just the tail) of all 5 runs for `ForeignKeyViolation`/exception tracebacks — none found. Both fixes
+  hold up under direct evidence, not self-report — this is exactly what OA-17 was built to produce: a
+  real forward-paper track record that isn't silently broken.
+- **New, smaller finding this run (not urgent, logged for completeness):** `gemini: client not
+  constructed (google-genai missing or key rejected at init)` appears in the smoke-test step of every
+  one of the 5 inspected runs. LLM analysis is documented as optional / degrades-safely and is not on
+  the scan-decision critical path (per the standing G2 hard rule), so this does not block anything —
+  but it means B4 (LLM-as-research-tool, gated on B2 anyway) currently has no live Gemini connectivity
+  to build against in this environment; worth a factory RCA if/when B4 work starts.
+- **Diagnosis (binding constraint, still evolving honestly):** `bankroll_remaining` fell monotonically
+  across the 3 live runs (335.82 → 206.22 → 153.89) as `bankroll = max_portfolio_usd($500) -
+  total_exposure` (`risk_manager.py:812`, confirmed by direct code read) and this run's cycles opened
+  new positions but **zero positions have resolved yet** (`"resolutions": null` in all 5 inspected
+  runs). This is expected and not a new bug: several fired markets are short-dated (this week's Elon
+  tweet-count window, an esports map, a within-2-weeks Iran deadline) so resolutions should start
+  arriving within days; others (FIFA World Cup winner) are months out and will sit as long-dated open
+  exposure. **The forward-loop's near-term binding constraint is no longer the category-cap bug — it is
+  simply elapsed real time** for enough of these paper positions to resolve and produce the first real
+  Brier/PnL evidence. No action needed; note it so a future run doesn't mistake "still 0 resolutions" a
+  few days from now for a new bug rather than the expected wait.
+
+### (2) NEW candidate real-data source found: Dune Analytics unified Polymarket+Kalshi resolved-market dataset — tested and CONFIRMED egress-blocked from this env (same broad policy as gamma-api/CLOB/HuggingFace/Data-API)
+  Web research (2026, Crowdfund Insider + Dune's own docs) found Dune Analytics ships a **unified,
+  free-tier, no-account-required** prediction-markets dataset combining Polymarket (from Nov 2022) and
+  Kalshi (from Jun 2021) — 5 public tables (trades, market details, hourly candlestick prices, 2 Kalshi
+  aggregates), with **every resolved market carrying its final outcome** and hourly probability paths
+  from open to settlement for major Kalshi series (Fed decisions, inflation prints). This would be
+  materially easier to consume than the OA-16 HuggingFace parquet-streaming path (no `datasets` library,
+  a normal SQL/REST query) AND — uniquely among all data sources considered so far — natively spans
+  **both** venues in one schema, which is exactly what EXP-004 (cross-venue coherence, proposed today by
+  the factory, #179) needs and none of OA-11/15/16 individually provide.
+  **Self-validation (tested directly, not assumed):** `curl` from this autonomous env's own proxy to
+  `dune.com`, `api.dune.com`, and `docs.dune.com` all returned **403 CONNECT reject**
+  (`gateway answered 403 to CONNECT (policy denial or upstream failure)`, confirmed via the proxy's own
+  `/__agentproxy/status` diagnostic, not an app-level error) — the exact same failure signature as
+  gamma-api/clob.polymarket.com, huggingface.co, and data-api.polymarket.com (Research Run 11,
+  2026-07-01). **This is now the FOURTH independent domain blocked the same way, which further
+  reinforces (does not newly establish) that this is a broad-scope egress ALLOWLIST policy, not a
+  per-domain blocklist gap** — no future research run should expect a different domain to be a
+  loop-side bypass; any new-data-source idea will hit the same wall and must be tested from the OWNER's
+  own network or a network-permitted CI runner (the pattern OA-11/15/16 and OA-17 already established).
+  **Caveat, disclosed honestly (not verified this run):** Dune's programmatic API requires a free
+  `DUNE_API_KEY` (confirmed via Dune's own FAQ/pricing docs — the API is not fully keyless even on the
+  free tier, unlike the Gamma/CLOB/HuggingFace-anonymous paths), so this is a new, distinct owner-action
+  class (create a free Dune account + API key) rather than something that rides for free on an existing
+  credential. Whether GitHub Actions runners (already confirmed to reach Polymarket + Gemini,
+  2026-07-02 finding 4) can reach `dune.com` is **not tested this run** — plausible (mainstream SaaS,
+  not typically egress-restricted) but unconfirmed; a factory build attempt on a live-validation-style
+  runner would confirm it directly.
+  **Not proposed as an OA / not built as a fetcher this run** — the research-agent scope is to surface
+  the finding; whether to build `dune_fetcher.py` and file it as a new owner action (mirroring exactly
+  how OA-16 originated: research finds the source, factory builds + fixture-tests the fetcher, THEN
+  files the owner step) is a factory/ROADMAP decision, logged to `next_actions` below, not something
+  this run treats as urgent (no existing capability is broken; it is a strictly-better opportunity on
+  top of two already-open, already-tracked data blockers).
+
+### (3) Secondary favorite-longshot-bias sources for Polymarket are directionally CONTRADICTORY within the same search sweep — treated as noise, not evidence, for the near-zero-price positions the live loop is currently taking
+  Searched specifically because the live forward loop (finding 1) is repeatedly buying **near-zero-price
+  longshots** via `logical_implication` (e.g. $0.0005–$0.0045, the same regime EXP-002's pre-mortem
+  already flagged as highest real-slippage-risk). Two non-academic secondary aggregator sites
+  (tradetheoutcome.com, fensory.com) surfaced in the same search sweep make **opposite-direction**
+  claims about the same phenomenon: one states "retail traders overpay for lottery-ticket payouts on the
+  low end" (classic favorite-longshot bias — cheap contracts are OVER-priced relative to true
+  probability, i.e. bad to buy) while a companion snippet from the same sweep states "outcomes below 10%
+  implied probability occur 14% of the time" (the OPPOSITE — cheap contracts are UNDER-priced, i.e. good
+  to buy). Neither source is peer-reviewed, neither states its sample/methodology, and this run could not
+  fetch either primary page directly (search-summary only, unreproducible by us — same discipline applied
+  to the 2026-07-01 secondary-source findings). **Treated as pure noise, not directional evidence, per
+  playbook discipline ("prefer insufficient data over reading noise").** This neither strengthens nor
+  weakens EXP-001/002; it is logged so a future run does not treat either claim as corroboration without
+  first checking whether it can be reproduced on our own real-resolution data.
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N proposed. This run is self-validation (confirming two prior URGENT fixes actually hold
+  on real data) + one new data-source lead (Dune, itself blocked here) + a noise-vs-evidence check on a
+  live-observed pattern. Proposing a new numbered experiment on a forward-paper track record that has
+  ZERO resolved trades yet (finding 1) would be premature — the honest next step is to let real time
+  pass and let resolutions accumulate, not manufacture a new hypothesis to fill the run.
+
+### Self-validation (sources this run)
+- Findings (1) are from directly reading `live-validation.yml` job logs via the `github` MCP tool for
+  runs 28580282836/28598027672/28617675741/28637890271/28652046234, cross-referenced against
+  `risk_manager.py:812` (`bankroll = max_portfolio_usd - total_exposure`) and `risk_manager.py:39`
+  (`max_portfolio_exposure_usd = 500.0`) read directly from the current tree.
+- Finding (2)'s egress test is a direct `curl` from this environment's own proxy against `dune.com`,
+  `api.dune.com`, `docs.dune.com`, confirmed via `/__agentproxy/status` (not an app-level guess).
+  Dune's dataset existence/schema/API-key requirement is WebSearch-sourced (Crowdfund Insider, Dune's
+  own docs/pricing/FAQ pages) — treated as DATA about a candidate source, not a validated result.
+- Finding (3)'s sources (tradetheoutcome.com, fensory.com) are explicitly flagged low-credibility /
+  unreproduced and NOT treated as evidence for or against any hypothesis.
