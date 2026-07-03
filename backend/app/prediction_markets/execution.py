@@ -401,7 +401,12 @@ class PolymarketExecutor:
                 size=req.size,
                 price=req.price,
                 status=OrderStatus.REJECTED,
-                error=str(e),
+                # Error-message hygiene (§12): a raw exception str leaks venue internals
+                # (host:port, py-clob-client stack, proxy topology) and this field flows to
+                # the /prediction-markets/execute HTTP response (routes.py:479). Surface only
+                # the exception TYPE — the full detail is already in the logger.error above.
+                # Mirrors routes.py::_safe_conn_error, the repo's established pattern.
+                error=type(e).__name__,
             )
 
     def _rest_rejected(self, req: OrderRequest, error: str, raw=None) -> OrderResult:
@@ -513,6 +518,13 @@ class PolymarketExecutor:
                         size=req.size,
                         price=req.price,
                         filled_size=parsed,
+                        # A limit order fills at (or better than) its limit price, so the
+                        # fill price IS req.price — mirror the CLOB path (line ~389). Omitting
+                        # this defaulted filled_price to 0.0, so a live REST fill would build a
+                        # Position with avg_entry_price=0.0 (execution.py:1090), making realized
+                        # PnL = settlement*size (all gain, no cost basis) and the entry fee 0 —
+                        # the hard loss caps / kill switch would then gate on inflated net PnL.
+                        filled_price=req.price,
                         status=OrderStatus.FILLED,
                         raw_response=data,
                     )
@@ -551,7 +563,10 @@ class PolymarketExecutor:
                 size=req.size,
                 price=req.price,
                 status=OrderStatus.REJECTED,
-                error=str(e),
+                # Error-message hygiene (§12): surface only the exception TYPE, not the raw
+                # str (which leaks host:port / requests internals) — this field reaches the
+                # execute HTTP response (routes.py:479). Full detail stays in the log above.
+                error=type(e).__name__,
             )
 
     def cancel_order(self, order_id: str) -> bool:
