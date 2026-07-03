@@ -46,6 +46,42 @@ def test_alpha_recovers_a_known_injected_edge():
     assert "validated edge" in r["verdict"]               # honest: recovering a synthetic edge is NOT a validated one
 
 
+def test_report_includes_regime_slice_and_flags_concentration():
+    """ROADMAP F10 wiring: a run where the alpha trades carries a regime-slice report so a
+    concentrated (fragile) edge cannot hide behind the aggregate number. The _synthetic()
+    corpus is priced at a single level (0.5) with a single 1-day horizon, so the alpha's
+    entire edge concentrates in ONE confidence/horizon bucket — which the guard MUST flag
+    fragile (the anti-overfitting point: this aggregate edge is not regime-robust)."""
+    r = v.evaluate(_synthetic(), wf, cal, seed=42)
+    assert "regime_slice_alpha" in r
+    rs = r["regime_slice_alpha"]
+    assert rs["n_trades"] == r["calibration_alpha_b4a"]["trades"] > 0
+    assert isinstance(rs["fragile"], bool) and isinstance(rs["fragile_reasons"], list)
+    # A single-price, single-horizon corpus is maximally concentrated → fragile with reasons.
+    assert rs["fragile"] is True
+    assert len(rs["fragile_reasons"]) > 0
+    assert rs["has_positive_edge"] is True
+    # With a positive edge the concentration shares are real numbers (not fabricated Nones).
+    assert rs["top_confidence_bucket_pnl_share"] is not None
+    # And the fragility is surfaced in the human-readable verdict.
+    assert "FRAGILE" in r["verdict"]
+
+
+def test_regime_slice_absent_edge_reports_no_shares():
+    """When the alpha does not trade (calibrated crowd), the regime report is present,
+    empty, and honestly reports no positive edge / null concentration shares."""
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    markets = [wf.HistoricalMarket(market_id=f"c{i}", decision_time=base + dt.timedelta(days=i),
+                                   resolution_time=base + dt.timedelta(days=i + 1),
+                                   market_price=0.7, model_prob=0.7, outcome=1 if (i % 10) < 7 else 0)
+               for i in range(300)]
+    r = v.evaluate(markets, wf, cal, seed=42)
+    rs = r["regime_slice_alpha"]
+    assert rs["n_trades"] == 0
+    assert rs["fragile"] is False              # no positive edge → nothing to flag
+    assert rs["top_market_pnl_share"] is None  # never fabricated when there is no PnL
+
+
 def test_no_edge_verdict_on_calibrated_crowd():
     """A well-calibrated crowd (price == outcome-rate) gives the alpha nothing -> 0 trades, NO-EDGE verdict."""
     base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)

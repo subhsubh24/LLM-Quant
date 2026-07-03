@@ -50,6 +50,17 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
     baseline = wf_mod.walk_forward_backtest(markets, seed=seed)                       # model_prob==crowd -> ~0
     alpha = wf_mod.walk_forward_backtest(markets, strategy_fn=cal_mod.make_calibration_bucket_strategy(), seed=seed)
 
+    # ROADMAP F10 — anti-overfitting integrity: an aggregate OOS PnL >= floor can still
+    # hide a FRAGILE edge concentrated in one horizon / confidence bucket / lucky window /
+    # a few markets. Slice the alpha's realized OOS trades and FLAG concentration. This is
+    # the go-live audit's regime-slice check, now produced automatically on every real run.
+    # HistoricalMarket carries no category (the resolved corpus does not label it), so we
+    # pass category_by_market_id=None (all "uncategorized" — never a fabricated label); the
+    # horizon / confidence / time slices + the single-market concentration check still apply.
+    rs_mod = _imp("backend.app.prediction_markets.regime_slice",
+                  "app.prediction_markets.regime_slice")
+    alpha_regime = rs_mod.analyze_regime_slices(alpha.trades)
+
     return {
         "corpus": {
             "n_markets": n, "yes_base_rate": round(sum(outs) / n, 4),
@@ -60,16 +71,37 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
                            "seed_hash": baseline.seed_hash},
         "calibration_alpha_b4a": {"trades": alpha.n_trades, "total_pnl_usd": round(alpha.total_pnl_usd, 2),
                                   "seed_hash": alpha.seed_hash},
+        "regime_slice_alpha": {
+            "n_trades": alpha_regime.n_trades,
+            "total_pnl_usd": round(alpha_regime.total_pnl_usd, 2),
+            "has_positive_edge": alpha_regime.has_positive_edge,
+            "fragile": alpha_regime.fragile,
+            "fragile_reasons": list(alpha_regime.fragile_reasons),
+            "top_market_pnl_share": alpha_regime.top_market_pnl_share,
+            "top_confidence_bucket_pnl_share": _top_slice_pnl_share(alpha_regime.by_confidence),
+            "top_horizon_bucket_pnl_share": _top_slice_pnl_share(alpha_regime.by_horizon),
+        },
         "biases_disclosed": ["liquidity-selection (volumeNum order)", "survivorship (clean-resolution only)",
                              "late-life pinning (decision sampled near resolution)"],
         "verdict": (
             "NO EDGE — the calibration alpha traded 0 (crowd well-calibrated on this liquid, near-resolution "
             "sample; needs earlier-life sampling for headroom)."
             if alpha.n_trades == 0 else
-            f"alpha took {alpha.n_trades} trades, net ${round(alpha.total_pnl_usd, 2)} OOS — NOT a validated "
-            f"edge; requires a larger corpus + a passing B2 calibration eval + >= floor over sufficient N."
+            f"alpha took {alpha.n_trades} trades, net ${round(alpha.total_pnl_usd, 2)} OOS"
+            + (" — FRAGILE edge (concentration): " + "; ".join(alpha_regime.fragile_reasons)
+               if alpha_regime.fragile else "")
+            + " — NOT a validated edge; requires a larger corpus + a passing B2 calibration eval "
+            "+ a NON-fragile (unconcentrated) >= floor result over sufficient N."
         ),
     }
+
+
+def _top_slice_pnl_share(slices) -> "float | None":
+    """The largest single bucket's share of net PnL among a regime-slice tuple, or None
+    when there is no positive net PnL to attribute (each SlicePnL.pnl_share is already
+    None in that case — honest, never a fabricated share)."""
+    shares = [s.pnl_share for s in slices if s.pnl_share is not None]
+    return round(max(shares), 4) if shares else None
 
 
 def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
