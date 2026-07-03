@@ -255,3 +255,25 @@ def test_price_history_token_id_path_is_bounded(monkeypatch):
     client = _router_client()
     _set_token(monkeypatch, "")
     assert client.get("/prediction-markets/price-history/" + "x" * 201).status_code == 422
+
+
+def test_cancel_order_id_path_is_bounded(monkeypatch):
+    # §12: the {order_id} PATH segment on the state-mutating cancel route was unbounded,
+    # so an authenticated caller could push a multi-MB string that echoes back in the JSON
+    # response (bandwidth/memory) — bound it (max_length=200). 422 before the handler.
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.post("/prediction-markets/cancel/" + "x" * 201).status_code == 422
+    # an in-bounds order_id passes validation (the handler may 200/4xx on the venue, never 422)
+    assert client.post("/prediction-markets/cancel/abc123").status_code != 422
+
+
+def test_enable_strategy_name_path_is_bounded(monkeypatch):
+    # §12: the {strategy_name} PATH segment on the state-mutating enable-strategy route was
+    # unbounded — an authenticated caller could echo-back-DoS via the response body AND
+    # inject an arbitrarily long value into the risk-manager log line. Bound it
+    # (max_length=100). 422 before the handler.
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.post("/prediction-markets/risk/enable-strategy/" + "x" * 101).status_code == 422
+    assert client.post("/prediction-markets/risk/enable-strategy/NearCertainty").status_code != 422

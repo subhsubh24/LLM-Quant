@@ -521,7 +521,10 @@ async def get_prediction_orders(limit: int = Query(50, ge=1, le=1000)):
 
 
 @router.post("/prediction-markets/cancel/{order_id}", dependencies=_MUTATING_AUTH)
-async def cancel_prediction_order(order_id: str, exchange: str = "polymarket"):
+async def cancel_prediction_order(
+    order_id: str = Path(..., min_length=1, max_length=200),
+    exchange: str = "polymarket",
+):
     """Cancel an open prediction market order."""
     from ..prediction_markets.execution import Exchange
     executor = _get_prediction_executor()
@@ -1075,7 +1078,7 @@ async def get_risk_status():
 
 
 @router.post("/prediction-markets/risk/enable-strategy/{strategy_name}", dependencies=_MUTATING_AUTH)
-async def enable_strategy(strategy_name: str):
+async def enable_strategy(strategy_name: str = Path(..., min_length=1, max_length=100)):
     """Re-enable a strategy that was auto-disabled by drawdown."""
     orchestrator = _get_orchestrator()
     orchestrator.risk_manager.enable_strategy(strategy_name)
