@@ -92,13 +92,34 @@ DEFAULT_MIN_SHARED_CONTENT = 2
 # days' tolerance is realistic, a few WEEKS is a different event.
 DEFAULT_MAX_DAYS_APART = 4.0
 
-# Relative tolerance when comparing two extracted numeric thresholds of the SAME unit
-# (e.g. 100000 vs 100001 is the same $100k strike; 100000 vs 90000 is not).
-_THRESHOLD_REL_TOL = 0.02
+# Relative tolerance when comparing two extracted numeric strikes of the SAME unit. It
+# must ONLY absorb true format/rounding differences ($100k vs $100,000 vs $100000 all
+# normalise to the identical float 100000.0), NOT ADJACENT STRIKES — an adversarial audit
+# showed a 2% relative tolerance fabricated a "disagreement" between `>50%` and `>51%` (or
+# $100k vs $102k), which are DIFFERENT events pricing coherently, not a venue mismatch.
+# Near-exact (float-rounding only): 50 vs 51 → reject; 100000 vs 100001 → reject.
+_THRESHOLD_REL_TOL = 1e-6
+
+# When NEITHER market yields a confident numeric strike, the pairing rests on content-token
+# overlap alone — plausible but NOT confident enough to size. Its coherence is hard-capped
+# strictly BELOW ``DEFAULT_MIN_COHERENCE`` so it is SURFACED but never traded on its own
+# (the module contract: "the weak, no-threshold, bare-token-overlap pairings never become
+# trades"). This also closes the spelled-out-number hole ("two hundred thousand" yields no
+# digit strike → both sides None → must not reach the trade bar via content score alone).
+_NO_THRESHOLD_COHERENCE_CAP = 0.45
 
 # Minimum coherence score for the backtest/caller to actually TRADE a match. Below this a
 # pairing is "plausible but not confident" and is surfaced but never sized.
 DEFAULT_MIN_COHERENCE = 0.5
+assert _NO_THRESHOLD_COHERENCE_CAP < DEFAULT_MIN_COHERENCE  # no-threshold pairs never trade by default
+
+# Negation words that INVERT a comparator's direction when they bind it: "no more than X"
+# means ≤ X (down), not "more" (up); "no fewer than X" means ≥ X (up). Without this a
+# negated bound is read as its opposite and pairs two OPPOSITE-meaning markets as the same
+# event (the resolution-divergence risk this module exists to prevent).
+_NEGATIONS = frozenset(
+    {"no", "not", "never", "cannot", "cant", "wont", "dont", "doesnt", "isnt", "arent"}
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -217,12 +238,19 @@ def extract_threshold(text: str) -> Optional[Threshold]:
         # (the "$100000" between them breaks the chain).
         prefix_tokens = re.findall(r"[a-z]+|\d[\d,\.]*", lowered[: m.start()])
         direction = "none"
-        for w in reversed(prefix_tokens):
-            if w in _UP_WORDS:
-                direction = "up"
-                break
-            if w in _DOWN_WORDS:
-                direction = "down"
+        for i in range(len(prefix_tokens) - 1, -1, -1):
+            w = prefix_tokens[i]
+            if w in _UP_WORDS or w in _DOWN_WORDS:
+                direction = "up" if w in _UP_WORDS else "down"
+                # A negation binding the comparator INVERTS it: "no more than X" is ≤ X.
+                # Check the token immediately before, and one connector-hop further back
+                # ("not be more than"), for a negation word.
+                if (i - 1 >= 0 and prefix_tokens[i - 1] in _NEGATIONS) or (
+                    i - 2 >= 0
+                    and prefix_tokens[i - 1] in _COMPARATOR_CONNECTORS
+                    and prefix_tokens[i - 2] in _NEGATIONS
+                ):
+                    direction = "down" if direction == "up" else "up"
                 break
             if w in _COMPARATOR_CONNECTORS:
                 continue
@@ -378,7 +406,14 @@ def _coherence_score(
     tf = 1.0 - min(1.0, max(0.0, days_apart) / max(max_days_apart, 1e-9))
     # Weighted blend; threshold is weighted heavily because it is the sharpest gate.
     score = 0.35 * content + 0.45 * threshold + 0.20 * tf
-    return round(min(1.0, max(0.0, score)), 6)
+    score = min(1.0, max(0.0, score))
+    # HARD CAP: a match with no confident numeric strike rests on token overlap alone. It
+    # is surfaced but must never be sized on its own — cap it strictly below the trade bar
+    # (closes the both-sides-None hole, incl. spelled-out numbers, where high content
+    # overlap + a close date could otherwise reach DEFAULT_MIN_COHERENCE).
+    if not has_threshold:
+        score = min(score, _NO_THRESHOLD_COHERENCE_CAP)
+    return round(score, 6)
 
 
 def find_cross_venue_matches(

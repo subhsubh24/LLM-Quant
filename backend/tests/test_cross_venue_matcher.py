@@ -100,6 +100,46 @@ def test_extract_threshold_none_when_no_number():
     assert extract_threshold("Will the Democrats win the House?") is None
 
 
+def test_adjacent_strikes_do_not_match():
+    # Adversarial-audit break: a 2% relative tolerance fabricated a "disagreement" between
+    # >50% and >51% (different, coherently-priced events). Near-exact tolerance rejects.
+    for lo, hi in [("above 50%", "above 51%"), ("above 4%", "above 4.05%"),
+                   ("above $100000", "above $102000"), ("above 270", "above 275")]:
+        a, b = extract_threshold(lo), extract_threshold(hi)
+        assert a is not None and b is not None
+        assert not a.matches(b), f"{lo!r} must NOT match {hi!r} (adjacent strikes = different events)"
+    # but pure format/rounding differences DO match (same normalized float).
+    assert extract_threshold("above $100k").matches(extract_threshold("above $100,000"))
+    assert extract_threshold("above $100000").matches(extract_threshold("above $100k"))
+
+
+def test_negated_comparator_inverts_direction():
+    # Adversarial-audit break: "no more than $100k" (≤, down) was read as "up" and paired
+    # with "above $100k" (>, up) — near-opposite events. Negation must invert direction.
+    assert extract_threshold("Will Bitcoin be no more than $100k by December 2026?").direction == "down"
+    assert extract_threshold("Will Bitcoin be no fewer than 50 by December 2026?").direction == "up"
+    assert extract_threshold("Will Bitcoin be not above 50 percent in December 2026?").direction == "down"
+    # end-to-end: opposite-direction markets on the same strike must NOT match.
+    poly = _mkt("P1", "Will Bitcoin be no more than $100k by December 2026?", 0.20)
+    kalshi = _mkt("K1", "Will Bitcoin be above $100000 by December 2026?", 0.55)
+    assert match_markets(poly, kalshi) is None
+
+
+def test_no_threshold_pair_is_not_tradeable():
+    # Adversarial-audit break: two markets whose numeric range is SPELLED OUT ("two hundred
+    # thousand") yield no digit strike → both threshold=None. With high content overlap +
+    # close dates a no-threshold pair used to reach coherence 0.5 and TRADE. It must now be
+    # SURFACED but never sized (coherence hard-capped strictly below DEFAULT_MIN_COHERENCE).
+    poly = _mkt("P1", "Will Tesla deliver between two hundred thousand and three hundred thousand cars in December 2026?", 0.60)
+    kalshi = _mkt("K1", "Will Tesla deliver between six hundred thousand and seven hundred thousand cars in December 2026?", 0.10)
+    m = match_markets(poly, kalshi)
+    if m is not None:  # surfaced as a low-confidence candidate is acceptable...
+        assert m.threshold is None
+        assert m.coherence_score < 0.5  # ...but NEVER tradeable on its own
+        pair = ResolvedCrossVenuePair(match=m, outcome_a=True, outcome_b=True)
+        assert evaluate_cross_venue_pairs([pair]).pairs_traded == 0
+
+
 def test_threshold_matches_and_mismatches():
     a = extract_threshold("above $100k")
     b = extract_threshold("above $100000")  # same magnitude, same unit
