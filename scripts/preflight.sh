@@ -58,6 +58,8 @@ if "$PY" -c "import pytest" 2>/dev/null; then
   for t in backend/tests/test_prediction_markets.py \
            backend/tests/test_cost_model.py \
            backend/tests/test_loss_caps.py \
+           backend/tests/test_loss_cap_fees.py \
+           backend/tests/test_audit_log.py \
            backend/tests/test_config_safety.py \
            backend/tests/test_live_gate_defense.py \
            backend/tests/test_metrics_aggregator.py \
