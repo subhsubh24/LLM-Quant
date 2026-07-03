@@ -391,17 +391,47 @@ class MarkToMarketEngine:
                         )
                         continue
                     resolved.append((token_id, winning_price))
-                    self._resolution_cache[token_id] = True
+                    # NOTE: the position is cached as resolved only AFTER a durable
+                    # settlement below (persist succeeds), not here — so a settlement whose
+                    # DB persist FAILS is left uncached and retried next cycle rather than
+                    # silently dropped.
 
             except Exception as e:
                 logger.debug(f"[MTM] Resolution check failed for {token_id}: {e}")
 
-        # Realize P&L for resolved positions
+        # Realize P&L for resolved positions. ORDERING IS SAFETY-CRITICAL (side-effect
+        # integrity): durably PERSIST the settlement (mark the DB row is_resolved=True)
+        # BEFORE counting the PnL into the executor loss-cap/kill-switch counters and
+        # removing the position from memory. Rationale: D8 (#143) made get_executor()
+        # REHYDRATE every is_resolved=False row on restart. So if the persist write
+        # FAILS after the PnL has already been counted, the position stays
+        # is_resolved=False in the DB, rehydrates on the next process, and RE-SETTLES —
+        # DOUBLE-COUNTING the realized PnL into the DURABLE loss-cap counters (a loss
+        # double-trips the cap; a WIN inflates the realized-PnL budget and LOOSENS the
+        # cap — the UNSAFE direction). (The #108 audit deemed a swallowed persist failure
+        # non-safety-critical "because executor.positions is never rehydrated"; D8 made
+        # that assumption stale — this closes the interaction.) Counting only AFTER a
+        # durable persist makes a settlement hit the loss caps AT MOST ONCE across
+        # restarts; a failed persist leaves the position OPEN + uncached to retry next
+        # cycle (a delayed settlement, never a double-counted one).
         for token_id, settlement_price in resolved:
             if token_id in self.executor.positions:
                 pos = self.executor.positions[token_id]
                 pnl = (settlement_price - pos.avg_entry_price) * pos.size
-                pos.realized_pnl += pnl
+                settled_realized = pos.realized_pnl + pnl
+
+                # Persist FIRST. If the DB write fails, do NOT count the PnL or remove
+                # the position — leave it OPEN + uncached to retry, so the loss caps can
+                # never double-count this settlement across a restart.
+                if not self._persist_resolution(pos, settled_realized, settlement_price):
+                    logger.warning(
+                        f"[MTM] Resolution persist FAILED for {token_id} — leaving the "
+                        f"position OPEN + uncached to retry next cycle (no PnL counted; a "
+                        f"failed persist can never double-count into the loss caps)."
+                    )
+                    continue
+
+                pos.realized_pnl = settled_realized
                 pos.unrealized_pnl = 0.0
                 pos.current_price = settlement_price
 
@@ -447,34 +477,78 @@ class MarkToMarketEngine:
                     f"P&L: ${pnl:+.2f}"
                 )
 
-                # Remove closed position
+                # Remove the now-settled position from memory + cache it so it is never
+                # re-settled in this process. The DB row is now is_resolved=True (persist
+                # succeeded above), so it also won't rehydrate on a restart.
                 del self.executor.positions[token_id]
+                self._resolution_cache[token_id] = True
 
-                # Persist resolution
-                self._persist_resolution(pos, pnl, settlement_price)
+    def _persist_resolution(
+        self, pos: Position, realized_pnl: float, settlement_price: float
+    ) -> bool:
+        """Durably mark a resolved position settled in the DB.
 
-    def _persist_resolution(self, pos: Position, pnl: float, settlement_price: float):
-        """Persist a resolved position to DB."""
+        Returns True when it is SAFE to count this settlement — i.e. no rehydratable row
+        can survive to re-settle:
+          * the DB row was marked ``is_resolved=True`` and the transaction COMMITTED; OR
+          * there is no ``prediction_positions`` table (no persistence configured — the
+            in-memory-only paper/test path), so nothing can rehydrate; OR
+          * the table exists but has no row for this token (nothing to rehydrate).
+        Returns False ONLY when a rehydratable row EXISTS but the write FAILED (the row
+        stays ``is_resolved=False`` and would rehydrate on the next process). The caller
+        counts PnL / removes the position only on True, so a settlement is counted into
+        the loss caps AT MOST ONCE across restarts. Best-effort + never raises — a DB
+        hiccup on an existing row only DEFERS this one settlement to the next cycle
+        (never a double-count, never a broken settlement path).
+        """
         try:
-            from ..db.database import get_session
+            from ..db import database
             from .models import PredictionPosition
             from sqlmodel import select
+            from sqlalchemy import inspect as sa_inspect
 
-            with get_session() as session:
+            # A DEFINITIVE "no table" means no persistence is configured (the in-memory-only
+            # paper/test path) ⇒ nothing can rehydrate ⇒ it is SAFE to count. But an
+            # INSPECTION FAILURE (the DB is unreachable — a Neon idle-drop / transient
+            # partition / pool-checkout failure) is NOT "no table": a rehydratable row may
+            # exist and simply be unreachable right now, so we must DEFER (return False),
+            # exactly like a write failure below — never assume "safe to count" when we
+            # cannot confirm there is no rehydratable row. (has_table is the FIRST DB touch;
+            # swallowing its error as has_table=False would re-open the very cross-restart
+            # double-count this fix closes — an adversarial live-safety audit caught it.)
+            try:
+                has_table = sa_inspect(database.engine).has_table(
+                    PredictionPosition.__tablename__
+                )
+            except Exception as e:
+                logger.error(
+                    f"[MTM] positions-table probe failed for {pos.token_id}; DEFERRING "
+                    f"settlement (cannot confirm no rehydratable row → retry next cycle): {e}"
+                )
+                return False
+            if not has_table:
+                return True
+
+            with database.get_session() as session:
                 stmt = select(PredictionPosition).where(
                     PredictionPosition.token_id == pos.token_id
                 )
                 db_pos = session.exec(stmt).first()
-                if db_pos:
-                    db_pos.is_active = False
-                    db_pos.is_resolved = True
-                    db_pos.resolution_value = settlement_price
-                    db_pos.realized_pnl = pos.realized_pnl
-                    db_pos.unrealized_pnl = 0.0
-                    db_pos.closed_at = datetime.now(timezone.utc)
-                    session.add(db_pos)
+                if db_pos is None:
+                    return True  # nothing to rehydrate → safe to count
+                db_pos.is_active = False
+                db_pos.is_resolved = True
+                db_pos.resolution_value = settlement_price
+                db_pos.realized_pnl = realized_pnl
+                db_pos.unrealized_pnl = 0.0
+                db_pos.closed_at = datetime.now(timezone.utc)
+                session.add(db_pos)
+                # get_session() commits on clean exit; a commit failure propagates to the
+                # except below → False (the rehydratable row was NOT durably resolved).
+            return True
         except Exception as e:
-            logger.error(f"[MTM] Failed to persist resolution: {e}")
+            logger.error(f"[MTM] Failed to persist resolution for {pos.token_id}: {e}")
+            return False
 
     def get_summary(self) -> dict:
         """Get mark-to-market summary."""
