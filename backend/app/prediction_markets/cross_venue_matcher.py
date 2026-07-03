@@ -236,21 +236,28 @@ def extract_threshold(text: str) -> Optional[Threshold]:
         # first comparator (up/down) OR the first intervening NUMBER. Stopping at a number
         # is what prevents "above $100000 on 2026-12-31" from binding "above" to the "12"
         # (the "$100000" between them breaks the chain).
-        prefix_tokens = re.findall(r"[a-z]+|\d[\d,\.]*", lowered[: m.start()])
+        # Strip apostrophes FIRST so contractions tokenize to their negation form
+        # ("won't"→"wont", "can't"→"cant", "doesn't"→"doesnt") — otherwise the `[a-z]+`
+        # tokenizer splits "won't"→["won","t"] and the negation is invisible (an
+        # adversarial-audit break: "won't exceed $100k" read as "up").
+        prefix = lowered[: m.start()].replace("'", "").replace("’", "")
+        prefix_tokens = re.findall(r"[a-z]+|\d[\d,\.]*", prefix)
         direction = "none"
         for i in range(len(prefix_tokens) - 1, -1, -1):
             w = prefix_tokens[i]
             if w in _UP_WORDS or w in _DOWN_WORDS:
                 direction = "up" if w in _UP_WORDS else "down"
-                # A negation binding the comparator INVERTS it: "no more than X" is ≤ X.
-                # Check the token immediately before, and one connector-hop further back
-                # ("not be more than"), for a negation word.
-                if (i - 1 >= 0 and prefix_tokens[i - 1] in _NEGATIONS) or (
-                    i - 2 >= 0
-                    and prefix_tokens[i - 1] in _COMPARATOR_CONNECTORS
-                    and prefix_tokens[i - 2] in _NEGATIONS
-                ):
-                    direction = "down" if direction == "up" else "up"
+                # A negation binding this comparator INVERTS it ("no more than"/"won't
+                # exceed"/"can't go above" are all ≤). Scan back a few tokens for a
+                # negation, STOPPING at another comparator or a number (which breaks the
+                # binding, so a negation on a DIFFERENT clause can't leak in).
+                for j in range(i - 1, max(-1, i - 5), -1):
+                    tj = prefix_tokens[j]
+                    if tj in _NEGATIONS:
+                        direction = "down" if direction == "up" else "up"
+                        break
+                    if tj in _UP_WORDS or tj in _DOWN_WORDS or tj[:1].isdigit():
+                        break
                 break
             if w in _COMPARATOR_CONNECTORS:
                 continue

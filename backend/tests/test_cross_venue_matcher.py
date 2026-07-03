@@ -119,10 +119,20 @@ def test_negated_comparator_inverts_direction():
     assert extract_threshold("Will Bitcoin be no more than $100k by December 2026?").direction == "down"
     assert extract_threshold("Will Bitcoin be no fewer than 50 by December 2026?").direction == "up"
     assert extract_threshold("Will Bitcoin be not above 50 percent in December 2026?").direction == "down"
-    # end-to-end: opposite-direction markets on the same strike must NOT match.
-    poly = _mkt("P1", "Will Bitcoin be no more than $100k by December 2026?", 0.20)
-    kalshi = _mkt("K1", "Will Bitcoin be above $100000 by December 2026?", 0.55)
-    assert match_markets(poly, kalshi) is None
+    # CONTRACTION forms (2nd audit break): the apostrophe tokenizer must not hide the
+    # negation — "won't exceed", "can't go above", "doesn't rise above", "isn't above".
+    assert extract_threshold("Bitcoin won't exceed $100000 in December 2026").direction == "down"
+    assert extract_threshold("Bitcoin can't go above $100000 in December 2026").direction == "down"
+    assert extract_threshold("Bitcoin doesn't rise above 50 percent in December 2026").direction == "down"
+    assert extract_threshold("Bitcoin isn't above 50 percent in December 2026").direction == "down"
+    # end-to-end: opposite-direction markets on the same strike must NOT match (both the
+    # word-form and the contraction form of the negation).
+    for neg_q in ("Will Bitcoin be no more than $100k by December 2026?",
+                  "Will Bitcoin won't be above $100k by December 2026?",
+                  "Will Bitcoin can't exceed $100000 by December 2026?"):
+        poly = _mkt("P1", neg_q, 0.20)
+        kalshi = _mkt("K1", "Will Bitcoin be above $100000 by December 2026?", 0.55)
+        assert match_markets(poly, kalshi) is None, neg_q
 
 
 def test_no_threshold_pair_is_not_tradeable():
