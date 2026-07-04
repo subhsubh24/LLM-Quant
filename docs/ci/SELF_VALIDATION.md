@@ -119,19 +119,11 @@ SELF_VALIDATION:
       ci_validatable: true          # no secret needed; the logic-critical parts (parsing + anti-leakage) are tested on realistic fixtures
       real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner runs fetch_kalshi_history.py on a network-permitted host. HONESTY CAVEAT: the Kalshi status-string + price-field CONTRACT (response status='active'/'settled'/'determined'; cent prices; the 'settled' discovery filter) is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response (egress-blocked offline) — an unrecognized status is logged LOUDLY (never silently dropped), and the OWNER must confirm the contract on the first real fetch."
       status: validated
-    - id: residual_legacy_data
-      desc: "retired stock/crypto data-provider config (ROADMAP A1) — no active trading path uses it"
-      validates_via: "n/a — dead config kept only until the tidy-up; no active flow reads it for trading"
-      mode: inactive
-      requires_env: [FINNHUB_API_KEY, ALPACA_API_KEY, ALPACA_API_SECRET, BINANCE_API_KEY, BINANCE_API_SECRET, FRED_API_KEY]
-      active: false
-      ci_validatable: false         # cannot validate a retired path — but active:false, so NOT unmet (inactive is exempt)
-      status: inactive_residual
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 11
+    capabilities_total: 10
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
@@ -143,12 +135,6 @@ SELF_VALIDATION:
     POLYMARKET_PASSPHRASE: {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
     POLYMARKET_PRIVATE_KEY: {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
     POLYMARKET_FUNDER:     {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
-    FINNHUB_API_KEY:       {capability: residual_legacy_data, needed_to: none_retired, owner_action: null}
-    ALPACA_API_KEY:        {capability: residual_legacy_data, needed_to: none_retired, owner_action: null}
-    ALPACA_API_SECRET:     {capability: residual_legacy_data, needed_to: none_retired, owner_action: null}
-    BINANCE_API_KEY:       {capability: residual_legacy_data, needed_to: none_retired, owner_action: null}
-    BINANCE_API_SECRET:    {capability: residual_legacy_data, needed_to: none_retired, owner_action: null}
-    FRED_API_KEY:          {capability: residual_legacy_data, needed_to: none_retired, owner_action: null}
   unvalidated_blocking: []   # active + unvalidated capabilities. NON-EMPTY => gate fails. Empty = green.
 ```
 
