@@ -571,21 +571,27 @@ through EVERY real user flow end to end, like a human — catching broken flows,
 defects that mocked unit tests and scripted happy-path e2e never see. It EXPLORES and FILES findings;
 it does NOT gate merges.
 
-- **HOW it runs (mechanism — this is settled, do not chase dead ends).** The factory drives a browser
-  ITSELF via `Bash` from its own routine — there is NO "computer-use tool" toggle and NO Playwright/
-  browser MCP connector available to a cloud routine (claude.ai routines accept only hosted HTTP
-  connectors; a stdio browser MCP is rejected). Two tiers, cheapest-that-works:
-  1. **Baseline (zero-cost, default): a Playwright full-flow sweep** the factory runs via Bash against
-     the DEPLOYED url — enumerate EVERY core flow, drive each, assert the real user-visible outcome,
-     capture screenshots/console/network. Reuse the repo's existing Playwright e2e infra. FIRST build
-     task: verify the routine's cloud env can install/run Chromium (`npx playwright install chromium`);
-     if it can, this needs nothing from the owner.
-  2. **Fallback / richer layer (only if the env can't run Chromium, OR for true human-like
-     exploration): a hosted browser** (Browserbase-style) driven from Bash, with Claude computer-use
-     doing the exploring. Needs owner-set env vars (e.g. `BROWSERBASE_API_KEY`/`_PROJECT_ID`) + costs
-     real money → cost-governed (§24/§25), used only when the baseline can't cover it. AptDesignerAI
-     `lib/agents/computer-use/` (with `safety.ts`) is the reference harness; keep model routing on the
-     factory's own CLAUDE agent (no extra Gemini spend).
+- **HOW it runs (mechanism — SETTLED by empirical test 2026-07-04; do not re-litigate).** The factory
+  drives a browser ITSELF via `Bash` from its own routine — there is NO "computer-use tool" toggle and
+  NO Playwright/browser MCP connector available to a cloud routine (claude.ai routines accept only
+  hosted HTTP connectors; a stdio browser MCP is rejected with HTTP 400 — verified). Chromium DOES
+  install + run headless in the routine envs, BUT it CANNOT reach an external DEPLOYED HTTPS app from
+  inside a routine: the envs route all egress through a MITM proxy whose CA `curl` trusts but Chromium
+  does not, so every deployed-URL nav resets (`net::ERR_CONNECTION_RESET`); proxy-arg, NSS CA-inject,
+  `--ignore-certificate-errors`, and `ignoreHTTPSErrors` were all tried and none reliably fixed it.
+  So, by tier:
+  1. **Deployed-app HTTPS validation (the §13-gating sweep): a hosted browser (Browserbase), driven
+     from Bash.** Browserbase runs Chromium on ITS network, so the routine's MITM proxy is irrelevant
+     and deployed HTTPS just works. Needs owner-set `BROWSERBASE_API_KEY` + `BROWSERBASE_PROJECT_ID` in
+     the routine env (a small ONE-TIME owner action; can start on Browserbase's free tier). Cost-governed
+     (§24/§25). AptDesignerAI `lib/agents/computer-use/` (with `safety.ts`) is the reference harness;
+     keep model routing on the factory's own CLAUDE agent (no extra Gemini spend). Until the owner sets
+     those keys, the factory reports the deployed sweep as `awaiting_connect` in `VALIDATOR_STATUS.md`
+     and surfaces the ONE owner action — it NEVER fabricates a green (that would falsely arm §13).
+  2. **Free in-container check (build-level, NOT a substitute for the deployed sweep): local Chromium
+     against a localhost app.** In-container Chromium CAN drive `http://localhost` (the app started in
+     the same container) — reuse the repo's existing Playwright e2e for this. It validates the BUILT
+     app, not the real deployed instance, so it is a supplement, never the §13 signal.
 - **Exploratory + NON-BLOCKING.** A FINDER, never a required merge gate (a browser sweep is
   non-deterministic — a gate would flake, stall merges, break the determinism contract). Runs
   scheduled: a smoke set of core flows often + a full-flow sweep periodically, cost-capped.
