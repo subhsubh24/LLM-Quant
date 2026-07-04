@@ -565,24 +565,40 @@ having validated nothing, and per-PR CI (fully mocked) proves code SHAPE, not fu
   harness-improvement proposal. Ties to §23 (action a red live-eval) and §26 (strengthen, don't defend).
 
 
-## 29. Computer-use functional validation — drive the REAL app like a human (exploratory, non-blocking)
-The realest anti-synthetic-green signal: a computer-use agent — on the factory's own Claude agent (§29's
-cost rule below), NOT Gemini — that navigates the DEPLOYED app
-through real user flows end to end, like a human — catching broken flows, dead ends, and UX defects
-that mocked unit tests and scripted happy-path e2e never see. It EXPLORES and FILES findings; it does
-NOT gate merges.
-- **Exploratory + NON-BLOCKING.** Computer-use is non-deterministic — a FINDER, never a required gate
-  (a gate would flake, stall merges, and break the determinism contract). Runs scheduled: a smoke set
-  of core flows often + a full-flow sweep periodically, cost-capped.
-- **Findings → triaged → factory work.** Each candidate defect / UX issue / improvement is triaged by
-  an INDEPENDENT pass (maker≠checker) to drop false positives, then filed as an issue for the factory
-  (bugs must reproduce; UX notes labeled as such). No raw-finding spam into the queue.
-- **Publish the sweep as DATA (the dashboard reads it).** Write the last sweep to
-  `docs/autonomous-loop/VALIDATOR_STATUS.md` — a fenced `VALIDATOR_STATUS` block: `project`, `as_of`,
-  `last_sweep`, `target_url`, `flows_total` / `flows_passed` / `flows_failed`, `open_findings`, and
-  `findings[]` (each `flow`, `status` = pass|fail|skipped, `severity`, `note`, `issue_url`). REAL numbers
-  only — never a fabricated all-green; absent until the first real sweep. The AutoFactoryDashboard reads
-  this like LOOP_HEALTH / GROWTH_STATUS and lights up its Live-validation panel.
+## 29. Deployed-app functional validation — drive the REAL app end-to-end (exploratory, non-blocking)
+The realest anti-synthetic-green signal: a browser-driving validator that navigates the DEPLOYED app
+through EVERY real user flow end to end, like a human — catching broken flows, dead ends, and UX
+defects that mocked unit tests and scripted happy-path e2e never see. It EXPLORES and FILES findings;
+it does NOT gate merges.
+
+- **HOW it runs (mechanism — this is settled, do not chase dead ends).** The factory drives a browser
+  ITSELF via `Bash` from its own routine — there is NO "computer-use tool" toggle and NO Playwright/
+  browser MCP connector available to a cloud routine (claude.ai routines accept only hosted HTTP
+  connectors; a stdio browser MCP is rejected). Two tiers, cheapest-that-works:
+  1. **Baseline (zero-cost, default): a Playwright full-flow sweep** the factory runs via Bash against
+     the DEPLOYED url — enumerate EVERY core flow, drive each, assert the real user-visible outcome,
+     capture screenshots/console/network. Reuse the repo's existing Playwright e2e infra. FIRST build
+     task: verify the routine's cloud env can install/run Chromium (`npx playwright install chromium`);
+     if it can, this needs nothing from the owner.
+  2. **Fallback / richer layer (only if the env can't run Chromium, OR for true human-like
+     exploration): a hosted browser** (Browserbase-style) driven from Bash, with Claude computer-use
+     doing the exploring. Needs owner-set env vars (e.g. `BROWSERBASE_API_KEY`/`_PROJECT_ID`) + costs
+     real money → cost-governed (§24/§25), used only when the baseline can't cover it. AptDesignerAI
+     `lib/agents/computer-use/` (with `safety.ts`) is the reference harness; keep model routing on the
+     factory's own CLAUDE agent (no extra Gemini spend).
+- **Exploratory + NON-BLOCKING.** A FINDER, never a required merge gate (a browser sweep is
+  non-deterministic — a gate would flake, stall merges, break the determinism contract). Runs
+  scheduled: a smoke set of core flows often + a full-flow sweep periodically, cost-capped.
+- **Findings → triaged → factory work.** Each candidate defect / UX issue is triaged by an INDEPENDENT
+  pass (maker≠checker) to drop false positives, then filed as an issue (bugs must reproduce; UX notes
+  labeled as such). No raw-finding spam into the queue.
+- **Publish the sweep as DATA (the dashboard + the §13 marketing gate read it).** Write the last sweep
+  to `docs/autonomous-loop/VALIDATOR_STATUS.md` — a fenced `VALIDATOR_STATUS` block: `project`,
+  `as_of`, `last_sweep`, `target_url`, `flows_total` / `flows_passed` / `flows_failed`, `open_findings`,
+  and `findings[]` (each `flow`, `status` = pass|fail|skipped, `severity`, `note`, `issue_url`). REAL
+  numbers only — never a fabricated all-green; absent until the first real sweep. A GREEN full-flow
+  sweep here is one of the three signals that ARM autonomous marketing (GTM §13); a fabricated one
+  would falsely unlock launch — so honesty here is load-bearing.
 - **Safety rails are non-negotiable (it acts on a LIVE app):**
   - **Dedicated TEST accounts only** — never real user data; creds live in the env, never held by the
     agent or committed.
@@ -593,16 +609,9 @@ NOT gate merges.
   - **Never destructive** beyond the test account's own data — no deleting/mutating shared or
     other-user state; no real outbound messages to real people.
   - **Bounded** by the §16 brakes: per-run step + wall-clock + spend caps; a stuck/looping session aborts.
-- **Web first; mobile deferred.** Drive the web build now (Browserbase-style). Mobile is a separate
-  harness (emulator + a mobile driver) and web→mobile is NOT automatic — shared backend helps, native
-  flows need their own pass. Track mobile as a later capability; never mark it covered when it isn't.
-- **Runs on the factory's OWN Claude agent (no extra API spend) — not Gemini.** Drive the browser with
-  Claude computer-use, the same subscription that already runs the factory (per §30's cost logic); do
-  NOT route this to a paid Gemini computer-use call. AptDesignerAI `lib/agents/computer-use/` (with
-  `safety.ts`) is the reference for the harness + safety patterns — its MODEL routing moves to Claude.
-  New factories build on their existing e2e/browser infra. Cost-governed (§24/§25); a red finding is
-  actioned like §23.
-
+- **Web first; mobile deferred.** Drive the web build now. A NATIVE app (e.g. HighlightMagic iOS)
+  needs a separate mobile harness (emulator + a mobile driver) — web→mobile is NOT automatic; never
+  mark native flows covered when they aren't.
 
 ## 30. Deep-research tier — the factory's OWN Claude agent (subscription-covered), no extra API spend
 High-stakes questions routine single-shot search can't answer — market sizing, competitive landscape,
