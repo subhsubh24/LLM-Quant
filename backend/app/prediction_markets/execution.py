@@ -939,6 +939,30 @@ class PredictionMarketExecutor:
         if not req.token_id:
             return "empty token_id — no tradeable token (multi-leg basket not executable here)"
 
+        # SIDE-EFFECT INTEGRITY: on a prediction market you CANNOT open a short by
+        # selling tokens you do not hold — a CTF/YES token can only be sold if it is
+        # already owned. A SELL may therefore only ever REDUCE an existing long
+        # position. Reject a SELL with no covering long (or one that exceeds it):
+        # otherwise the paper `_simulate_fill` (which fills unconditionally) fabricates
+        # a fictional ``side="short"`` position the real venue would REJECT — a phantom
+        # fill (same class as the empty-token / multi-leg guards) whose broken accounting
+        # then NEVER feeds the realized-PnL loss caps (a BUY "to close" the fictional
+        # short scales it UP and records $0 PnL), silently bypassing the D3/D4 kill
+        # switch. The scan loop reaches this whenever a default strategy emits an
+        # executable SELL (e.g. CrossMarketArbitrage's exclusion/cross-market branch)
+        # on an un-held token — the orchestrator's skip-held dedup guarantees any SELL
+        # that reaches execution is on an un-held token. Reducing a genuinely-held long
+        # (BUY then SELL) is preserved and still records PnL via the reduce branch.
+        if req.side == OrderSide.SELL:
+            pos = self.positions.get(req.token_id)
+            covering_long = pos.size if (pos is not None and pos.side == "long") else 0.0
+            if req.size > covering_long + 1e-9:
+                return (
+                    "SELL rejected: no covering long position for this token — cannot "
+                    "open/increase a short by selling unowned tokens on a prediction "
+                    "market (a SELL may only reduce a held long)"
+                )
+
         # HARD LOSS CAPS (D3) enforced AT THE GATE — defense-in-depth alongside the
         # auto-trip on PnL realization. If realized losses already breach a cap, trip
         # the kill switch (D4) and reject. Caps are config-derived but ENFORCED here,
