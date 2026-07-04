@@ -245,13 +245,16 @@ class TestWindowMetrics:
         assert m.realized_pnl_usd == 50.0       # order-invariant total
         assert m.max_drawdown_usd == 50.0       # order-DEPENDENT; date-only ordering → 0.0
 
-    def test_same_instant_ties_are_stable_by_input_order(self):
-        """Trades at the EXACT same timestamp keep their input order (the index tiebreak),
-        so the curve stays deterministic across runs regardless of incidental input order."""
+    def test_same_instant_ties_follow_input_order(self):
+        """Trades at the EXACT same timestamp keep their INPUT order (the index tiebreak),
+        so the order-dependent drawdown is determined by input order. The two orderings
+        below yield DIFFERENT drawdowns, proving the tiebreak is load-bearing (not a
+        vacuous determinism check)."""
         t = _utc(2026, 6, 29, 12)
-        a = compute_window_metrics([_trade("a", t, 100.0), _trade("a", t, -40.0)])
-        b = compute_window_metrics([_trade("a", t, 100.0), _trade("a", t, -40.0)])
-        assert a.max_drawdown_usd == b.max_drawdown_usd == 40.0
+        win_first = compute_window_metrics([_trade("a", t, 100.0), _trade("a", t, -50.0)])
+        loss_first = compute_window_metrics([_trade("a", t, -50.0), _trade("a", t, 100.0)])
+        assert win_first.max_drawdown_usd == 50.0   # curve [100, 50] → peak 100, trough 50
+        assert loss_first.max_drawdown_usd == 0.0    # curve [-50, 50] → monotone up, no dd
 
     def test_brier_score_hand_computed(self):
         # predicted 0.8 actual 1 -> 0.04 ; predicted 0.3 actual 0 -> 0.09 ; mean 0.065

@@ -555,8 +555,9 @@ def build_windows(
 
     Each window spans ``[Monday, Monday + 7 days)`` in UTC. Only windows that contain at
     least one trade are emitted (zero-trade windows are NOT fabricated). Windows are
-    returned ascending by ``window_start``; within a window, trades are ordered by UTC
-    date then input order.
+    returned ascending by ``window_start``; within a window, trades are ordered by full UTC
+    timestamp then input order (so the order-dependent drawdown reflects the real
+    chronological sequence — see ``_ordered_trades``).
 
     ``configs_by_strategy`` is the set of config snapshots ACTIVE across these windows
     (taken at each window's start by the caller / ``WindowManager``). Each window only
