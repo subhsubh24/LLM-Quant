@@ -24,7 +24,11 @@ HONESTY — read before trusting any number this enables:
 
 Usage:
   python3 scripts/fetch_polymarket_history.py --out data/polymarket_history.json \
-      --limit 250 --max-pages 1 --decision-lead-days 7 [--min-volume 5000]
+      --limit 100 --max-pages 10 --decision-lead-days 7 [--min-volume 5000]
+
+  NOTE: Gamma silently caps each page at 100 rows regardless of --limit, so the
+  effective corpus size is ~min(--limit, 100) * --max-pages. GROW the corpus via
+  --max-pages, not --limit (a larger --limit alone still yields one 100-row page).
 """
 
 from __future__ import annotations
@@ -45,8 +49,10 @@ from backend.app.prediction_markets.polymarket_history_fetcher import (  # noqa:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="data/polymarket_history.json")
-    ap.add_argument("--limit", type=int, default=250, help="markets per Gamma page")
-    ap.add_argument("--max-pages", type=int, default=1, help="BOUND on paging (never unbounded)")
+    ap.add_argument("--limit", type=int, default=100,
+                    help="markets per Gamma page (Gamma caps each page at 100 regardless)")
+    ap.add_argument("--max-pages", type=int, default=10,
+                    help="BOUND on paging (never unbounded); grow the corpus via THIS, not --limit")
     ap.add_argument("--order", default="volumeNum",
                     help="Gamma sort field (desc). 'volumeNum' harvests markets that actually "
                          "traded; the fetcher default 'endDate' surfaces never-traded junk.")
