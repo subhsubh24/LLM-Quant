@@ -1617,13 +1617,21 @@ async def start_orchestrator(
 def _build_default_scanner() -> PredictionMarketScanner:
     """Build a scanner with the validated strategies enabled.
 
-    WhaleCopyTrading + WeatherArbitrage are UNVALIDATED (untracked in
-    ROADMAP/RESEARCH_MEMORY, no B3 registry evidence, no forensic-audit proof they fire
-    on real-shaped data — and the whale feed historically shipped a fabricated hardcoded
-    seed of "known whale" addresses). Per FACTORY_STANDARD "no alpha ships while integrity
-    is weak" + evidence-based-done, they are kept OUT of the default scan unless the owner
-    explicitly opts in via ENABLE_UNVALIDATED_STRATEGIES (default off). See the 2026-07-01
-    Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
+    WhaleCopyTrading + WeatherArbitrage + WalletBehaviorDivergence are UNVALIDATED
+    (untracked in ROADMAP/RESEARCH_MEMORY, no B3 registry evidence, no forensic-audit proof
+    they fire on real-shaped data — and the whale feed historically shipped a fabricated
+    hardcoded seed of "known whale" addresses). Per FACTORY_STANDARD "no alpha ships while
+    integrity is weak" + evidence-based-done, they are kept OUT of the default scan unless
+    the owner explicitly opts in via ENABLE_UNVALIDATED_STRATEGIES (default off). See the
+    2026-07-01 Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
+
+    WalletBehaviorDivergence was gated 2026-07-04 (PENDING_OPS OA-13 pre-registered
+    remediation): it sizes Kelly bets on a FABRICATED edge (whale_feed computes
+    edge = abs(price-0.5)*0.2, floored to min_edge+0.01), and was safe-by-ACCIDENT only
+    while its data-api.polymarket.com feed was egress-blocked (0 signals). That block no
+    longer holds — the factory build env now reaches data-api directly (HTTP 200) — so the
+    "unfed, harmless" premise that justified keeping it deployed is falsified; it is gated
+    with its siblings until B3-validated, never deploying capital on the fabricated edge.
     """
     from ..config import get_settings
     from .strategies import (
@@ -1652,7 +1660,6 @@ def _build_default_scanner() -> PredictionMarketScanner:
 
     # Advanced standalone strategies
     scanner.add_strategy(LogicalImplicationDetector(client, config))
-    scanner.add_strategy(WalletBehaviorDivergence(client, config))
 
     # Adaptive threshold wraps edge-based strategies for per-horizon filtering.
     # These are NOT registered directly to avoid duplicate signals.
@@ -1664,6 +1671,9 @@ def _build_default_scanner() -> PredictionMarketScanner:
 
     # UNVALIDATED strategies — off by default (see docstring + FACTORY_STANDARD).
     if enable_unvalidated:
+        # WalletBehaviorDivergence sizes on a fabricated edge and its data-api feed is now
+        # reachable — gated with its siblings until B3-validated (2026-07-04, OA-13).
+        scanner.add_strategy(WalletBehaviorDivergence(client, config))
         from .strategies import WhaleCopyTradingStrategy
         scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
         try:
@@ -1674,8 +1684,8 @@ def _build_default_scanner() -> PredictionMarketScanner:
             logger.warning(f"[ORCHESTRATOR] Weather strategy not loaded: {e}")
     else:
         logger.info(
-            "[ORCHESTRATOR] Unvalidated strategies (whale copy-trading, weather arb) "
-            "gated OFF (ENABLE_UNVALIDATED_STRATEGIES not set)."
+            "[ORCHESTRATOR] Unvalidated strategies (whale copy-trading, weather arb, "
+            "wallet-behavior divergence) gated OFF (ENABLE_UNVALIDATED_STRATEGIES not set)."
         )
 
     logger.info(f"[ORCHESTRATOR] Auto-configured scanner with {len(scanner.strategies)} strategies")

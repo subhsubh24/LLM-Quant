@@ -61,9 +61,14 @@ _VALIDATED_NAMES = {
     "market_making",
     "flash_crash",
     "logical_implication",
-    "wallet_divergence",
 }
-_UNVALIDATED_NAMES = {"whale_copy", "weather_arb"}
+# wallet_divergence gated 2026-07-04 (OA-13): it sizes on a FABRICATED edge
+# (whale_feed abs(price-0.5)*0.2) and was safe-by-accident only while its
+# data-api.polymarket.com feed was egress-blocked. That block no longer holds (the feed is
+# now reachable from the factory env, HTTP 200), so it must stay OUT of the default scan
+# until B3-validated, like its siblings — never deploy Kelly-sized capital on an
+# unvalidated fabricated edge.
+_UNVALIDATED_NAMES = {"whale_copy", "weather_arb", "wallet_divergence"}
 
 
 def _scanner_names(monkeypatch, enabled: bool):
