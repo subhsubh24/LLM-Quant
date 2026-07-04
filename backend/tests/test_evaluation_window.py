@@ -230,6 +230,32 @@ class TestWindowMetrics:
         assert m.max_drawdown_usd == 0.0
         assert m.max_drawdown_pct == 0.0
 
+    def test_same_day_trades_order_by_time_not_just_date(self):
+        """Two trades on the SAME calendar day at different times, listed in
+        NON-chronological input order: a 3pm LOSS (−50) first, a 9am WIN (+100) second.
+        Ordering by the FULL timestamp sequences them 9am-win → 3pm-loss → cumulative
+        [100, 50] → a real intra-day drawdown of 50. A date-only sort (the pre-fix bug)
+        preserves the input order → cumulative [−50, 50] → drawdown 0, HIDING it.
+        Proven-fail pre-fix (asserts 50.0; the date-only path yields 0.0)."""
+        trades = [
+            _trade("a", _utc(2026, 6, 29, 15), -50.0),   # 3pm loss, listed FIRST
+            _trade("a", _utc(2026, 6, 29, 9), 100.0),    # 9am win, listed SECOND
+        ]
+        m = compute_window_metrics(trades)
+        assert m.realized_pnl_usd == 50.0       # order-invariant total
+        assert m.max_drawdown_usd == 50.0       # order-DEPENDENT; date-only ordering → 0.0
+
+    def test_same_instant_ties_follow_input_order(self):
+        """Trades at the EXACT same timestamp keep their INPUT order (the index tiebreak),
+        so the order-dependent drawdown is determined by input order. The two orderings
+        below yield DIFFERENT drawdowns, proving the tiebreak is load-bearing (not a
+        vacuous determinism check)."""
+        t = _utc(2026, 6, 29, 12)
+        win_first = compute_window_metrics([_trade("a", t, 100.0), _trade("a", t, -50.0)])
+        loss_first = compute_window_metrics([_trade("a", t, -50.0), _trade("a", t, 100.0)])
+        assert win_first.max_drawdown_usd == 50.0   # curve [100, 50] → peak 100, trough 50
+        assert loss_first.max_drawdown_usd == 0.0    # curve [-50, 50] → monotone up, no dd
+
     def test_brier_score_hand_computed(self):
         # predicted 0.8 actual 1 -> 0.04 ; predicted 0.3 actual 0 -> 0.09 ; mean 0.065
         trades = [
