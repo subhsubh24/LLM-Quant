@@ -1222,3 +1222,50 @@ calibration + cost-realistic validation surviving the adversarial auditors.
 - Reproducibility: live-fetch (not committed — same limitation as Run 14); re-runnable by anyone via
   the exact command above on a permitted host. The recency + static walk-forwards are deterministic
   (same corpus+config → same PnL); the corpus itself drifts as new markets resolve.
+
+## 2026-07-04 (4th run) — static B4a replication (pre-registered #1) + FIRST HuggingFace 1.3M-archive OOS run → bucket-calibration family CONFIRMED non-robust
+- Hypothesis (falsifiable, pre-registered by the 3rd run): (1) the +$3,330 static B4a on n=799 was
+  either a real edge or noise — replicate on an INDEPENDENT corpus; a sign-flip = confirmed noise,
+  a hold + non-fragile = a candidate for ≥3 auditors. (2) The HuggingFace `Polymarket-v1` archive
+  (1.3M markets, a genuinely different, platform-wide sample) is the strongest independent test.
+- Min sample N: 100-floor; corpora this run n=621 (Gamma) + n=375 (HF binary markets).
+- OOS result: **static B4a is NON-ROBUST across FOUR corpora — CONFIRMED noise, not an edge.**
+  Static B4a (EXP-002), 7-day lead, all via the unmodified `walk_forward` + `cost_model` (2% fee +
+  0.5% slippage), deterministic:
+    * Run 14 (Gamma volumeNum, n=510):   **−$2,938**
+    * 3rd run (Gamma volumeNum, n=799):   **+$3,330**
+    * THIS run (Gamma volumeNum, n=621, fresh same-day fetch, seed_hash df25f5c48a5ab34b): **−$2,947 / 70tr**
+    * THIS run (HuggingFace archive, n=375, INDEPENDENT platform-wide sample, seed_hash 792a492cb9152c6a):
+      **+$534.88 / 30tr but FRAGILE** — F10 regime-slice flags 100% of net PnL in ONE horizon bucket
+      ('3-7d') AND 122% in the extreme-confidence bucket ('90-100%'), i.e. the "positive" result is
+      entirely a crowd-pinned-market artifact, not a broad edge.
+  The Gamma sign now flips −/+/− across three same-config fetches (the two near-nested corpora give
+  OPPOSITE signs), and the ONE genuinely-independent corpus (HF) is positive-but-fragile-concentrated.
+  Four corpora, no robust positive: the bucket-calibration family (static AND the already-refuted
+  recency variant) has **no robust OOS edge**. This resolves pre-registered question #1: the +$3,330
+  was noise.
+- Calibration (Brier / reliability): crowd Brier 0.106 (Gamma) / 0.085 (HF) — the crowd is sharp,
+  especially on the pinned markets where B4a's apparent HF edge lives (hence FRAGILE). No B2
+  Bonferroni pass; not re-run on a seen corpus (p-hacking).
+- Costs modeled: yes — unmodified `cost_model.py` via `walk_forward`; same sizing across variants.
+- Verdict: **edge-not-proven — the ENTIRE price-bucket-calibration family (static + recency) is
+  refuted / non-robust.** STOP building more bucket variants (a rolling-WINDOW variant would iterate
+  on a refuted family — dropped as padding). Both bucket strategies remain UNWIRED.
+- MAJOR ENABLER shipped this run (#226, ROADMAP A6 / OA-16): the HuggingFace `daily_aligned` schema
+  was streamed + CONFIRMED for the first time (egress open) and the fetcher remapped to it. The layer
+  is per-TRADE/per-OUTCOME; the leakage-safe mapping is market←`condition_id`, tick←`block_timestamp`,
+  **P[YES]←`p_event`** (already YES-normalized; raw `price` is the traded-leg price and is EXCLUDED so
+  a 'No' row can't invert), resolution←`close_at` (`resolved_at` null), outcome←`winning_outcome_label`
+  (team-name → skipped → categorical markets excluded). Real run: 375 leakage-safe binary markets
+  assembled from the 1.3M archive (contested/no-tick/categorical correctly skipped). The 1.3M-market
+  corpus is now loop-runnable — the volume half of the binding-constraint unblock.
+- Pivot / next (pre-registered, do NOT p-hack): the binding constraint is now clearly "no
+  structurally-different alpha," not "no data." Prioritize the alphas that do NOT depend on
+  out-calibrating a sharp crowd: **B8 cross-venue coherence** (matcher built #179 — now runnable on
+  real Polymarket⟷Kalshi corpora, egress open) and **B4 per-market deep research**. Also worth: run
+  the HF lane at EARLIER-life leads / larger N to test whether ANY calibration edge exists off the
+  pinned regime — but as a diagnostic, not a rescue of the refuted bucket family.
+- Reproducibility: live-fetch (corpus drifts as markets resolve; not committed — same limitation as
+  Run 14). Commands: `python scripts/validate_real_oos.py --venues polymarket --max-pages 12
+  --decision-lead-days 7 --json` and `--venues polymarket_v1_hf --max-pages 800 --decision-lead-days 7`.
+  Walk-forwards deterministic (same corpus+config → same seed_hash/PnL).
