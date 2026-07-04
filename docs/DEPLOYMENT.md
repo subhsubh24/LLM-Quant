@@ -105,6 +105,8 @@ Railway → **New Project → Deploy from repo**. In the service settings set
 | `CORS_ALLOW_ORIGINS` | your Vercel origin, e.g. `https://llm-quant.vercel.app` (exact: scheme+host, no trailing slash; set after §3) |
 | `LIVE_TRADING_ENABLED` | leave **`false`** (owner-only; never enable at deploy) |
 | `DEMO_MODE` | `true` |
+| `BACKEND_API_TOKEN` | **required on a public deploy** — control routes (kill-switch/execute/bot/risk) are **default-CLOSED** (since #129): with no token they return **401**. Set a random secret here and inject it server-side from the frontend (never `NEXT_PUBLIC_*`). See PENDING_OPS OA-14. |
+| `BACKEND_AUTH_DISABLED` | dev/paper opt-out **instead** of a token: set `1` to run the control routes OPEN on a trusted single-user host. Refuses to boot if set while `LIVE_TRADING_ENABLED=true`. Omit on a public deploy. |
 | `GEMINI_API_KEY` | optional (LLM features); `GEMINI_MODEL` optional override (default `gemini-2.5-flash`) |
 | `POLYMARKET_*` | **LIVE trading only** (paper needs none); owner-set server-side per PENDING_OPS OA-5 / LIVE_RUNBOOK. Leave unset for paper. |
 

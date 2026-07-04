@@ -19,8 +19,9 @@ from .. import DISCLAIMER
 router = APIRouter()
 
 # Shared-secret guard for STATE-MUTATING routes (kill-switch, risk config, execute,
-# portfolio reset, bot control, …). No-op when BACKEND_API_TOKEN is unset (degrades
-# safely); enforces `Authorization: Bearer <token>` when the owner sets it. See auth.py.
+# portfolio reset, bot control, …). DEFAULT-CLOSED (#129): denies with 401 when
+# BACKEND_API_TOKEN is unset — unless BACKEND_AUTH_DISABLED=1 (a trusted dev/paper host)
+# — and enforces `Authorization: Bearer <token>` when the owner sets it. See auth.py.
 _MUTATING_AUTH = [Depends(require_backend_token)]
 
 

@@ -80,12 +80,13 @@ class Settings(BaseSettings):
 
     # Shared-secret bearer token guarding the backend's STATE-MUTATING routes
     # (kill-switch, risk config, execute, portfolio reset, bot start/stop/scan, …).
-    # DEGRADES SAFELY: empty (the default) => auth DISABLED, every request passes, so
-    # paper/dev behaviour is unchanged. When the owner sets BACKEND_API_TOKEN on a public
-    # deploy, those routes require a matching `Authorization: Bearer <token>` (401 else),
-    # so the backend control surface is credential-protected server-side, not merely
-    # network-isolated. Server-side only; the autonomous loop never sets it. See
-    # backend/app/api/auth.py + PENDING_OPS OA-14.
+    # DEFAULT-CLOSED (since #129): when this is empty AND `backend_auth_disabled` is False
+    # (the default), the mutating routes DENY with 401 — a public paper deploy that forgets
+    # to set the token is NOT silently unauthenticated. To run those routes, EITHER set
+    # BACKEND_API_TOKEN (they then require a matching `Authorization: Bearer <token>`, 401
+    # else) OR set BACKEND_AUTH_DISABLED=1 for a trusted local/dev host (see below).
+    # Server-side only; the autonomous loop never sets it. See backend/app/api/auth.py +
+    # PENDING_OPS OA-14.
     backend_api_token: str = ""  # env: BACKEND_API_TOKEN — owner-set; protects control routes (default CLOSED)
 
     # Dev/paper opt-out for the default-CLOSED control auth. By DEFAULT (this flag False) the

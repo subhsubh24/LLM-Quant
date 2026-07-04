@@ -38,7 +38,12 @@ services:
         sync: false
       - key: GEMINI_API_KEY     # optional (LLM analysis; degrades to templates if unset)
         sync: false
-      - key: BACKEND_API_TOKEN  # optional (protects the control routes on a public deploy; see PENDING_OPS OA-14)
+      # Control routes are DEFAULT-CLOSED (#129): with no token they return 401. On a public
+      # deploy set BACKEND_API_TOKEN; on a trusted single-user host set BACKEND_AUTH_DISABLED=1
+      # instead. See PENDING_OPS OA-14 / docs/DEPLOYMENT.md.
+      - key: BACKEND_API_TOKEN  # public deploys: set this (else control routes 401)
+        sync: false
+      - key: BACKEND_AUTH_DISABLED  # dev/paper opt-out instead of a token; NEVER with LIVE_TRADING_ENABLED
         sync: false
       # NOTE: LIVE venue keys (POLYMARKET_*) + LIVE_TRADING_ENABLED are HUMAN-CORE and
       # set ONLY when going live — never here. Paper (the default) needs no venue keys.
