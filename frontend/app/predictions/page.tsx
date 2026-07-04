@@ -284,7 +284,11 @@ export default function PredictionsPage() {
             id: String(i), market: p.market_question || p.market_id,
             outcome: p.outcome_label || p.token_id, side: p.side === "long" ? "BUY" : "SELL",
             entryPrice: p.avg_entry_price, currentPrice: p.current_price,
-            size: p.market_value, pnl: p.total_pnl, strategy: p.strategy,
+            // "Size" = contract count (p.size), NOT notional value (p.market_value). The
+            // backend returns both; mapping market_value here showed a dollar amount under
+            // a quantity-labeled "Size" column — a misleading semantic mismatch. Notional
+            // is already surfaced as "Total Value" in the portfolio card.
+            size: p.size, pnl: p.total_pnl, strategy: p.strategy,
             openedAt: p.opened_at ? new Date(p.opened_at).toLocaleTimeString() : "",
           })));
         }
@@ -897,7 +901,7 @@ export default function PredictionsPage() {
                           </td>
                           <td className="py-3 px-4 tabular-nums font-mono text-foreground">${pos.entryPrice.toFixed(2)}</td>
                           <td className="py-3 px-4 tabular-nums font-mono text-foreground">${pos.currentPrice.toFixed(2)}</td>
-                          <td className="py-3 px-4 tabular-nums font-mono text-foreground">${pos.size.toFixed(2)}</td>
+                          <td className="py-3 px-4 tabular-nums font-mono text-foreground">{pos.size.toFixed(2)}</td>
                           <td className="py-3 px-4">
                             <span className={cn("font-semibold tabular-nums font-mono", pos.pnl >= 0 ? "text-green-500" : "text-red-500")}>
                               {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(2)}
