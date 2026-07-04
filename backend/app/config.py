@@ -5,7 +5,6 @@ Uses pydantic-settings for type-safe configuration.
 
 import os
 from functools import lru_cache
-from typing import Literal
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, Field, model_validator
 
@@ -40,13 +39,6 @@ class Settings(BaseSettings):
     # LLM Integration - Google Gemini (primary)
     gemini_api_key: str = ""  # env: GEMINI_API_KEY
     gemini_model: str = "gemini-2.5-flash"  # env: GEMINI_MODEL — override to a newer model without code changes
-
-    # Market Data API Keys (optional but recommended for live data)
-    finnhub_api_key: str = ""  # Free tier: 60 calls/min
-
-    # Data Provider
-    data_provider: Literal["stooq", "yfinance"] = "yfinance"
-    data_cache_days: int = 1
 
     # Paper Trading
     initial_cash: float = 100_000.0
@@ -132,32 +124,6 @@ class Settings(BaseSettings):
     # 2026-07-01 Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
     enable_unvalidated_strategies: bool = False  # env: ENABLE_UNVALIDATED_STRATEGIES — default off
 
-    # ============ Live Broker Settings ============
-    # Alpaca (US Stocks/ETFs) - Paper Trading
-    alpaca_api_key: str = ""
-    alpaca_api_secret: str = ""
-    alpaca_paper_mode: bool = True  # True = paper trading, False = live
-
-    # Binance (Crypto)
-    binance_api_key: str = ""
-    binance_api_secret: str = ""
-    binance_testnet_mode: bool = True  # True = testnet, False = live
-    binance_us_mode: bool = True  # True = Binance.US, False = Binance Global (non-US)
-    # NOTE: equity/crypto live-broker auto-connect was removed (ROADMAP A1 — retire
-    # stock/crypto trading). The alpaca/binance settings above remain only for the
-    # not-yet-retired read-only stock data provider (data/alpaca_data.py); they drive
-    # no order placement. Prediction-markets is the only venue path.
-
-    # ============ Alternative Data Settings ============
-    # FRED API key (free from https://fred.stlouisfed.org/docs/api/api_key.html)
-    fred_api_key: str = ""
-
-    # Enable/disable alternative data sources
-    alt_data_enabled: bool = True          # Master switch for all alt data
-    alt_data_fred_enabled: bool = True     # Macroeconomic data from FRED
-    alt_data_cross_asset_enabled: bool = True  # Cross-asset signals (bonds, commodities, FX)
-    alt_data_sentiment_enabled: bool = True    # Sentiment indicators (VIX, breadth)
-
     model_config = ConfigDict(
         env_file=find_env_file(),
         env_file_encoding="utf-8",
@@ -226,21 +192,6 @@ class Settings(BaseSettings):
     def slippage_decimal(self) -> float:
         """Slippage as decimal (not basis points)."""
         return self.default_slippage_bps / 10000.0
-
-    @property
-    def has_alpaca_keys(self) -> bool:
-        """Check if Alpaca API keys are configured."""
-        return bool(self.alpaca_api_key and self.alpaca_api_secret)
-
-    @property
-    def has_binance_keys(self) -> bool:
-        """Check if Binance API keys are configured."""
-        return bool(self.binance_api_key and self.binance_api_secret)
-
-    @property
-    def has_fred_key(self) -> bool:
-        """Check if FRED API key is configured."""
-        return bool(self.fred_api_key and len(self.fred_api_key) > 5)
 
 
 @lru_cache

@@ -60,7 +60,6 @@ async def get_status():
     return {
         "demo_mode": settings.demo_mode,
         "llm_available": settings.has_llm_key,
-        "data_provider": settings.data_provider,
         "initial_cash": settings.initial_cash,
         "disclaimer": DISCLAIMER
     }
