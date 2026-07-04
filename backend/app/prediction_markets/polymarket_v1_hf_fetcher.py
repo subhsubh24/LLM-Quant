@@ -26,16 +26,30 @@ LEAKAGE-SAFETY logic is what matters for correctness and is fully unit-tested
 offline on realistic-shaped rows with NO heavy dependency (see
 backend/tests/test_polymarket_v1_hf_fetcher.py).
 
-SCHEMA IS VERIFIED ON THE FIRST DOWNLOAD (unconfirmed offline)
-The exact ``daily_aligned`` column names for the resolution outcome, the
-pre-resolution price, the timestamp, the resolution time, the market id, and the
-category are NOT documented in this repo and cannot be confirmed from the
-egress-blocked env. So the field names are a configurable ``HFFieldSpec`` with
-documented DEFAULTS, and ``stream_daily_aligned`` LOGS the real column set of the
-first row and ``assemble_historical_markets`` RAISES a clear, key-dumping error if
-a required field is absent — so the first real run surfaces the true schema
-immediately rather than silently mis-parsing. Adjust ``HFFieldSpec`` once the live
-schema is known; the leakage-safety logic never changes.
+SCHEMA CONFIRMED ON THE FIRST REAL DOWNLOAD (2026-07-04 — egress now open)
+The ``daily_aligned`` layer is a per-TRADE, per-OUTCOME row stream. The real
+columns (verified by streaming the live dataset) and the mapping this module now
+uses:
+  * market id          <- ``condition_id`` (groups a market's Yes/No legs)
+  * tick timestamp      <- ``block_timestamp`` (unix SECONDS of the trade)
+  * decision-time P[YES] <- ``p_event`` — the market-implied YES probability, ALREADY
+      normalized: a 'No' trade at ``price=0.05`` carries ``p_event=0.95``. The raw
+      ``price`` column is the TRADED OUTCOME's price (0.05 for that No leg), NOT
+      P[YES] — so we map ``price_yes`` to ``p_event`` and DELIBERATELY EXCLUDE bare
+      ``price`` from the candidate list. Using ``price`` would flip every 'No' row's
+      probability and corrupt the corpus; this is the one non-obvious correctness
+      choice in the whole remap.
+  * resolution time     <- ``close_at`` (``resolved_at`` is NULL in this layer)
+  * settled outcome     <- ``winning_outcome_label`` ('Yes'->1, 'No'->0). A
+      non-binary winner (a team name — World Cup / NFL / NBA markets) maps to None
+      via ``_settled_outcome`` and the whole market is SKIPPED, so this binary
+      P[YES] pipeline never mis-assembles a categorical market.
+  * category            <- ``category`` (``category_refined`` is noisy/mis-labeled).
+``stream_daily_aligned`` still LOGS the first row's columns and
+``assemble_historical_markets`` still RAISES a key-dumping error if a required field
+is absent (a future schema drift resurfaces loudly). The leakage-safety core never
+changed. ``HFFieldSpec`` remains overridable, and each field keeps a couple of
+fallback candidate names, but the real column is FIRST.
 
 THE ANTI-LEAKAGE GUARANTEE (identical to polymarket_history_fetcher.py)
 A resolved market's settled outcome is the answer. Using it — or any price tick at
@@ -91,22 +105,32 @@ SETTLE_TOL = 0.02
 class HFFieldSpec:
     """Column-name mapping for the ``daily_aligned`` rows.
 
-    The DEFAULTS are the best-guess names from the dataset card; the exact schema
-    is VERIFIED on the first real download (see module docstring). Each attribute
-    lists CANDIDATE names tried in order (presence, not truthiness) so a couple of
-    plausible variants resolve without a code change; the first real run logs the
-    actual columns and RAISES if none of the candidates for a required field match.
+    The DEFAULTS are the CONFIRMED real column names (verified against the live
+    dataset 2026-07-04 — see module docstring), each followed by a couple of
+    fallback candidate names so a benign schema drift resolves without a code
+    change. Names are tried in order by PRESENCE (not truthiness) so a legit 0/0.0
+    resolves; the first real run logs the actual columns and RAISES if none of the
+    candidates for a required field match.
+
+    ``price_yes`` maps to ``p_event`` (the already-YES-normalized market probability)
+    and DELIBERATELY OMITS the raw ``price`` column — ``price`` is the traded
+    outcome's price (0.05 on a 'No' leg), so using it would invert every 'No' row.
     """
 
-    market_id: Tuple[str, ...] = ("market_id", "condition_id", "conditionId", "id")
-    timestamp: Tuple[str, ...] = ("date", "timestamp", "day", "t", "ts")
-    price_yes: Tuple[str, ...] = ("price", "yes_price", "price_yes", "p", "close")
+    market_id: Tuple[str, ...] = ("condition_id", "market_id", "conditionId", "id")
+    timestamp: Tuple[str, ...] = ("block_timestamp", "date", "timestamp", "day", "t", "ts")
+    # p_event = P[YES] regardless of the traded leg; raw `price` is intentionally NOT here.
+    price_yes: Tuple[str, ...] = ("p_event", "price_yes", "yes_price")
+    # resolved_at is NULL in this layer -> falls through to close_at; kept first so a
+    # future version that populates the true resolution instant is preferred automatically.
     resolution_time: Tuple[str, ...] = (
-        "resolution_time", "resolved_at", "end_date", "endDate", "close_time",
+        "resolved_at", "close_at", "resolution_time", "end_date", "endDate", "close_time",
     )
-    outcome: Tuple[str, ...] = ("outcome", "resolution", "result", "winning_outcome")
+    outcome: Tuple[str, ...] = (
+        "winning_outcome_label", "outcome", "resolution", "result", "winning_outcome",
+    )
     category: Tuple[str, ...] = ("category", "tag", "topic")
-    question: Tuple[str, ...] = ("question", "title", "market_question")
+    question: Tuple[str, ...] = ("market_slug", "question", "title", "market_question")
 
 
 @dataclass(frozen=True)

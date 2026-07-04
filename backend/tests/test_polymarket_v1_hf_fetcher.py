@@ -29,17 +29,28 @@ RES = datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc)
 LEAD = timedelta(days=5)
 
 
-def _row(market_id, day_offset, price, *, outcome="yes", res=RES, category="Politics"):
-    """A realistic daily_aligned row (default HFFieldSpec column names)."""
+def _row(market_id, day_offset, price, *, outcome="Yes", res=RES, category="Politics"):
+    """A realistic daily_aligned row (CONFIRMED real column names, 2026-07-04).
+
+    ``price`` is the market-implied P[YES] (the ``p_event`` column). ``outcome`` is the
+    ``winning_outcome_label`` ('Yes'/'No'). A ``price`` column (the raw traded-leg price)
+    is ALSO emitted so tests prove the parser reads ``p_event`` (YES), never ``price``:
+    on a 'No' leg it is ``1 - p_event``, so if the parser ever read it the market_price
+    would flip.
+    """
     ts = res - timedelta(days=day_offset)
+    is_yes = str(outcome).strip().lower() in ("yes", "y", "true", "1")
     return {
-        "market_id": market_id,
-        "date": ts.isoformat().replace("+00:00", "Z"),
-        "price": price,
-        "resolution_time": res.isoformat().replace("+00:00", "Z"),
-        "outcome": outcome,
+        "condition_id": market_id,
+        "block_timestamp": int(ts.timestamp()),   # unix SECONDS (the real tick time)
+        "p_event": price,                          # market-implied P[YES]
+        "price": price if is_yes else round(1.0 - price, 6),  # raw traded-leg price (never used)
+        "outcome_label": "Yes" if is_yes else "No",
+        "resolved_at": None,                       # NULL in this layer -> close_at is used
+        "close_at": res,                           # the resolution instant
+        "winning_outcome_label": outcome,          # 'Yes'/'No' (a team name -> skipped)
         "category": category,
-        "question": f"Q {market_id}?",
+        "market_slug": f"slug-{market_id}",
     }
 
 
@@ -125,7 +136,7 @@ def test_present_but_ambiguous_outcome_skips_whole_market():
     # the clean survivors), even when other rows of the same market look cleanly settled.
     rows = [
         _row("m1", 8, 0.5, outcome="yes"),   # clean
-        dict(_row("m1", 6, 0.6), outcome=0.6),  # present-but-ambiguous → contests the market
+        dict(_row("m1", 6, 0.6), winning_outcome_label=0.6),  # present-but-ambiguous → contests
     ]
     out = assemble_historical_markets(rows, decision_lead=LEAD)
     assert out == []
@@ -177,7 +188,7 @@ def test_empty_corpus_raises_on_schema_format_mismatch():
     first-download unit/format mismatch surfaces, per the 'verify schema on first download'
     promise). Absent columns are already caught by the strict-first-row check; this covers
     present-but-wrong-UNIT values."""
-    rows = [dict(_row(f"m{i}", 6, 0.5), price=55.0) for i in range(3)]
+    rows = [dict(_row(f"m{i}", 6, 0.5), p_event=55.0) for i in range(3)]
     with pytest.raises(ValueError, match="0 were usable"):
         assemble_historical_markets(rows, decision_lead=LEAD)
 
@@ -185,7 +196,7 @@ def test_empty_corpus_raises_on_schema_format_mismatch():
 def test_empty_corpus_raises_even_with_category_filter():
     """The wipeout guard fires on a genuine parse failure EVEN with a category filter set
     (the filter is applied per-market later, so it never empties by_market itself)."""
-    rows = [dict(_row(f"m{i}", 6, 0.5, category="Politics"), price=55.0) for i in range(3)]
+    rows = [dict(_row(f"m{i}", 6, 0.5, category="Politics"), p_event=55.0) for i in range(3)]
     with pytest.raises(ValueError, match="0 were usable"):
         assemble_historical_markets(rows, decision_lead=LEAD, categories=["politics"])
 
@@ -200,7 +211,7 @@ def test_null_void_outcome_row_skips_whole_market():
     rows = [
         _row("m1", 8, 0.4, outcome="yes"),        # clean survivor
         _row("m1", 6, 0.5, outcome="yes"),        # clean survivor
-        dict(_row("m1", 4, 0.6), outcome=None),   # VOID: present column, null value
+        dict(_row("m1", 4, 0.6), winning_outcome_label=None),  # VOID: present column, null value
     ]
     out = assemble_historical_markets(rows, decision_lead=LEAD)
     assert out == []
@@ -211,7 +222,7 @@ def test_null_void_outcome_first_row_does_not_crash_corpus():
     market is skipped and OTHER markets still assemble (order-independence; the auditor's
     order-dependent whole-corpus-crash finding)."""
     rows = [
-        dict(_row("mvoid", 6, 0.5), outcome=None),   # void, FIRST (strict) — must not crash
+        dict(_row("mvoid", 6, 0.5), winning_outcome_label=None),  # void, FIRST (strict) — must not crash
         _row("good", 6, 0.7, outcome="yes"),         # a clean market
     ]
     out = assemble_historical_markets(rows, decision_lead=LEAD)
@@ -222,7 +233,7 @@ def test_missing_outcome_column_raises_on_first_row():
     """An entirely ABSENT outcome column (not a null value) is a schema problem → strict
     raise with the actual keys, distinct from a present-but-null void marker."""
     r = _row("m1", 6, 0.5)
-    del r["outcome"]
+    del r["winning_outcome_label"]
     with pytest.raises(ValueError, match="missing an 'outcome' field"):
         assemble_historical_markets([r], decision_lead=LEAD)
 
@@ -234,15 +245,71 @@ def test_millisecond_epoch_timestamps_parse():
         return int(dt.timestamp() * 1000)
 
     row = {
-        "market_id": "m1",
-        "date": ms(RES - timedelta(days=7)),
-        "price": 0.6,
-        "resolution_time": ms(RES),
-        "outcome": "yes",
+        "condition_id": "m1",
+        "block_timestamp": ms(RES - timedelta(days=7)),
+        "p_event": 0.6,
+        "resolved_at": None,
+        "close_at": ms(RES),
+        "winning_outcome_label": "Yes",
         "category": "X",
     }
     out = assemble_historical_markets([row], decision_lead=LEAD)
     assert len(out) == 1 and out[0].market_price == pytest.approx(0.6)
+
+
+# ---------------------------------------------------------------------------
+# CONFIRMED real-schema semantics (2026-07-04 — the daily_aligned remap)
+# The daily_aligned layer is per-TRADE, per-OUTCOME. These pin the three
+# non-obvious correctness choices in the remap so a future edit can't regress them.
+# ---------------------------------------------------------------------------
+def test_uses_p_event_yes_probability_not_raw_traded_price():
+    """A 'No' trade row carries raw ``price=0.05`` (the No leg) but ``p_event=0.95``
+    (P[YES]). The decision price MUST be 0.95 — reading the raw ``price`` column would
+    invert every 'No' row and corrupt the corpus. This is THE load-bearing choice of the
+    remap (``price_yes`` maps to ``p_event``, and bare ``price`` is excluded from the
+    candidate list)."""
+    ts = int((RES - timedelta(days=6)).timestamp())
+    row = {
+        "condition_id": "m1", "block_timestamp": ts,
+        "p_event": 0.95, "price": 0.05, "outcome_label": "No",
+        "resolved_at": None, "close_at": RES, "winning_outcome_label": "Yes",
+        "category": "Politics",
+    }
+    out = assemble_historical_markets([row], decision_lead=LEAD)
+    assert len(out) == 1
+    assert out[0].market_price == pytest.approx(0.95)   # P[YES], NOT the 0.05 No-leg price
+    assert out[0].outcome == 1                          # winning_outcome_label 'Yes'
+
+
+def test_categorical_market_winner_is_skipped():
+    """A multi-outcome market (World Cup): ``winning_outcome_label`` is a team name, which
+    ``_settled_outcome`` maps to None → the whole market is SKIPPED. The binary P[YES]
+    pipeline never mis-assembles a categorical market as a 0/1 outcome."""
+    ts = int((RES - timedelta(days=6)).timestamp())
+    row = {
+        "condition_id": "wc", "block_timestamp": ts,
+        "p_event": 0.30, "price": 0.30, "outcome_label": "Argentina",
+        "resolved_at": None, "close_at": RES, "winning_outcome_label": "France",
+        "category": "Sports",
+    }
+    out = assemble_historical_markets([row], decision_lead=LEAD)
+    assert out == []
+
+
+def test_resolution_time_from_close_at_when_resolved_at_null():
+    """``resolved_at`` is NULL in this layer, so the resolution instant (and the leakage
+    cutoff) comes from ``close_at`` — proven by asserting the assembled record's
+    resolution_time is close_at even though resolved_at is present-but-null."""
+    ts = int((RES - timedelta(days=6)).timestamp())
+    row = {
+        "condition_id": "m1", "block_timestamp": ts,
+        "p_event": 0.62, "price": 0.62, "outcome_label": "Yes",
+        "resolved_at": None, "close_at": RES, "winning_outcome_label": "Yes",
+        "category": "Politics",
+    }
+    out = assemble_historical_markets([row], decision_lead=LEAD)
+    assert len(out) == 1
+    assert out[0].resolution_time == RES   # from close_at (resolved_at was null)
 
 
 def test_duplicate_timestamp_selection_is_deterministic():
