@@ -102,6 +102,22 @@ def _as_utc_date(ts: Union[datetime, date]) -> date:
     return ts
 
 
+def _as_utc_datetime(ts: Union[datetime, date]) -> datetime:
+    """Full UTC-aware datetime for ORDERING (preserves time-of-day).
+
+    Unlike ``_as_utc_date`` — which drops the time-of-day for calendar (ISO-week)
+    bucketing — this keeps the time so trades on the SAME day order chronologically. A
+    naive datetime is interpreted as UTC, a tz-aware one is converted to UTC, and a plain
+    ``date`` becomes midnight UTC. Always tz-aware, so a mixed naive/aware input list never
+    raises on comparison (host-independent).
+    """
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
+    return datetime(ts.year, ts.month, ts.day, tzinfo=timezone.utc)
+
+
 def window_start_of(d: Union[datetime, date]) -> date:
     """Monday opening the ISO week containing ``d`` (matches ``weekly_metrics``)."""
     day = _as_utc_date(d)
@@ -377,12 +393,18 @@ class ReconciliationReport:
 def _ordered_trades(trades: Sequence[ResolvedTrade]) -> List[ResolvedTrade]:
     """Trades ordered deterministically: by UTC timestamp, then original input index.
 
-    The original-index tiebreak keeps trades that resolve on the same day in a stable,
-    reproducible order so the in-window cumulative curve (and thus drawdown) is identical
-    across runs regardless of incidental input ordering of same-instant trades.
+    The original-index tiebreak keeps trades at the SAME instant in a stable, reproducible
+    order so the in-window cumulative curve (and thus drawdown) is identical across runs
+    regardless of incidental input ordering of same-instant trades.
+
+    Ordering uses the FULL UTC timestamp (not just the calendar date): two trades on the
+    same day at different times MUST order chronologically, or the order-dependent
+    cumulative-PnL curve — and thus ``max_drawdown`` — is computed on the wrong sequence
+    (a 3pm win booked before a 9am loss hides a real intra-day drawdown). ``_as_utc_date``
+    is for WINDOW (ISO-week) bucketing only, never for intra-window ordering.
     """
     indexed = list(enumerate(trades))
-    indexed.sort(key=lambda pair: (_as_utc_date(pair[1].timestamp), pair[0]))
+    indexed.sort(key=lambda pair: (_as_utc_datetime(pair[1].timestamp), pair[0]))
     return [t for _, t in indexed]
 
 
