@@ -202,6 +202,7 @@ def load_positions_into_executor(executor: PredictionMarketExecutor):
     hid here because this helper had ZERO call sites until ROADMAP D8 wired it.
     """
     loaded = 0
+    skipped = 0
     total_open = 0
     with get_session() as session:
         stmt = (
@@ -214,31 +215,51 @@ def load_positions_into_executor(executor: PredictionMarketExecutor):
         for db_pos in db_positions:
             if db_pos.token_id in executor.positions:
                 continue
+            # SIDE-EFFECT INTEGRITY / FACTORY_STANDARD §32: rehydrating ONE row is a
+            # per-row side-effect; a single malformed/legacy row (e.g. an ``exchange`` value
+            # that is no longer a valid ``Exchange`` enum member — a schema/enum change, a
+            # manual edit, or a venue string added before its enum) must NEVER abort the
+            # WHOLE rehydration. Before this guard, an uncaught ``Exchange(...)`` ValueError
+            # crashed the loop inside the session → EVERY open position stayed orphaned →
+            # ``check_resolutions`` (which reads in-memory ``executor.positions``) never
+            # settled them → realized losses never booked → the loss caps / kill switch never
+            # saw them. Build the Position first; a failure logs LOUD (swallow the BLOCK, not
+            # the SIGNAL — §28) and skips only that row so the rest still rehydrate.
+            try:
+                pos = Position(
+                    exchange=Exchange(db_pos.exchange),
+                    market_id=db_pos.market_id,
+                    token_id=db_pos.token_id,
+                    market_question=db_pos.market_question,
+                    outcome_label=db_pos.outcome_label,
+                    side=db_pos.side,
+                    size=db_pos.size,
+                    avg_entry_price=db_pos.avg_entry_price,
+                    current_price=db_pos.current_price,
+                    unrealized_pnl=db_pos.unrealized_pnl,
+                    realized_pnl=db_pos.realized_pnl,
+                    strategy=db_pos.strategy,
+                    # Carry the persisted correlation bucket so the risk manager counts this
+                    # rehydrated position against its REAL category, not "General" (the
+                    # per-category cap otherwise silently degrades to a global cap across the
+                    # fresh-process paper cycle — a confirmed live freeze, 2026-07-02).
+                    category=db_pos.category or "",
+                    opened_at=db_pos.opened_at,
+                    updated_at=db_pos.updated_at,
+                )
+            except Exception as e:
+                skipped += 1
+                logger.error(
+                    "skipping un-rehydratable open position row (token_id=%r, "
+                    "exchange=%r): %s — the other open positions still rehydrate",
+                    db_pos.token_id, db_pos.exchange, e,
+                )
+                continue
+            executor.positions[db_pos.token_id] = pos
             loaded += 1
-            executor.positions[db_pos.token_id] = Position(
-                exchange=Exchange(db_pos.exchange),
-                market_id=db_pos.market_id,
-                token_id=db_pos.token_id,
-                market_question=db_pos.market_question,
-                outcome_label=db_pos.outcome_label,
-                side=db_pos.side,
-                size=db_pos.size,
-                avg_entry_price=db_pos.avg_entry_price,
-                current_price=db_pos.current_price,
-                unrealized_pnl=db_pos.unrealized_pnl,
-                realized_pnl=db_pos.realized_pnl,
-                strategy=db_pos.strategy,
-                # Carry the persisted correlation bucket so the risk manager counts this
-                # rehydrated position against its REAL category, not "General" (the
-                # per-category cap otherwise silently degrades to a global cap across the
-                # fresh-process paper cycle — a confirmed live freeze, 2026-07-02).
-                category=db_pos.category or "",
-                opened_at=db_pos.opened_at,
-                updated_at=db_pos.updated_at,
-            )
     logger.info(
         f"Rehydrated {loaded} open prediction-market position(s) from DB "
-        f"({total_open} open row(s) found)"
+        f"({total_open} open row(s) found, {skipped} skipped)"
     )
 
 
