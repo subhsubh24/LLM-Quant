@@ -49,6 +49,16 @@ HORIZON_PNL_CONCENTRATION = 0.70
 TIME_PNL_CONCENTRATION = 0.70
 CONFIDENCE_PNL_CONCENTRATION = 0.70
 TOP_MARKET_PNL_CONCENTRATION = 0.50
+# EXTREME-confidence concentration: the single-bucket confidence check above misses an edge
+# SPLIT across BOTH near-certain entry buckets (e.g. 50% from '0-10%' + 45% from '90-100%' —
+# neither alone > 70%, but 95% combined). This product's own OOS research is the motivation:
+# the crowd is SHARP on price-pinned markets, so an edge living in the near-0/near-1 entry
+# buckets is exactly the regime most likely to be spurious (few headroom). Flag when the two
+# extreme confidence buckets together hold more than this share of net PnL. Set above the
+# single-bucket 0.70 (it takes TWO buckets to trip) so it only fires on genuine
+# extremes-concentration; tightening-only (can add a fragile flag, never clear one).
+EXTREME_CONFIDENCE_PNL_CONCENTRATION = 0.85
+_EXTREME_CONFIDENCE_LABELS = ("0-10%", "90-100%")
 
 # Bucket edges.
 _HORIZON_EDGES_DAYS = (1.0, 3.0, 7.0, 30.0)          # <=1d, 1-3d, 3-7d, 7-30d, >30d
@@ -282,6 +292,22 @@ def analyze_regime_slices(
         _flag(by_horizon, HORIZON_PNL_CONCENTRATION, "horizon")
         _flag(by_confidence, CONFIDENCE_PNL_CONCENTRATION, "confidence")
         _flag(by_time, TIME_PNL_CONCENTRATION, "time-window")
+
+        # Extreme-confidence concentration — the two NEAR-CERTAIN entry buckets combined
+        # (see EXTREME_CONFIDENCE_PNL_CONCENTRATION). Catches an edge split across both
+        # extremes that each single-bucket check misses; tightening-only.
+        extreme_pnl = sum(
+            s.net_pnl_usd for s in by_confidence if s.label in _EXTREME_CONFIDENCE_LABELS
+        )
+        extreme_share = extreme_pnl / total_pnl if total_pnl > 0 else 0.0
+        if extreme_share > EXTREME_CONFIDENCE_PNL_CONCENTRATION:
+            fragile = True
+            reasons.append(
+                f"confidence-extremes: {extreme_share:.0%} of net PnL from the near-certain "
+                f"entry buckets ({'/'.join(_EXTREME_CONFIDENCE_LABELS)}) > "
+                f"{EXTREME_CONFIDENCE_PNL_CONCENTRATION:.0%} threshold — edge concentrated in "
+                f"crowd-pinned markets (the low-headroom regime this product's OOS research flags)"
+            )
 
         # Leave-one-out on the top CATEGORY: does the edge survive dropping it? Only with
         # real labels (otherwise "the top category" is the sole UNCATEGORIZED bucket and

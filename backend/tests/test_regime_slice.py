@@ -68,6 +68,47 @@ def test_broad_edge_is_not_fragile():
 
 
 # ---------------------------------------------------------------------------
+# Edge split across BOTH near-certain (extreme-confidence) buckets → fragile.
+# The single-bucket confidence check misses this; the extreme-confidence check catches it.
+# ---------------------------------------------------------------------------
+def test_edge_split_across_confidence_extremes_is_fragile():
+    # All the edge lives in the two near-certain entry buckets (0-10% and 90-100%), split so
+    # NEITHER alone exceeds the single-bucket 70% threshold (~56% and ~51%) — the exact blind
+    # spot the single-bucket confidence check misses. Combined ~107% > 85% → the
+    # extreme-confidence check flags it. Horizon/time are spread and no single market > 50%,
+    # so confidence-extremes is the ONLY fragility source (proving the new check, not another).
+    trades = [
+        _trade("a1", +25.0, entry=0.05, horizon_days=2, res=_week(0)),   # 0-10%
+        _trade("a2", +25.0, entry=0.05, horizon_days=20, res=_week(1)),  # 0-10%
+        _trade("b1", +23.0, entry=0.95, horizon_days=2, res=_week(0)),   # 90-100%
+        _trade("b2", +23.0, entry=0.95, horizon_days=20, res=_week(1)),  # 90-100%
+        _trade("c1", -6.0, entry=0.40, horizon_days=5, res=_week(2)),    # 25-50% middle loss
+    ]
+    rep = analyze_regime_slices(trades)   # no category labels → category dimension not assessed
+    assert rep.total_pnl_usd == 90.0 and rep.has_positive_edge is True
+    assert rep.fragile is True
+    assert any("confidence-extremes" in r for r in rep.fragile_reasons)
+    # the single-bucket confidence check did NOT catch it (each extreme < 70%)...
+    assert not any(r.startswith("confidence:") for r in rep.fragile_reasons)
+    # ...nor did the single-market check (no market holds > 50% of net PnL).
+    assert rep.top_market_pnl_share is not None and rep.top_market_pnl_share < 0.5
+
+
+def test_moderate_extreme_share_below_threshold_not_flagged_by_extremes():
+    # A broad edge with only MODEST extreme-confidence weight (each extreme ~25%, combined
+    # 50% < 85%) must NOT trip the extreme-confidence flag — the check is conservative.
+    trades = [
+        _trade("a", +25.0, entry=0.05, horizon_days=2, res=_week(0)),    # 0-10%   (25%)
+        _trade("b", +25.0, entry=0.95, horizon_days=20, res=_week(1)),   # 90-100% (25%)
+        _trade("c", +25.0, entry=0.40, horizon_days=5, res=_week(2)),    # 25-50%  (25%)
+        _trade("d", +25.0, entry=0.60, horizon_days=40, res=_week(3)),   # 50-75%  (25%)
+    ]
+    rep = analyze_regime_slices(trades)
+    assert rep.has_positive_edge is True
+    assert not any("confidence-extremes" in r for r in rep.fragile_reasons)
+
+
+# ---------------------------------------------------------------------------
 # Concentrated in one category → fragile (category + leave-one-out + single-market)
 # ---------------------------------------------------------------------------
 def test_single_category_edge_is_fragile():
