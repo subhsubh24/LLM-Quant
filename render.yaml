@@ -38,5 +38,8 @@ services:
         sync: false
       - key: GEMINI_API_KEY     # optional (LLM analysis; degrades to templates if unset)
         sync: false
-      - key: FRED_API_KEY       # optional (market data)
+      - key: BACKEND_API_TOKEN  # optional (protects the control routes on a public deploy; see PENDING_OPS OA-14)
         sync: false
+      # NOTE: LIVE venue keys (POLYMARKET_*) + LIVE_TRADING_ENABLED are HUMAN-CORE and
+      # set ONLY when going live — never here. Paper (the default) needs no venue keys.
+      # See docs/growth/LIVE_RUNBOOK.md.
