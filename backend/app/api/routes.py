@@ -126,25 +126,30 @@ def _get_prediction_scanner():
             from ..prediction_markets.advanced_strategies import (
                 NOPositionScanner,
                 LogicalImplicationDetector,
-                WalletBehaviorDivergence,
             )
             _prediction_scanner.add_strategy(NOPositionScanner(client, config))
             _prediction_scanner.add_strategy(LogicalImplicationDetector(client, config))
-            _prediction_scanner.add_strategy(WalletBehaviorDivergence(client, config))
         except Exception as e:
             logger.warning(f"Advanced strategies not loaded: {e}")
 
-        # UNVALIDATED strategies (whale copy-trading, weather arb) — off by default.
-        # They are untracked in ROADMAP/RESEARCH_MEMORY, have no B3 registry evidence, and
-        # the whale feed historically shipped a fabricated hardcoded seed. Per
-        # FACTORY_STANDARD "no alpha ships while integrity is weak" they only load when the
-        # owner explicitly opts in via ENABLE_UNVALIDATED_STRATEGIES. See the 2026-07-01
-        # Research Run 11 integrity finding in docs/growth/RESEARCH_MEMORY.md.
+        # UNVALIDATED strategies (whale copy-trading, weather arb, wallet-behavior
+        # divergence) — off by default. They are untracked in ROADMAP/RESEARCH_MEMORY, have
+        # no B3 registry evidence, and the whale feed historically shipped a fabricated
+        # hardcoded seed. WalletBehaviorDivergence additionally sizes on a FABRICATED edge
+        # (whale_feed: abs(price-0.5)*0.2) and was safe-by-ACCIDENT only while its
+        # data-api.polymarket.com feed was egress-blocked; that block no longer holds (the
+        # feed is now reachable), so it is gated with its siblings (2026-07-04, PENDING_OPS
+        # OA-13 pre-registered remediation). Per FACTORY_STANDARD "no alpha ships while
+        # integrity is weak" they only load when the owner explicitly opts in via
+        # ENABLE_UNVALIDATED_STRATEGIES. See the 2026-07-01 Research Run 11 integrity finding
+        # in docs/growth/RESEARCH_MEMORY.md.
         if get_settings().enable_unvalidated_strategies:
+            from ..prediction_markets.advanced_strategies import WalletBehaviorDivergence
             from ..prediction_markets.strategies import (
                 WeatherArbitrageStrategy,
                 WhaleCopyTradingStrategy,
             )
+            _prediction_scanner.add_strategy(WalletBehaviorDivergence(client, config))
             _prediction_scanner.add_strategy(WhaleCopyTradingStrategy(client, config))
             weather_strategy = WeatherArbitrageStrategy(client, config)
             try:
@@ -157,8 +162,8 @@ def _get_prediction_scanner():
             _prediction_scanner.add_strategy(weather_strategy)
         else:
             logger.info(
-                "Unvalidated strategies (whale copy-trading, weather arb) gated OFF "
-                "(ENABLE_UNVALIDATED_STRATEGIES not set)."
+                "Unvalidated strategies (whale copy-trading, weather arb, wallet-behavior "
+                "divergence) gated OFF (ENABLE_UNVALIDATED_STRATEGIES not set)."
             )
 
     return _prediction_scanner
