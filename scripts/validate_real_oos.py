@@ -15,7 +15,9 @@ Honest by construction:
     well-calibrated crowd — a 0-trade / ~$0 result is reported AS a null edge, never dressed up.
   * Discloses the known biases (liquidity-selection, survivorship, late-life pinning).
 
-Usage: python scripts/validate_real_oos.py [--limit 250] [--max-pages 2] [--decision-lead-days 2] [--json]
+Usage: python scripts/validate_real_oos.py [--limit 100] [--max-pages 10] [--decision-lead-days 2] [--json]
+       NOTE: Gamma caps each page at 100 rows regardless of --limit, so the effective
+       corpus size is ~min(--limit,100) * --max-pages; grow it via --max-pages, not --limit.
 """
 
 from __future__ import annotations
@@ -150,8 +152,10 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--limit", type=int, default=250)
-    ap.add_argument("--max-pages", type=int, default=2)
+    ap.add_argument("--limit", type=int, default=100,
+                    help="markets per Gamma page (Gamma caps each page at 100 regardless)")
+    ap.add_argument("--max-pages", type=int, default=10,
+                    help="BOUND on paging; grow the corpus via THIS, not --limit")
     ap.add_argument("--decision-lead-days", type=float, default=2.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--venues", default="polymarket,kalshi",

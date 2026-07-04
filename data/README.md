@@ -33,8 +33,11 @@ A **real, leakage-safe** snapshot of resolved Polymarket markets, produced by
 ```bash
 python3 scripts/fetch_polymarket_history.py \
   --out data/polymarket_history_sample.json \
-  --limit 250 --max-pages 2 --order volumeNum --decision-lead-days 2
+  --limit 100 --max-pages 10 --order volumeNum --decision-lead-days 2
 ```
+
+Gamma caps each page at 100 rows regardless of `--limit`, so the effective corpus size is
+`~min(--limit, 100) * --max-pages` — grow it via `--max-pages`, not `--limit`.
 
 Run it where Polymarket egress is permitted (a backend host, or a network-permitted CI
 job). The autonomous build env blocks egress to Polymarket (a 403 at the proxy), so the
