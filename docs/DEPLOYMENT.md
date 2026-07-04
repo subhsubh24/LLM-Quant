@@ -106,8 +106,7 @@ Railway → **New Project → Deploy from repo**. In the service settings set
 | `LIVE_TRADING_ENABLED` | leave **`false`** (owner-only; never enable at deploy) |
 | `DEMO_MODE` | `true` |
 | `GEMINI_API_KEY` | optional (LLM features); `GEMINI_MODEL` optional override (default `gemini-2.5-flash`) |
-| `FRED_API_KEY` | optional (market data) |
-| `ALPACA_*` / `BINANCE_*` | optional (paper defaults) |
+| `POLYMARKET_*` | **LIVE trading only** (paper needs none); owner-set server-side per PENDING_OPS OA-5 / LIVE_RUNBOOK. Leave unset for paper. |
 
 Deploy, then grab the backend's public URL (e.g. `https://llm-quant-api.onrender.com`).
 Tables auto-create on first boot.
