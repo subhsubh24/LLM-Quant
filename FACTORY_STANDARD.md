@@ -550,6 +550,15 @@ having validated nothing, and per-PR CI (fully mocked) proves code SHAPE, not fu
   GroceryManager `check-self-validation.mjs`): every declared capability names the REAL check that
   exercises it; the job REDDENS if that check doesn't actually run in CI, needs an unwired secret, or
   hides behind an undeclared env-gated skip. Generalize it to every factory.
+- **Owner progress often lands in ENV / external config that git CANNOT see — re-probe every run.** A
+  `git fetch`-quiet run is NOT evidence that source-connections, keys, or external dependencies are
+  unchanged: owner-set env vars (`CRON_SECRET`, provider keys, `ADMIN_EMAIL`, feature flags — set on
+  Vercel or in the routine env) are INVISIBLE to `git` and to connector-lists. Never infer "nothing
+  changed" from git or a connector list. Each run, actively re-probe every declared external
+  dependency by hitting its REAL read path (authenticated with the secret provided in your
+  environment) and self-report in the validation ledger: whether the expected secret was present in
+  your env (presence only, NEVER the value) + what the probe actually returned. A source stays
+  disconnected only when the probe TRULY failed — never because you didn't look.
 - **Enforcement wiring stays human-gated.** The loop implements fail-loud behavior in app code, test
   assertions, and the capability manifest — but the REQUIRED CI gate itself lives in `.github`, which
   the loop never edits (§27); promoting a real lane to blocking goes through the owner / the one
