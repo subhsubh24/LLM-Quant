@@ -585,7 +585,9 @@ it does NOT gate merges.
      and deployed HTTPS just works. Needs owner-set `BROWSERBASE_API_KEY` + `BROWSERBASE_PROJECT_ID` in
      the routine env (a small ONE-TIME owner action; can start on Browserbase's free tier). Cost-governed
      (§24/§25). AptDesignerAI `lib/agents/computer-use/` (with `safety.ts`) is the reference harness;
-     keep model routing on the factory's own CLAUDE agent (no extra Gemini spend). Until the owner sets
+     keep model routing on the factory's own CLAUDE agent (no extra Gemini spend). PROVEN RECIPE
+     (verified 2026-07-04 end-to-end: a routine reached the LIVE app, HTTP 200): `npm i @browserbasehq/sdk playwright-core`; `const bb=new Browserbase({apiKey:BROWSERBASE_API_KEY}); const s=await bb.sessions.create({projectId:BROWSERBASE_PROJECT_ID}); const browser=await chromium.connectOverCDP(s.connectUrl)` — use the SDK's SIGNED `s.connectUrl` DIRECTLY (a hand-built
+     `wss://connect.browserbase.com?apiKey=` URL does NOT work). Until the owner sets
      those keys, the factory reports the deployed sweep as `awaiting_connect` in `VALIDATOR_STATUS.md`
      and surfaces the ONE owner action — it NEVER fabricates a green (that would falsely arm §13).
   2. **Free in-container check (build-level, NOT a substitute for the deployed sweep): local Chromium
