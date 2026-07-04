@@ -176,9 +176,10 @@ GROWTH_STATUS:
       oos_plan: >
         (A) PREFERRED — Polymarket-v1 HuggingFace (OA-16): extract daily_aligned Parquet,
         filter to "politics"/"elections" category, reconstruct pre-resolution price
-        snapshots at desired decision_lead. (B) ALTERNATIVE — OA-11 with filter:
-        python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 500
-        --max-pages 3 --categories "politics,elections" --merge
+        snapshots at desired decision_lead. (B) ALTERNATIVE — OA-11 with filter (Gamma
+        caps each page at 100 rows regardless of --limit, fixed #220; grow via --max-pages):
+        python3 scripts/fetch_polymarket_history.py --decision-lead-days 7 --limit 100
+        --max-pages 15 --categories "politics,elections" --merge
         --out data/polymarket_history_politics.json
         Chronological 60/40 split. CalibrationBucketStrategy (already built) fitted on
         oldest 60%. B2 significance gate: bootstrap CI excludes 0. Bonferroni correction

@@ -1163,3 +1163,62 @@ calibration + cost-realistic validation surviving the adversarial auditors.
 - The category-emptiness finding (finding 5) is a direct field count over 1,000 freshly-fetched raw
   resolved markets, cross-referenced against `polymarket_history_fetcher.py:248` and the existing
   `market_category.py`/#156 fix already documented in RESEARCH_MEMORY 2026-07-02/07-03.
+
+## 2026-07-04 — Factory Run (3rd of the day): recency-weighted bucket alpha (B4a-revised, EXP-002's named successor) — TESTED ONCE ON REAL DATA (n=799), REFUTED; static B4a sign-FLIPPED across corpora (not a robust edge); factory-env egress now OPEN
+- Hypothesis (falsifiable, PRE-REGISTERED before the run): a per-price-bucket calibration model
+  that weights RECENT resolved training markets more heavily (exponential recency decay on each
+  training market's `resolution_time` relative to the decision time) tracks a TIME-VARYING true
+  rate better than EXP-002's all-time average — the diagnosed cause of EXP-002's Run-14 refutation
+  (the [0,0.1) bucket resolved YES at 1.0% in the training slice vs 7.59% OOS) — and so produces a
+  better-calibrated, cost-net-positive decision-time probability vs the crowd. Params fixed from
+  FIRST PRINCIPLES / shipped defaults BEFORE looking: half_life_days=60, min_effective_n=30 (Kish
+  effective sample size), 10 equal-width buckets, min_edge=0.02, kelly_fraction=0.25, seed=42;
+  fetch order=volumeNum, decision_lead_days=7, min_volume≥1000. Run ONCE, no tweak-and-retry.
+- Min sample N: 100 (EXP-002's pre-registered floor). This run's corpus: **n=799** (the largest real
+  leakage-safe corpus this project has evaluated — enabled by the #220 Gamma-pagination fix +
+  `--limit 100 --max-pages 15`; prior best 510).
+- OOS result: **TESTED AND REFUTED for the recency mechanism, and the static B4a shown NON-ROBUST.**
+  On the same n=799 corpus (crowd_brier=0.1108, pinned=49.6%, yes_base_rate=0.274, deterministic —
+  recency hash reproduced bit-for-bit):
+    * crowd baseline: 0 trades / $0 (model_prob==crowd tautology).
+    * **static B4a (EXP-002): 154 trades, +$3,330.32.**
+    * **recency B4a-revised: 108 trades, −$914.27** — the recency model LOST money OOS and was
+      WORSE than the static variant. `regime_slice.has_positive_edge=False` (no positive edge to
+      assess for concentration). The recency hypothesis (recency-weighting beats the static average)
+      is **refuted on this corpus**.
+  CRITICAL integrity read on the static +$3,330: Research Run 14 measured the SAME static B4a at
+  **−$2,938 on n=510** (a smaller, different-page corpus). A result whose SIGN FLIPS between two
+  honest OOS corpora (+$3,330 vs −$2,938) is the textbook signature of a **non-robust,
+  selection/regime-dependent** result — NOT a validated edge. The larger n=799 corpus reaches deeper
+  into the volumeNum ordering (lower-volume markets on later pages) where the bucket averages differ;
+  the positive aggregate is not evidence of edge without independent-corpus replication + regime
+  slicing + a passing calibration gate. **So neither bucket mechanism (static OR recency) has a
+  robust OOS edge**; the binding constraint (no validated OOS edge) STANDS.
+- Calibration (Brier / reliability): not separately re-run through the B2 significance gate this run
+  (the walk-forward PnL is the primary read; the static sign-flip already refutes robustness). A B2
+  Bonferroni calibration eval on a FRESH pre-registered corpus is the next rigorous step, not a
+  re-eval of the corpus just seen (that would be p-hacking).
+- Costs modeled: yes — the unmodified `cost_model.py` (2% fee + 0.5% slippage) via the factory's own
+  `walk_forward`, identical sizing for static and recency (recency reuses EXP-002's `_net_edge_decision`
+  → apples-to-apples; any PnL delta is the recency mechanism alone).
+- Verdict: **edge-not-proven — recency mechanism REFUTED on this corpus; static B4a shown NON-ROBUST
+  (sign-flip).** Both remain UNWIRED. Do NOT re-run either on this same corpus expecting a different
+  answer, and do NOT tune half_life on it (p-hacking).
+- Why / next (pre-registered candidates, tested only AFTER pre-registering on a FRESH corpus):
+  (a) REPLICATE the static B4a on an independent corpus (different `order` / a disjoint time slice) —
+  if the sign flips again it is confirmed noise; if it holds AND regime_slice is non-fragile it becomes
+  a candidate for ≥3 adversarial auditors. (b) A rolling-WINDOW (fixed-N most-recent) bucket variant,
+  distinct from exponential decay. (c) B4/B8 reasoning alphas (deep-research / cross-venue coherence)
+  are structurally different bets that don't depend on out-calibrating a sharp crowd.
+- MAJOR ENABLER (self-validated this run, per FACTORY_STANDARD §28 "re-probe env-gated deps every run"):
+  the autonomous FACTORY BUILD ENV's own egress to `gamma-api`/`clob`/`data-api.polymarket.com`,
+  `api.elections.kalshi.com`, and `huggingface.co` is **OPEN** (direct `curl` HTTP 200 to all five +
+  a real 799-record fetch through the committed pipeline). This OVERTURNS the "egress-blocked,
+  confirmed by prior runs" conclusion that gated OA-11/13/16 — the loop can now fetch real corpora
+  itself (no owner egress step needed for gamma/clob; OA-16 HuggingFace + OA-15 Kalshi are now
+  loop-runnable too). Re-probe every run; do not infer "still blocked" from a stale prior. (This also
+  triggered #222 — data-api reachability made the ungated fabricated-edge `wallet_divergence` a live
+  risk, gated OFF per OA-13.)
+- Reproducibility: live-fetch (not committed — same limitation as Run 14); re-runnable by anyone via
+  the exact command above on a permitted host. The recency + static walk-forwards are deterministic
+  (same corpus+config → same PnL); the corpus itself drifts as new markets resolve.
