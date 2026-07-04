@@ -73,6 +73,12 @@ logger = logging.getLogger(__name__)
 GAMMA_API = "https://gamma-api.polymarket.com"
 CLOB_API = "https://clob.polymarket.com"
 
+# Gamma's ``/markets`` endpoint silently caps each response at this many rows regardless
+# of the requested ``limit`` (verified live: ``limit=500`` returns exactly 100 rows). The
+# pager caps its per-page stride to this so ``offset`` stays aligned and it keeps paging
+# instead of mistaking the first (capped) page for the end of the data.
+_GAMMA_MAX_PAGE = 100
+
 # A hard per-request deadline. ALWAYS shorter than any run budget — a required
 # safety rule for every external call so a hung endpoint cannot stall the job.
 REQUEST_TIMEOUT = 15
@@ -177,14 +183,26 @@ class PolymarketHistoryFetcher:
         PRE-REGISTERED, not chosen after seeing results.
         """
         cats = {c.lower() for c in categories} if categories else None
+        # Gamma's ``/markets`` endpoint SILENTLY caps each response at
+        # ``_GAMMA_MAX_PAGE`` (100) rows regardless of the requested ``limit`` — so a
+        # request for ``limit=500`` returns exactly 100 rows. If we paged with a stride
+        # of ``limit`` and stopped on ``len(data) < limit``, the very FIRST (capped) page
+        # would look "short" (100 < 500) and paging would stop after ONE page — silently
+        # under-sampling by up to ``max_pages`` worth of history (this is why every real
+        # corpus fetched before this fix topped out near 100 records). Cap the per-page
+        # stride to the real Gamma page size so ``offset`` stays aligned (0, 100, 200, …)
+        # and the loop keeps paging until a genuinely short page or ``max_pages``.
+        # Effective rows fetched ≈ ``min(limit, 100) * max_pages`` — grow the corpus via
+        # ``max_pages``, not ``limit``.
+        page_size = min(int(limit), _GAMMA_MAX_PAGE)
         out: List[ResolvedMarket] = []
         for page in range(max_pages):
             params = {
                 "closed": "true",
                 "order": order,
                 "ascending": "false",
-                "limit": limit,
-                "offset": page * limit,
+                "limit": page_size,
+                "offset": page * page_size,
             }
             data = self._get(f"{GAMMA_API}/markets", params)
             if isinstance(data, dict):
@@ -203,7 +221,7 @@ class PolymarketHistoryFetcher:
                 if cats is not None and rm.category.lower() not in cats:
                     continue
                 out.append(rm)
-            if len(data) < limit:
+            if len(data) < page_size:
                 # Short page → we've reached the end of available history.
                 break
         logger.info("fetched %d resolved markets across <=%d pages", len(out), max_pages)

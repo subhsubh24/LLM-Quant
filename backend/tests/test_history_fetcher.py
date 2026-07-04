@@ -304,6 +304,35 @@ def test_fetch_loop_respects_max_pages():
     assert len(gamma_calls) == 3
 
 
+def test_pager_respects_gamma_100_row_cap():
+    """Gamma silently caps each /markets response at 100 rows regardless of the requested
+    ``limit`` (verified live). A pager that used ``limit`` as the stride and stopped on
+    ``len(data) < limit`` would see the first (capped) 100-row page as "short"
+    (100 < 500) and stop after ONE page — silently under-sampling by up to ``max_pages``
+    worth of history. The pager must cap its per-page stride to the real cap and keep
+    paging. Proven to FAIL pre-fix (returns only 100 rows across a single ``limit=500``
+    page)."""
+    CAP = 100
+    corpus = [_gamma_market(f"m{i}", ["1", "0"]) for i in range(250)]
+
+    def router(url, params):
+        offset = (params or {}).get("offset", 0)
+        # Emulate Gamma: ignore the requested limit, return <= 100 rows from offset.
+        return corpus[offset:offset + CAP]
+
+    session = FakeSession(router)
+    out = PolymarketHistoryFetcher(session=session).fetch_resolved_markets(limit=500, max_pages=5)
+
+    # All 250 markets fetched across pages of 100/100/50 — NOT truncated to 100.
+    assert len(out) == 250
+    # The pager capped its stride to the real Gamma page size and advanced offsets in
+    # steps of 100 (not 500), so no rows were skipped or re-fetched, and it stopped on the
+    # genuinely short final page (50 < 100) rather than on the first (capped) page.
+    gamma_calls = [c for c in session.calls if c["url"] == f"{GAMMA_API}/markets"]
+    assert [c["params"]["offset"] for c in gamma_calls] == [0, 100, 200]
+    assert all(c["params"]["limit"] == 100 for c in gamma_calls)
+
+
 # ---------------------------------------------------------------------------
 # A7 — POINT-IN-TIME / earlier-life sampling
 # ---------------------------------------------------------------------------
