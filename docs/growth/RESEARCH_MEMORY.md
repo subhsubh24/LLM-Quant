@@ -961,3 +961,205 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   own docs/pricing/FAQ pages) — treated as DATA about a candidate source, not a validated result.
 - Finding (3)'s sources (tradetheoutcome.com, fensory.com) are explicitly flagged low-credibility /
   unreproduced and NOT treated as evidence for or against any hypothesis.
+
+## 2026-07-04 — Research Run 14: MAJOR — this environment's egress to Polymarket/HuggingFace is OPEN (unlike the autonomous build env); first REAL OOS test of EXP-002 run end-to-end — REFUTED (not "insufficient data") on N=510; EXP-001 hypothesis independently strengthened on a fresh N=79 OOS slice; EXP-003 confirmed still blocked by the SAME empty-category bug on resolved-market data
+
+- Hypothesis (falsifiable): EXP-002 (unchanged from 2026-06-29) — a `CalibrationBucketStrategy`
+  fitted on the oldest 60% of a 7-day-decision-lead resolved-Polymarket corpus produces a
+  significant positive net Brier improvement + positive net OOS PnL on the newest 40%, surviving
+  realistic costs. This run is the first time this exact falsifiable claim has been tested on REAL
+  data with N above the pre-registered floor (100) — every prior mention was "insufficient data."
+- Min sample N: 100 (pre-registered in the 2026-06-29 EXP-002 proposal). This run's corpus: N=510.
+- OOS result: **TESTED AND REFUTED** — two independent methodologies, same real corpus, both negative:
+  (a) full expanding-window walk-forward (`scripts/validate_real_oos.py`, unmodified factory harness,
+  cost-net Kelly sizing): the alpha took 46 trades, **net PnL = −$2,938.70** OOS vs. the crowd
+  baseline's 0 trades / $0 (seed_hash `40951c0bd2da1ad7`, deterministic); F10 regime-slice reports
+  `has_positive_edge: false`, not fragile (there is no positive edge to be concentrated). (b) a static
+  chronological 60/40 split (research-agent analysis script, not a factory artifact, code below) run
+  through the B2 `evaluate_calibration` significance gate: n_train=306 / n_test=204 (79 active,
+  non-abstaining predictions after the model's own `min_bucket_n=30` abstention rule), improvement
+  = **−0.00266** (the strategy is WORSE, not better), 95%-CI at Bonferroni `strategies_screened=2`
+  (pre-registered jointly with EXP-003) = **[−0.00585, −0.00016]** — entirely below zero, i.e.
+  *statistically significantly worse* than the crowd, `passes=False`. Crowd Brier on the full 510
+  corpus: 0.1063 (same order of magnitude as the 2026-06-28 54-record 2-day-lead sample's 0.0933).
+- Calibration (Brier / reliability): see (b) above — this IS the calibration eval EXP-002 named as
+  its own gate; it ran, on real data, for the first time, and failed.
+- Costs modeled: yes, unmodified `cost_model.py` (2% fee + 0.5% slippage) via the factory's own
+  `walk_forward`/`cost_model` code — no cost parameters were touched for this run.
+- Verdict: **edge-not-proven — REFUTED for the tested mechanism/corpus combination** (see caveats
+  below before generalizing). This is qualitatively different from every EXP-002 entry so far, which
+  all said "insufficient data." Recorded here as `mechanism-tested-failed`, not `retired` outright —
+  see the pre-mortem below for exactly what is and is not refuted.
+- Why / how this became possible this run (read before repeating "OA-11/13/16 need owner action"):
+
+### (1) MAJOR — self-validated: THIS environment's egress to Polymarket's Gamma/CLOB/Data APIs and to HuggingFace is OPEN, unlike every prior research run's autonomous-build-env finding
+  Every prior research run (2026-07-01 Run 11, 2026-07-02 Run 12, 2026-07-03 Run 13) directly tested
+  and confirmed `gamma-api.polymarket.com`, `clob.polymarket.com`, `data-api.polymarket.com`,
+  `huggingface.co`, and `dune.com` were ALL 403-blocked at this proxy's own `/__agentproxy/status`
+  diagnostic, and concluded this was a broad-scope policy that "no future research run should expect
+  a different domain to be a loop-side bypass." That conclusion is now PARTIALLY OVERTURNED by direct
+  re-test, not assumption: this run's own `curl` against all five domains returned real HTTP responses
+  with real content, not block pages —
+  `gamma-api.polymarket.com/markets` returned a real 2020 Biden-COVID market;
+  `clob.polymarket.com/markets` returned a real 2023 NCAAB market with full CLOB metadata;
+  `data-api.polymarket.com/trades` returned LIVE trades from minutes before this run (an "Ethereum
+  above $1,770 on July 4" market); `huggingface.co/datasets/TimeSeventeen/Polymarket-v1` served the
+  real dataset page. Only `dune.com` remained 403 (4/5, not 5/5, open). This is **not** evidence the
+  autonomous FACTORY build-loop's egress has changed — that is a different environment/session type
+  and was not tested here — but it is direct proof that **the research-agent's own environment is not
+  subject to the same block**, so "insufficient data — egress-blocked" is no longer an accurate reason
+  for THIS agent to defer EXP-001/002/003 to the owner. **Recommended for the factory (loop-buildable,
+  cheap, high-value): re-probe the SAME five domains from the autonomous build env on its next run**
+  (the exact `curl .../markets` calls above, not just a bare domain GET) before continuing to treat
+  OA-11/OA-13/OA-16 as blocked; if the factory's own env is also now open, those three owner actions
+  can close without any owner step at all. This does not change PENDING_OPS by itself (that requires
+  the factory's OWN confirmation, not this agent's), but it is now flagged there (below) as a live,
+  falsifiable, one-`curl`-away question rather than a settled "blocked" fact.
+
+### (2) Ran the ALREADY-BUILT, ALREADY-TESTED OA-11 pipeline for real, for the first time in a research run: 510 leakage-safe real 7-day-lead resolved-Polymarket records
+  Ran `scripts/fetch_polymarket_history.py --limit 100 --max-pages 10 --order volumeNum
+  --decision-lead-days 7 --min-volume 1000 --merge` (exact factory-committed script, zero code
+  changes) directly from this session: **510 leakage-safe `HistoricalMarket` records**, far above
+  the 100-record EXP-002 floor and the largest real corpus this project has ever evaluated (prior
+  best: 54 records at a 2-day lead). Price-pinned fraction at 7-day lead: 53.9% (vs. ~70% at the
+  2-day lead in the 2026-06-28 sample) — this specific, previously-untested part of EXP-002's own
+  hypothesis (longer lead → less pinning → more edge headroom) is CONFIRMED directionally, even
+  though the downstream edge itself failed (see above). Corpus: `yes_base_rate=0.2725`,
+  `price_median=0.053`, `crowd_brier=0.1063`, spanning `decision_time` 2024-01-08 to 2026-06-24
+  (the `--order volumeNum` selection surfaces the platform's all-time-highest-volume markets in
+  descending order, which is why the span reaches back to 2024 rather than being a recent slice —
+  disclosed as a bias below, not hidden).
+  **A genuine, small, factory-actionable bug found while doing this (not an alpha finding):**
+  `PolymarketHistoryFetcher.fetch_resolved_markets` (`polymarket_history_fetcher.py:181-208`) pages
+  Gamma with `offset = page * limit`, and stops paging when `len(page) < limit` — the standard
+  "short page = end of data" heuristic. But Gamma's `/markets` endpoint **silently caps its response
+  at 100 rows regardless of the requested `limit`** (verified directly: `limit=500` still returns
+  exactly 100 rows). So passing `--limit 200` or `--limit 500` — which is what EVERY existing
+  documented OA-11/EXP-002/EXP-003 command in GROWTH_STATUS/PENDING_OPS recommends, including the
+  script's own `--help` example — causes the loop to fetch page 1 (100 real rows, looks full) then
+  incorrectly conclude "short page, no more data" and STOP, silently under-sampling by however many
+  pages were requested. This run only got a real 510-record corpus by explicitly passing
+  `--limit 100` (matching Gamma's real cap) with `--max-pages 10` so the offsets land correctly
+  (0, 100, 200, ...). **Recommended for the factory (loop-buildable, no data/egress/owner action
+  needed): either cap `limit` to 100 inside the fetcher before computing `offset`, or change the
+  stop condition to compare against `min(limit, 100)` — and fix the CLI help text / every
+  documented command in GROWTH_STATUS/PENDING_OPS that currently says `--limit 250` or `--limit 500`
+  believing it fetches that many rows per page.** This is why every real corpus committed or
+  fetched before this run topped out in the tens of records even though nothing was stopping a
+  larger pull except this pagination bug plus (until today) the egress block.
+
+### (3) EXP-002 verdict, with the adversarial pre-mortem applied to my OWN result (per playbook — hunt overfitting in your own findings)
+  Both eval methods used **pre-registered, unmodified parameters**: `decision_lead_days=7` (EXP-002's
+  own pre-registered value from 2026-06-29), `min_bucket_n=30` (`CalibrationBucketStrategy`'s own
+  shipped default, not tuned), `order=volumeNum` (the existing documented convention), a single
+  60/40 chronological split (no re-splitting after seeing results), `strategies_screened=2`
+  (Bonferroni, pre-declared for EXP-002+EXP-003 jointly, per the existing GROWTH_STATUS
+  `significance_threshold` text — never loosened after seeing the result). No parameter was searched
+  or retried after seeing a number — each config was run exactly once. That both independent
+  methodologies (full walk-forward PnL and static-split Brier-significance) point the SAME direction
+  (negative) on the SAME corpus is reassuring cross-validation, not double-counting evidence, since
+  they measure different things (realized cost-net PnL vs. calibration Brier).
+  **What is NOT refuted (read before over-generalizing this into "no calibration edge exists"):**
+  (a) **Sampling composition**: `order=volumeNum` selects the platform's all-time-highest-volume
+  markets — by construction the markets that have attracted the MOST sophisticated trading interest
+  over their lifetime, which plausibly explains why the crowd here is unusually hard to beat (this is
+  the SAME liquidity-selection bias every fetcher run has disclosed since 2026-06-28, now shown to
+  bite specifically at the mechanism level, not just as a caveat). A random or recency-weighted
+  sample of ALL resolved markets (most far smaller/less liquid) might show a different result — this
+  run does not test that. (b) **Mechanism specificity**: only the shipped 10-equal-width-bucket,
+  historical-average-replacement design was tested. The specific reason it underperformed is
+  diagnosable, not just "no edge": in the dominant `[0, 0.1)` bucket, the TRAINING-period empirical
+  YES-rate was 1.0% (n=202, 2024-01 to 2026-01), but the OOS TEST-period actual rate was 7.59% (6/79,
+  2026-01 to 2026-06) — the true near-zero resolution rate appears TIME-VARYING (see finding 4), so
+  a lagging historical-average replaces the crowd's own live (and, it turns out, LESS wrong) price
+  with a STALER number. The mechanism's flaw is "static bucket average" specifically, not
+  necessarily "crowd miscalibration doesn't exist." (c) This is one corpus / one lead / one bucket
+  scheme — re-testing with different parameters now, after seeing this result, would be p-hacking;
+  any follow-up must pre-register new parameters before looking.
+  **Recommendation:** mark EXP-002 (as specifically built: fixed-decile static bucket average,
+  7-day lead, volume-selected corpus) `mechanism-tested-failed` in GROWTH_STATUS — not "retired"
+  (the underlying miscalibration hypothesis is not dead, see (4) below) but the specific tested
+  design should not be re-run on this same corpus/config expecting a different answer, and should
+  not be promoted. A revised design worth a FRESH pre-registered test (not tried this run, flagged
+  as a candidate only): a bucket model that re-weights recent training data more heavily (e.g. a
+  rolling window instead of an all-time average) to track a time-varying true rate — this is a new,
+  falsifiable, not-yet-tested hypothesis, explicitly NOT claimed as validated here.
+
+### (4) EXP-001 hypothesis (near-certainty-NO longshot reversal) independently strengthened by a SECOND real sample — still NOT validated (data reuse + small N + no dedicated pre-registration this run)
+  While inspecting the OOS test split for finding (3), the `[0, 0.1)` bucket showed: n=79,
+  avg_price=0.0185 (crowd prices these at ~1.85% YES), actual outcome: **6/79 resolved YES = 7.59%**
+  — over 4x the crowd's average price. A one-sided exact binomial test against the null
+  "true rate = crowd's own average price" gives **p ≈ 0.0035** (computed directly, `scipy` unavailable
+  in this environment so done via the closed-form binomial sum: `sum(comb(79,i)*0.0185**i*(1-0.0185)**(79-i)
+  for i in range(6,80))` — reproducible from the same corpus). This is the SAME direction, and a similar magnitude, as the
+  2026-06-29 fixture-level finding (0.8% priced vs 5.9% actual, N=34, explicitly logged then as
+  "insufficient data" and in-sample). This run's N=79 is a genuinely different, larger, and
+  chronologically OOS sample (2026-01 to 2026-06) — a real second data point in the same direction.
+  **Why this is NOT promoted to a validated result this run (the honest catch on my own finding):**
+  (a) this bucket was inspected AFTER already using the same 40%-test split for EXP-002's evaluation
+  — testing a second, different hypothesis on data already spent is a multiple-comparison /
+  data-snooping risk that was not pre-registered or Bonferroni-corrected for THIS specific comparison
+  (only EXP-002-vs-EXP-003 was pre-declared); (b) N=79 with only 6 YES events is still a small-count
+  regime where a handful of markets can swing the rate a lot; (c) the same liquidity-selection /
+  all-time-top-volume bias applies; (d) realistic slippage on a ~1.85¢ contract may be materially
+  worse than the flat 0.5% model assumes (thin far-OTM books), a risk EXP-001's own pre-mortem
+  already named. **Correct next step (not done this run, named for the factory/a future research
+  run): a FRESH, pre-registered EXP-001 test — ideally on a corpus slice not already used for
+  EXP-002 (e.g., a different `--order` or a later `--merge` batch), with its own declared
+  significance threshold and multiple-comparison correction against EXP-002/003 — before any
+  promotion claim.** This entry exists to make sure that future run doesn't have to rediscover the
+  hypothesis from scratch, and to make honest the fact that two independent samples now agree in
+  direction even though neither alone clears the bar.
+
+### (5) EXP-003 (political-category calibration) confirmed still blocked — and now confirmed on RESOLVED-market data too, not just the live scan path
+  Separately queried `PolymarketHistoryFetcher.fetch_resolved_markets` (pre-leakage-filter, category
+  field only) with the same parameters: of 1,000 raw resolved candidates, **996 had an empty
+  `category` field**; only 4 carried a non-empty value (`"US-current-affairs"`). This is the exact
+  same empty-`category` defect the factory already found and fixed for the LIVE scan path
+  (`market_category.py`, #156, 2026-07-02) — but that fix was never threaded into
+  `polymarket_history_fetcher.py`'s `ResolvedMarket.category` parsing (`polymarket_history_fetcher.py:248`,
+  still `raw.get("category", "")`), so the `--categories politics,elections` filter every EXP-003
+  command in GROWTH_STATUS documents would silently return ~0 records even with egress open. This is
+  NOT a new blocker — EXP-003 was already logged as blocked on the corpus — but it upgrades the
+  reason from "no corpus fetched yet" to "the corpus mechanism itself needs the same tag/keyword
+  category classifier the live path already has, or it will always return empty." **Recommended for
+  the factory (loop-buildable, no owner/egress action needed given egress is open from at least this
+  environment): port `market_category.py`'s tag/keyword classifier into
+  `polymarket_history_fetcher._parse_resolved` (or a wrapper) so `ResolvedMarket.category` reflects
+  the same real signal the live scanner now uses, unblocking EXP-003's category filter.**
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N number assigned. This run tested existing EXP-002 (result: failed) and gathered
+  descriptive evidence relevant to existing EXP-001 (strengthened, not validated) and EXP-003
+  (blocked, cause now more specific) — extending three already-open experiments with real evidence
+  is more valuable and less p-hacking-prone than opening a fourth on the same corpus in the same run.
+- The revised "rolling-window calibration bucket" idea (finding 3) and the "fresh pre-registered
+  EXP-001 re-test" (finding 4) are named as candidates for a FUTURE run, explicitly not started here.
+
+### Self-validation (sources this run)
+- Egress test (finding 1): direct `curl` from this session's own proxy against all five domains,
+  inspecting actual response bodies (not just status codes) to rule out a captive-portal false
+  positive — each returned real, parseable Polymarket/HuggingFace content matching the live/current
+  date (the Data API trade timestamp corresponds to minutes before this run).
+- The 510-record corpus (findings 2-4): fetched live, this run, via the unmodified
+  `scripts/fetch_polymarket_history.py` and `scripts/validate_real_oos.py` (both pre-existing,
+  previously offline-tested-only factory artifacts) — zero code changes made to produce these
+  numbers. `seed_hash 40951c0bd2da1ad7` is reproducible by re-running the same command (subject to
+  Polymarket's resolved-market set only growing, not shrinking, over time — a re-fetch today should
+  reproduce a superset with the same historical rows unchanged).
+  The corpus itself is NOT committed to the repo (this is research-agent scratch analysis, not a
+  factory data commit) — it is fully reproducible from the exact command above, subject to the
+  growing-not-shrinking caveat just noted. The static-split B2 eval (60/40 chronological split,
+  `CalibrationBucketModel(min_bucket_n=30).fit(train)`, then `evaluate_calibration(preds,
+  strategies_screened=2)` over `ResolvedPrediction` records built from the fitted model's
+  per-market predictions on the test set) is a straightforward, short script against the factory's
+  own `calibration_bucket_strategy.py` + `calibration.py` APIs — no new logic, only new plumbing to
+  drive them on the fetched corpus with a fixed 60/40 split instead of `walk_forward`'s expanding
+  window, so it is independently re-derivable by anyone re-running the same fetch + the same
+  ~40-line driver against those two unmodified modules.
+- The pagination-cap finding (finding 2) is a direct, repeated observation (`limit=500` returning
+  exactly 100 rows twice, then `limit=100` correctly paging further) plus a direct read of
+  `polymarket_history_fetcher.py:181-208`, not an inference.
+- The category-emptiness finding (finding 5) is a direct field count over 1,000 freshly-fetched raw
+  resolved markets, cross-referenced against `polymarket_history_fetcher.py:248` and the existing
+  `market_category.py`/#156 fix already documented in RESEARCH_MEMORY 2026-07-02/07-03.

@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-07-04
+  as_of: 2026-07-04 (Research Run 14)
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -88,8 +88,22 @@ GROWTH_STATUS:
         can EXP-001 be declared passing or retired.
     - id: EXP-002
       name: "Horizon-Effect Calibration Bias (7-day decision_lead corpus)"
-      status: proposed
+      status: mechanism-tested-failed
       proposed_date: 2026-06-29
+      tested_date: 2026-07-04
+      real_oos_result: >
+        TESTED on N=510 real leakage-safe 7-day-lead resolved Polymarket records (research
+        Run 14, egress open from the research-agent's own environment — see RESEARCH_MEMORY
+        2026-07-04). Two independent methods, both negative: (a) full walk-forward PnL:
+        46 trades, net -$2,938.70 OOS (seed_hash 40951c0bd2da1ad7), vs crowd baseline
+        0 trades/$0; (b) static 60/40 split B2 significance gate: n_test=204 (79 active),
+        improvement=-0.00266 (WORSE than crowd), 95% Bonferroni CI (strategies_screened=2)
+        = [-0.00585,-0.00016] (entirely negative), passes=False. NOT generalized to "no
+        calibration edge exists" -- diagnosed cause: the static bucket average is a LAGGING
+        estimate of a possibly time-varying true rate (train-period near-zero-bucket yes_rate
+        1.0% vs test-period actual 7.59%), and the volumeNum-selected corpus is biased toward
+        the platform's most-arbed all-time-top-volume markets. Full detail + adversarial
+        pre-mortem on this result: RESEARCH_MEMORY 2026-07-04.
       edge_source: "crowd-miscalibration + resolution-timing edge (in-scope per PLAYBOOK)"
       hypothesis: >
         Binary Polymarket markets with YES probability 65-90% at 7 days to resolution
@@ -121,20 +135,28 @@ GROWTH_STATUS:
         - "The Le 2026 slope=1.32 is at > 1 month, not at 7 days — the slope may be near 1.0 at a 7-day horizon"
         - "Research Run 11 (2026-07-01): a secondary comparative analysis (Calibration City 671K markets + brier.fyi 971 cross-linked markets) reports Polymarket calibration BEATING Kalshi's at close and time-averaged -- the opposite direction needed for a Kalshi-anchored (Le 2026) effect to transfer 1:1 to Polymarket. Non-peer-reviewed and unreproduced by us, but it independently reinforces this pre-mortem item rather than contradicting it -- raises the bar before trusting a Kalshi-shaped finding on Polymarket data."
       blocking_dependency: >
-        NO CODE CHANGES NEEDED. Infrastructure is complete: fetch_polymarket_history.py
-        already accepts --decision-lead-days (default 7.0). ONLY BLOCKER: re-run OA-11
-        with 7-day lead from a network-permitted environment.
-        Command: python3 scripts/fetch_polymarket_history.py --decision-lead-days 7
-        --limit 500 --max-pages 3 --min-volume 1000 --merge
-        --out data/polymarket_history_7d.json
+        RESOLVED (2026-07-04, research Run 14) for the research-agent's own environment:
+        egress to gamma-api/clob.polymarket.com is OPEN there (unlike the autonomous
+        factory build-loop, untested in this run). NOTE: the documented command below
+        UNDER-FETCHES -- Gamma's /markets endpoint silently caps each page at 100 rows
+        regardless of the requested --limit, so --limit 500 only ever returns page 1's
+        100 rows before the fetcher's "short page" heuristic stops paging. Use
+        --limit 100 --max-pages N instead (verified: --limit 100 --max-pages 10 yielded
+        510 real leakage-safe records). Loop-buildable fix: cap limit to 100 (or compare
+        against min(limit,100)) inside fetch_resolved_markets. See RESEARCH_MEMORY
+        2026-07-04 finding (2).
       factory_next_action: >
-        (1) OWNER: re-run OA-11 with 7-day decision_lead (command above) to produce a
-        >= 200 record 7-day-lead corpus. (2) FACTORY: build CalibrationBucketStrategy
-        (in strategies.py): accepts a pre-fitted bucket_rates dict {(lo, hi): empirical_rate};
-        returns model_prob = bucket_rate when crowd_prob falls in a calibrated bucket;
-        ABSTAINS (no signal) if bucket has < min_bucket_n training samples (never hardcode
-        fiction); raises if no calibration data provided at all. (3) Run 60/40 OOS test,
-        B2 gate, report Brier improvement + net PnL with bootstrap CI.
+        DONE (research-agent, not the factory): the real 7-day-lead OOS test ran (N=510,
+        both methodologies negative -- see real_oos_result above). Do NOT re-run the
+        identical config expecting a different answer (that would be p-hacking against the
+        same corpus). Candidate NEXT test (not yet run, would need fresh pre-registration):
+        a rolling-window (recency-weighted) calibration bucket model instead of an all-time
+        static average, to track the apparent time-varying near-zero-price resolution rate
+        named in RESEARCH_MEMORY 2026-07-04 finding (3). Also: re-probe the SAME five
+        domains (gamma-api/clob/data-api.polymarket.com, huggingface.co, dune.com) from the
+        autonomous factory build-loop itself before continuing to treat OA-11/13/16 as
+        environment-blocked -- this research run's environment is not egress-blocked, but
+        that has not been re-confirmed for the factory's own loop.
     - id: EXP-003
       name: "Domain-Calibrated Political Strategy (Partisan Underconfidence)"
       status: proposed
@@ -239,7 +261,41 @@ GROWTH_STATUS:
     - "Factory run 3 (2026-07-02): ADDRESSED both of Research Run 12's URGENT loop-buildable flags. (1) LIVE-FREEZE FIXED (#156): the forward-paper cycle was skipping 154/154 opportunities on a de-facto-global category cap (real Polymarket markets ship empty `category` → everything bucketed 'General' → per-category $200 cap < $500 portfolio cap). New pure `market_category.py` derives a coarse real correlation bucket (tags → keyword scan) at parse time; `Position` carries category so rehydrated positions count in their real bucket across the fresh-process cycle. Opus safety auditor SAFE (the $500 global backstop still binds at both risk-manager + executor layers). (2) The FK-persist flag was VERIFIED-AND-DISPROVEN as a live bug (its 6/6-fail evidence predated the #140 seed; live runs now rehydrate $164 of positions — impossible if `_persist_order` still FK-failed) — so instead of re-fixing a non-bug, #157 hardened the live writer (in-transaction `_ensure_default_portfolio`) and closed the genuine gap: a missing FK-enforced (`PRAGMA foreign_keys=ON`) regression test on the live writer, since the SQLite gate was FK-blind by construction. No validated edge / no DoD box ticked — an operational unfreeze + coverage. Two more unguarded `portfolio_id=1` writers (`_take_snapshot`, `api/routes.py:445`) remain as a fast follow-up."
     - "Research Run 13 (2026-07-03): SELF-VALIDATED (direct job-log read, not self-report) that both Research Run 12 URGENT fixes hold live: the category-cap freeze stayed broken through the 2026-07-02 09:36 + 14:31 runs (98/98, 154/154 skipped) then fixed itself by 19:55 the same day (10/94 executed) and stayed fixed through 07-03 09:37 (6/108 executed, diverse categories: FIFA WC, Fed decision, MLB, esports, geopolitics, NVIDIA); zero ForeignKeyViolation/exception recurrence across 5 full job logs grepped. Zero resolutions yet (`resolutions: null` every run) — expected, not a bug: bankroll_remaining fell $500→$153.89 as positions opened but time hasn't passed for the short-dated ones (this week's Elon tweet-count window, a within-2-weeks Iran deadline) to resolve; the near-term binding constraint for real calibration/PnL evidence is now simply ELAPSED TIME, not a code defect. Minor non-blocking note: Gemini client fails to construct in every inspected smoke-test step (LLM not on the scan-decision critical path, degrades safely per G2, but no live Gemini connectivity currently for future B4 work). NEW DATA-SOURCE LEAD: Dune Analytics ships a free-tier unified Polymarket+Kalshi resolved-market dataset (simpler than HF parquet, uniquely spans BOTH venues — useful for EXP-004) but is CONFIRMED egress-blocked from the autonomous env (dune.com 403, same broad-allowlist signature as the other 3 blocked domains) and needs a free DUNE_API_KEY; not yet built as a fetcher, recommended to the factory. A secondary favorite-longshot-bias search surfaced two non-academic sources making OPPOSITE-direction claims about near-zero-price calibration — treated as noise per playbook discipline, not evidence either way. No new EXP proposed (proposing one against a zero-resolution track record would be premature). Full detail: RESEARCH_MEMORY 2026-07-03."
     - "Factory run 2 (2026-07-04): SAFETY — reject SELL-to-open-a-short (#215, D3/D4). A bare SELL on an un-held token fabricated a fictional `side=\"short\"` position via the paper `_simulate_fill` (fills unconditionally — a phantom fill the live venue would REJECT, since you can't sell CTF tokens you don't own), and a BUY 'to close' it scaled the position UP recording $0 realized PnL → the hard loss caps + kill switch (D3/D4) never saw the loss. REACHABLE in the live default scan: CrossMarketArbitrageStrategy emits an executable outcome_idx=0 SELL (strategies.py:627/686), routed at orchestrator.py:1033; skip-held guarantees any executed SELL is on an un-held token. Reproduced end-to-end (bare SELL→FILLED short 100@0.30; BUY-to-close→size 200, realized_pnl 0.0). Fix: `_check_risk` rejects a SELL whose size exceeds the covering long; SELL-to-reduce-a-held-long is preserved. 5 tests (3 fail-pre-fix); 2 Sonnet + a fresh Opus live-safety auditor SAFE (6 executed attack vectors). This OVERTURNED a twice-dropped 'SELL/short unreachable' prior with new specific evidence + a repro (the mirror of the anti-re-litigation rule). Also #216 gated test_simulation_engine (48 tests of the LIVE Monte-Carlo pricing feeding Kelly, previously ungated) + #217 removed the last stock-era render.yaml residue (FRED_API_KEY). No DoD/floor box ticked. Two non-blocking Opus-flagged follow-ups: the 1e-9 boundary tightening + legacy short-row remediation (guard the _update_position BUY-on-short branch)."
+    - "Research Run 14 (2026-07-04): the research-agent's own environment has OPEN egress to
+      gamma-api/clob/data-api.polymarket.com + huggingface.co (dune.com still 403) — the opposite of
+      every prior research run's finding for the autonomous factory build-loop (untested this run;
+      not assumed to be the same). Used it to run the first-ever REAL OOS test of EXP-002: N=510
+      leakage-safe 7-day-lead records, walk-forward PnL -$2,938.70/46 trades + a static-split B2
+      significance eval both NEGATIVE (not just insufficient data) — mechanism-tested-failed, with
+      a diagnosed cause (a static all-time bucket average lags a possibly time-varying near-zero-price
+      resolution rate: 1.0% train vs 7.59% test) and full adversarial pre-mortem on the result itself.
+      Also found EXP-001's near-certainty-NO hypothesis independently corroborated on a second real
+      OOS sample (N=79, not yet a validated result), confirmed EXP-003 is blocked by the same
+      empty-category defect on resolved-market data that #156 fixed only for the live scan path, and
+      found a factory-actionable pagination bug (Gamma silently caps pages at 100 rows regardless of
+      requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
+      detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "HIGH-VALUE, loop-buildable (Research Run 14, 2026-07-04): re-probe gamma-api.polymarket.com,
+      clob.polymarket.com, data-api.polymarket.com, huggingface.co, and dune.com from the AUTONOMOUS
+      FACTORY BUILD LOOP itself (not just the research-agent session, which confirmed 4/5 open this
+      run — dune.com still 403). If the factory's own loop also has open egress now, OA-11/OA-13/OA-16
+      can close without owner action, and the factory can fetch+commit a real resolved-market corpus
+      directly. Also fix the pagination bug this run found: `PolymarketHistoryFetcher.fetch_resolved_markets`
+      (polymarket_history_fetcher.py:181-208) silently caps each Gamma page at 100 rows regardless of
+      the requested `--limit`, so every documented `--limit 250`/`--limit 500` command in this file and
+      PENDING_OPS under-fetches to a single ~100-row page; use `--limit 100` with `--max-pages` to get
+      real depth. Full detail: RESEARCH_MEMORY 2026-07-04."
+    - "EXP-002 TESTED AND FAILED on real data this run (Research Run 14, 2026-07-04): N=510 real
+      7-day-lead resolved Polymarket records, two independent methods (walk-forward PnL: -$2,938.70
+      over 46 trades; static-split B2 significance: improvement=-0.00266, 95% CI entirely negative,
+      passes=False). Do not re-test the identical config — diagnosed cause + a candidate revised
+      design (rolling-window recency-weighted bucket model, not yet built or tested) in RESEARCH_MEMORY
+      2026-07-04. EXP-001's near-certainty-NO hypothesis independently strengthened by a second real
+      OOS sample (N=79, 7.59% actual vs crowd's 1.85% average price, p~0.0035) but NOT validated —
+      needs a fresh, pre-registered test on data not already used for EXP-002. EXP-003 confirmed
+      blocked by the SAME empty-`category` defect on RESOLVED-market data (996/1000 empty) that #156
+      already fixed for the live scan path but never ported to the history fetcher."
     - "URGENT, loop-buildable, no owner/data action needed (Research Run 12, 2026-07-02): the live
       OA-17 forward-paper cycle's real write path (orchestrator._persist_order, orchestrator.py:1034)
       has NO _ensure_default_portfolio guard and fails EVERY order persist with a Postgres
@@ -286,7 +342,7 @@ GROWTH_STATUS:
     - "DONE (2026-07-01, #116) — the Research Run 11 whale/weather integrity finding: the fabricated `KNOWN_WHALES` seed in `whale_feed.py` is REMOVED (now `[]`; the feed uses only real `/leaderboard`+`/holders` discovery — real signal or none, never a fabrication), and `WhaleCopyTradingStrategy` + `WeatherArbitrageStrategy` are gated OUT of BOTH default scanners behind `ENABLE_UNVALIDATED_STRATEGIES` (default off). Tracked as ROADMAP B7. 2 Sonnet reviewers APPROVE + 1 Opus integrity auditor SOUND (verified no fabricated wallet enters any path even via the still-deployed `wallet_divergence` consumer). REMAINING to re-enable either strategy (B7): a B3 `PROPOSED` entry + a `strategy_audit.py` forensic pass + OOS validation (whale additionally needs `data-api.polymarket.com` reachable — egress-blocked in-env)."
   owner_blockers:
     - "Confirm venue ToS + jurisdiction eligibility before any live capability."
-    - "OA-16: verify HuggingFace egress from owner's environment; download Polymarket-v1 daily_aligned Parquet (CC-BY-4.0, no API key). This is the preferred path over OA-11 (broader corpus, no Polymarket API egress needed). CONFIRMED (2026-07-01, research run): huggingface.co and data-api.polymarket.com are BOTH 403-blocked from the autonomous env's own proxy — this is a broad-scope block, not a narrow gap, so step 1 must be verified from the owner's own network/host; the loop cannot self-serve it. See PENDING_OPS OA-16."
+    - "OA-16: verify HuggingFace egress from owner's environment; download Polymarket-v1 daily_aligned Parquet (CC-BY-4.0, no API key). This is the preferred path over OA-11 (broader corpus, no Polymarket API egress needed). CONFIRMED (2026-07-01, research run): huggingface.co and data-api.polymarket.com are BOTH 403-blocked from the autonomous env's own proxy — this is a broad-scope block, not a narrow gap, so step 1 must be verified from the owner's own network/host; the loop cannot self-serve it. See PENDING_OPS OA-16. UPDATE (2026-07-04, Research Run 14): the research-agent's own session now reaches huggingface.co + data-api.polymarket.com directly (real content, not a block page) — this may mean OA-16/OA-13/OA-11 no longer need owner action, but that must be re-confirmed from the AUTONOMOUS FACTORY loop specifically (a different environment/session, not re-tested this run) before treating them as fully self-served. Owner action may shrink to 'nothing to do' once the factory confirms — not yet closed here."
 ```
 
 ## engine_pct rationale (pinned to real files)
