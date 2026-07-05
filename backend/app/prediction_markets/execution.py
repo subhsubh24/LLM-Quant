@@ -1049,7 +1049,17 @@ class PredictionMarketExecutor:
 
         # Track result
         self.order_history.append(result)
-        if result.is_success:
+        # SIDE-EFFECT INTEGRITY (D1 class): only a REAL fill produces a position. A
+        # resting/acknowledged order comes back status=OPEN with filled_size=0 (the live
+        # CLOB path at ~L349 and the REST path at ~L559 both return OPEN on a non-match),
+        # and `is_success` is True for OPEN — so the un-guarded `is_success` created a
+        # phantom Position with size=0 / avg_entry_price=0 that (a) never traversed a real
+        # fill and (b) POISONS the orchestrator's `token_id in executor.positions` dedup,
+        # silently skipping every later genuine opportunity on that token (and persisting
+        # the phantom across restarts via the durable store). Mutate position/fee state
+        # ONLY on an actual fill; the order is still recorded in order_history above.
+        # (Paper is unaffected: _simulate_fill always returns FILLED with filled_size>0.)
+        if result.is_success and result.filled_size > 0:
             self._update_position(req, result)
             self.total_fees += result.fees
 

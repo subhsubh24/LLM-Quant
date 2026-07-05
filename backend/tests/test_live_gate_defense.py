@@ -327,3 +327,106 @@ class TestRegressionOuterGateAndPaper:
         assert result.filled_price > 0.0
         # Position must be tracked
         assert len(ex.positions) == 1
+
+
+class TestOpenOrderCreatesNoPhantomPosition:
+    """SIDE-EFFECT INTEGRITY (D1 class): a resting/acknowledged live order returns
+    status=OPEN with filled_size=0. `is_success` is True for OPEN, so the executor used
+    to fabricate a phantom size=0/avg_entry_price=0 Position that poisons the orchestrator
+    `token_id in executor.positions` dedup — silently skipping every later real
+    opportunity on that token. execute() must record the order in history but create NO
+    position until a real (partial or full) fill occurs.
+    """
+
+    def _live_executor(self, venue_result):
+        """A live-enabled executor whose venue place_order returns `venue_result`."""
+        fake_poly = MagicMock()
+        fake_poly.place_order.return_value = venue_result
+        return PredictionMarketExecutor(
+            polymarket=fake_poly,
+            dry_run=False,
+            live_enabled=True,
+            max_position_usd=50.0,
+            max_portfolio_usd=500.0,
+        )
+
+    def _open_result(self, req):
+        return OrderResult(
+            order_id="resting-001",
+            exchange=Exchange.POLYMARKET,
+            market_id=req.market_id,
+            token_id=req.token_id,
+            side=req.side,
+            order_type=req.order_type,
+            size=req.size,
+            price=req.price,
+            status=OrderStatus.OPEN,   # accepted, not yet matched
+            filled_size=0.0,
+            filled_price=0.0,
+        )
+
+    def test_open_order_creates_no_phantom_position(self):
+        req = _req(size=10.0, price=0.50)
+        ex = self._live_executor(self._open_result(req))
+
+        result = ex.execute(req)
+
+        # The venue accepted the order (OPEN) and it is recorded in history...
+        assert result.status == OrderStatus.OPEN
+        assert result in ex.order_history
+        # ...but a 0-fill OPEN order is NOT a position — no phantom, no poisoned dedup.
+        assert ex.positions == {}, (
+            f"Phantom position fabricated from a 0-fill OPEN order: {ex.positions!r}"
+        )
+        assert req.token_id not in ex.positions
+        assert ex.total_fees == 0.0
+
+    def test_dedup_not_poisoned_second_real_opportunity_can_execute(self):
+        """The concrete downstream harm: after a 0-fill OPEN order, a later REAL fill on
+        the SAME token must still create the position (the dedup was not poisoned)."""
+        req = _req(size=10.0, price=0.50)
+        ex = self._live_executor(self._open_result(req))
+        ex.execute(req)
+        assert req.token_id not in ex.positions
+
+        # A subsequent genuine fill on the same token now arrives.
+        filled = OrderResult(
+            order_id="fill-002",
+            exchange=Exchange.POLYMARKET,
+            market_id=req.market_id,
+            token_id=req.token_id,
+            side=req.side,
+            order_type=req.order_type,
+            size=req.size,
+            price=req.price,
+            status=OrderStatus.FILLED,
+            filled_size=10.0,
+            filled_price=0.50,
+        )
+        ex.polymarket.place_order.return_value = filled
+        ex.execute(req)
+
+        assert req.token_id in ex.positions
+        assert ex.positions[req.token_id].size == pytest.approx(10.0)
+        assert ex.positions[req.token_id].avg_entry_price == pytest.approx(0.50)
+
+    def test_real_fill_still_creates_position(self):
+        """Control: the guard must NOT block a genuine fill (filled_size>0)."""
+        req = _req(size=10.0, price=0.50)
+        filled = OrderResult(
+            order_id="fill-001",
+            exchange=Exchange.POLYMARKET,
+            market_id=req.market_id,
+            token_id=req.token_id,
+            side=req.side,
+            order_type=req.order_type,
+            size=req.size,
+            price=req.price,
+            status=OrderStatus.FILLED,
+            filled_size=10.0,
+            filled_price=0.50,
+        )
+        ex = self._live_executor(filled)
+        ex.execute(req)
+        assert req.token_id in ex.positions
+        assert ex.positions[req.token_id].size == pytest.approx(10.0)
