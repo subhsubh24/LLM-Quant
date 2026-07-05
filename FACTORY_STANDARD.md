@@ -709,3 +709,35 @@ gate or the run).
   converts tokens→USD, so pricing stays correct in one place. Report exact real token counts; a
   fabricated or guessed number is a §5 honesty failure. If the transcript is unreadable this run,
   skip the line (don't invent one) — a missing line is honest, a fake one is not.
+
+## 34. Pre-launch funnel — earn interest with a REAL demo, ground it with a gated beta (not a blank waitlist)
+A blank "coming soon + email" gate converts poorly (no reason to care) AND risks the flop where hype
+outruns the product and reality disappoints. Fix both: let people EXPERIENCE the core magic so interest
+is grounded in reality, and their expectations stay calibrated to the real thing. (Products with a
+consumer waitlist only; a personal tool is a no-op here.) The funnel:
+
+  PUBLIC DEMO (try the core "aha") → WAITLIST / early-access → GATED BETA (invited real-app usage) → LAUNCH
+
+- **PUBLIC DEMO — the waitlist driver.** Build a public, NO-ACCOUNT, bounded demo of the ONE core "aha"
+  feature on the web surface (§12): the single magic moment a visitor can try themselves (e.g. upload a
+  photo → see the AI result; paste a receipt → see it auto-fill). It goes public ONLY once it clears the
+  quality + design bar (§6b/§8) — NEVER demo a weak, broken, or slop "aha"; a bad demo hurts more than
+  no demo. HARDEN it like a live paid surface (Track H / §12 security): rate-limit + per-IP cap + a
+  code-level spend ceiling + a bot check on the public AI path, and BOUND it (sample data or a small
+  number of free runs) so it can't be a wallet-drain. The FULL product (accounts, the user's own data,
+  all features, billing) stays GATED behind the site gate — only the bounded demo is exposed.
+- **GATED BETA — interest becomes real usage.** Build the invite mechanism: waitlist → invite
+  (codes/allowlist) → the REAL app for invited users, while the site gate stays up for everyone else.
+  This gives real people the real product before you scale, and produces the FIRST honest PMF cohort
+  (activation/retention) + a feedback loop — the leading indicator (§9), grounded, not guessed.
+- **Honesty (anti-flop).** The demo shows the REAL working feature, never a faked/AI-slop demo of
+  vaporware; the beta is the real app, labeled beta. Interest stays calibrated to reality — that is the
+  whole point. Never over-promise a capability the demo/beta doesn't actually deliver.
+- **How it maps to the GTM §13 owner gates (unchanged — still exactly two).** BUILDING + publishing the
+  demo and the beta mechanism is AUTONOMOUS (quality-gated, not owner-approved — it exposes a bounded
+  hardened feature/page, not outreach). Driving TRAFFIC/outreach to the demo→waitlist, and rolling BETA
+  invites to opted-in signups, happen after the owner approves GATE 1 (start waitlist outreach). Public
+  LAUNCH (lifting the gate for everyone) stays GATE 2. So the demo + beta live INSIDE the two gates.
+- **Native-app products (e.g. an iOS app) where a live web demo of the core is infeasible:** substitute
+  a REAL screen-recording demo video + a bounded web taste where possible, and use a gated TestFlight/
+  closed beta as the "gated beta." Never mark a demo/beta "live" when it isn't (BUILDS ≠ WORKS, §6).
