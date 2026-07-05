@@ -25,8 +25,18 @@ def test_bypass_in_paper_mode_is_allowed():
     assert s.live_trading_enabled is False
 
 
-def test_live_without_bypass_but_with_control_token_is_allowed():
-    """Live mode with the bypass OFF + a control token set boots normally."""
+_VENUE_CREDS = {
+    "POLYMARKET_API_KEY": "k",
+    "POLYMARKET_API_SECRET": "s",
+    "POLYMARKET_PASSPHRASE": "p",
+    "POLYMARKET_PRIVATE_KEY": "0x" + "a" * 64,
+}
+
+
+def test_live_without_bypass_but_with_control_token_is_allowed(monkeypatch):
+    """A FULLY-provisioned live host (bypass OFF + control token + venue creds) boots."""
+    for k, v in _VENUE_CREDS.items():
+        monkeypatch.setenv(k, v)
     s = Settings(
         e2e_disable_rate_limit=False,
         live_trading_enabled=True,
@@ -34,6 +44,36 @@ def test_live_without_bypass_but_with_control_token_is_allowed():
     )
     assert s.live_trading_enabled is True
     assert s.backend_api_token == "a-strong-secret"
+
+
+def test_live_without_venue_credentials_refuses_to_boot(monkeypatch):
+    """Real money on the line + missing Polymarket order credentials → hard boot refusal.
+
+    A live-enabled host without the venue creds would boot but fail EVERY real order at
+    runtime (the executor is not authenticated). FAIL LOUD at boot instead (§28). The
+    control token is set here so this isolates the NEW venue-credential gate.
+    """
+    for k in _VENUE_CREDS:
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(ValidationError):
+        Settings(live_trading_enabled=True, backend_api_token="a-strong-secret")
+
+
+def test_live_with_partial_venue_credentials_refuses_to_boot(monkeypatch):
+    """Even ONE missing venue credential (private key) refuses to boot — all four required."""
+    for k, v in _VENUE_CREDS.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("POLYMARKET_PRIVATE_KEY", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(live_trading_enabled=True, backend_api_token="a-strong-secret")
+
+
+def test_paper_mode_needs_no_venue_credentials(monkeypatch):
+    """Paper (default) must NEVER require venue creds — the loop runs paper with none set."""
+    for k in _VENUE_CREDS:
+        monkeypatch.delenv(k, raising=False)
+    s = Settings(live_trading_enabled=False, backend_api_token="")
+    assert s.live_trading_enabled is False
 
 
 def test_live_without_control_token_refuses_to_boot():

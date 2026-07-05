@@ -179,6 +179,42 @@ class Settings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _require_venue_credentials_in_live(self) -> "Settings":
+        """Real money on the line ⇒ the venue order credentials MUST be present at BOOT.
+
+        The Polymarket order path needs POLYMARKET_API_KEY / _API_SECRET / _PASSPHRASE /
+        _PRIVATE_KEY (read from the environment in `execution.get_executor()`). Without
+        them the executor's `is_authenticated` is False, so `_get_clob_client()` raises at
+        RUNTIME on the FIRST order attempt — i.e. a live-enabled bot boots "fine" but is
+        silently unable to place a single order (a live-but-broken state that surfaces only
+        as a per-order failure once the scan loop is already running). FAIL LOUD at boot
+        instead (FACTORY_STANDARD §28: an env credential a critical path requires must fail
+        loud, not late), naming the exact missing var — mirroring the control-auth boot
+        gate above. This can NEVER affect paper/dev/CI (live defaults false and the
+        autonomous loop never flips it) — it only binds the owner's real-money host.
+        Setting these keys is HUMAN-CORE (PENDING_OPS OA-5, LIVE_RUNBOOK §5 — the venue
+        LIVE-API-key step; §6/OA-6 is the separate master-gate flip).
+        """
+        if self.live_trading_enabled:
+            required = (
+                "POLYMARKET_API_KEY",
+                "POLYMARKET_API_SECRET",
+                "POLYMARKET_PASSPHRASE",
+                "POLYMARKET_PRIVATE_KEY",
+            )
+            missing = [name for name in required if not (os.environ.get(name) or "").strip()]
+            if missing:
+                raise ValueError(
+                    "LIVE_TRADING_ENABLED is true but the Polymarket order credentials "
+                    f"{missing} are unset — the bot would boot but fail EVERY real order at "
+                    "runtime (the executor is not authenticated). Refusing to boot. Set all "
+                    "of POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE, "
+                    "POLYMARKET_PRIVATE_KEY on the live host (see PENDING_OPS OA-5 / "
+                    "LIVE_RUNBOOK §5)."
+                )
+        return self
+
     @property
     def has_llm_key(self) -> bool:
         """Check if LLM API key is configured."""
