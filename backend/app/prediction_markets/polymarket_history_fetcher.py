@@ -65,6 +65,7 @@ from typing import Any, List, Optional, Sequence
 
 import requests
 
+from .market_category import derive_market_category
 from .walk_forward import HistoricalMarket
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,16 @@ class PolymarketHistoryFetcher:
             market_id=str(raw.get("id", "")),
             condition_id=str(raw.get("conditionId", "")),
             question=str(raw.get("question", "")),
-            category=str(raw.get("category", "")),
+            # Real Gamma resolved markets ship an EMPTY top-level `category`, so derive a
+            # coarse correlation bucket from the raw category (if ever present), tags, and
+            # the question text — the SAME deriver the live scan path uses (#156). Without
+            # this every resolved record collapses to "General", blocking the F10 category
+            # dimension + EXP-003 category filtering on real OOS corpora. Pure/deterministic.
+            category=derive_market_category(
+                str(raw.get("question", "")),
+                str(raw.get("category", "")),
+                raw.get("tags") if isinstance(raw.get("tags"), list) else None,
+            ),
             yes_token_id=token_ids[0],
             no_token_id=token_ids[1],
             resolution_time=resolution_time,
@@ -364,6 +374,7 @@ class PolymarketHistoryFetcher:
             # decision-time estimate (computed from info available up to decision_time).
             model_prob=market_price,
             outcome=resolved.outcome,
+            category=resolved.category,
         )
 
     def build_historical_markets(
@@ -470,6 +481,7 @@ class PolymarketHistoryFetcher:
             market_price=market_price,
             model_prob=market_price,   # naive crowd baseline; a real strategy overrides it
             outcome=resolved.outcome,
+            category=resolved.category,
         )
 
     def build_historical_markets_at_fraction(

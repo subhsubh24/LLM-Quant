@@ -71,6 +71,14 @@ class HistoricalMarket:
     # existing positional/keyword construction (tests + fetcher) is unchanged, and a None
     # market is priced at the FLAT rate exactly as before (zero behavior change).
     liquidity: Optional[float] = None
+    # OPTIONAL coarse correlation category (Crypto / Politics / Sports / …, via
+    # market_category.derive_market_category), carried from the resolved-history fetcher so
+    # the F10 regime-slice report can assess CATEGORY concentration on real OOS trades (an
+    # aggregate edge concentrated in one category is NOT robust). It is pure METADATA — it
+    # never enters the decision (leakage-neutral) NOR the PnL, so it is deliberately EXCLUDED
+    # from _seed_hash (reproducibility invariant: category=None vs a value → identical hash).
+    # Defaulted to None so every existing construction is byte-unchanged.
+    category: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.market_price <= 1.0):
@@ -131,6 +139,9 @@ class BacktestTrade:
     payout_usd: float            # gross payout at resolution
     pnl_usd: float               # payout - budget
     is_win: bool
+    # Coarse correlation category carried from the traded market (None when unlabeled), so
+    # per-category realized-PnL concentration (F10) can be attributed. Metadata only.
+    category: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -276,6 +287,7 @@ def _settle(
         payout_usd=payout,
         pnl_usd=pnl,
         is_win=win,
+        category=m.category,
     )
 
 
@@ -463,7 +475,11 @@ def _seed_hash(
             # liquidity is included so determinism/fingerprint covers the depth signal
             # that now affects fill cost. Existing markets have liquidity=None → stored as
             # JSON null, a stable representation, so same-data runs keep consistent hashes
-            # and the cost-rate-change hash test still holds.
+            # and the cost-rate-change hash test still holds. NOTE: m.category is
+            # deliberately NOT fingerprinted — it is regime-slice metadata that never affects
+            # a decision or PnL, so including it would needlessly break the pinned real-data
+            # reproduction hash (8dc358439ffb5746). Same-data runs must hash identically
+            # whether or not categories are labeled (test_walk_forward_category pins this).
             [m.market_id, m.decision_time.isoformat(), m.resolution_time.isoformat(),
              round(m.market_price, 12), round(m.model_prob, 12), m.outcome,
              None if m.liquidity is None else round(m.liquidity, 12)]

@@ -52,6 +52,7 @@ from typing import Any, List, Optional, Sequence
 
 import requests
 
+from .market_category import derive_market_category
 from .walk_forward import HistoricalMarket
 
 logger = logging.getLogger(__name__)
@@ -223,7 +224,12 @@ class KalshiHistoryFetcher:
         return KalshiResolvedMarket(
             ticker=str(ticker),
             title=str(raw.get("title", "")),
-            category=str(raw.get("category", "")),
+            # Derive a coarse correlation bucket from the raw category + the title text (the
+            # SAME deriver the other venues use) so Kalshi resolved records carry a REAL
+            # category for the F10 category dimension, not the frequently-empty raw field.
+            category=derive_market_category(
+                str(raw.get("title", "")), str(raw.get("category", ""))
+            ),
             resolution_time=resolution_time,
             outcome=outcome,
             volume=_to_float(raw.get("volume")) or 0.0,
@@ -380,6 +386,7 @@ class KalshiHistoryFetcher:
             # decision-time estimate (computed from info available up to decision_time).
             model_prob=market_price,
             outcome=resolved.outcome,
+            category=resolved.category,
         )
 
     def build_historical_markets(

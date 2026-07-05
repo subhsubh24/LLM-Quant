@@ -56,16 +56,20 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
     # hide a FRAGILE edge concentrated in one horizon / confidence bucket / lucky window /
     # a few markets. Slice the alpha's realized OOS trades and FLAG concentration. This is
     # the go-live audit's regime-slice check, now produced automatically on every real run.
-    # The alpha operates on HistoricalMarket records (market_id / price / outcome only) —
-    # the venue category is NOT threaded through the walk-forward here, so we pass
-    # category_by_market_id=None. With no labels, analyze_regime_slices explicitly does NOT
-    # assess category-concentration / leave-one-out (they would fire on every run and be a
-    # false signal); the horizon / confidence / time slices + single-market concentration
-    # DO apply. Threading real categories through is a future enhancement (would enable the
-    # category dimension too); until then the report is honest about what it did not assess.
+    # The resolved-history fetchers now derive a coarse correlation category and thread it
+    # onto each HistoricalMarket (market_category.derive_market_category), so we build a
+    # category_by_market_id map and pass it in — enabling analyze_regime_slices' CATEGORY
+    # dimension (per-category concentration + leave-one-out on the top category) on real OOS
+    # trades, alongside the horizon / confidence / time / single-market checks. A genuinely
+    # unlabeled corpus (empty map) still degrades honestly (category checks not assessed).
     rs_mod = _imp("backend.app.prediction_markets.regime_slice",
                   "app.prediction_markets.regime_slice")
-    alpha_regime = rs_mod.analyze_regime_slices(alpha.trades)
+    category_by_market_id = {
+        m.market_id: m.category for m in markets if getattr(m, "category", None)
+    }
+    alpha_regime = rs_mod.analyze_regime_slices(
+        alpha.trades, category_by_market_id=category_by_market_id or None
+    )
 
     return {
         "corpus": {
@@ -86,6 +90,9 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
             "top_market_pnl_share": alpha_regime.top_market_pnl_share,
             "top_confidence_bucket_pnl_share": _top_slice_pnl_share(alpha_regime.by_confidence),
             "top_horizon_bucket_pnl_share": _top_slice_pnl_share(alpha_regime.by_horizon),
+            "n_categories": len(category_by_market_id and set(category_by_market_id.values()) or []),
+            "top_category_pnl_share": alpha_regime.top_category_pnl_share,
+            "top_category_budget_share": round(alpha_regime.top_category_budget_share, 4),
         },
         "biases_disclosed": ["liquidity-selection (volumeNum order)", "survivorship (clean-resolution only)",
                              "late-life pinning (decision sampled near resolution)"],
