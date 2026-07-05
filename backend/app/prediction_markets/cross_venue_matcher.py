@@ -316,8 +316,22 @@ class CrossVenueMatch:
 
 
 def _yes_price(market: Market) -> Optional[float]:
-    """The YES-outcome midpoint of a binary market, or ``None`` if not a clean binary."""
+    """The YES-outcome midpoint of a binary market, or ``None`` if not a clean binary
+    OR not currently tradeable.
+
+    The ``active`` gate is load-bearing on REAL data: a venue that cannot quote a market
+    (e.g. a Kalshi market with no bid/ask/last book) presents a NEUTRAL PLACEHOLDER price
+    (0.50) and marks the market ``active=False`` — the data analog of a fake fill (the
+    #101/#102/#193 honesty rule). Without this gate the matcher reads that fabricated 0.50
+    and can manufacture a bogus cross-venue "disagreement" against a real market. Gating on
+    ``active`` also correctly refuses a RESOLVED market (whose price has settled to ~1/0),
+    so only genuinely tradeable, real-quote markets ever enter a coherence pairing. (The
+    RESOLVED-pair backtest builds ``CrossVenueMatch`` directly from pre-resolution snapshot
+    prices and never routes through this function, so it is unaffected.)
+    """
     if not getattr(market, "is_binary", False):
+        return None
+    if not getattr(market, "active", False):
         return None
     for o in market.outcomes:
         if str(o.label).strip().lower() in ("yes", "y"):
