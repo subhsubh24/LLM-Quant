@@ -89,6 +89,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+from .market_category import derive_market_category
 from .walk_forward import HistoricalMarket
 
 logger = logging.getLogger(__name__)
@@ -343,7 +344,15 @@ def _assemble_one(
         raise ValueError(f"inconsistent outcome across daily rows: {sorted(outcomes)}")
     outcome = next(iter(outcomes))
 
-    category = next((r.category for r in drows if r.category), "")
+    # Derive a coarse correlation bucket from the raw category (if the archive populated
+    # it) + the question/slug text — the SAME deriver the live scan + Gamma history path
+    # use — so the HF corpus carries a REAL category (not the mostly-empty raw field) for
+    # the F10 category dimension + EXP-003 category filtering. Pure/deterministic; never
+    # enters the leakage-safe price selection below. The category filter (`cats`) now
+    # matches the DERIVED bucket, so a --categories run selects on the real bucket.
+    raw_category = next((r.category for r in drows if r.category), "")
+    question = next((r.question for r in drows if r.question), "")
+    category = derive_market_category(question, raw_category)
     if cats is not None and category.lower() not in cats:
         raise _CategoryFiltered()
 
@@ -377,6 +386,7 @@ def _assemble_one(
         # decision-time estimate (computed from info available up to decision_time).
         model_prob=market_price,
         outcome=outcome,
+        category=category,
     )
 
 
