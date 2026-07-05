@@ -5,6 +5,99 @@
 
 ---
 
+## 2026-07-05 — overall `B` · ship gate NOT met (4th grade — functional_reality recovered B→A; 3 A→A+ nits closed; business_case still the lone binding B)
+
+**Diff vs 2026-07-03:** overall unchanged at **B**, but the composition genuinely
+improved. **`functional_reality` recovered B→A** — the 2026-07-03 ship-critical gap is
+**fixed and verified**. Now **only one** ship-critical dim is below A
+(`business_case_strength`, B — same binding constraint as 2026-07-01), and this cycle's
+research made that no-edge finding **stronger**, not weaker.
+
+**What the factory closed since 2026-07-03 (verified, not trusted):**
+- **functional_reality B→A (#165/#202)** — the synthetic `volume=10000`/`liquidity=5000`
+  fabrication on the Gamma-zero-volume path is **gone**. `_mark_unavailable_data`
+  (`strategies.py:1374-1399`) now sets `volume_unavailable`/`liquidity_unavailable`
+  **flags** and leaves volume/liquidity at honest `0`; the filters
+  (`polymarket_client.py:90-107`) *neutralize* on the flag rather than pass on a synthetic
+  number. A zero-volume degraded market surfaces via a genuine **skip**. Pinned by a real
+  regression test (`test_data_availability_flags.py`, asserts `"$10,000" not in
+  results[0].reason`). Fresh adversarial grader confirmed by reading the code + running the
+  test. **#165 and #202 resolved.**
+- **run_risk_readiness A→A+ nit closed (#207)** — durable restart-survival is now tested
+  through the production `get_executor()` singleton seam
+  (`test_executor_state_persistence.py:213-232`): trips a real `record_realized_pnl(-15.0)`
+  loss-cap breach, drops the singleton, asserts the halt + budget survive. Held at **A**.
+- **design_taste A→A+ nit closed (#206)** — positions-tab "Unrealized" shows `—` until
+  loaded (`page.tsx:867-871`), matching the portfolio tab's null-honesty bar.
+- **artifact A→A+ nit closed** — `ruff.toml` comment now accurately describes the shipped
+  correctness-only E9/F821/F811 gate (no longer claims full-lint enforcement is withheld).
+- **correctness — two genuine safety fixes verified**: SELL-to-open-a-short is rejected at
+  the risk gate *before* the unconditional fill (`execution.py:956-964`,
+  `test_short_open_rejected.py`), closing the phantom-fill/loss-cap bypass (**#215**); a
+  resolved position now settles into the loss caps **at most once across a restart** via
+  persist-before-count + defer-on-probe-failure (`orchestrator.py:417-432,519-528`, **#204**).
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**
+  (import smoke + curated tests + safety + secrets + runtime harness + scorecard-parse +
+  self-validation coverage all OK; full ruff skipped in CI by design).
+- `scripts/runtime_harness.py` → **PASSED**: live gate REJECTS real order, kill switch
+  blocks, max-position cap rejects $900>$50, loss cap trips **net-of-fees** at −$41.20 vs
+  −$10 and blocks subsequent orders; paper fills, deterministic.
+- `scripts/run_walk_forward.py` twice → **reproduces** bit-identically (`seed_hash
+  b3a8d5e0e9579853`, total PnL 910,880.71; SYNTHETIC demo, labeled NOT a validated edge).
+- `scripts/validate_real_oos.py` → the leak guard **refuses to fabricate a decision-time
+  price**: every market without a pre-resolution tick is SKIPPED, not invented (Polymarket
+  + Kalshi; Kalshi leg egress-throttled 429). No fabricated fills.
+- `ruff check backend/app --select E9,F821,F811` → **clean**; full ruff → **131** cosmetic.
+  Secret scan clean (only `.env.example`).
+
+**Grades (fresh adversarial per-dimension graders, none the maker):**
+functional_reality **A** (↑ from B), backtest_integrity **A**, correctness_reliability **A**,
+security **A**, run_risk_readiness **A**, artifact_integrity **A**,
+business_case_strength **B**, design_taste **A**, tests_evals **A**, performance **A**.
+
+**Backtest integrity (make-or-break) — reproduction attempted again + edge honesty
+audited:** leak-free (structural `MarketView` guard omits outcome+resolution_time; fetchers
+reject any tick `> decision_ts`/`>= resolution_ts` and RAISE rather than fabricate),
+cost-realistic (single source of truth with the executor, pinned by `test_cost_model`),
+reproducible (identical hash + PnL across two runs). **The candidate alpha was REFUTED, not
+inflated:** the price-bucket-calibration family (EXP-002/B4a static + recency) was tested
+across **four real corpora** (−$2,938 @ n=510, +$3,330 @ n=799, −$2,947 @ n=621, HF
+crowd-pinned artifact) and honestly declared **CONFIRMED noise, not an edge**
+(`RESEARCH_MEMORY.md`, Run 15). The prior −$480.86 probe is now correctly understood as
+small-sample noise. **No unreproducible backtest, no fabricated PnL, no fabricated edge.**
+Held at **A** (not A+): the impact/capacity term is an uncalibrated `impact_coeff=0.5`
+placeholder.
+
+**Anti-inflation notes (held grades at A, not A+):**
+- **artifact_integrity** — the grader leaned A− on the #240 finding: the commit *subject*
+  ("§34 pre-launch funnel — public demo of the core aha") reads as a shipped feature, but
+  the diff is **spec-only** (+32 lines `FACTORY_STANDARD.md §34`, explicitly a no-op for a
+  personal tool). Internally honest — **there is no demo displaying invented numbers**, so
+  the feared artifact failure does not materialize. Graded **A** with the framing nit named
+  (prefer `docs/spec:` over feature framing when the diff adds no product code).
+- **correctness_reliability** — genuine determinism + two real bypass fixes, but a named
+  non-blocking gap remains: the SELL/partial-reduce path feeds the executor hard caps (the
+  binding kill-switch trigger) but not yet the per-strategy drawdown circuit
+  (`risk_manager.record_pnl`). Secondary (resolution is the dominant loss path; hard caps
+  wired) → **A**, not a downgrade to B.
+
+**Overall = B:** the sole ship-critical dim below A is **business_case_strength** (no
+validated OOS edge; the only non-crowd alpha family is now refuted across four corpora —
+THE binding constraint). Ship gate correctly closed.
+
+**Issues:** **#79 kept open + updated** (business case — unchanged binding constraint,
+reinforced by the 4-corpora refutation). **#202 + #165 CLOSED** (functional_reality
+fabrication verified fixed). **#125 CLOSED** (all four items + the three follow-on A→A+
+nits — ruff.toml comment, positions-tab honesty, get_executor seam — now resolved).
+
+**Weakest link (honest):** still no validated out-of-sample edge — and this cycle the
+factory earned credit by running its own candidate alpha to a **REFUTED** verdict rather
+than curve-fitting it. Everything downstream stays gated correctly and honestly.
+
+---
+
 ## 2026-07-03 — overall `B` · ship gate NOT met (3rd grade — 4 of 5 #125 nits closed; a new ship-critical integrity gap surfaced)
 
 **Diff vs 2026-07-01:** overall unchanged at **B**, but the composition shifted.
