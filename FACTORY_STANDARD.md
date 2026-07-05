@@ -689,3 +689,23 @@ wrong." A non-essential side effect (the profile row) was allowed to abort the c
   profile-insert / email / analytics gets fixed — a silently-degraded side-effect no one notices is its
   own §28 violation.
 - Reviewer check: "can any non-essential side-effect on this path abort the core action?" If yes, harden it.
+
+## 33. Self-report your run cost — per-routine, per-model (a git ledger, no external collector)
+You can read your OWN token usage and record it, so the owner sees real per-routine, per-model spend
+on the dashboard without any OTEL collector, admin key, or third-party service. Do this every run as
+part of the FINAL bookkeeping commit (it is a shared-ledger write — §15; best-effort, NEVER blocks a
+gate or the run).
+
+- **Your transcript** is `~/.claude/projects/<project-dir>/${CLAUDE_CODE_SESSION_ID}.jsonl`, with a
+  per-message `message.usage` (`input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+  `cache_creation_input_tokens`) and `message.model`. INCLUDE any sibling `*.jsonl` in the same
+  project dir modified during THIS run so your maker/checker + scout SUBAGENT tokens count too.
+- **Sum tokens by model** (exact facts — jq/awk), e.g.:
+  `jq -s 'map(select(.message.usage)) | group_by(.message.model) | map({model:.[0].message.model, input:(map(.message.usage.input_tokens//0)|add), output:(map(.message.usage.output_tokens//0)|add), cache_read:(map(.message.usage.cache_read_input_tokens//0)|add), cache_write:(map(.message.usage.cache_creation_input_tokens//0)|add)})' <transcripts>`
+- **Append ONE line** to `docs/autonomous-loop/COST_LEDGER.jsonl` (append-only — add lines, never edit
+  existing ones; idempotent per session: skip if your `${CLAUDE_CODE_SESSION_ID}` already has a line):
+  `{"schema":"cost_ledger.v1","date":"<UTC YYYY-MM-DD>","role":"<self-identify: product-factory | gtm-factory | quality-auditor | gtm-auditor | digest>","session":"<CLAUDE_CODE_SESSION_ID>","by_model":{"<model-id>":{"input":N,"output":N,"cache_read":N,"cache_write":N}}}`
+- **Tokens ONLY — NEVER write a dollar figure.** The dashboard holds the single price table and
+  converts tokens→USD, so pricing stays correct in one place. Report exact real token counts; a
+  fabricated or guessed number is a §5 honesty failure. If the transcript is unreadable this run,
+  skip the line (don't invent one) — a missing line is honest, a fake one is not.
