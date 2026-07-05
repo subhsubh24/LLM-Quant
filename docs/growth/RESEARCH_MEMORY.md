@@ -18,6 +18,15 @@ Format per entry:
 
 ---
 
+## 2026-07-05 — B8 cross-venue coherence (Polymarket ⟷ Kalshi): real-data feasibility probe
+- Hypothesis (falsifiable): the built B8 event-matcher (`cross_venue_matcher.find_cross_venue_matches`, #179) can find enough GENUINE same-event pairs across live Polymarket + Kalshi markets to run a cost-net coherence OOS backtest — a structurally different edge from the refuted bucket-calibration family (it trades venue DISAGREEMENT, not out-calibrating a sharp crowd).
+- Min sample N: needed ≥ a handful of tradeable matches (coherence ≥ 0.5) to justify building the full resolved-pair OOS harness.
+- OOS result: **NOT RUNNABLE this run — 0 tradeable matches.** Fetched 547 Polymarket + 200 Kalshi binary markets (egress open). `find_cross_venue_matches` → 33 candidate pairings, ALL false (sports/player-name token overlap, no numeric threshold) and ALL below the 0.5 trade bar (max coherence 0.375). The matcher's conservatism correctly refuses the false pairs → zero would trade. **ROOT BLOCKER: the Kalshi `/markets` LIST endpoint returns NO usable quotes** — all 200 open markets parsed `active=False` with a uniform 0.500 placeholder price (0 with a real quote) and garbled multi-outcome concatenated question text (multi-leg sports events, not clean single-event binaries). So the Kalshi live-list feed is unusable for B8 as-is.
+- Calibration (Brier / reliability): n/a (no trades).
+- Costs modeled: n/a (no trades). The matcher/backtest already model both venues' fees+slippage (`coherence_edge`).
+- Verdict: **edge-not-proven (not runnable yet)** — B8 does NOT validate this run.
+- Why + NEXT (pre-registered, do NOT p-hack): B8 needs (a) a Kalshi QUOTE source with real prices — a per-market quote fetch OR the resolved-history candlesticks path (#170) — plus clean single-event binary question text; and (b) a targeted NUMERIC-THRESHOLD universe (BTC/Fed/econ) co-listed on BOTH venues (a random universe is sports-dominated, which the matcher rightly won't pair without matching strikes). Build the real dual-venue OOS harness (fetch RESOLVED markets + pre-resolution snapshots from both venues, match on numeric-threshold events, run `evaluate_cross_venue_pairs`), then require an OOS edge ≥ floor that ≥3 auditors cannot break. The probe surfaced + shipped a real fix (#232): `_yes_price` now gates on `market.active` so an untradeable market's 0.500 placeholder can't feed a fabricated cross-venue disagreement (the #101/#102/#193 fake-price class). LESSON: probe real-data feasibility BEFORE building the full harness — it turned a speculative spec-build into a decisive finding + a real fix, and it is honest about B8 being a multi-run data-engineering effort, not a one-run validation.
+
 ## 2026-06-27 — Bootstrap (no alphas tested yet)
 - Hypothesis (falsifiable): n/a — apparatus bootstrap only.
 - Min sample N: n/a
