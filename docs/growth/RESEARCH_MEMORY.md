@@ -1278,3 +1278,141 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   Run 14). Commands: `python scripts/validate_real_oos.py --venues polymarket --max-pages 12
   --decision-lead-days 7 --json` and `--venues polymarket_v1_hf --max-pages 800 --decision-lead-days 7`.
   Walk-forwards deterministic (same corpus+config → same seed_hash/PnL).
+
+## 2026-07-05 — Research Run 15: forward-paper loop confirmed STILL at zero resolutions (bankroll deployed + Sports-category cap now binding, not a bug); Kalshi's public quote gap reconfirmed at 5x the sample size (n=1000); NEW candidate hypothesis — "Yes Bias" in low-liquidity narrative/mention markets (unverified secondary source); no new EXP-00N tested
+
+- Hypothesis (falsifiable): n/a for this run's self-validation portions — no new alpha tested on
+  our own data. One NEW hypothesis is surfaced from external research (below) and logged as a
+  candidate, not tested.
+- Min sample N: n/a (self-validation) / n/a yet for the new candidate (no corpus, no classifier).
+- OOS result: n/a — no edge tested this run.
+- Calibration (Brier / reliability): not measured this run — still zero resolved trades in the
+  forward paper track record (see finding 1).
+- Costs modeled: n/a.
+- Verdict: **edge-not-proven** (self-validation + research only, consistent with the playbook's
+  "insufficient data over reading noise").
+- Why:
+
+### (1) SELF-VALIDATION: the forward-paper track record (OA-17) is STILL at zero resolutions two days later — diagnosis updated, and it is NOT the same bug class as before
+  Directly inspected 6 `live-validation.yml` job logs spanning 2026-07-03T04:12 through
+  2026-07-05T09:24 UTC (today's most recent run), via the `github` MCP tool (run IDs 28637890271,
+  28680739763, 28701334039, 28717474808, 28729577988, 28736147254). **`"resolutions": null` and
+  `"executions": []` in EVERY one of the 6 runs** — zero new paper fills, zero resolved positions,
+  across the entire window. Grepped full log content for `ForeignKeyViolation`/tracebacks in all 6:
+  none found — the 2026-07-02 persistence bug (Research Run 12) remains fixed, no recurrence.
+  **This is a real diagnosis update, not a repeat of the prior finding:** unlike 2026-07-02 (where
+  every real market defaulted to the empty `"General"` bucket due to a parsing bug), these 6 runs
+  show categories being derived CORRECTLY (`Sports`, `General`, a named Bitcoin-price market) — the
+  #156 category fix is holding. The freeze this time has a different, more mundane cause: bankroll
+  fell from $500 to $102.87 by 2026-07-04 and has sat flat since (no new capital committed in the
+  latest 3 runs), and the live logs show the `Sports` category's $200 sub-cap is now genuinely
+  SATURATED by real concentration — the open FIFA World Cup position set (multiple correlated
+  outright/exact-score/top-scorer markets on the same tournament, opened 2026-07-02/07-03) consumes
+  it, so new Sports opportunities are correctly skipped as "Category 'Sports' exposure ... > $200.0"
+  while the handful of non-Sports opportunities scanned each run hit `Kelly size = 0` (no edge, not
+  a bug — the expected honest outcome on a well-calibrated market). **This is the per-category
+  diversification cap (D2) doing its designed job under a small, mostly-deployed $500 bankroll, not
+  a defect** — a materially different, and less alarming, situation than Research Run 12's freeze.
+  The near-term binding constraint for real calibration/PnL evidence, first named in Research Run 13
+  (2026-07-03) as "simply elapsed real time," STILL holds two days later, now with a concrete added
+  factor: **capital is recycled only when open positions resolve** (the FIFA World Cup outright
+  market itself is months out; other 2026-07-02/03 fires — Fed decision, MLB, esports, an Elon
+  tweet-count window, a within-2-weeks Iran deadline — should resolve sooner). No action recommended
+  this run: this is expected behavior, not a bug to fix. A future research run should keep checking
+  whether resolutions arrive as those shorter-dated positions mature, and should flag it as a genuine
+  problem only if the Sports cap stays saturated for weeks with no rotation into other categories
+  despite bankroll freeing up.
+  One benign defensive log line worth noting (not an error): `"[POLYMARKET] Order book for <token> is
+  empty or one-sided after validation (bids=56, asks=0) — no real spread; returning None (no
+  fabricated 0/1 quote)"` — correct behavior (refusing to fabricate a quote), not a new anomaly.
+
+### (2) Kalshi's public `/markets` LIST endpoint quote gap RECONFIRMED directly, at 5x the sample size of the factory's original B8 probe
+  The 2026-07-05 factory B8 probe (logged above, same date) fetched 200 open Kalshi markets and
+  found ALL 200 parsed with `active=False` + a uniform 0.500 placeholder price. This run
+  independently re-tested the SAME endpoint directly from this session (not reusing the factory's
+  numbers): `curl "https://api.elections.kalshi.com/trade-api/v2/markets?limit=1000&status=open"` →
+  **1000 open markets returned, 0 of them (0/1000) carry a non-null `yes_bid`, `yes_ask`, OR
+  `last_price`** — every single field is `null` for every market in the sample, a 5x-larger
+  reconfirmation of the same structural gap (not a small-sample fluke). Sampled tickers were
+  overwhelmingly multi-leg combo/parlay-style series (`KXMVESPORTSMULTIGAMEEXTENDED-...`, concatenated
+  multi-outcome titles — "yes Reg Time: Brazil,yes Reg Time: England,yes Over..." in one `title`
+  field), consistent with the factory's "garbled multi-outcome concatenated question text" finding.
+  **Implication for B8 (cross-venue coherence): the public bulk `/markets` LIST endpoint is
+  structurally unsuited for live quote-matching — this is now confirmed at meaningful N, not a
+  one-off** — B8 needs a PER-MARKET quote call (the orderbook endpoint) or the already-fixed
+  candlestick history path (OA-15, #170 — built for RESOLVED-history ingest, not live quotes) rather
+  than iterating the list endpoint and hoping for populated fields. This doesn't change B8's status
+  (still edge-not-proven / not-runnable), but it upgrades the diagnosis from "the sampled 200 markets
+  happened to be bad" to "the list endpoint itself does not carry quotes for this market class" —
+  worth stating precisely so a future run doesn't re-probe the same endpoint expecting different luck.
+
+### (3) NEW candidate hypothesis (external research, UNVERIFIED — secondary source, no magnitude/N): a "Yes Bias" in low-liquidity narrative "mention markets" near resolution
+  Web research surfaced "How Wise is the Crowd? Bias and Edge in Prediction Markets" (Deleep, Lee,
+  Bai, Suresh, Dhawan; SSRN, ~March 2026; tick-level order flow + wallet histories + user commentary
+  across Polymarket AND Kalshi). **Could not fetch the primary SSRN paper directly (403 Forbidden,
+  same access pattern as prior SSRN/Dune sources) — relying on a QuantPedia research-review summary
+  only, which itself discloses no sample size, date range, or magnitude numbers.** Per that summary,
+  the paper's headline claim is structurally DIFFERENT from every hypothesis this project has tested
+  so far: (a) the classic favorite-longshot bias "evaporates" once the authors control for contract
+  lifecycle timing via multivariate spline regressions — the SAME price-level-based framing our own
+  refuted bucket-calibration family (EXP-002/B4a) used; (b) what remains is a **"Yes Bias" specific to
+  "Mention Markets"** (narrative/commentary contracts, e.g. "Will [person] say [X] on [show]?") —
+  concentrated in **low-liquidity, near-resolution** stages, where traders "systematically overpay for
+  the Yes outcome" driven by "narrative conviction and temporal volatility spikes," not a price-level
+  effect; (c) whales underperform small-order traders via adverse selection (not actionable for us —
+  this project already rejected whale-copy-trading on private-data/integrity grounds, 2026-07-01); (d)
+  comment/sentiment intensity does NOT correlate with informational edge (a negative result — rules out
+  a "trade on loud commentary" idea before anyone tries it). **Why this is a genuinely new candidate,
+  not a rehash:** it targets a market TYPE + lifecycle stage (mention/narrative markets, near
+  resolution) rather than a price bucket, so a null result on the price-bucket family does not
+  predict a null result here — it survives the "am I just re-testing a refuted mechanism" check. **Why
+  it is NOT proposed as a numbered EXP with a min-N/OOS plan this run (same discipline as the
+  2026-07-01 whale-seed finding — don't formalize on top of an unverified input):** (i) the primary
+  paper is unreachable, so the magnitude, N, and statistical significance are completely unknown —
+  this could be a strong effect or a curve-fit that doesn't replicate; (ii) our own market taxonomy
+  (`market_category.py`) has no "mention/narrative market" classifier — this data doesn't exist in our
+  pipeline yet; (iii) "low-liquidity near-resolution" narrows the tradeable universe considerably, and
+  Polymarket's mention-market volume/count is unknown to us. **Logged as a candidate for a FUTURE run:**
+  if a mention-market classifier is built (loop-buildable, no data/egress dependency — a keyword/tag
+  heuristic similar to the existing category classifier, e.g. question patterns like "will X say/tweet/
+  mention Y", combined with a low-liquidity + near-resolution filter), this becomes a testable EXP with
+  its own pre-registered min-N and significance threshold — explicitly NOT started this run.
+  A companion search for Polymarket order-book microstructure (Dubach 2026, arXiv:2604.24366v2 — a
+  working paper, tick-level order-book + on-chain trade archive) was checked for concrete
+  slippage-by-price-level numbers relevant to the recurring "near-zero-price longshot slippage risk"
+  pre-mortem item (present in EXP-001/002/004's own caveats) — the reachable extract did not surface
+  usable quantitative figures (spread/depth-by-price tables were not present in the fetched text).
+  **Inconclusive, not used as evidence either way** — flagged so a future run knows this specific paper
+  was checked and came up empty, rather than re-searching for the same thing.
+
+### (4) Egress RE-CONFIRMED open from this environment (consistent with 2026-07-04, not a new fact)
+  Direct `curl` from this session: `gamma-api.polymarket.com` (301 redirect to real content, `/markets`
+  returns real live markets), `clob.polymarket.com` (200), `data-api.polymarket.com` (200),
+  `huggingface.co` (200) all reachable with real content; `dune.com` still 403 (unchanged since
+  2026-07-03). `api.elections.kalshi.com` is reachable (200, real live data) but see finding (2) for
+  why its LIST endpoint doesn't help B8. This reconfirms, not newly establishes, the 2026-07-04
+  finding — logged per the standing "re-probe env-gated deps every run" discipline, not as new news.
+
+### Candidate alphas NOT proposed this run (reasons)
+- **"Yes Bias" in mention markets:** unverified secondary source (no N/magnitude, primary paper
+  unreachable) + no classifier exists yet in our pipeline. Logged as a future candidate (see finding
+  3), not proposed as a numbered EXP this run — proposing one on an unreachable paper's uncontrolled
+  claim would violate the "never fabricate an edge" rule by proxy (formalizing an unverifiable input).
+- No re-test of the refuted bucket-calibration family (static or recency) — already confirmed
+  non-robust across 4 corpora (2026-07-04); re-running it again would not produce new information.
+
+### Self-validation (sources this run)
+- Finding (1): direct `github` MCP reads of `live-validation.yml` job logs for run IDs 28637890271,
+  28680739763, 28701334039, 28717474808, 28729577988, 28736147254 (2026-07-03T04:12 through
+  2026-07-05T09:24 UTC) — grepped full log content, not just tails, for `resolutions`, `executions`,
+  `ForeignKeyViolation`, and tracebacks.
+- Finding (2): direct `curl` from this session against `api.elections.kalshi.com/trade-api/v2/markets`
+  with `limit=1000&status=open`, parsed with a small Python script counting non-null
+  `yes_bid`/`yes_ask`/`last_price` fields across all 1000 returned markets (0/1000 populated).
+  Reproducible by re-running the same call (subject to Kalshi's live market set changing over time).
+- Finding (3): WebSearch + WebFetch of the QuantPedia review page (quantpedia.com) and a direct SSRN
+  fetch attempt (403, could not reproduce the primary source — disclosed, not hidden). The Dubach
+  microstructure paper was fetched from arXiv (arxiv.org/pdf/2604.24366) but yielded no usable
+  quantitative figures in the reachable extract.
+- Finding (4): direct `curl` from this session's own network path against all 6 previously-tracked
+  domains, same method as 2026-07-01/07-03/07-04 research runs.

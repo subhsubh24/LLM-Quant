@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-07-05 (factory run — B8 real-data probe + F10 category threading)
+  as_of: 2026-07-05 (research run 15 — forward-loop self-validation + Kalshi quote-gap reconfirmation)
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -213,6 +213,32 @@ GROWTH_STATUS:
         confirms HuggingFace egress is accessible (OA-16 step 1), run the fetcher to extract
         the political corpus and feed EXP-003.
   learnings:
+    - "Research Run 15 (2026-07-05): the forward-paper track record (OA-17) is STILL at zero
+      resolutions two days after Research Run 13's diagnosis — confirmed directly via 6
+      live-validation.yml job logs spanning 2026-07-03T04:12 to 2026-07-05T09:24 UTC (all
+      'resolutions': null, 'executions': []; FK persistence bug NOT recurred). Diagnosis updated:
+      this is NOT the 2026-07-02 empty-category bug (categories now derive correctly — Sports,
+      General, a named Bitcoin market) — bankroll fell to $102.87 and sits flat because the Sports
+      category's $200 sub-cap is genuinely SATURATED by real FIFA World Cup position concentration,
+      while non-Sports opportunities scanned each run hit Kelly size=0 (no edge, honest). This is
+      the D2 diversification cap working as designed under a mostly-deployed small bankroll, not a
+      bug — no fix recommended. The binding constraint for real evidence remains simply elapsed
+      time until shorter-dated 2026-07-02/03 positions (Fed decision, MLB, esports, an Elon
+      tweet-count window, a within-2-weeks Iran deadline) resolve and free capital. SEPARATELY:
+      reconfirmed, at 5x the sample size (n=1000 vs the same-day factory B8 probe's n=200), that
+      Kalshi's public /markets LIST endpoint returns ZERO markets with any populated yes_bid/
+      yes_ask/last_price field — this is a structural gap in the bulk list endpoint (not
+      small-sample bad luck), sharpening B8's next-step diagnosis toward a per-market quote/
+      orderbook call or the already-fixed candlestick path (OA-15), not further list-endpoint
+      iteration. NEW CANDIDATE (unverified, no EXP number assigned): 'How Wise is the Crowd? Bias
+      and Edge in Prediction Markets' (Deleep et al., SSRN ~March 2026, via a QuantPedia
+      review — primary paper 403'd, no N/magnitude disclosed) proposes a 'Yes Bias' concentrated in
+      low-liquidity, near-resolution 'mention markets' (narrative/commentary contracts), driven by
+      narrative conviction rather than price level — structurally different from the refuted
+      price-bucket family, so a null result there doesn't predict a null result here. Needs a
+      mention-market classifier (doesn't exist yet) before it is testable; logged as a future
+      candidate only, per the 'don't formalize on an unreachable source' discipline. Full detail:
+      RESEARCH_MEMORY 2026-07-05 (Research Run 15)."
     - "Factory run (2026-07-05): B8 cross-venue coherence — the pre-registered #1 next candidate — was PROBED on real live data (547 Polymarket + 200 Kalshi binary markets) and does NOT validate this run. find_cross_venue_matches produced 33 candidate pairings, ALL false (sports/player-name token overlap, no numeric threshold) + ALL below the 0.5 trade bar (max coherence 0.375) → ZERO tradeable matches (the matcher's conservatism correctly refuses false pairs). ROOT BLOCKER: the Kalshi /markets LIST endpoint returns NO usable quotes — all 200 open markets parsed active=False with a uniform 0.500 placeholder + garbled multi-outcome concatenated question text (multi-leg sports, not clean binaries). B8 next needs (a) a Kalshi quote source with real prices (per-market quote fetch OR the #170 candlesticks path) + clean single-event questions, and (b) a targeted NUMERIC-THRESHOLD universe (BTC/Fed/econ) co-listed on both venues — a multi-run data-eng effort, NOT a one-run validation. The probe surfaced + shipped a REAL fix (#232): the matcher's _yes_price now gates on market.active so an untradeable market's 0.500 placeholder can't feed a fabricated cross-venue disagreement (the #101/#102/#193 fake-price class). No edge validated; binding constraint (no robust alpha) STANDS."
     - "Factory run (2026-07-05): F10 category-threading COMPLETE (#231) — real per-market categories are now threaded end-to-end (3 resolved-history fetchers derive via market_category.derive_market_category → HistoricalMarket/BacktestTrade → validate_real_oos.category_by_market_id), so F10's analyze_regime_slices CATEGORY-concentration + leave-one-out checks fire on real OOS trades (they were always category_by_market_id=None before). category is _seed_hash-EXCLUDED metadata → the pinned real-data reproduction hash 8dc358439ffb5746 is unchanged (a dedicated invariance test pins it). Anti-overfitting integrity infra; not a validated edge (no DoD/floor box)."
     - "Bootstrap: prediction-markets engine runs in paper/dry-run; no validated out-of-sample edge yet."
@@ -279,6 +305,27 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "NEW, loop-buildable, not yet built (Research Run 15, 2026-07-05): a 'mention/narrative
+      market' classifier (keyword/tag heuristic in the style of market_category.py — question
+      patterns like 'will X say/tweet/mention Y') would unlock testing the 'Yes Bias' candidate
+      (unverified secondary source — QuantPedia review of Deleep et al. SSRN ~March 2026, primary
+      paper unreachable): traders in low-liquidity, near-resolution mention markets allegedly
+      overpay for YES via narrative conviction, a market-TYPE-based effect distinct from the
+      refuted price-bucket family. Do NOT treat this as validated — no N/magnitude available; build
+      the classifier + a pre-registered EXP-005 proposal only once real mention-market volume on
+      Polymarket can be measured. Full detail: RESEARCH_MEMORY 2026-07-05."
+    - "SHARPENED (Research Run 15, 2026-07-05): Kalshi's public /markets LIST endpoint reconfirmed,
+      at n=1000 (5x the same-day factory B8 probe's n=200), to return ZERO markets with a populated
+      yes_bid/yes_ask/last_price — a structural property of the bulk list endpoint, not a
+      small-sample fluke. B8's next step should target a per-market quote/orderbook call or the
+      already-fixed candlestick history path (OA-15/#170), not further iteration on the list
+      endpoint. Full detail: RESEARCH_MEMORY 2026-07-05."
+    - "STATUS UPDATE (Research Run 15, 2026-07-05): forward-paper track record (OA-17) still at zero
+      resolutions as of 2026-07-05T09:24 UTC (6 runs checked since 2026-07-03, all null). NOT a new
+      bug — bankroll ($102.87 remaining) is mostly deployed and the Sports category's $200 cap is
+      genuinely saturated by real FIFA World Cup concentration (D2 working as designed); no fix
+      needed. Keep watching for resolutions as shorter-dated 2026-07-02/03 positions mature — flag
+      only if the Sports cap stays saturated for weeks with no rotation despite freed capital."
     - "HIGH-VALUE, loop-buildable (Research Run 14, 2026-07-04): re-probe gamma-api.polymarket.com,
       clob.polymarket.com, data-api.polymarket.com, huggingface.co, and dune.com from the AUTONOMOUS
       FACTORY BUILD LOOP itself (not just the research-agent session, which confirmed 4/5 open this
