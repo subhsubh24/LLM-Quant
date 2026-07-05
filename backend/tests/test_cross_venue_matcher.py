@@ -378,3 +378,66 @@ def test_backtest_respects_custom_cost_model():
     r_cheap = evaluate_cross_venue_pairs([pair], cost_model=cheap)
     r_dear = evaluate_cross_venue_pairs([pair], cost_model=dear)
     assert r_cheap.net_pnl >= r_dear.net_pnl
+
+
+# --------------------------------------------------------------------------- #
+# active-gate: an untradeable / no-quote market never enters a coherence pair  #
+# (a real-data honesty fix — a Kalshi market with no book presents a NEUTRAL   #
+#  0.50 PLACEHOLDER + active=False; the matcher must not read that fabricated  #
+#  price and manufacture a bogus cross-venue disagreement).                    #
+# --------------------------------------------------------------------------- #
+
+
+def _untradeable(mid: str, question: str, placeholder_yes: float, end_date=_BASE) -> Market:
+    """A binary market that could not be quoted: a NEUTRAL 0.50 placeholder price and
+    active=False (exactly what kalshi_client emits for a no-bid/ask/last book)."""
+    return Market(
+        id=mid, condition_id=mid, question=question, slug=mid.lower(), description="",
+        category="", end_date=end_date,
+        outcomes=[
+            Outcome(token_id=f"{mid}-YES", label="Yes", price=placeholder_yes,
+                    midpoint=placeholder_yes, volume=0.0),
+            Outcome(token_id=f"{mid}-NO", label="No", price=1.0 - placeholder_yes,
+                    midpoint=1.0 - placeholder_yes, volume=0.0),
+        ],
+        total_volume=0.0, liquidity=0.0,
+        active=False, closed=False, resolved=False,
+    )
+
+
+def test_untradeable_market_never_matched_placeholder_price():
+    """An active Polymarket market vs. an untradeable (no-quote, 0.50 placeholder) Kalshi
+    market that shares content + threshold must NOT match — the 0.50 is fabricated, not a
+    real disagreement."""
+    poly = _mkt("poly1", "Will Bitcoin exceed $100k by 2026?", 0.20)
+    kal_noquote = _untradeable("kal1", "Bitcoin to exceed $100k in 2026", 0.50)
+    matches = find_cross_venue_matches([poly], [kal_noquote])
+    assert matches == []
+    # match_markets returns None directly (the gate is in _yes_price).
+    assert match_markets(poly, kal_noquote) is None
+
+
+def test_active_gate_is_what_blocks_not_content():
+    """Control: the SAME market, flipped to active=True with a real quote, DOES match —
+    proving it is the active-gate (not the content/threshold) that blocked the pairing."""
+    poly = _mkt("poly1", "Will Bitcoin exceed $100k by 2026?", 0.20)
+    kal_real = _mkt("kal1", "Bitcoin to exceed $100k in 2026", 0.62)  # active=True, real quote
+    matches = find_cross_venue_matches([poly], [kal_real])
+    assert len(matches) == 1
+    assert matches[0].yes_price_a == 0.20 and matches[0].yes_price_b == 0.62
+
+
+def test_resolved_market_not_matched():
+    """A RESOLVED market (active=False, price settled ~1/0) is also correctly refused for a
+    LIVE coherence pairing — you cannot open a coherence trade on a settled market."""
+    poly = _mkt("poly1", "Will Bitcoin exceed $100k by 2026?", 0.20)
+    kal_resolved = Market(
+        id="kal1", condition_id="kal1", question="Bitcoin to exceed $100k in 2026",
+        slug="kal1", description="", category="", end_date=_BASE,
+        outcomes=[
+            Outcome(token_id="kal1-YES", label="Yes", price=1.0, midpoint=1.0, volume=100.0),
+            Outcome(token_id="kal1-NO", label="No", price=0.0, midpoint=0.0, volume=100.0),
+        ],
+        total_volume=100.0, liquidity=100.0, active=False, closed=True, resolved=True,
+    )
+    assert find_cross_venue_matches([poly], [kal_resolved]) == []
