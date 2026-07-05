@@ -299,3 +299,41 @@ def test_get_price_boundary_values_ok():
     # 0.0 and 1.0 are valid probabilities (a resolved-loser / near-certain quote).
     assert _client_with_get({"price": "0.0"}).get_price("tok") == 0.0
     assert _client_with_get({"price": "1.0"}).get_price("tok") == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Non-finite volume/liquidity must NOT survive into the Market (issue: the
+# #165 invented-data-into-the-BUY-gate class). A "nan"/"inf" coerces cleanly
+# through float() but `NaN < min_volume` is False / `inf` is huge, so such a
+# market would slip past the strategy volume/liquidity filters. Prices are
+# already math.isfinite-guarded; these pin the same guard for volume/liquidity.
+# ---------------------------------------------------------------------------
+def test_nan_volume_not_stored_falls_back_to_zero():
+    m = _client()._parse_market(_base_raw(volume="nan"))
+    assert m.total_volume == 0.0
+    assert m.total_volume == m.total_volume  # not NaN (NaN != NaN)
+
+
+def test_inf_volume_not_stored_falls_back_to_zero():
+    m = _client()._parse_market(_base_raw(volume="inf"))
+    assert m.total_volume == 0.0
+
+
+def test_nan_liquidity_not_stored_falls_back_to_zero():
+    m = _client()._parse_market(_base_raw(liquidity="Infinity"))
+    assert m.liquidity == 0.0
+
+
+def test_non_finite_volume_does_not_slip_past_the_filter():
+    # The concrete decision impact: a market with a non-finite volume must be
+    # treated as volume-below any positive floor once it falls back to 0.0
+    # (whereas a raw NaN would make volume_below() return False → passes gate).
+    m = _client()._parse_market(_base_raw(volume="nan", liquidity="nan"))
+    assert m.volume_below(1000.0) is True
+    assert m.liquidity_below(500.0) is True
+
+
+def test_finite_volume_and_liquidity_still_parsed():
+    m = _client()._parse_market(_base_raw(volume="12345.6", liquidity="789.0"))
+    assert m.total_volume == 12345.6
+    assert m.liquidity == 789.0
