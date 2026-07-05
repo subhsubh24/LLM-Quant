@@ -24,6 +24,7 @@ EVERY outbound call uses ``timeout=15`` (a hard rule — never omit).
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -324,11 +325,19 @@ class KalshiClient:
 # Pure helpers
 # ---------------------------------------------------------------------------
 def _to_float(value: Any) -> Optional[float]:
-    """Coerce a value to float, returning None on failure."""
+    """Coerce a value to a FINITE float, returning None on failure.
+
+    A malformed ``"nan"``/``"inf"``/``"Infinity"`` coerces cleanly through ``float()``
+    but must never survive: the volume path does ``_to_float(...) or 0.0`` and a NaN is
+    truthy, so a non-finite volume would flow into the ``Market`` and slip past strategy
+    filters (``NaN < min_volume`` is False) — the same invented-data-into-the-decision
+    class the Polymarket parser guards against. Reject non-finite here (returns None) so
+    every ``_to_float`` caller stays finite by construction."""
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
+    return result if math.isfinite(result) else None
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:

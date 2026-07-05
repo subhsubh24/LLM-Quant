@@ -393,3 +393,29 @@ def test_multiple_markets_parsed():
     assert len(markets) == 5
     ids = {m.id for m in markets}
     assert ids == {f"KX{i}-25DEC" for i in range(5)}
+
+
+# ---------------------------------------------------------------------------
+# Non-finite volume must NOT survive into the Market. `_to_float(...) or 0.0`
+# would keep a NaN (NaN is truthy), and a NaN/inf volume slips past the
+# strategy volume filter (`NaN < min_volume` is False) — the same
+# invented-data-into-the-decision class the Polymarket parser guards against.
+# ---------------------------------------------------------------------------
+def test_nan_volume_falls_back_to_zero():
+    raw = _make_raw_market(volume="nan")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.total_volume == 0.0
+    assert m.total_volume == m.total_volume  # not NaN
+
+
+def test_inf_volume_falls_back_to_zero():
+    raw = _make_raw_market(volume="Infinity")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.total_volume == 0.0
+    assert m.volume_below(1000.0) is True  # 0.0 is genuinely below → filter works
+
+
+def test_finite_volume_still_parsed():
+    raw = _make_raw_market(volume="4200.5")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.total_volume == 4200.5

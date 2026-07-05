@@ -826,29 +826,38 @@ class PolymarketClient:
         if isinstance(tags, str):
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
-        # Volume: try multiple field names (API schema changes over time)
+        # Volume: try multiple field names (API schema changes over time).
+        # Only assign a FINITE, positive value — a malformed "nan"/"inf"/"Infinity"
+        # coerces cleanly through float() but must NEVER land in total_volume: a NaN/inf
+        # volume slips past the strategy filters (`NaN < min_volume` is False, `inf` is
+        # huge) so a market with no real volume passes the BUY gate — the same
+        # invented-liquidity-into-the-decision-path class as #165. Prices are already
+        # math.isfinite-guarded (see the raw_price guard ~line 792); this closes the
+        # volume/liquidity asymmetry. A non-finite/non-positive value leaves 0.0 intact.
         volume = 0.0
         for vol_key in ("volume", "volumeNum", "totalVolume", "total_volume", "volume_usd"):
             v = raw.get(vol_key)
             if v is not None:
                 try:
-                    volume = float(v)
-                    if volume > 0:
-                        break
+                    fv = float(v)
                 except (ValueError, TypeError):
-                    pass
+                    continue
+                if math.isfinite(fv) and fv > 0:
+                    volume = fv
+                    break
 
-        # Liquidity: try multiple field names
+        # Liquidity: try multiple field names (same finiteness guard as volume).
         liquidity = 0.0
         for liq_key in ("liquidity", "liquidityNum", "totalLiquidity", "liquidityClob"):
             v = raw.get(liq_key)
             if v is not None:
                 try:
-                    liquidity = float(v)
-                    if liquidity > 0:
-                        break
+                    fv = float(v)
                 except (ValueError, TypeError):
-                    pass
+                    continue
+                if math.isfinite(fv) and fv > 0:
+                    liquidity = fv
+                    break
 
         # Derive a real correlation-risk bucket. Real Polymarket Gamma markets ship an
         # EMPTY top-level `category`, which collapsed every market into the risk
