@@ -18,6 +18,19 @@ Format per entry:
 
 ---
 
+## 2026-07-05 (3rd probe) — B8 cross-venue coherence: structured-strike + quote-SOURCE probe (one level deeper than the 2nd probe)
+- **Context:** the 2nd probe found Kalshi HAS 254 crypto series with strikes in structured `cap_strike`/`floor_strike` fields but concluded "multi-run data-eng." This probe went one level deeper — directly hit the Kalshi crypto series with their structured fields to pin the exact remaining data path (egress open, HTTP 200 all venues).
+- **Method (reproducible):** `curl`/`httpx` against `api.elections.kalshi.com/trade-api/v2`: `GET /series?category=Crypto` (→ 254 series); `GET /markets?series_ticker=KXBTCD&status=open` etc. (inspect `floor_strike`/`cap_strike`/`strike_type`/`yes_bid`/`yes_ask`/`volume`); `GET /markets/{ticker}/orderbook` for the flagship year-end BTC market; `GET /series/{s}/markets/{t}/candlesticks`.
+- **Findings:**
+  1. **Structured strikes are clean + directly parseable** — every crypto market carries `floor_strike`/`cap_strike` + `strike_type ∈ {greater, less, between}` (e.g. `KXBTCD-26JUL06-T72249.99` floor=72249.99 "greater" → daily terminal; `KXBTC` "between" range markets; `KXBTCMAXY-26DEC31-109999.99` floor=109999.99 "greater" → year-end barrier). So the structured-strike parser (blocker i from the 2nd probe) is concretely buildable against real fixtures.
+  2. **DECISIVE quote-source correction (the deeper finding):** the `/markets` LIST feed returns NO quotes/volume even per-series — **0 of 254** crypto markets carry `yes_bid`/`yes_ask`/`volume`. BUT the quotes DO EXIST in the **`/markets/{ticker}/orderbook`** endpoint: `KXBTCMAXY-26DEC31-109999.99` returned a real, deep YES/NO orderbook (`no_dollars` [[0.01,8531.08],[0.02,10870.00],…], a full book). So the prior runs' blocker "Kalshi has no quotes" is more precisely **"the client reads the wrong endpoint — live quotes live in the per-market orderbook, not the list feed."**
+  3. Settled year-end series are empty (2026 bets settle 2027 → no resolved candlestick history yet on those); the candlesticks endpoint requires a `start_ts` query param.
+- **Conclusion:** UNCHANGED (B8 is a multi-run data-eng effort, NOT built this run — no validated co-listed universe to exercise infra against → speculative per DECISION COROLLARY), but the remaining path is now PINNED: per-series discovery → structured-strike parser → **per-market orderbook-quote assembly** → touch/barrier/terminal semantic classification → curated co-listed BTC/ETH universe → dual-venue OOS harness (candlesticks w/ `start_ts`).
+- **Lesson (mirror, one level deeper):** each run's real-data probe should go ONE level past the prior finding — "no quotes on the list feed" becomes "quotes live in the orderbook endpoint" only by actually hitting the orderbook. The probe keeps converting a vague blocker into a precise, buildable one without faking a result or building speculative unwired infra.
+- **NOT proposed as a numbered EXP** (no OOS run — a data-path feasibility probe, not an alpha test; the honest "not runnable yet + the exact next data step").
+
+---
+
 ## 2026-07-05 — B8 cross-venue coherence (Polymarket ⟷ Kalshi): real-data feasibility probe
 - Hypothesis (falsifiable): the built B8 event-matcher (`cross_venue_matcher.find_cross_venue_matches`, #179) can find enough GENUINE same-event pairs across live Polymarket + Kalshi markets to run a cost-net coherence OOS backtest — a structurally different edge from the refuted bucket-calibration family (it trades venue DISAGREEMENT, not out-calibrating a sharp crowd).
 - Min sample N: needed ≥ a handful of tradeable matches (coherence ≥ 0.5) to justify building the full resolved-pair OOS harness.
