@@ -193,7 +193,8 @@ class Settings(BaseSettings):
         loud, not late), naming the exact missing var — mirroring the control-auth boot
         gate above. This can NEVER affect paper/dev/CI (live defaults false and the
         autonomous loop never flips it) — it only binds the owner's real-money host.
-        Setting these keys is HUMAN-CORE (PENDING_OPS OA-5/OA-6, LIVE_RUNBOOK §6).
+        Setting these keys is HUMAN-CORE (PENDING_OPS OA-5, LIVE_RUNBOOK §5 — the venue
+        LIVE-API-key step; §6/OA-6 is the separate master-gate flip).
         """
         if self.live_trading_enabled:
             required = (
@@ -209,8 +210,8 @@ class Settings(BaseSettings):
                     f"{missing} are unset — the bot would boot but fail EVERY real order at "
                     "runtime (the executor is not authenticated). Refusing to boot. Set all "
                     "of POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE, "
-                    "POLYMARKET_PRIVATE_KEY on the live host (see PENDING_OPS OA-5/OA-6 / "
-                    "LIVE_RUNBOOK §6)."
+                    "POLYMARKET_PRIVATE_KEY on the live host (see PENDING_OPS OA-5 / "
+                    "LIVE_RUNBOOK §5)."
                 )
         return self
 
