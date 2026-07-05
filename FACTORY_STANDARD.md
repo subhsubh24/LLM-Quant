@@ -298,6 +298,27 @@ and it is never PMF; never invent it. (A SEPARATE Growth Agent owns `GROWTH_STAT
 This closes the pre-launch demand-validation loop: GTM validates demand → you build toward it →
 GTM re-validates against what shipped.
 
+## 11b. GTM phasing + launch timing (the factory tells the owner WHEN)
+Don't just build — tell the owner where they are and when to act. Maintain a GTM PHASE +
+LAUNCH-READINESS read every run (computed from real signals; honest "insufficient data" when
+sources aren't connected or there's no traffic) and SURFACE it (dashboard + the growth report):
+- PHASES: **BUILD** (product not yet credible → focus product; growth prepares assets only) →
+  **ASSESS-DEMAND** (product credible enough to show → drive traffic to the waitlist + run demand
+  tests; measure visitor→waitlist rate, waitlist size + GROWTH RATE, engagement/organic pull) →
+  **LAUNCH** (both gates met) → **POST-LAUNCH** (optimize on real conversion/retention).
+- **LAUNCH GATE = PRODUCT-READY *and* VALIDATED-DEMAND** (both, never one): the product clears its
+  readiness/quality bar AND a real pre-launch demand signal exists (waitlist threshold + growth rate
+  + conversion-intent / cited pain). Never launch a broken product; never launch into zero demand.
+- **RECOMMEND timing every run**, one of: NOT-YET (name the lacking axis + the single action to fix
+  it) | START-MARKETING (product credible but demand data thin → connect the sources + drive traffic)
+  | LAUNCH-WINDOW-OPEN (both gates met → the reason + the owner launch checklist). Criteria-driven,
+  never a vibe; say "insufficient data" plainly when the inputs aren't wired.
+- **AS AUTONOMOUS AS POSSIBLE within the rails:** the loop researches, drafts, schedules, measures,
+  and recommends autonomously; OWNED connected channels auto-post (the app posts via the owner's
+  APIs). The ONE irreducibly-human step is authentic COMMUNITY posting (Reddit/forums/DMs) — NEVER
+  bot-post to communities (platform ToS + it poisons the demand signal you're trying to read): the
+  agent prepares turnkey posts, the owner posts + reports the result back as signal.
+
 ## 12. Security / abuse bar (always clears the value bar)
 Use THIS repo's security model (per ROADMAP) and re-check it every deep audit: every data
 surface protected (tenant isolation / authz enforced server-side, never trust the client);
