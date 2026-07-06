@@ -2,6 +2,22 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-06 (owner-directed) — filed B9: efficiency-aware PER-CATEGORY edge search (with the anti-p-hacking guard)
+
+- Sports IS a first-class category (market_category recognizes it; heavily present; F10 slices by it). But
+  sports crowds are SHARP (efficient, bookmaker-adjacent) → low edge-headroom, and they DRAG the aggregate
+  crowd Brier down. So an aggregate "no edge" can HIDE a real edge in a less-efficient category.
+- **B9 = per-category edge search:** measure per-category crowd calibration → rank categories by beatability;
+  run the alpha OOS per-category; an efficiency-aware universe filter to down-weight/EXCLUDE sharp categories
+  (Sports first) so the model only competes where a crowd is plausibly soft.
+- **The whole risk — and the guard:** "test per category" IS multiple comparisons = p-hacking unless
+  corrected. B9 requires a per-category "edge" to survive ALL of: B2 Bonferroni (reuse `strategies_screened`
+  = #categories), F11 bootstrap CI excludes 0, F10 non-fragility within the category, AND a PRE-REGISTERED
+  category set (never mine post-hoc). Ties A8 (softer crowd) + F10 + F11 + B2 + B4a together.
+- **Lesson: slicing to find where an edge lives is legitimate ONLY with multiple-comparison correction +
+  pre-registration — otherwise it's a machine for turning noise into a fake edge.** The correction is the
+  difference between "efficiency-aware search" and "p-hacking."
+
 ## 2026-07-06 (owner-directed) — filed A8: Manifold (+ Metaculus) as READ-ONLY research venues (test a softer crowd)
 
 - "Can we expand our markets?" → yes, but as DATA, not live venues. Firm NO on crypto/equities (retired,
