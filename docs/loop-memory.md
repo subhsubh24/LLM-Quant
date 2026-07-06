@@ -2,6 +2,23 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-06 (owner-directed) — filed A8: Manifold (+ Metaculus) as READ-ONLY research venues (test a softer crowd)
+
+- "Can we expand our markets?" → yes, but as DATA, not live venues. Firm NO on crypto/equities (retired,
+  PM-only by design) and on adding LIVE trading venues (no validated edge yet; premature surface area).
+- **Reframe from A6's own finding:** data-VOLUME is solved (1.3M HF corpus runnable, A6; earlier-life
+  sampling, A7). The binding constraint PIVOTED to ALPHA — *does a beatable crowd exist anywhere?* Both
+  real-money crowds measured (Polymarket, Kalshi) are sharp (Brier ~0.08–0.09).
+- **A8 = Manifold** as a read-only venue: huge, free, reachable, PLAY-money crowd → plausibly less
+  calibrated → exactly where a calibration/reasoning edge would FIRST appear. Same leakage-safe fetcher
+  pattern, opt-in venue in `validate_real_oos`, no creds/execution/money. **CRITICAL guardrail: RESEARCH-ONLY**
+  — play-money edges validate the METHOD but NEVER count toward the real-money floor / go-live (label
+  `research_only`). Metaculus optional as a base-rate reference for B4.
+- **Lesson: "expand our markets" is only worth it when it serves the CURRENT binding constraint.** Here that's
+  the alpha (a beatable crowd), not more Polymarket-history data — so the right expansion is a DIFFERENT crowd
+  (Manifold's softer one), read-only, firewalled from the real-money floor. Expanding live venues for
+  "more to bet on" with no edge is anti-thesis.
+
 ## 2026-07-06 (owner-directed, swarm-article review) — filed F11 (bootstrap CI on the tradeable OOS edge)
 
 - Reviewed the "six-agent alpha swarm" article against the factory. Finding: we ALREADY implement it, PM-
