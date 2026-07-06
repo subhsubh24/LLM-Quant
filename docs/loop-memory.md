@@ -2,6 +2,24 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-06 (owner-directed, swarm-article review) — filed F11 (bootstrap CI on the tradeable OOS edge)
+
+- Reviewed the "six-agent alpha swarm" article against the factory. Finding: we ALREADY implement it, PM-
+  tailored, and are STRONGER on rigor — the 6 stages map to research-routine / factory-maker / walk_forward /
+  adversarial-Opus-auditors+B2 / F10 regime-slice / crowd-baseline-residual; and all 5 of its failure modes
+  are explicitly guarded (validator non-negotiable, RESEARCH_MEMORY+registry+LOOP_HEALTH abandoned_reasons,
+  maker≠checker, specialized fan-out, and — our strongest — a DERIVED-not-claimed stopping condition/GO signal).
+  Not adopting Slate (vendor harness); the cloud routines + Workflow apparatus are the equivalent.
+- **Only genuinely additive idea → F11.** B2 already runs a deterministic paired-bootstrap CI on the BRIER
+  difference (+ Bonferroni) — ahead of the article's "bootstrap 10k". The gap is the TRADEABLE result: the
+  walk_forward OOS PnL / hit-rate is a bare point estimate (validate_real_oos's "−$639"), which at N=54 is
+  ~indistinguishable from 0. F11 adds a deterministic bootstrap CI on the OOS edge (reuse
+  `calibration._paired_bootstrap_ci`), verdict = "real only if CI excludes 0", wired into validate_real_oos +
+  the go-live audit alongside F10's fragility flag. **Lesson: a point PnL is never a signal — every OOS
+  edge needs its confidence interval, the money analog of the calibration significance gate we already have.**
+- Note: Newey-West (the article's other test) is LESS relevant for PM — it corrects autocorrelation in a
+  return series, but PM resolutions are largely INDEPENDENT binary events. Bootstrap is the right tool.
+
 ## 2026-07-05 (3rd factory run) — a GATED-LIVE-SAFETY-hardening run: shipped 2 file-disjoint code PRs (a REAL phantom-position/dedup-poisoning bug on the live order path #241 + a live-boot venue-credential fail-loud gate #242) from a full 8-Haiku scout sweep where 6/8 lenses were NOTHING-GENUINE / all-DROP on the hardened engine. All 4 Sonnet reviewers first-pass APPROVE (1 pre-merge nit fixed), 0 reverts. Also DEEPENED the B8 binding-constraint finding one level further (the exact remaining data path).
 
 - **Shipped 2 file-disjoint code PRs + this bookkeeping, maker≠checker (4 Sonnet reviewers, 4/4 first-pass APPROVE, 0 fix cycles, 0 reverts):**
