@@ -28,7 +28,7 @@ active flow depends on an unvalidated path. Live real-money keys are HUMAN-CORE 
 
 ```yaml
 SELF_VALIDATION:
-  as_of: 2026-06-29
+  as_of: 2026-07-07
   # ci_validatable: can the gate REALLY validate this with NO owner-only secret? An ACTIVE
   # capability with ci_validatable:false is UNMET -> it surfaces (urgent OWNER_ACTION +
   # LOOP_HEALTH validation.unmet) and blocks merges. real_flow_note (pitfall #5): for a
@@ -119,11 +119,20 @@ SELF_VALIDATION:
       ci_validatable: true          # no secret needed; the logic-critical parts (parsing + anti-leakage) are tested on realistic fixtures
       real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner runs fetch_kalshi_history.py on a network-permitted host. HONESTY CAVEAT: the Kalshi status-string + price-field CONTRACT (response status='active'/'settled'/'determined'; cent prices; the 'settled' discovery filter) is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response (egress-blocked offline) — an unrecognized status is logged LOUDLY (never silently dropped), and the OWNER must confirm the contract on the first real fetch."
       status: validated
+    - id: manifold_market_data
+      desc: "read public Manifold Markets data + assemble leakage-safe resolved history (no auth) — RESEARCH ONLY (PLAY MONEY)"
+      validates_via: "test_manifold_history_fetcher.py — parse + anti-leakage core exercised offline with injected bet histories (decision price is a pre-decision probAfter; settled outcome never the decision price; RAISES rather than fabricating)"
+      mode: mocked_offline
+      requires_env: []              # NO credentials required; Manifold market data is public
+      active: true
+      ci_validatable: true          # no secret needed; parsing + anti-leakage tested on injected fixtures; live probe is a thin read
+      real_flow_note: "RESEARCH ONLY — Manifold is PLAY MONEY. A Manifold finding validates the METHOD (can a model beat a softer crowd?) and NEVER counts toward the profit floor, go-live-eligibility, or any real-money decision. NO orders, NO money, NO credentials. The critical logic is PARSING + anti-leakage (offline fixtures); the live read (scripts/manifold_research_probe.py) is a thin GET with no side-effect. Live probe RAN 2026-07-07: 2147 leakage-safe records, crowd Brier 0.144 vs the sharp real-money crowds' ~0.09 — a softer play crowd, as hypothesized (RESEARCH_MEMORY)."
+      status: validated
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 10
+    capabilities_total: 11
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
