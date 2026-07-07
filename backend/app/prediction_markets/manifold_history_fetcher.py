@@ -6,12 +6,22 @@ crowd. Both real-money crowds we have measured (Polymarket, Kalshi) are sharp (B
 calibration/reasoning edge would FIRST appear — so Manifold lets us test the METHOD
 ("can the model beat a softer crowd?") on a corpus we can actually reach.
 
-CRITICAL RESEARCH-ONLY GUARDRAIL (honesty — enforced by construction + the module name):
-Manifold is PLAY money. A Manifold edge validates the *method* but does **NOT** transfer
-to real money and must **NEVER** count toward the profit floor, go-live-eligibility, or any
-real-money decision (the floor is real-money OOS only). Every record this module produces is
-`research_only`; callers must treat it as method-validation + RESEARCH_MEMORY signal only.
-This module places NO orders, touches NO money, and needs NO credentials (public API).
+CRITICAL RESEARCH-ONLY GUARDRAIL (honesty): Manifold is PLAY money. A Manifold edge validates
+the *method* but does **NOT** transfer to real money and must **NEVER** count toward the profit
+floor, go-live-eligibility, or any real-money decision (the floor is real-money OOS only). Every
+record this module produces is `research_only`; callers must treat it as method-validation +
+RESEARCH_MEMORY signal only. This module places NO orders, touches NO money, needs NO credentials.
+
+HONEST SCOPE OF THE GUARDRAIL (an adversarial auditor's finding, disclosed not hidden): the
+research-only property is currently enforced by CONVENTION — the module name + the `research_only`
+marker + the fact that NOTHING wires Manifold records into the real-money lane (they never reach
+`validate_real_oos` / the DB-persisted floor). It is NOT yet enforced STRUCTURALLY: this fetcher
+emits a plain `walk_forward.HistoricalMarket`, byte-indistinguishable from a real-money Polymarket
+/Kalshi record, so a FUTURE copy-paste that fed these into the floor lane would not be refused by a
+type/field guard. NAMED FOLLOW-UP (A8): add a positive `source`/`research_only` tag that
+`walk_forward`/`floor_met` refuse — a shared-type change deferred so it does not collide with the
+`walk_forward.py` seed_hash reproducibility contract this run. Until then: do NOT route a Manifold
+record into any real-money path (the floor is real-money OOS only).
 
 Leakage-safety is IDENTICAL to the Polymarket/Kalshi fetchers and reuses their audited
 guard (`polymarket_history_fetcher._last_pre_decision_price`):
@@ -68,7 +78,8 @@ class ManifoldHistoryFetcher:
     real-money / floor / go-live decision (see the module docstring).
     """
 
-    research_only = True  # a machine-readable marker of the guardrail
+    research_only = True  # ADVISORY marker (no consumer reads it yet — see the docstring's named
+    #                       follow-up for the positive structural tag on HistoricalMarket)
 
     def __init__(self, session: Optional[requests.Session] = None):
         self.session = session or requests.Session()
