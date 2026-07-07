@@ -206,11 +206,20 @@ class KalshiHistoryFetcher:
         elif result == "no":
             outcome = 0
         else:
-            logger.debug(
-                "skip Kalshi market ticker=%s: result=%r is not 'yes'/'no'",
-                ticker,
-                result,
-            )
+            # Distinguish the two "not yes/no" cases honestly (SELF_VALIDATION claims an
+            # UNRECOGNIZED status is logged LOUDLY — this makes that true without spamming):
+            #  * an EMPTY result = the market simply isn't resolved yet, an ordinary skip (debug);
+            #  * a NON-EMPTY unrecognized token (e.g. "void"/"cancel"/an unexpected Kalshi value)
+            #    = a real CONTRACT surprise the owner must SEE on the first live fetch → WARNING.
+            if result:
+                logger.warning(
+                    "skip Kalshi market ticker=%s: UNRECOGNIZED result=%r (expected "
+                    "'yes'/'no') — verify the Kalshi settlement contract",
+                    ticker,
+                    result,
+                )
+            else:
+                logger.debug("skip Kalshi market ticker=%s: no result yet (unresolved)", ticker)
             return None
 
         # Resolution time from close_time or expiration_time.
