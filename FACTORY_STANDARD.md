@@ -792,8 +792,10 @@ rather than being re-litigated cold each run.
 ## 37. Diversity — don't collapse onto the same lever every run
 A loop that keeps shipping the SAME category of change run after run is exploiting a local groove, not
 covering the roadmap (the diversity-collapse failure mode).
-- **Track the category** of each shipped change in LOOP_HEALTH (§10b) — e.g. reliability/perf, security,
-  mobile, monetization, design-taste, tests/evals, marketing, business-case.
+- **Track the category** of each shipped change in LOOP_HEALTH (§10b) as `rolling_7d.category_mix`
+  (a `{category: count}` map — e.g. reliability/perf, security, mobile, monetization, design-taste,
+  tests/evals, marketing, business-case), plus a one-line `diversity` read (`varied` /
+  `concentrated: <category>`) so the mix surfaces on the dashboard.
 - **Novelty check at SELECT time (§1 step B):** if the last ~K runs cluster on one or two categories, the
   scout sweep must SURFACE and the selection must INCLUDE ≥1 genuinely different, still-value-bar-clearing
   lens. The lowest-incomplete phase still wins priority — this breaks monoculture, it does NOT license
