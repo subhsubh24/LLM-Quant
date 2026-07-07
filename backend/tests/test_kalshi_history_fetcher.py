@@ -617,3 +617,24 @@ def test_nan_timestamp_does_not_poison_decision_price():
         {"t": 1200.0, "p": 0.62},
     ]
     assert _last_pre_decision_price(hist, decision_ts=1300.0, resolution_ts=1500.0) == 0.62
+
+
+def test_unrecognized_result_is_logged_loudly_empty_is_quiet(caplog):
+    """SELF_VALIDATION claims an UNRECOGNIZED Kalshi status is logged LOUDLY. Honest fix:
+    a NON-EMPTY unexpected result (e.g. 'void') → WARNING (owner must verify the contract);
+    an EMPTY result (simply unresolved) → DEBUG (an ordinary skip, no noise)."""
+    import logging
+    f = KalshiHistoryFetcher()
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        assert f._parse_resolved(_kalshi_market("KXVOID-25MAR", result="void")) is None
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("UNRECOGNIZED" in r.getMessage() and "KXVOID-25MAR" in r.getMessage() for r in warnings)
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        assert f._parse_resolved(_kalshi_market("KXOPEN-25MAR", result="")) is None
+    # an empty (unresolved) result must NOT warn — only a quiet debug skip
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any(r.levelno == logging.DEBUG and "unresolved" in r.getMessage() for r in caplog.records)
