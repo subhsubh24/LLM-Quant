@@ -5,6 +5,97 @@
 
 ---
 
+## 2026-07-07 — overall `B` · ship gate NOT met (5th grade — small hardening cycle; two more verified safety fixes; business_case still the lone binding B)
+
+**Diff vs 2026-07-05:** overall unchanged at **B**, letters unchanged across all ten
+dimensions — an honest read of a small **hardening** cycle. No ship-critical dimension
+crossed a threshold. Composition improved: two more genuine safety fixes landed and were
+verified non-tautological, the prior #240 git-log-framing nit is resolved, and the research
+loop ran another real-data probe to **no new edge**. The binding constraint
+(`business_case_strength`, B) is unchanged.
+
+**What the factory closed since 2026-07-05 (fresh adversarial graders, verified not trusted):**
+- **#241 (D1 side-effect integrity)** — a 0-fill `OPEN` order (`is_success` True for OPEN,
+  `filled_size=0`) previously fabricated a **phantom `Position`** (size 0) that poisoned the
+  orchestrator's `token_id in executor.positions` dedup, silently skipping later *real*
+  opportunities on that token (and persisting across restart). Fixed by gating the
+  position/fee mutation on an actual fill — `execution.py:1062`
+  (`if result.is_success and result.filled_size > 0:`). Non-tautological tests
+  (`test_live_gate_defense.py:368,384,413`) trip pre-fix; the order is still recorded in
+  `order_history`; paper is unaffected (`_simulate_fill` returns FILLED, filled_size>0).
+- **#242 (venue-credential boot gate)** — a live-enabled host missing the Polymarket order
+  credentials would boot "fine" and fail **every** real order at runtime (executor not
+  authenticated). New `_require_venue_credentials_in_live` model validator
+  (`config.py:183-215`) refuses to boot when `live_trading_enabled` and any of
+  `POLYMARKET_API_KEY/_SECRET/_PASSPHRASE/_PRIVATE_KEY` is unset. Gated on
+  `if self.live_trading_enabled:` (live defaults false) → can never bind paper/dev/CI. Real
+  env-var tests assert boot-time `ValidationError`, incl. a partial-credential case
+  (`test_config_safety.py:49,62,71`). It adds a fail-loud check; weakens nothing.
+- **Prior #240 artifact-framing nit — resolved.** The four newest commits are honestly
+  framed: `087cd27`/`f46de05`/`dfd27e2` are prefixed **"File ROADMAP"** (touch only
+  `ROADMAP.md`/`loop-memory.md`); `33f2d6f` is **"chore: sync"** (`FACTORY_STANDARD.md`).
+  None masquerade as a shipped feature.
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**
+  (import smoke + curated tests + safety + secrets + runtime harness + scorecard-parse +
+  self-validation + GTM-honesty OK; full ruff skipped in CI by design).
+- `scripts/runtime_harness.py` → **PASSED**: live gate REJECTS real order, kill switch
+  blocks, max-position cap rejects $900>$50, loss cap trips **net-of-fees** at −$41.20 vs
+  −$10 and blocks subsequent orders; paper fills, deterministic.
+- `scripts/run_walk_forward.py` twice → **reproduces** bit-identically (`seed_hash
+  b3a8d5e0e9579853`, total PnL 910,880.71; SYNTHETIC demo, labeled NOT a validated edge).
+- `ruff check backend/app --select E9,F821,F811` → **clean**. Secret scan clean (only
+  `.env.example`). `pytest --collect-only` → 1040 collected, 13 errors (all
+  `No module named 'pandas'` — the documented light-gate exclusion).
+- `pytest test_live_gate_defense.py test_config_safety.py` → **27 passed**.
+
+**Grades (fresh adversarial per-dimension graders, none the maker):**
+functional_reality **A**, backtest_integrity **A**, correctness_reliability **A**,
+security **A**, run_risk_readiness **A**, artifact_integrity **A**,
+business_case_strength **B**, design_taste **A**, tests_evals **A**, performance **A**.
+
+**Anti-inflation overrides (held grades DOWN):**
+- **security** — the grader recommended **A+**. I **held it at A**: A+ requires *zero*
+  findings, and the grader itself named a (trivial) nit (the `auth_core` empty-token
+  primitive is misreadable in isolation, though documented + unreachable). Nothing changed
+  this cycle to justify an A→A+ promotion — #242 only adds a boot gate. Textbook A.
+- **correctness_reliability / run_risk_readiness** — the grader leaned **A−** on the
+  unchanged partial-reduce → per-strategy-drawdown-circuit gap (`orchestrator.py:459-463`).
+  Held at **A** (consistent with prior cycles): the binding hard loss caps + kill switch are
+  fully wired on **both** paths; the missing piece is only the *secondary* per-strategy
+  drawdown auto-disable on the non-dominant partial-reduce path. A world-class dim with a
+  named, non-blocking, secondary nit is the textbook A, not a downgrade to B.
+
+**Backtest integrity (make-or-break) — reproduction attempted again:** leak-free
+(structural `MarketView` guard; fetchers reject any tick `> decision_ts`/`>= resolution_ts`
+and RAISE), cost-realistic (single source of truth with the executor), reproducible
+(identical hash + PnL across two runs this cycle). **No new OOS run;** the bucket family
+remains **REFUTED across 4 corpora**, and the B8 cross-venue work is a data-feasibility
+probe with **zero OOS runs** (it pinned the Kalshi orderbook-quote path only). No
+unreproducible backtest, no fabricated PnL, no fabricated edge. Held at **A** (not A+): the
+impact/capacity term is an uncalibrated `impact_coeff=0.5` placeholder.
+
+**Artifact-integrity finding (conservative, corrected):** the prior scorecard reported
+"894 tests"; actual collection is **1040**. Direction is **understated, never inflated**, so
+no integrity violation — but a stale reported metric. Corrected in this scorecard; the
+A→A+ item is "keep the reported count in sync (or cite the curated-green subset)."
+
+**Overall = B:** the sole ship-critical dim below A is **business_case_strength** (no
+validated OOS edge; the only non-crowd alpha family is refuted across four corpora and the
+B8 candidate has not run OOS — THE binding constraint). Ship gate correctly closed.
+
+**Issues:** **#79 kept open + updated** (business case — unchanged binding constraint;
+2026-07-07 grade re-confirms no new edge, B8 still an unbuilt data-eng effort). #241 and
+#242 landed as verified factory fixes (no auditor issue needed — both close cleanly and no
+ship-critical dim regressed).
+
+**Weakest link (honest, unchanged):** still no validated out-of-sample edge — and this
+cycle the factory again earned credit by running its own candidate probe to **no new edge**
+rather than curve-fitting one. Everything downstream stays gated correctly and honestly.
+
+---
+
 ## 2026-07-05 — overall `B` · ship gate NOT met (4th grade — functional_reality recovered B→A; 3 A→A+ nits closed; business_case still the lone binding B)
 
 **Diff vs 2026-07-03:** overall unchanged at **B**, but the composition genuinely
