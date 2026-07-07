@@ -100,3 +100,20 @@ def test_no_edge_verdict_on_calibrated_crowd():
     r = v.evaluate(markets, wf, cal, seed=42)
     assert r["calibration_alpha_b4a"]["trades"] == 0
     assert "NO EDGE" in r["verdict"]
+
+
+def test_report_includes_f11_significance_and_serializes_valid_json():
+    """ROADMAP F11 wiring: every run carries a bootstrap significance block on the tradeable
+    PnL, and the WHOLE report must be RFC-8259-valid JSON (no NaN) even when the alpha trades
+    fewer than min_trades (the common case) — the insufficient_data branch reports None, not NaN."""
+    import json
+    r = v.evaluate(_synthetic(), wf, cal, seed=42)
+    assert "significance_alpha_f11" in r
+    sig = r["significance_alpha_f11"]
+    assert "verdict" in sig and "is_significant_edge" in sig
+    text = json.dumps(r)                       # emits invalid `NaN` tokens if any field is NaN
+    assert "NaN" not in text
+    assert json.loads(text)["significance_alpha_f11"]["verdict"] in {
+        "insufficient_data", "significant_positive", "significant_negative",
+        "indistinguishable_from_zero",
+    }

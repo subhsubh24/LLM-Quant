@@ -50,15 +50,18 @@ class OOSSignificance:
     """
 
     n_trades: int
-    total_pnl_usd: float          # the observed point estimate (payout - budget summed)
-    mean_pnl_usd: float           # observed mean per-trade PnL
-    hit_rate: float               # observed fraction of winning trades
-    total_ci_low: float
-    total_ci_high: float
-    mean_ci_low: float
-    mean_ci_high: float
-    hit_rate_ci_low: float
-    hit_rate_ci_high: float
+    total_pnl_usd: float                    # the observed point estimate (payout - budget summed)
+    mean_pnl_usd: Optional[float]           # observed mean per-trade PnL (None only when n == 0)
+    hit_rate: Optional[float]               # observed fraction of winning trades (None only when n == 0)
+    # CI bounds are None (never NaN) when not assessed (insufficient_data) — mirrors
+    # regime_slice's "not assessed -> None" convention so json.dumps stays RFC-8259 valid
+    # (NaN is not legal JSON and breaks jq / non-Python parsers).
+    total_ci_low: Optional[float]
+    total_ci_high: Optional[float]
+    mean_ci_low: Optional[float]
+    mean_ci_high: Optional[float]
+    hit_rate_ci_low: Optional[float]
+    hit_rate_ci_high: Optional[float]
     alpha: float
     n_bootstrap: int
     min_trades: int
@@ -116,13 +119,17 @@ def bootstrap_oos_significance(
     hit = (sum(1 for w in wins if w) / n) if n else float("nan")
 
     if n < max(1, min_trades):
-        # Not enough trades to bootstrap a meaningful CI — refuse to call it anything.
+        # Not enough trades to bootstrap a meaningful CI — refuse to call it anything. CI
+        # bounds (and mean/hit-rate at n==0) are None, NOT NaN: NaN is not legal JSON and
+        # a downstream json.dumps of this block would emit an invalid `NaN` token that jq
+        # and non-Python parsers reject. None mirrors regime_slice's "not assessed" convention.
         return OOSSignificance(
-            n_trades=n, total_pnl_usd=round(total, 4), mean_pnl_usd=round(mean, 6) if n else float("nan"),
-            hit_rate=round(hit, 6) if n else float("nan"),
-            total_ci_low=float("nan"), total_ci_high=float("nan"),
-            mean_ci_low=float("nan"), mean_ci_high=float("nan"),
-            hit_rate_ci_low=float("nan"), hit_rate_ci_high=float("nan"),
+            n_trades=n, total_pnl_usd=round(total, 4),
+            mean_pnl_usd=round(mean, 6) if n else None,
+            hit_rate=round(hit, 6) if n else None,
+            total_ci_low=None, total_ci_high=None,
+            mean_ci_low=None, mean_ci_high=None,
+            hit_rate_ci_low=None, hit_rate_ci_high=None,
             alpha=alpha, n_bootstrap=n_bootstrap, min_trades=min_trades,
             verdict="insufficient_data", is_significant_edge=False,
         )

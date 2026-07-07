@@ -1,6 +1,7 @@
 """Deterministic tests for the F11 tradeable-edge bootstrap significance gate."""
 
-import math
+import json
+from dataclasses import asdict
 
 from backend.app.prediction_markets.bootstrap_oos_significance import (
     OOSSignificance,
@@ -8,19 +9,31 @@ from backend.app.prediction_markets.bootstrap_oos_significance import (
 )
 
 
-def _big(pnls):
-    """Replicate a small pattern up to a >= min_trades sample without changing its mean."""
-    return (pnls * 10)[:60] if len(pnls) * 10 >= 60 else pnls * 10
-
-
 def test_insufficient_data_below_min_trades():
     r = bootstrap_oos_significance([5.0, -3.0, 4.0], min_trades=30)
     assert r.verdict == "insufficient_data"
     assert r.is_significant_edge is False
     assert r.n_trades == 3
-    # point estimate is still reported honestly, CI is NaN (not fabricated)
+    # point estimate is still reported honestly, CI is None (never fabricated, never NaN)
     assert r.total_pnl_usd == 6.0
-    assert math.isnan(r.total_ci_low) and math.isnan(r.total_ci_high)
+    assert r.total_ci_low is None and r.total_ci_high is None
+
+
+def test_insufficient_data_serializes_to_valid_json():
+    # The common real path (alpha trades < min_trades) must emit RFC-8259-valid JSON:
+    # NaN is not legal JSON and would break jq / non-Python consumers of --json output.
+    r = bootstrap_oos_significance([5.0, -3.0, 4.0], min_trades=30)
+    text = json.dumps(asdict(r))          # would raise/emit `NaN` if a field were NaN
+    assert "NaN" not in text
+    assert json.loads(text)["total_ci_low"] is None
+
+
+def test_zero_trades_reports_none_point_estimates():
+    r = bootstrap_oos_significance([], min_trades=30)
+    assert r.verdict == "insufficient_data"
+    assert r.n_trades == 0
+    assert r.mean_pnl_usd is None and r.hit_rate is None
+    assert "NaN" not in json.dumps(asdict(r))
 
 
 def test_clear_positive_edge_is_significant():
