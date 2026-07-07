@@ -20,7 +20,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, date
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:  # avoid a runtime import cycle; the name is only used in an annotation
+    from .risk_manager import RiskManager
 
 import requests
 
@@ -637,6 +640,13 @@ class PredictionMarketExecutor:
         self.max_position_usd = max_position_usd
         self.max_portfolio_usd = max_portfolio_usd
 
+        # OPTIONAL per-strategy drawdown circuit (ROADMAP D2). The orchestrator sets this to
+        # its RiskManager so the SELL/partial-reduce path can feed realized PnL into the
+        # strategy's drawdown auto-disable (not just the executor's global hard caps). Left
+        # None when the executor runs standalone (e.g. the runtime harness) — then the
+        # SELL/reduce path is a safe no-op for the drawdown circuit, exactly as before.
+        self.risk_manager: Optional["RiskManager"] = None
+
         # HARD LOSS CAPS (ROADMAP D3/D4). Default from settings (MAX_DAILY_LOSS_USD /
         # MAX_TOTAL_LOSS_USD); overridable for tests. Enforced at the execution gate
         # (_check_risk) AND they AUTO-TRIP the kill switch on breach (D4) — not just a
@@ -1126,6 +1136,26 @@ class PredictionMarketExecutor:
                 # trips the cap EARLIER (the conservative, safe direction).
                 entry_fee = DEFAULT_FEE_RATE * pos.avg_entry_price * result.filled_size
                 self.record_realized_pnl(pnl, fees=result.fees + entry_fee)
+                # Feed the per-strategy DRAWDOWN circuit too (ROADMAP D2, the correctness
+                # A->A+ gap the scorecard named). The RESOLUTION path (MTM engine) already
+                # feeds risk_manager.record_pnl; this SELL/partial-reduce path realized PnL
+                # but previously fed ONLY the executor's global hard caps, so a strategy
+                # bleeding on REDUCES tripped the global kill switch but never its own
+                # drawdown auto-disable. Attribute the realized PnL to the position's owning
+                # strategy (pos.strategy — the alpha that opened it). No double-count: a
+                # resolved position settles via the MTM engine, NOT through _update_position,
+                # so each portion's PnL reaches record_pnl exactly once (reduced part here,
+                # held-to-resolution remainder there). Best-effort + None-safe: a risk-manager
+                # hiccup (or a standalone executor with no risk_manager) never breaks a fill.
+                if self.risk_manager is not None:
+                    strategy = (getattr(pos, "strategy", "") or "").strip()
+                    if strategy:
+                        try:
+                            self.risk_manager.record_pnl(strategy, pnl)
+                        except Exception as e:  # pragma: no cover - defensive
+                            logger.warning(
+                                "[EXEC] risk_manager.record_pnl failed for %s: %s", key, e
+                            )
                 pos.size -= result.filled_size
                 if pos.size <= 0.001:
                     # Position closed

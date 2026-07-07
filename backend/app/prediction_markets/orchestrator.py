@@ -456,11 +456,12 @@ class MarkToMarketEngine:
                 # resolution losses never reach its drawdown-based auto-disable, so a
                 # decayed alpha keeps trading. Best-effort + None-safe so a risk-manager
                 # hiccup can never break the resolution/settlement path.
-                # SCOPE (reviewer S2, honest): this closes the RESOLUTION path — the
-                # dominant way binary positions realize PnL (held to settlement). The
-                # SELL/partial-reduce path feeds the executor's caps but does not yet feed
-                # risk_manager.record_pnl; wiring that is a named follow-up (positions are
-                # usually held to resolution, so resolution is the right path to close first).
+                # SCOPE: this is the RESOLUTION path — the dominant way binary positions
+                # realize PnL (held to settlement). The SELL/partial-reduce path now ALSO
+                # feeds risk_manager.record_pnl (via executor.risk_manager, ROADMAP D2), so
+                # the per-strategy drawdown circuit is complete: BOTH realized-PnL paths
+                # (reduce + resolution) reach the strategy's drawdown auto-disable, each
+                # portion exactly once (reduce settles here-vs-there disjointly).
                 if self.risk_manager is not None:
                     try:
                         strategy = (getattr(pos, "strategy", "") or "").strip()
@@ -594,6 +595,11 @@ class PredictionMarketOrchestrator:
         self.risk_manager = risk_manager or RiskManager()
         self.kelly_config = kelly_config or KellyConfig()
         self.mtm_engine = MarkToMarketEngine(self.executor, risk_manager=self.risk_manager)
+        # Wire the SAME RiskManager into the executor so the SELL/partial-reduce path also
+        # feeds the per-strategy drawdown circuit (ROADMAP D2). Without this, only the
+        # resolution path (via the MTM engine above) reached risk_manager.record_pnl, so a
+        # strategy bleeding on reduces never tripped its own drawdown auto-disable.
+        self.executor.risk_manager = self.risk_manager
 
         # Simulation-enhanced pricing and probability tracking
         self.simulation_pricer = EnhancedContractPricer() if EnhancedContractPricer else None
