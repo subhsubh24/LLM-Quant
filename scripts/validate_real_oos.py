@@ -71,6 +71,17 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
         alpha.trades, category_by_market_id=category_by_market_id or None
     )
 
+    # ROADMAP F11 — significance on the TRADEABLE result. F10 (above) flags whether the PnL is
+    # CONCENTRATED; F11 asks the orthogonal question: is the realized PnL distinguishable from
+    # ZERO at all? A green total over a small N is routinely noise (a few lucky longshots), so
+    # the money claim gets the same bootstrap-CI gate B2 puts on the calibration claim. Only a
+    # `significant_positive` verdict (total-PnL CI excludes 0) is candidate edge evidence.
+    sig_mod = _imp("backend.app.prediction_markets.bootstrap_oos_significance",
+                   "app.prediction_markets.bootstrap_oos_significance")
+    alpha_sig = sig_mod.bootstrap_oos_significance(
+        [t.pnl_usd for t in alpha.trades], [t.is_win for t in alpha.trades], seed=seed,
+    )
+
     return {
         "corpus": {
             "n_markets": n, "yes_base_rate": round(sum(outs) / n, 4),
@@ -94,6 +105,17 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
             "top_category_pnl_share": alpha_regime.top_category_pnl_share,
             "top_category_budget_share": round(alpha_regime.top_category_budget_share, 4),
         },
+        "significance_alpha_f11": {
+            "n_trades": alpha_sig.n_trades,
+            "total_pnl_usd": alpha_sig.total_pnl_usd,
+            "total_ci_low": alpha_sig.total_ci_low,
+            "total_ci_high": alpha_sig.total_ci_high,
+            "hit_rate": alpha_sig.hit_rate,
+            "hit_rate_ci_low": alpha_sig.hit_rate_ci_low,
+            "hit_rate_ci_high": alpha_sig.hit_rate_ci_high,
+            "verdict": alpha_sig.verdict,
+            "is_significant_edge": alpha_sig.is_significant_edge,
+        },
         "biases_disclosed": ["liquidity-selection (volumeNum order)", "survivorship (clean-resolution only)",
                              "late-life pinning (decision sampled near resolution)"],
         "verdict": (
@@ -103,8 +125,11 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
             f"alpha took {alpha.n_trades} trades, net ${round(alpha.total_pnl_usd, 2)} OOS"
             + (" — FRAGILE edge (concentration): " + "; ".join(alpha_regime.fragile_reasons)
                if alpha_regime.fragile else "")
+            + f" — F11 significance: {alpha_sig.verdict} "
+            f"(total-PnL 95% CI [{alpha_sig.total_ci_low}, {alpha_sig.total_ci_high}])"
             + " — NOT a validated edge; requires a larger corpus + a passing B2 calibration eval "
-            "+ a NON-fragile (unconcentrated) >= floor result over sufficient N."
+            "+ a NON-fragile (unconcentrated) result whose total-PnL CI EXCLUDES 0 (F11 "
+            "significant_positive) over sufficient N, >= floor."
         ),
     }
 
