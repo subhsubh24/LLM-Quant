@@ -1438,3 +1438,70 @@ calibration + cost-realistic validation surviving the adversarial auditors.
   quantitative figures in the reachable extract.
 - Finding (4): direct `curl` from this session's own network path against all 6 previously-tracked
   domains, same method as 2026-07-01/07-03/07-04 research runs.
+
+---
+
+## 2026-07-07 — Factory run: A8 Manifold (softer PLAY crowd) + B9 per-category map — two real diagnostic findings on the pivoted binding constraint ("where is a crowd beatable?")
+
+Egress OPEN from the factory build env (gamma/manifold/kalshi all HTTP 200). This run BUILT +
+RAN two diagnostics that directly attack the pivoted binding constraint. NEITHER is a validated
+edge; both are honest SEARCH maps (no DoD/floor box ticked).
+
+### Finding A — A8: a reachable Manifold PLAY-money research corpus (NOT proven "softer/beatable" — an auditor corrected the framing)
+- **Hypothesis (falsifiable):** a play-money crowd is less calibrated than the sharp real-money
+  crowds (Polymarket/Kalshi Brier ~0.08–0.09), so a calibration/reasoning method would show an
+  edge there FIRST.
+- **Real run (2026-07-07, `scripts/manifold_research_probe.py`, 7-day decision lead):** 4031 resolved
+  binary markets fetched → **2147 leakage-safe records** (1884 skipped by the leakage guard — no
+  pre-decision bet / lead predates creation, honest). Crowd **Brier 0.144, ECE 0.027, only 18.5%
+  pinned** (base rate 40.9% YES, median price 0.41). An independent auditor's own live run (549
+  records) gave Brier 0.154 — same order, drift-only.
+- **Interpretation (CORRECTED after an adversarial auditor flagged an overclaim — honesty > a
+  flattering read):** the 0.144 Brier is **NOT apples-to-apples** with the real-money crowds' ~0.09.
+  Brier rises with LESS PINNING (Manifold 18.5% vs Polymarket ~70% — a perfectly-calibrated crowd on
+  a lightly-pinned mix scores a much higher Brier) AND with the LONGER decision lead (7d vs 2d), both
+  INDEPENDENT of calibration quality. The honest miscalibration signal is **ECE 0.027 — which is LOW,
+  i.e. the play crowd is actually WELL-calibrated on this sample.** So the correct claim is a
+  **less-pinned, longer-horizon research corpus**, NOT a proven "softer/beatable" crowd. Whether a
+  method can beat it is UNPROVEN (and a play-money edge NEVER transfers to real money anyway).
+- **Verdict: research venue built + informative finding; edge-not-proven.** Manifold is now a
+  reusable method-validation corpus (`manifold_market_data` capability, no creds, research_only).
+  Next: run a real calibration/reasoning method (B4-lite) against this less-pinned play corpus and see if the
+  METHOD produces a B2-passing, F10-non-fragile, F11-significant calibration gain — a METHOD result,
+  never a real-money edge. (PR #252.)
+
+### Finding B — B9: per-category crowd calibration on a 1099-market real Polymarket corpus
+- **Hypothesis:** the aggregate crowd Brier hides category heterogeneity; some category is less
+  efficient (higher ECE) and a better place to aim a future alpha.
+- **Real run (`scripts/per_category_edge_search.py`, 7-day lead, volumeNum, n=1099, agg Brier 0.115,
+  Bonferroni α=0.01 for K=5 assessed categories):**
+  | category | n | crowd Brier | crowd ECE | base | pinned% |
+  |---|---|---|---|---|---|
+  | **Sports** (most_beatable) | 133 | 0.199 | **0.091** | 0.35 | 16% |
+  | General | 425 | 0.150 | 0.057 | 0.35 | 36% |
+  | Economics | 68 | 0.020 | 0.053 | 0.24 | 79% |
+  | Crypto | 105 | 0.055 | 0.045 | 0.10 | 70% |
+  | Politics (sharpest) | 335 | 0.082 | **0.030** | 0.21 | 61% |
+- **Interpretation (honest):** by ECE the crowd looks LEAST calibrated on **Sports** and most
+  calibrated on **Politics** — consistent with political markets being efficient. BUT this is a
+  DIAGNOSTIC map, not an edge: (a) "Sports miscalibrated at 7-day lead" is unsurprising (games not
+  played) and beating it needs a real sports model we don't have; (b) any per-category "edge" must
+  still survive the Bonferroni α=0.01, a real alpha beating the crowd OOS, B2, F10, and F11; (c) the
+  corpus is liquidity-selected (volumeNum) — a known bias. The map SEARCHES; it does not prove.
+- **Verdict: diagnostic built + informative map; edge-not-proven.** Feeds a future targeted alpha
+  (aim at a soft category, not the aggregate). (PR #251.)
+
+### Also shipped this run (integrity infra gating any future edge claim)
+- **F11 (#249):** bootstrap significance CI on the TRADEABLE OOS PnL/hit-rate — a green backtest
+  total is only an edge when the total-PnL CI EXCLUDES zero (the money analog of B2). Now every
+  `validate_real_oos` run carries the F11 verdict; a lucky-longshot positive total is called
+  `indistinguishable_from_zero`.
+- **D2 (#253):** the SELL/partial-reduce path now feeds the per-strategy drawdown circuit (closed a
+  named QUALITY_SCORECARD correctness A→A+ gap).
+- **A3/§14 (#254):** an UNRECOGNIZED Kalshi settlement result is now logged LOUDLY (was DEBUG),
+  making the SELF_VALIDATION "logged LOUDLY" claim honest.
+
+**Binding constraint STANDS:** no validated real-money OOS edge. The pivot ("where is a crowd
+beatable?") now has two real SEARCH maps (Manifold = a reachable less-pinned play corpus, well-calibrated at ECE 0.027; Sports = the least-sharp
+Polymarket category) + the F11/F10/B2 significance net to keep any future claim honest. Next: a real
+method (B4-lite calibration/reasoning) aimed at the soft targets, run through the full net.

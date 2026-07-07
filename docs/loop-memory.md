@@ -1943,3 +1943,51 @@ Cross-run lessons for the autonomous factory loop. Append; read before each run.
   source-level route-registration uniqueness + exercising their pure `compute_*` wrappers (same as
   the existing metrics endpoints). **Lesson: install requirements-ci.txt first to reproduce CI; the
   blocking gate tests pure logic, not the ASGI app boot.**
+
+## 2026-07-07 — 5-PR run: F11 significance + A8 Manifold softer-crowd + B9 per-category map + D2 drawdown + Kalshi log honesty
+Egress OPEN from the factory env. Scouted 8 Haiku (tracks A/B + F + D/E + 4 deep-audit lenses);
+no CRITICAL/HIGH bugs (correctness + live-safety both audited SOUND). Selected the maximal
+file-DISJOINT set on the pivoted binding constraint ("where is a crowd beatable?") + named quality gaps:
+- **F11 (#249):** bootstrap significance CI on the TRADEABLE OOS PnL/hit-rate (new
+  `bootstrap_oos_significance.py` + wired into `validate_real_oos`). Money analog of B2's Brier CI;
+  a green total is only an edge when its CI excludes 0. 2 Sonnet APPROVE (Reviewer A caught a real
+  NaN→invalid-JSON bug on the insufficient_data path → fixed to None, one review cycle).
+- **A8 (#252):** Manifold PLAY-money research venue (`manifold_history_fetcher.py`, reuses the
+  audited `_last_pre_decision_price` guard; research_only, no creds). RAN LIVE: 2147 leakage-safe
+  records, crowd Brier 0.144 / ECE 0.027 / 18.5% pinned. 2 Sonnet APPROVE + ≥3 fresh Opus leakage
+  auditors CANNOT-BREAK. **Auditor honesty catches (both corrected before merge):** (1) FINDING-
+  OVERCLAIMED — the "Brier 0.144 vs ~0.09 = softer crowd" framing is a less-pinning + longer-lead
+  artifact, NOT worse calibration (ECE 0.027 is LOW = well-calibrated); (2) GUARDRAIL-HOLE — a play
+  `HistoricalMarket` is byte-identical to a real-money one, so `research_only` is CONVENTION not
+  structural enforcement (docstring said "by construction" — corrected + named a positive-tag
+  follow-up). **Lesson: an adversarial auditor earns its keep on INTERPRETIVE overclaim, not just
+  code — "well-calibrated at higher Brier" is the pinning/horizon confound; read ECE, not Brier,
+  for calibration. And never claim "enforced by construction" for a property enforced only by
+  labeling + non-wiring.**
+- **B9 (#251):** per-category crowd-calibration diagnostic (`per_category_diagnostics.py`, pure,
+  Bonferroni-corrected, min-N-gated). RAN LIVE on 1099 markets: Sports least-calibrated (ECE 0.091),
+  Politics sharpest (ECE 0.030). A SEARCH map, not an edge. 2 Sonnet APPROVE.
+- **D2 (#253):** SELL/partial-reduce now feeds the per-strategy drawdown circuit (closed the named
+  QUALITY_SCORECARD correctness A→A+ gap; executor gets an optional risk_manager wired by the
+  orchestrator; no double-count — resolution settles via the MTM engine, not `_update_position`).
+- **A3/§14 (#254):** an UNRECOGNIZED Kalshi settlement result is logged LOUDLY (was DEBUG) — makes
+  the SELF_VALIDATION "logged LOUDLY" claim honest; empty (unresolved) stays quiet to avoid spam.
+
+### Lessons
+- **Branch hygiene under concurrent default-branch churn:** the B9 branch got accidentally STACKED
+  on the F11 fix commit (its parent was `bb16b87`, not default) — a `git checkout -B` didn't reset
+  as expected while other work advanced default. Caught it via `git diff origin/default...HEAD --stat`
+  showing F11 files in the B9 diff. Fixed with `git rebase --onto origin/default <f11-fix-sha>`.
+  **Rule: after creating each branch and BEFORE pushing, verify `git diff origin/default...HEAD --stat`
+  shows ONLY that PR's files.** The default branch also advanced mid-run (Quality Auditor merged #250);
+  rebasing each branch onto the fresh default before PR avoided conflicts.
+- **A new alpha needs no live data yet → ship it UNWIRED + a standalone research runner, disjoint
+  from the shared real-money lane.** A8's Manifold probe is a SEPARATE `scripts/manifold_research_probe.py`
+  (not wired into `validate_real_oos`) — this keeps the play-money guardrail crisp (a play-money record
+  can never accidentally feed the real-money floor) AND keeps A8 file-disjoint from F11 (which owned
+  `validate_real_oos.py` this run). Only ONE PR can own a heavily-shared script per run.
+- **Reviewer A's NaN→JSON catch:** `float("nan")` in a dataclass that a downstream `json.dumps`
+  serializes emits an invalid `NaN` token (breaks jq / non-Python parsers). Use `None` for
+  "not assessed" (mirror `regime_slice`), never NaN. Regression test asserts `"NaN" not in json.dumps(...)`.
+- **Anti-padding held:** the deep-audit lenses found NO real defect beyond one MEDIUM living-artifact
+  honesty gap (Kalshi log level) — so no defect-PR was invented; the honest gap became #254.
