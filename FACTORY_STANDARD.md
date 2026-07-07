@@ -752,3 +752,54 @@ consumer waitlist only; a personal tool is a no-op here.) The funnel:
 - **Native-app products (e.g. an iOS app) where a live web demo of the core is infeasible:** substitute
   a REAL screen-recording demo video + a bounded web taste where possible, and use a gated TestFlight/
   closed beta as the "gated beta." Never mark a demo/beta "live" when it isn't (BUILDS ≠ WORKS, §6).
+
+## 35. Structured, itemized memory (no context collapse — ACE discipline)
+The memory files (§10b loop-memory + dead-end ledger, §20 SUCCESS_PATTERNS, GROWTH_MEMORY) are your
+only cross-run brain — a free-form blob rewritten each run loses hard-won detail to brevity bias and
+collapses. Keep them as an ITEMIZED log of stable, addressable entries, not prose:
+- **One entry = one bullet with a stable id + a typed line:** `[id] KIND: insight — CONTEXT — EVIDENCE`.
+  KIND ∈ {pattern, dead-end, incident, decision}. The id is permanent so later runs can reference it.
+- **Update INCREMENTALLY.** Append a new bullet or edit the ONE relevant bullet; NEVER rewrite the whole
+  file into a fresh summary — that is exactly where detail dies. Same discipline the ACE playbook uses:
+  a deterministic itemized merge, not a re-summarized blob.
+- **CURATOR pass (with the deep audit, §10).** Periodically dedup near-identical entries, MERGE them into
+  one higher-level entry (keep the survivor's id so references stay valid), drop the obsolete, and CAP
+  each file. Fewer, sharper entries beat many specific ones — a bloated memory is an unusable memory.
+- **Honest only (anti-gaming):** a `pattern` cites a real merged PR / measured result; a `dead-end` cites
+  the real verifier cause. This is observability + reuse, NOT a ship gate.
+
+## 36. Harness self-improvement — propose → held-out-validate → human-accept (extends §10b)
+The META rule (§10b) is the ONLY channel by which the loop's own operating rules improve, and the accept
+step is HUMAN-GATED BY DESIGN: the loop MUST NOT edit its own routine / `.claude` / CI — the evaluator
+and the permission controls live OUTSIDE the loop that would change them. This boundary is what makes an
+unattended self-improving loop safe (reward-hacking + broken-abstraction risk); never route around it. To
+make each proposal rigorous instead of a vague wish, the `loop: harness improvement proposal` issue
+(opened only on a churning/stuck signal, ≤1/run) MUST contain all five:
+1. **WEAKNESS (verifier-grounded):** the recurring failure pattern mined from LOOP_HEALTH traces — the
+   terminal cause AND the causal mechanism, not the surface symptom (two runs sharing `gate_test` can
+   have different roots).
+2. **BOUNDED EDIT:** the SMALLEST change to an editable surface (a doctrine line, a prompt clause, a
+   checklist item) that resolves it — narrow and addressable, never a rewrite, never task-specific
+   difficulty dressed up as a rule.
+3. **HELD-IN evidence:** the specific past run(s) the edit would have fixed (the reproduction).
+4. **HELD-OUT check:** the passing behaviors it must NOT break — name currently-succeeding runs/changes
+   and argue the edit does not regress them. A proposal with no held-out argument is INCOMPLETE.
+5. **PRESERVE:** what stays unchanged.
+A human (owner / a human-run doctrine sync) accepts or rejects. REJECTED proposals are LOGGED as a
+`decision` entry (§35), never silently dropped — so the same wall re-surfaces with accumulated evidence
+rather than being re-litigated cold each run.
+
+## 37. Diversity — don't collapse onto the same lever every run
+A loop that keeps shipping the SAME category of change run after run is exploiting a local groove, not
+covering the roadmap (the diversity-collapse failure mode).
+- **Track the category** of each shipped change in LOOP_HEALTH (§10b) — e.g. reliability/perf, security,
+  mobile, monetization, design-taste, tests/evals, marketing, business-case.
+- **Novelty check at SELECT time (§1 step B):** if the last ~K runs cluster on one or two categories, the
+  scout sweep must SURFACE and the selection must INCLUDE ≥1 genuinely different, still-value-bar-clearing
+  lens. The lowest-incomplete phase still wins priority — this breaks monoculture, it does NOT license
+  off-roadmap work.
+- **Bounded by the value bar (§5):** novelty NEVER justifies a sub-bar change — a diverse-but-worthless
+  change is still churn. Coverage of REAL work, not variety for its own sake.
+- **Honest signal:** if genuinely only one category has value-bar-clearing work this run (common
+  pre-launch), concentrate there and SAY so in LOOP_HEALTH — forced diversity against an empty field is
+  the same failure inverted.
