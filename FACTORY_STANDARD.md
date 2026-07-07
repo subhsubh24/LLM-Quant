@@ -194,6 +194,17 @@ every UI surface in every factory; product-specific brand/voice/tokens live in V
   Skill is available in the run environment, use it — but this in-repo standard + the gates are the
   guarantee, independent of any skill being installed.)
 
+## 6c. Fix the ROOT CAUSE — never bypass, never band-aid
+When something breaks, fix the underlying CAUSE, not the symptom. NOT fixes (forbidden as the
+resolution): skipping/disabling the failing check or test, catching-and-swallowing the error, loosening
+a threshold/guard to go green, a narrow special-case that leaves the same CLASS of bug live elsewhere,
+or any workaround that hides the problem. REQUIRED instead: diagnose WHY it failed from EVIDENCE
+(observe the real system — §6/§10), fix the actual cause so the whole class CANNOT recur, add a
+regression test that fails LOUD on that cause, and record it. A genuine minimal mitigation to stop the
+bleeding is allowed ONLY if it is EXPLICITLY labeled temporary AND paired with a tracked root-cause
+fix — never left as the answer. A green check bought by weakening the check is a FAILURE, not a fix.
+Reviewers (§4) REJECT band-aids; the readiness auditors (§7) treat a symptom-patch as not-done.
+
 ## 7. Readiness = TWO gates (you may NOT self-certify "ready")
 Declare "ready" / open the single readiness issue ONLY when BOTH pass IN THE SAME RUN:
 - **Gate 1 — mechanical preflight (`scripts/preflight.sh`, exit 0):** re-runs the full
