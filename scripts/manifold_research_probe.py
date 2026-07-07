@@ -60,10 +60,15 @@ def probe(markets, cal_mod) -> dict:
         "price_pinned_pct": round(pinned, 3),
         "price_median": round(statistics.median(prices), 4),
         "interpretation": (
-            "Compare crowd_brier to the sharp real-money crowds (Polymarket/Kalshi ~0.08-0.09). "
-            "A materially HIGHER Brier/ECE here = a softer, more-beatable crowd — a place to "
-            "test a calibration/reasoning method. A method that beats THIS crowd but not the "
-            "real-money crowds is an informative METHOD finding, NOT a real-money edge."
+            "crowd_brier is NOT directly comparable to the real-money crowds' ~0.08-0.09: Brier "
+            "rises with LESS PINNING and a LONGER decision lead INDEPENDENT of calibration quality "
+            "(a perfectly-calibrated crowd on a lightly-pinned mix scores a much higher Brier than "
+            "on a 70%-pinned one). Read pinned_pct + the lead alongside it. The honest miscalibration "
+            "signal is crowd_ece: a LOW ece means the crowd is WELL-calibrated even if its Brier is "
+            "higher (sharpness/horizon artifact, not a soft crowd). Only a MATERIALLY elevated ece "
+            "(vs the real-money crowds at a comparable lead) would suggest a softer, more-beatable "
+            "crowd worth testing a calibration/reasoning method against — and even then a method that "
+            "beats THIS play crowd is a METHOD finding, NEVER a real-money edge."
         ),
     }
 
