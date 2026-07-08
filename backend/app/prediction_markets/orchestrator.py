@@ -270,9 +270,18 @@ def size_from_scan_result(
     # contract count is bet_usd / effective_cost — using the raw price would overstate
     # the position and deploy more cash than bet_usd (ROADMAP C2).
     price = market_price if market_price > 0 else 0.50
-    num_contracts = DEFAULT_COST_MODEL.contracts_for_budget(bet_usd, price)
+    num_contracts = round(DEFAULT_COST_MODEL.contracts_for_budget(bet_usd, price), 1)
 
-    return bet_usd, round(num_contracts, 1)
+    # Keep the ROUNDED order within the per-trade ceiling. Clamping bet_usd above keeps
+    # notional < bet_usd <= cap for any realistic cap, but rounding contracts up to the
+    # nearest 0.1-lot could nudge a very small cap's notional just over — which the gate
+    # would then reject, defeating the resize. Trim to the largest 0.1-lot whose notional
+    # (contracts*price) stays within the cap, so the resized order ALWAYS passes the gate.
+    # No-op for the default $5 cap (already within) and when the cap is disabled.
+    if max_per_trade_usd is not None and num_contracts * price > max_per_trade_usd:
+        num_contracts = int((max_per_trade_usd / price) * 10) / 10.0
+
+    return bet_usd, num_contracts
 
 
 # Type import for MC Kelly (avoids circular imports at module level)
