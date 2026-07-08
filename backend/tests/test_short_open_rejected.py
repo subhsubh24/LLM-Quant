@@ -113,3 +113,41 @@ def test_oversized_sell_that_would_flip_to_short_is_rejected():
     # The original long is untouched.
     pos = ex.positions.get("tok")
     assert pos is not None and pos.side == "long" and pos.size == pytest.approx(100.0)
+
+
+def _legacy_short(token="tok", size=100.0, entry=0.30):
+    """A pre-#215 legacy short row (the only way a side='short' position can exist now:
+    rehydrated from the DB — no in-process path creates one, since the SELL guard blocks it)."""
+    from app.prediction_markets.execution import Position
+    return Position(
+        exchange=Exchange.POLYMARKET, market_id="m1", token_id=token,
+        market_question="Q?", outcome_label="Yes", side="short",
+        size=size, avg_entry_price=entry, current_price=entry,
+        unrealized_pnl=0.0, realized_pnl=0.0, strategy="legacy",
+    )
+
+
+def test_buy_on_a_legacy_short_is_rejected_not_scaled():
+    """D4 named follow-up: a BUY on a token holding a legacy short must be REJECTED, not
+    scaled. Pre-fix, _update_position's BUY branch (keying off req.side, LONG semantics)
+    scaled the short UP and recorded $0 PnL, then any SELL-to-reduce was rejected by the
+    covering-long guard — trapping the position in a corrupted, un-closeable state."""
+    ex = _executor()
+    ex.positions["tok"] = _legacy_short(size=100.0)     # simulate a rehydrated legacy short
+    res = ex.execute(_order("BUY", 50, 0.40))
+    assert res.status == OrderStatus.REJECTED
+    assert "BUY rejected" in (res.error or "")
+    # The short was QUARANTINED, not scaled: size unchanged, no phantom realized PnL.
+    pos = ex.positions.get("tok")
+    assert pos is not None and pos.side == "short" and pos.size == pytest.approx(100.0)
+    assert ex._realized_pnl_total == pytest.approx(0.0)
+
+
+def test_buy_on_a_normal_long_still_scales_in():
+    """The legitimate BUY-to-scale-a-long path is PRESERVED (the guard fires only on shorts)."""
+    ex = _executor()
+    ex.execute(_order("BUY", 100, 0.50))                # open long 100 @ 0.50
+    res = ex.execute(_order("BUY", 100, 0.60))          # scale in
+    assert res.status == OrderStatus.FILLED
+    pos = ex.positions.get("tok")
+    assert pos is not None and pos.side == "long" and pos.size == pytest.approx(200.0)

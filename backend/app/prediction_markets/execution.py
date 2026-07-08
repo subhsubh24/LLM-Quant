@@ -973,6 +973,31 @@ class PredictionMarketExecutor:
                     "market (a SELL may only reduce a held long)"
                 )
 
+        # SIDE-EFFECT INTEGRITY (D4 named follow-up): a BUY on a token that already holds a
+        # ``side="short"`` position must be REJECTED. New shorts cannot be opened (the SELL
+        # guard above blocks that since #215), so a short can only ever be a LEGACY DB row
+        # rehydrated from before that fix — an anomaly. `_update_position`'s BUY branch keys
+        # off `req.side` assuming LONG semantics, so a BUY here would SCALE the short UP and
+        # record $0 realized PnL (never feeding the D3/D4 loss caps), and a later SELL to
+        # reduce it is then rejected by the guard above ("no covering long") — trapping the
+        # position in a corrupted, un-closeable state. Refuse the BUY and QUARANTINE the
+        # anomalous position for manual cleanup (surfaced loudly on rehydrate) rather than
+        # letting the bot compound it. Paper-safe (no short is ever created in-process).
+        if req.side == OrderSide.BUY:
+            pos = self.positions.get(req.token_id)
+            if pos is not None and getattr(pos, "side", "long") == "short":
+                logger.critical(
+                    "[EXEC] BUY rejected on a token holding a legacy short position "
+                    "(token_id=%s, size=%s) — anomalous side='short' row; quarantined for "
+                    "manual cleanup, not scaled by automated trading",
+                    req.token_id, pos.size,
+                )
+                return (
+                    "BUY rejected: token holds a legacy short position (side='short') — "
+                    "quarantined anomaly (shorts cannot be opened since #215); resolve the "
+                    "stale DB row manually rather than scaling it via automated trading"
+                )
+
         # HARD LOSS CAPS (D3) enforced AT THE GATE — defense-in-depth alongside the
         # auto-trip on PnL realization. If realized losses already breach a cap, trip
         # the kill switch (D4) and reject. Caps are config-derived but ENFORCED here,
