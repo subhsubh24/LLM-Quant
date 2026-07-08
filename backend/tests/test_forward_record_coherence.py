@@ -188,6 +188,56 @@ def test_check_resolutions_settles_rehydrated_position(db, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# (b2) check_resolutions RETURNS the settled count — live forward-paper telemetry
+#      (Research Run 16: the method returned None implicitly, so the paper cycle's
+#      `resolutions booked` field was permanently null — dead research telemetry that
+#      could not distinguish "0 settled" from "settlement never ran").
+# ---------------------------------------------------------------------------
+
+def test_check_resolutions_returns_settled_count(db, monkeypatch):
+    _insert_position(db, "TOKW", "42", is_resolved=False, avg=0.4, size=10.0)
+
+    ex = PredictionMarketExecutor(dry_run=True)
+    persistence.load_positions_into_executor(ex)
+    assert "TOKW" in ex.positions
+
+    from app.prediction_markets import polymarket_client as pmc
+
+    won = Market(
+        id="42", condition_id="c", question="Q?", slug="will-x", description="",
+        category="", end_date=None,
+        outcomes=[Outcome(token_id="TOKW", label="Yes", price=1.0, midpoint=1.0, volume=0.0)],
+        total_volume=0.0, liquidity=0.0, active=False, closed=True, resolved=True,
+    )
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_market_by_id(self, market_id):
+            return won
+
+    orig = pmc.PolymarketClient
+    pmc.PolymarketClient = _FakeClient
+    try:
+        settled = MarkToMarketEngine(ex).check_resolutions()
+    finally:
+        pmc.PolymarketClient = orig
+
+    # The one resolved position settled → the count is a real 1 (was None pre-fix).
+    assert settled == 1
+    assert "TOKW" not in ex.positions
+
+
+def test_check_resolutions_returns_zero_when_no_positions():
+    # No open positions → settlement runs and books nothing → a real 0 (not None). This is
+    # the healthy-0 the telemetry must distinguish from "settlement did not run".
+    ex = PredictionMarketExecutor(dry_run=True)
+    assert ex.positions == {}
+    assert MarkToMarketEngine(ex).check_resolutions() == 0
+
+
+# ---------------------------------------------------------------------------
 # (c) get_executor() wires rehydration end-to-end (the production seam)
 # ---------------------------------------------------------------------------
 

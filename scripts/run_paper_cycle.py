@@ -83,6 +83,10 @@ async def _run() -> dict:
     scan = await orch.scan_and_execute()
     # 2) SETTLE: refresh live prices + book realized PnL on resolved paper positions. Mirror
     #    the orchestrator's own _mtm_loop — the resolution logic lives on mtm_engine, not orch.
+    #    `check_resolutions()` returns the COUNT of positions durably settled this cycle (0 when
+    #    none), so the forward-paper telemetry can distinguish "0 booked" (a real, healthy 0)
+    #    from "settlement did not run" (None: no mtm engine) or an error (a string). Before the
+    #    Run-16 fix the method returned None implicitly, so this field was permanently null.
     settled = None
     mtm = getattr(orch, "mtm_engine", None)
     if mtm is not None:

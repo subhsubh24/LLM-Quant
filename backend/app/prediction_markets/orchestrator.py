@@ -346,22 +346,29 @@ class MarkToMarketEngine:
         if updated > 0:
             logger.debug(f"[MTM] Updated {updated} position prices")
 
-    def check_resolutions(self):
+    def check_resolutions(self) -> int:
         """
         Check if any positions have resolved (market settled).
 
         For resolved markets:
         - If we held the winning outcome: realize profit
         - If we held the losing outcome: realize loss
+
+        Returns the COUNT of positions durably settled this cycle (0 when none). This
+        is a live research-integrity signal: the forward-paper cycle (scripts/run_paper_cycle.py)
+        reports it as `resolutions booked`, and the metric must distinguish "0 resolutions
+        occurred" (return 0) from "settlement never ran" (an early guard or an exception).
+        Before this, the method returned None implicitly, so the forward-paper telemetry
+        field was permanently null — dead research telemetry (Research Run 16 finding).
         """
         try:
             from .polymarket_client import PolymarketClient
         except ImportError:
-            return
+            return 0
 
         positions = list(self.executor.positions.items())
         if not positions:
-            return
+            return 0
 
         # Reuse ONE client (and its requests.Session connection pool) across all
         # positions this cycle. The MTM loop runs every ~30s, so the old per-position
@@ -372,7 +379,7 @@ class MarkToMarketEngine:
             client = PolymarketClient()
         except Exception as e:  # never let client init break settlement
             logger.warning(f"[MTM] PolymarketClient init failed; skipping resolution check: {e}")
-            return
+            return 0
 
         resolved = []
         for token_id, pos in positions:
@@ -441,6 +448,7 @@ class MarkToMarketEngine:
         # durable persist makes a settlement hit the loss caps AT MOST ONCE across
         # restarts; a failed persist leaves the position OPEN + uncached to retry next
         # cycle (a delayed settlement, never a double-counted one).
+        settled_count = 0
         for token_id, settlement_price in resolved:
             if token_id in self.executor.positions:
                 pos = self.executor.positions[token_id]
@@ -510,6 +518,9 @@ class MarkToMarketEngine:
                 # succeeded above), so it also won't rehydrate on a restart.
                 del self.executor.positions[token_id]
                 self._resolution_cache[token_id] = True
+                settled_count += 1
+
+        return settled_count
 
     def _persist_resolution(
         self, pos: Position, realized_pnl: float, settlement_price: float
