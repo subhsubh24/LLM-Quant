@@ -117,6 +117,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Baseline security response headers (defense-in-depth for the monitoring surface).
+# Deliberately the NON-BREAKING set: nosniff, clickjacking-deny, a tight referrer policy,
+# and HSTS (only acted on by browsers over HTTPS; inert on plain-HTTP local dev). A strict
+# Content-Security-Policy is intentionally OMITTED — the backend also serves the Swagger
+# `/docs` UI, which pulls its assets from a CDN and uses inline scripts, so a restrictive
+# CSP here would break `/docs`; the API returns JSON where CSP has no effect. These headers
+# add protection and change no response body.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        # Don't clobber a header a route set deliberately.
+        response.headers.setdefault(header, value)
+    return response
+
+
 # Include routes
 app.include_router(router, prefix="/api")
 
@@ -134,11 +159,16 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """Health check endpoint.
+
+    Intentionally MINIMAL: it must not disclose deployment posture to unauthenticated
+    callers. `live_trading_enabled` was previously returned here, letting anyone probe
+    whether the host is armed for real money — reconnaissance with no legitimate public
+    use. Liveness only; sensitive state stays behind the authenticated control routes.
+    """
     settings = get_settings()
     return {
         "status": "healthy",
         "demo_mode": settings.demo_mode,
         "llm_available": settings.has_llm_key,
-        "live_trading_enabled": settings.live_trading_enabled,
     }
