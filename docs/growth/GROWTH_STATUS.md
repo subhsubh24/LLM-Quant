@@ -212,7 +212,81 @@ GROWTH_STATUS:
         — same structural anti-leakage guarantee as polymarket_history_fetcher.py. Once owner
         confirms HuggingFace egress is accessible (OA-16 step 1), run the fetcher to extract
         the political corpus and feed EXP-003.
+    - id: EXP-005
+      name: "Sports-Category Calibration Bucket (targeting the worst-ECE Polymarket category)"
+      status: insufficient-data
+      proposed_date: 2026-07-08
+      tested_date: 2026-07-08
+      real_oos_result: >
+        Research Run 16: fetched 1,095 real leakage-safe 7-day-lead Polymarket records
+        (max_pages=20, unmodified polymarket_history_fetcher + validate_real_oos.evaluate(),
+        seed=42) -> 134 Sports-category markets (crowd_brier=0.1988, base_rate=0.343, 15.7%
+        pinned -- closely reproduces B9's independent 133-market Sports slice from two days
+        earlier). CalibrationBucketStrategy made 0 trades; F11 verdict=insufficient_data (NOT a
+        measured negative). Diagnosis: 134 markets / 10 buckets averages 13.4 training records
+        per bucket even using the WHOLE corpus as training -- below min_bucket_n=30 for every
+        bucket, so the model correctly abstained throughout (the designed anti-fabrication
+        behavior, not a bug). A first attempt at max_pages=40 (targeting ~400+ Sports records)
+        hit Gamma's own pagination ceiling (422 at offset~2100) plus a 280s wall-clock budget
+        before finishing -- a future attempt needs more wall-clock budget and/or --merge-style
+        accumulation across runs, not just a bigger max_pages in one shot.
+      edge_source: "crowd-miscalibration, category-targeted (in-scope per PLAYBOOK)"
+      hypothesis: >
+        A CalibrationBucketStrategy fit EXCLUSIVELY on Polymarket's Sports-category resolved
+        markets (7-day decision lead) produces a positive, non-fragile (F10), F11-significant
+        net OOS PnL -- motivated by B9 (2026-07-07): Sports carries the worst per-category ECE
+        (0.091) of 5 Polymarket categories assessed, i.e. the crowd looks least-calibrated there.
+        A new, not-previously-tested slice (distinct from EXP-002 "all categories" / EXP-003
+        "politics").
+      min_sample_n: 100
+      oos_plan: >
+        Fetch a Sports-only leakage-safe corpus (filter HistoricalMarket.category=="Sports" from
+        the existing polymarket_history_fetcher + market_category derivation), pre-registered
+        seed + decision_lead_days=7, single run through the unmodified
+        validate_real_oos.evaluate() harness (same F10/F11 machinery as EXP-002/B4a). NEXT
+        ATTEMPT needs a materially larger Sports-only N (>=300-400, so the dominant price
+        buckets can plausibly clear min_bucket_n=30 even inside walk_forward's expanding
+        window) -- budget more wall-clock time or accumulate via --merge across multiple runs
+        rather than a single large max_pages call (which timed out this run).
+      cost_assumptions: "2% fee + 0.5% slippage (cost_model.py); unmodified, moot at 0 trades."
+      significance_threshold: "F11 bootstrap CI on total OOS PnL must exclude 0; F10 non-fragile; B2 Bonferroni if screened jointly with EXP-002/003."
+      how_it_could_be_wrong:
+        - "Sports' high ECE (B9) may be driven by genuinely unpredictable in-game variance (injuries, upsets), not a systematic PRICE-LEVEL miscalibration a bucket model can exploit -- 'least calibrated' does not imply 'beatable by this mechanism.'"
+        - "The bucket-calibration family (static + recency) is already CONFIRMED non-robust across 4 general corpora (2026-07-04) -- a Sports-only slice of the SAME mechanism could show the identical sign-instability once N is large enough to trade at all."
+        - "Sports markets resolve on short horizons (game-day) -- at a 7-day lead many are still pre-season/early, so the 'least calibrated' signal from B9 (also 7-day lead) may itself reflect thin early-life liquidity rather than a persistent crowd bias worth trading."
+        - "Liquidity-selection bias (volumeNum order) still applies -- popular (heavily-arbed) Sports markets dominate the sample."
+      blocking_dependency: "N=134 is below the floor for the 10-bucket model to activate on any bucket. Needs a larger Sports-only fetch (loop-buildable, egress open from at least the research-agent's own environment; unconfirmed for the autonomous factory build-loop this specific run -- re-probe per standing discipline)."
+      factory_next_action: >
+        Not retried this run (more N, not a re-roll, is the honest next step). A future run:
+        fetch a much larger raw corpus (budget >=10 min wall-clock, or accumulate via --merge
+        across several runs) to reach >=300-400 Sports-category leakage-safe records, then
+        re-run validate_real_oos.evaluate() on the Sports-only slice ONCE with the same
+        pre-registered params (seed=42, decision_lead_days=7, no retry after seeing the number).
   learnings:
+    - "Research Run 16 (2026-07-08): URGENT — `MarkToMarketEngine.check_resolutions()`
+      (orchestrator.py:322-485) has NO return statement (always implicitly returns None), so
+      `run_paper_cycle.py`'s `\"resolutions\"` JSON field has been structurally incapable of
+      ever showing non-null since OA-17 went live — independent of whether positions actually
+      resolved. Compounding: `grep -rn basicConfig backend/ scripts/` = ZERO matches anywhere in
+      this codebase, so the root logger has no handler and Python's `logging.lastResort` silently
+      discards every INFO-level log (incl. the one `[MTM] Position resolved` line that would
+      prove a resolution fired) — confirmed by cross-referencing 9+ live-validation.yml logs
+      (2026-07-02→07-08): a sibling WARNING-level line (`persistence.py:256`, legacy-short
+      rehydration) DOES appear in every log; the INFO-level MTM line appears in NONE. Both bugs
+      are REPORTING-only (the underlying persist/PnL/position-removal side effects are untouched
+      by either) but together they mean Research Runs 12/13/15's \"still zero resolutions, just
+      elapsed time\" diagnosis was reading a signal that could never have shown otherwise even if
+      resolutions WERE accumulating. Reclassify the forward-paper resolution count as UNKNOWN,
+      not ZERO, until fixed (loop-buildable: (a) `check_resolutions()` should return a summary;
+      (b) add `logging.basicConfig(level=logging.INFO)` at the `run_paper_cycle.py` entrypoint).
+      Also this run: EXP-005 (Sports-category CalibrationBucketStrategy, targeting B9's
+      worst-ECE category) — insufficient data at N=134 (mechanism correctly abstained, every
+      price bucket below min_bucket_n=30; needs a much larger Sports-only fetch next attempt,
+      budgeted for more wall-clock time). Egress reconfirmed 5/6 open (dune.com still 403). A
+      WebFetch-summarized \"Yes Bias mention-market, 10pp overpricing, N=1447\" claim was
+      CROSS-CHECKED against the paper's real abstract and found to be an over-summarization, not
+      a verified figure — logged as a methodology caution, not a new finding. Full detail:
+      RESEARCH_MEMORY 2026-07-08 (Research Run 16)."
     - "Factory run (2026-07-05, 2nd): B8 cross-venue coherence RESOLVED-history feasibility PROBE (deeper than the 1st run's live-list probe; egress open). 500 resolved Polymarket markets by volume → 15 numeric-threshold (BTC/ETH TOUCH); 3000 settled Kalshi markets via the general /markets list → 0 clean single numeric-threshold binaries (dominated by KXMVECROSSCATEGORY multi-leg concatenated combos → matcher correctly refuses). Kalshi HAS 254 crypto series but reachable ONLY per-series with strikes in STRUCTURED cap_strike/floor_strike fields (not the title text extract_threshold parses), AND a SEMANTIC mismatch: Kalshi KXBTCMAXY=barrier / KXBTCD=terminal vs Polymarket=touch → same asset, different resolution mechanics. So B8 is a multi-run data-eng effort (per-series discovery + structured-strike parser + touch/barrier-vs-terminal classification + curated numeric universe), NOT runnable this run; NOT built (speculative infra per DECISION COROLLARY). Binding constraint (no robust alpha) STANDS. Probe reproduced/deepened the 1st run's finding — no fake result."
     - "Factory run (2026-07-05, 2nd): #238 (A2/A5) — volume/liquidity finiteness guard. A malformed 'nan'/'inf' volume coerces through float() but NaN<min_volume is False, so a no-real-volume market PASSED the strategy BUY-gate filter (Market.volume_below() returns False on NaN) — the same invented-data-into-the-decision class the Quality Auditor graded ship-critical for fabricated volume=10000 (#165). Prices were already math.isfinite-guarded; this closed the volume/liquidity asymmetry (polymarket_client._parse_market never assigns a non-finite; kalshi_client._to_float rejects non-finite). 6 regression tests proven fail-pre-fix in the already-gated suites. 2 Sonnet reviewers first-pass APPROVE (both reverted the source to confirm the decision-flip). Ingest honesty on the live scan path; no DoD/floor box (not a validated edge). QUALITY-GRADE-RECONCILE: the scorecard's functional_reality=B (#165, strategies.py:1451-1457) is ALREADY FIXED in code (#203, _volume_unavailable guard) — the scorecard is stale, not open; sole ship-critical gap is business_case_strength=B (no validated OOS edge = the binding constraint)."
     - "Research Run 15 (2026-07-05): the forward-paper track record (OA-17) is STILL at zero
@@ -307,6 +381,25 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "URGENT, loop-buildable, no owner/data action needed (Research Run 16, 2026-07-08): the
+      forward-paper track record's OWN resolution telemetry cannot currently prove or disprove
+      that any position has ever resolved. `MarkToMarketEngine.check_resolutions()`
+      (orchestrator.py:322-485) never returns a value (falls off the end → implicit None), so
+      `run_paper_cycle.py`'s `\"resolutions\"` JSON field (run_paper_cycle.py:86-100) is a
+      structural constant (`null`), not a signal — true whether 0 or 50 positions settled this
+      cycle. Separately, `basicConfig` is called NOWHERE in backend/ or scripts/ (grep-confirmed),
+      so the root logger has no handler and Python's `logging.lastResort` silently drops every
+      INFO-level record — including the one `[MTM] Position resolved` line
+      (orchestrator.py:475) that would prove a resolution fired in the GH Actions job log.
+      Fix (two independent, small, loop-buildable changes): (a) have `check_resolutions()`
+      `return` a summary dict (resolved count + net PnL) instead of falling off the end;
+      (b) add `logging.basicConfig(level=logging.INFO)` at `run_paper_cycle.py`'s entrypoint (a
+      systemic gap — zero basicConfig calls anywhere, not MTM-specific) so INFO-level events
+      are actually captured. Until fixed, do NOT read \"resolutions: null\" as evidence that
+      zero positions have resolved — the correct framing is UNKNOWN, and the three prior
+      research-run diagnoses (Runs 12/13/15) built on \"just elapsed time\" should be understood
+      as unverifiable, not necessarily wrong. Full detail: RESEARCH_MEMORY 2026-07-08 (Research
+      Run 16)."
     - "NEW, loop-buildable, not yet built (Research Run 15, 2026-07-05): a 'mention/narrative
       market' classifier (keyword/tag heuristic in the style of market_category.py — question
       patterns like 'will X say/tweet/mention Y') would unlock testing the 'Yes Bias' candidate
