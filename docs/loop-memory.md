@@ -2049,3 +2049,79 @@ maximal file-DISJOINT value-bar-clearing set was 3 code PRs + this bookkeeping:
 - **Anti-padding held under a big scout haul:** 8 scouts surfaced ~15 candidate items; only 3 were
   genuine + buildable + not-already-done. The rest were stale/moot/unreachable/speculative and were
   triaged OUT with recorded reasons — not shipped as filler.
+
+## 2026-07-08 (model/strategy factory) — 3-PR run: NearCertainty edge-units correctness + MAX_PER_TRADE_USD enforcement + security headers
+
+Egress OPEN. Ran the full 8-Haiku scout sweep (binding-constraint alpha, model/alpha
+correctness, backtest-integrity, risk/live-safety, learning-infra, quality/tests,
+security/secrets, quality-reconcile+self-validation). Binding constraint STANDS
+(business_case_strength B — no validated real-money OOS edge). Shipped the maximal
+file-DISJOINT value-bar-clearing set: 3 code PRs across 3 distinct lenses (correctness /
+safety / security) + this bookkeeping. 6 first-round Sonnet reviewers (all worktree-isolated),
+0 reverts.
+
+- **#263 (B/correctness):** `NearCertaintyStrategy` (the ACTIVE default paper scanner) emitted
+  `edge = expected_value / price` — a RELATIVE return — but the orchestrator reconstructs
+  `win_probability = entry_price + result.edge` uniformly for every strategy (no per-strategy
+  branch), so `edge` must be in ABSOLUTE probability units (`true_prob − price`). `expected_value`
+  already equals that (binary-bet EV = true_prob − price = confidence − price). The `/price`
+  inflated win_probability above the strategy's own `confidence` (0.95→0.9816 vs 0.98) and, at
+  the low end of the [0.80,0.99] band, ABOVE 1.0 (0.80→1.025) — a garbage Kelly input → systematic
+  over-sizing. Fix = emit the absolute EV. 2 Sonnet APPROVE (both reproduced the 1.025 figure).
+- **#264 (D3/safety):** `max_per_trade_usd` (config default $5) was read NOWHERE — an owner
+  setting MAX_PER_TRADE_USD got ZERO protection (only max_position_usd=$50, 10× looser, gated a
+  single order). Wired it: optional executor param (None=gate off, all direct/harness constructions
+  bit-identical), `_check_risk` gate, and `get_executor` reads settings (fail-loud $5 fallback).
+  Two review cycles hardened it: (A) don't DROP over-cap Kelly bets at the gate (starves the
+  paper-validation loop) → CLAMP/resize down to the cap in `size_from_scan_result`; (B) a NON-round
+  cap ($1.17@0.65) float-reconstructs notional a sub-nanocent over → gate-rejects the resized
+  order → 1e-9 money-precision tolerance on the gate + the trim guard. Both REQUEST_CHANGES
+  resolved with the reviewers' exact prescriptions + a test that fails without each fix.
+- **#265 (G/security):** baseline security response headers (nosniff / frame-DENY / referrer /
+  HSTS) via middleware — deliberately NO CSP (would break the Swagger /docs CDN+inline UI); and
+  `/health` no longer leaks `live_trading_enabled` (unauth recon of real-money posture). 2 Sonnet
+  APPROVE (verified /docs still 200, no /health consumer).
+
+### Scout triage (anti-padding — findings deemed NOT-genuine or DEFERRED, recorded so future runs don't re-raise)
+- **Binding-constraint alpha (Sports high-YES NO-reversal, Scout Rank 1):** DEFERRED — a concurrent
+  research routine (#262, Run 16) had ALREADY probed the Sports bucket → "insufficient data". A
+  rushed second attempt would duplicate an inconclusive probe and risk p-hacking. A great backtest
+  that isn't real is worse than none — the binding constraint stays a genuine research problem.
+- **backtest_integrity impact-coeff calibration (cost_model.py:38-44 DEFAULT_IMPACT_COEFF=0.5):**
+  DEFERRED — the impact term is DORMANT (depth never populated in the fetchers), so the placeholder
+  affects NO current backtest result; real calibration is a multi-week data-eng effort. Not this-run
+  buildable to genuine A→A+; the scorecard gap is real but not tractable now.
+- **E4 auto-retirement wiring (learning scout GO):** DEFERRED per DECISION COROLLARY — zero promoted
+  strategies + no real PnL stream, so it changes only TEST-harness behavior, not the real paper run;
+  and retiring on RAW lifetime PnL without significance gating is the exact noise-reaction E7 warns
+  against (wrong design order).
+- **WeatherArb edge formula (strategies.py:166, model-correctness scout):** DROP — a real formula
+  quirk but on a strategy GATED OFF behind ENABLE_UNVALIDATED_STRATEGIES (dormant/unvalidated);
+  fixing invisible math on off-by-default code is churn (consistent with prior runs).
+- **Theater init-tests in experimental Phase 13/15 modules (quality scout):** DROP — non-gated
+  experimental code the loop deliberately LEAVES; tightening weak `is not None` asserts = churn.
+- **Scorecard reconcile:** gap (a) SELL/partial-reduce→drawdown circuit is STALE-CLOSED (#253, after
+  the 2026-07-07 scorecard); test-count drift (1040→1421) and impact-coeff are scorecard-owned figures
+  the maker does NOT write. Self-validation CLEAN (11 caps, unmet=[], all creds declared, no stub-
+  masquerade). Security scout NOTHING-GENUINE critical.
+
+### Lessons
+- **`edge` has a UNITS CONTRACT enforced implicitly by the orchestrator.** Every ScanResult.edge is
+  read as `win_probability = entry_price + edge`, so a strategy that computes edge in ANY other unit
+  (relative return, odds, %) silently mis-sizes. When adding/auditing a strategy, assert
+  `entry_price + edge == its stated win-prob/confidence`. A `win_probability > 1` fed to Kelly is the
+  tell. (#263)
+- **A per-trade risk CEILING must RESIZE, not DROP.** Enforcing a notional cap only at the execution
+  gate silently rejects ordinary Kelly-sized bets (Kelly max $50 vs a $5 cap) → starves the
+  validation loop. The correct semantics: clamp the bet DOWN to the cap in the sizer (sub-Kelly, safe
+  direction) and keep the gate as a defense-in-depth backstop. (#264)
+- **Money comparisons need an epsilon.** A resized order at a NON-round cap reconstructs notional a
+  sub-nanocent over via IEEE-754 (1.8×0.65 == 1.17 but 1.17000000000000002 in float), and a
+  zero-tolerance gate rejects it. 1e-9 tolerance on money caps is correct hygiene (a real breach is
+  ≥1¢), NOT guard-weakening — but test it with NON-round caps + a cent sweep, since clean $0.10-lot
+  fixtures never expose it. (#264 delta review)
+- **Worktree-isolated reviewers worked flawlessly (adopted last run):** 6 concurrent Sonnet reviewers
+  in their own worktrees, ZERO shared-tree checkout races (the recurring hazard). Keep doing this.
+- **Concurrent routines can pre-empt your candidate:** the Sports-bucket alpha the alpha-scout ranked
+  #1 was already probed → insufficient by a sibling research run (#262) that merged mid-run. Re-read
+  the default branch log after the scout sweep — a candidate may already be answered.
