@@ -126,21 +126,26 @@ def test_clamped_order_passes_the_executor_gate():
 
 
 def test_resized_order_never_exceeds_cap_even_for_tiny_caps_and_rounding():
-    # Rounding contracts to 0.1-lots could otherwise nudge a very small cap's notional over
-    # the ceiling (e.g. cap $0.50 @ price 0.51). The contract trim guarantees the resized
-    # order's notional stays within the cap for ALL cap/price combos, so it always passes.
+    # Rounding contracts to 0.1-lots could otherwise nudge a small cap's notional over the
+    # ceiling, and even the trimmed 0.1-lot can reconstruct a sub-nanocent over a NON-round
+    # cap in float (e.g. cap $1.17 @ price 0.65: 1.8*0.65 == 1.17 but 1.17000...02 in float).
+    # The trim + the gate's 1e-9 money-precision tolerance together guarantee the resized
+    # order passes for ALL cap/price combos — including non-round caps and a cent sweep.
     from app.prediction_markets.orchestrator import size_from_scan_result, KellyConfig
 
     cfg = KellyConfig(use_monte_carlo=False)
-    for cap, price in [(0.50, 0.51), (0.30, 0.99), (1.0, 0.97), (5.0, 0.50), (0.10, 0.13)]:
+    explicit = [(0.50, 0.51), (0.30, 0.99), (1.0, 0.97), (5.0, 0.50), (0.10, 0.13),
+                (1.17, 0.65), (2.33, 0.37), (0.77, 0.19)]  # last three are non-round caps
+    # Plus a cent-precision sweep — the reviewer's brute force found float-noise violations
+    # only at non-round caps; assert none survive.
+    sweep = [(c / 100.0, p / 100.0) for c in range(11, 300, 17) for p in range(5, 99, 13)]
+    for cap, price in explicit + sweep:
         _bet, contracts = size_from_scan_result(
             _scan_result(edge=0.10, entry_price=price), bankroll=1000.0,
             config=cfg, max_per_trade_usd=cap,
         )
-        notional = contracts * price
-        assert notional <= cap + 1e-9, f"cap={cap} price={price}: notional {notional} > cap"
         ex = PredictionMarketExecutor(
-            dry_run=True, max_position_usd=50.0, max_portfolio_usd=500.0, max_per_trade_usd=cap
+            dry_run=True, max_position_usd=1e9, max_portfolio_usd=1e9, max_per_trade_usd=cap
         )
         if contracts > 0:
             res = ex.execute(_order(size=contracts, price=price))

@@ -274,11 +274,16 @@ def size_from_scan_result(
 
     # Keep the ROUNDED order within the per-trade ceiling. Clamping bet_usd above keeps
     # notional < bet_usd <= cap for any realistic cap, but rounding contracts up to the
-    # nearest 0.1-lot could nudge a very small cap's notional just over — which the gate
+    # nearest 0.1-lot could nudge a small cap's notional materially over — which the gate
     # would then reject, defeating the resize. Trim to the largest 0.1-lot whose notional
-    # (contracts*price) stays within the cap, so the resized order ALWAYS passes the gate.
-    # No-op for the default $5 cap (already within) and when the cap is disabled.
-    if max_per_trade_usd is not None and num_contracts * price > max_per_trade_usd:
+    # (contracts*price) stays within the cap. The executor gate carries a matching 1e-9
+    # money-precision tolerance so a non-round cap's sub-nanocent float noise (e.g. 1.8*0.65
+    # == 1.17 mathematically but 1.17000000000000002 in float) can't reject the resized
+    # order. Together the resized order always passes the gate. No-op for the default $5 cap
+    # (already within) and when the cap is disabled. NB: a hard per-trade cap below
+    # KellyConfig.min_bet_usd intentionally WINS over that soft floor (the risk ceiling is
+    # authoritative), so a sub-$1 cap may execute a below-floor trade — the safe direction.
+    if max_per_trade_usd is not None and num_contracts * price > max_per_trade_usd + 1e-9:
         num_contracts = int((max_per_trade_usd / price) * 10) / 10.0
 
     return bet_usd, num_contracts

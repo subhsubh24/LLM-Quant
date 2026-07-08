@@ -1024,7 +1024,12 @@ class PredictionMarketExecutor:
         # PER-TRADE ceiling (D3) — a SINGLE order can never deploy more than the owner's
         # MAX_PER_TRADE_USD. Checked before the per-position cap so the tighter bound wins
         # and the rejection message names the right ceiling. None => gate disabled.
-        if self.max_per_trade_usd is not None and notional > self.max_per_trade_usd:
+        # The 1e-9 is float-noise tolerance on a MONEY comparison: a legitimately resized
+        # order can reconstruct notional a sub-nanocent above a NON-round cap purely from
+        # IEEE-754 rounding (e.g. 1.8 contracts * 0.65 == 1.17 mathematically but
+        # 1.1700000000000002 in float). A real breach is >= 1 cent, so this never admits an
+        # actually-oversized order — it only stops float noise from rejecting a good one.
+        if self.max_per_trade_usd is not None and notional > self.max_per_trade_usd + 1e-9:
             return (
                 f"Order notional ${notional:.2f} exceeds max per-trade "
                 f"${self.max_per_trade_usd:.2f}"
