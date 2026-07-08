@@ -28,7 +28,7 @@ active flow depends on an unvalidated path. Live real-money keys are HUMAN-CORE 
 
 ```yaml
 SELF_VALIDATION:
-  as_of: 2026-07-07
+  as_of: 2026-07-08
   # ci_validatable: can the gate REALLY validate this with NO owner-only secret? An ACTIVE
   # capability with ci_validatable:false is UNMET -> it surfaces (urgent OWNER_ACTION +
   # LOOP_HEALTH validation.unmet) and blocks merges. real_flow_note (pitfall #5): for a
@@ -121,12 +121,12 @@ SELF_VALIDATION:
       status: validated
     - id: manifold_market_data
       desc: "read public Manifold Markets data + assemble leakage-safe resolved history (no auth) — RESEARCH ONLY (PLAY MONEY)"
-      validates_via: "test_manifold_history_fetcher.py — parse + anti-leakage core exercised offline with injected bet histories (decision price is a pre-decision probAfter; settled outcome never the decision price; RAISES rather than fabricating)"
+      validates_via: "test_manifold_history_fetcher.py (now REGISTERED in the blocking preflight gate, #258) — parse + anti-leakage core exercised offline with injected bet histories (decision price is a pre-decision probAfter; settled outcome never the decision price; RAISES rather than fabricating). STRUCTURAL research-only guardrail (#259): records carry research_only=True and the real-money floor lane (validate_real_oos.evaluate) REFUSES them — test_validate_real_oos.test_floor_lane_refuses_research_only_play_money_records"
       mode: mocked_offline
       requires_env: []              # NO credentials required; Manifold market data is public
       active: true
       ci_validatable: true          # no secret needed; parsing + anti-leakage tested on injected fixtures; live probe is a thin read
-      real_flow_note: "RESEARCH ONLY — Manifold is PLAY MONEY. A Manifold finding validates the METHOD (can a model beat a softer crowd?) and NEVER counts toward the profit floor, go-live-eligibility, or any real-money decision. NO orders, NO money, NO credentials. The critical logic is PARSING + anti-leakage (offline fixtures); the live read (scripts/manifold_research_probe.py) is a thin GET with no side-effect. Live probe RAN 2026-07-07: 2147 leakage-safe records, crowd Brier 0.144, ECE 0.027, only 18.5% pinned (7-day lead). HONEST framing (per an adversarial auditor): the 0.144 Brier is NOT apples-to-apples with the real-money crowds' ~0.09 — it is driven by far LESS pinning (18.5% vs ~70%) + a longer lead (7d vs 2d), not worse calibration; ECE 0.027 is LOW, so the play crowd is actually well-calibrated on this sample. So this is a less-pinned/longer-horizon research corpus, NOT proven a 'softer, beatable' crowd — a method must still be run and beat it OOS."
+      real_flow_note: "RESEARCH ONLY — Manifold is PLAY MONEY. A Manifold finding validates the METHOD (can a model beat a softer crowd?) and NEVER counts toward the profit floor, go-live-eligibility, or any real-money decision. NO orders, NO money, NO credentials. The critical logic is PARSING + anti-leakage (offline fixtures); the live read (scripts/manifold_research_probe.py) is a thin GET with no side-effect. Live probe RAN 2026-07-07: 2147 leakage-safe records, crowd Brier 0.144, ECE 0.027, only 18.5% pinned (7-day lead). HONEST framing (per an adversarial auditor): the 0.144 Brier is NOT apples-to-apples with the real-money crowds' ~0.09 — it is driven by far LESS pinning (18.5% vs ~70%) + a longer lead (7d vs 2d), not worse calibration; ECE 0.027 is LOW, so the play crowd is actually well-calibrated on this sample. So this is a less-pinned/longer-horizon research corpus, NOT proven a 'softer, beatable' crowd — a method must still be run and beat it OOS. (2026-07-08: the 'materially softer crowd' overclaim was corrected across ROADMAP/loop-memory/LOOP_HEALTH to match THIS framing; and the research-only property is now STRUCTURALLY enforced, not convention-only — #259.)"
       status: validated
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.

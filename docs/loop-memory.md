@@ -1954,8 +1954,10 @@ file-DISJOINT set on the pivoted binding constraint ("where is a crowd beatable?
   NaN→invalid-JSON bug on the insufficient_data path → fixed to None, one review cycle).
 - **A8 (#252):** Manifold PLAY-money research venue (`manifold_history_fetcher.py`, reuses the
   audited `_last_pre_decision_price` guard; research_only, no creds). RAN LIVE: 2147 leakage-safe
-  records, crowd Brier 0.144 vs ~0.09 → a materially softer, less-pinned crowd. 2 Sonnet APPROVE +
-  ≥3 fresh Opus leakage auditors CANNOT-BREAK.
+  records, crowd Brier 0.144 / ECE 0.027 / 18.5% pinned — a LESS-PINNED, longer-horizon corpus,
+  NOT proven softer/beatable (corrected 2026-07-08: the 0.144-vs-~0.09 Brier gap is the pinning
+  (18.5% vs ~70%) + 7d-lead confound, NOT worse calibration; ECE 0.027 is LOW = well-calibrated).
+  2 Sonnet APPROVE + ≥3 fresh Opus leakage auditors CANNOT-BREAK.
 - **B9 (#251):** per-category crowd-calibration diagnostic (`per_category_diagnostics.py`, pure,
   Bonferroni-corrected, min-N-gated). RAN LIVE on 1099 markets: Sports least-calibrated (ECE 0.091),
   Politics sharpest (ECE 0.030). A SEARCH map, not an edge. 2 Sonnet APPROVE.
@@ -1983,3 +1985,67 @@ file-DISJOINT set on the pivoted binding constraint ("where is a crowd beatable?
   "not assessed" (mirror `regime_slice`), never NaN. Regression test asserts `"NaN" not in json.dumps(...)`.
 - **Anti-padding held:** the deep-audit lenses found NO real defect beyond one MEDIUM living-artifact
   honesty gap (Kalshi log level) — so no defect-PR was invented; the honest gap became #254.
+
+## 2026-07-08 — 3-PR run: significance-net gating + Manifold structural guardrail + legacy-short quarantine (+ Manifold overclaim honesty fix)
+
+Egress OPEN. Ran the full 8-Haiku scout sweep (B8 next-step, new-alpha, quality-reconcile,
++ 4 deep-audit lenses: correctness / live-safety / leakage / artifact-honesty, + F-coverage).
+The binding constraint STANDS: no validated real-money OOS edge (business_case_strength B).
+Most scout "findings" were correctly triaged as stale/moot/unreachable (anti-padding); the
+maximal file-DISJOINT value-bar-clearing set was 3 code PRs + this bookkeeping:
+
+- **#258 (F/§26):** registered the 3 UNREGISTERED significance-net test suites
+  (F11 bootstrap_oos_significance, B9 per_category_diagnostics, A8 manifold_history_fetcher)
+  in the blocking preflight gate — the net that VETOES false edge claims could previously
+  ship a regression green. + fixed a confirmed RFC-8259 JSON hole (per_category_diagnostics
+  aggregate_crowd_brier float("nan")→None on empty corpus, serialized by --json). 2 Sonnet
+  APPROVE (B ran the full gate: 1055 passed).
+- **#259 (A8):** the STRUCTURAL research-only guardrail (the named A8 follow-up) — a positive
+  `research_only` tag on HistoricalMarket (metadata, EXCLUDED from _seed_hash like `category`),
+  stamped True by the Manifold fetcher, and REFUSED (fail-loud) by the real-money floor lane
+  (validate_real_oos.evaluate). Play money can no longer inflate the real-money floor even by
+  copy-paste — was convention-only. 2 Sonnet APPROVE (seed_hash 8dc358439ffb5746 unchanged).
+- **#260 (D4 follow-up):** quarantine a legacy `side="short"` position — _check_risk REJECTS a
+  BUY-on-short (was: scaled it UP recording $0 PnL, then SELL-to-reduce rejected → trapped/
+  corrupted), + a loud rehydrate WARNING. Gated-live defense-in-depth for a legacy-DB anomaly
+  (no in-process path creates a short since #215). 2 Sonnet APPROVE.
+- **Bookkeeping (this PR):** corrected the Manifold OVERCLAIM the prior run left on default
+  (ROADMAP A8:50, loop-memory:1957, LOOP_HEALTH last_run all said "materially softer crowd") —
+  ECE 0.027 is LOW (well-calibrated); the 0.144-vs-0.09 Brier gap is the pinning(18.5% vs ~70%)
+  + longer-lead(7d) confound, NOT worse calibration. So Manifold is a LESS-PINNED research
+  corpus, NOT a proven softer/beatable crowd. (SELF_VALIDATION already had the honest framing;
+  the anchors did not.) Closed stale bookkeeping PR #255 (its correction folded in here).
+
+### Scout triage (anti-padding — findings deemed NOT-genuine, recorded so future runs don't re-raise)
+- **calibration.py / calibration_drift.py NaN→JSON** (leakage scout findings 2,4): MOOT — the
+  wired API path sanitizes via `_safe_float` / `DriftResult.to_dict()`; only per_category's script
+  path (#258) reaches raw NaN. Fixing calibration.py would be churn.
+- **orchestrator size_from_scan_result entry_price≤0 mismatch** (correctness scout, rated CRITICAL):
+  UNREACHABLE — DQV rejects out-of-range prices and no strategy emits entry_price=0; the `else 0.50`
+  is a defensive fallback on a dead path. Guarding it = an impossible-case test (churn). NOT built.
+- **EXP-003 fetcher-category empty** (new-alpha scout): STALE — post-#231 polymarket_history_fetcher
+  already derives category via derive_market_category (line 272). No gap.
+- **DEPLOYMENT.md scikit-learn/cvxpy stale** (artifact scout): FALSE POSITIVE — both ARE imported
+  (attribution.py, portfolio/optimizer.py). No change.
+- **B8 Kalshi orderbook-quote fetcher + structured-strike parser** (B8 scout, GO-rated): DEFERRED
+  again per DECISION COROLLARY — genuine pinned next-steps but unwired infra with no co-listed
+  universe to exercise end-to-end this run (consistent with the 3 prior B8-probe runs). The
+  binding constraint is a robust ALPHA, not this data-layer step; building it now = speculative.
+- **1e-9 covering-long epsilon tighten** (live-safety scout follow-up a): SKIPPED — removing it risks
+  false-rejecting an FP-equal full-size SELL; a 1e-9-contract sell is not a real path (churn).
+
+### Lessons
+- **Reviewer-checkout race is REAL and corrupts branch state (loop-memory's own warning, hit again):**
+  a PR-1 reviewer's `git checkout` on the SHARED working tree switched my HEAD mid-work, so PR-2's
+  commit landed STACKED on PR-1's branch. Caught via `git ls-remote` + `git diff base...HEAD --stat`
+  showing the wrong file set; repaired with `git checkout feat && git reset --hard origin/default &&
+  git cherry-pick <pr2-sha>` + `git branch -f pr1 origin/pr1`. **FIX ADOPTED THIS RUN: spawn all
+  reviewers with `isolation: worktree`** — each gets its own repo copy, zero contention. Do this for
+  EVERY reviewer going forward (the checkout-based reviewer on the main tree is the hazard).
+- **get_status total_count:0 ≠ no CI.** preflight reports via the Checks API, not the legacy
+  commit-status API, so `pull_request_read get_status` shows 0 even when checks ran green. Verify via
+  `actions_list` workflow runs by head_sha (all 3 PRs: preflight completed/success). (This also
+  explains why the stale #255's status looked check-less.)
+- **Anti-padding held under a big scout haul:** 8 scouts surfaced ~15 candidate items; only 3 were
+  genuine + buildable + not-already-done. The rest were stale/moot/unreachable/speculative and were
+  triaged OUT with recorded reasons — not shipped as filler.

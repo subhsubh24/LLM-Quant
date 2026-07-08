@@ -1502,3 +1502,49 @@ edge; both are honest SEARCH maps (no DoD/floor box ticked).
 beatable?") now has two real SEARCH maps (Manifold = a softer crowd exists; Sports = the least-sharp
 Polymarket category) + the F11/F10/B2 significance net to keep any future claim honest. Next: a real
 method (B4-lite calibration/reasoning) aimed at the soft targets, run through the full net.
+
+---
+
+## 2026-07-08 — Factory run: honesty correction on the Manifold finding + integrity-hardening (no new edge attempted)
+
+Egress OPEN. A hardening + honesty-reconcile run (8-Haiku scout sweep incl. 4 deep-audit lenses).
+No new alpha was attempted — the binding constraint (no validated real-money OOS edge) is a
+research problem the last 4 corpora refuted for the bucket family, and this run's genuine
+value-bar-clearing work was integrity + honesty, not a speculative edge attempt.
+
+### Honesty correction — the 2026-07-07 Manifold "materially softer crowd" framing is REVISED
+The 2026-07-07 A8 finding (Finding A) recorded Manifold as "a materially softer, less-pinned
+crowd" and read "PARTLY genuine softness (ECE 0.027 > the real-money crowds')". An adversarial
+artifact-honesty audit this run flags that as an OVERCLAIM: **ECE 0.027 is LOW in absolute terms
+(a well-calibrated crowd)**, and the Brier 0.144-vs-~0.09 gap is driven by the PINNING confound
+(18.5% vs ~70% pinned) + a longer 7-day lead (a less-pinned market carries a higher Brier at
+EQUAL calibration), NOT by worse calibration. **Corrected claim:** Manifold is a LESS-PINNED,
+longer-horizon research corpus — NOT a proven "softer/beatable" crowd. A method must still be run
+and beat it OOS before any softness claim holds. (SELF_VALIDATION already carried this bounded
+framing; ROADMAP A8, loop-memory, and LOOP_HEALTH did not — corrected in this run's bookkeeping.)
+Implication for the pivot: "aim a method at the soft Manifold crowd" is NOT a de-risked lead —
+Manifold being well-calibrated (ECE 0.027) means a method has to beat a genuinely-calibrated
+play crowd, not an obviously-soft one.
+
+### Deep-audit triage (8 scouts; anti-padding — most candidates were NOT genuine, recorded so we don't re-raise)
+- **STRUCTURAL research-only guardrail (#259):** the named A8 follow-up — a `research_only` tag on
+  HistoricalMarket the real-money floor lane REFUSES. Closes the play-money-into-the-floor hole
+  (was convention-only). REAL value (protects floor integrity), shipped.
+- **Significance-net CI gating + per_category NaN→None (#258):** the F11/B9/A8 test suites that
+  VETO false edge claims were passing but UNGATED in CI; now registered. + a confirmed RFC-8259
+  JSON hole fixed. REAL value (§26), shipped.
+- **Legacy-short quarantine (#260):** D4 named follow-up — a BUY on a legacy `side="short"` row
+  scaled it recording $0 PnL; now rejected + warned. Gated-live defense-in-depth, shipped.
+- **NOT genuine (triaged out, recorded):** calibration.py/calibration_drift.py NaN→JSON = MOOT
+  (API path sanitizes via `_safe_float`/`to_dict`); orchestrator `entry_price<=0` sizing mismatch
+  = UNREACHABLE (DQV rejects out-of-range prices; the `else 0.50` is a dead defensive branch —
+  guarding it is an impossible-case test); EXP-003 fetcher-category = STALE (post-#231 the fetcher
+  derives category); DEPLOYMENT.md sklearn/cvxpy "stale" = FALSE POSITIVE (both ARE imported).
+- **B8 Kalshi orderbook-quote fetcher + structured-strike parser (GO-rated by the B8 scout):**
+  DEFERRED AGAIN per DECISION COROLLARY — genuine pinned next-steps, but unwired data-layer infra
+  with NO co-listed universe to exercise end-to-end this run (consistent with the 3 prior B8 probes).
+  The binding constraint is a robust ALPHA, not this data step; building it now is speculative.
+
+**Binding constraint STANDS:** no validated real-money OOS edge (business_case_strength B). Manifold
+is now known to be well-calibrated (not obviously soft), so the "where is a crowd beatable?" search
+has one fewer easy target than the 2026-07-07 framing implied — an honest narrowing, not a setback.
