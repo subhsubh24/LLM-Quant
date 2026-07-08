@@ -1548,3 +1548,165 @@ play crowd, not an obviously-soft one.
 **Binding constraint STANDS:** no validated real-money OOS edge (business_case_strength B). Manifold
 is now known to be well-calibrated (not obviously soft), so the "where is a crowd beatable?" search
 has one fewer easy target than the 2026-07-07 framing implied — an honest narrowing, not a setback.
+
+---
+
+## 2026-07-08 — Research Run 16: URGENT — the forward-paper track record's resolution reporting is DEAD CODE (cannot tell, from any existing signal, whether a single position has ever resolved); EXP-005 (Sports-category calibration bucket) run — insufficient data; egress reconfirmed; one external-research lead caught as a WebFetch over-summarization before it entered the record
+
+- Hypothesis (falsifiable): **EXP-005** — a `CalibrationBucketStrategy` fit EXCLUSIVELY on the
+  Sports-category slice of a real leakage-safe resolved-Polymarket corpus (7-day decision lead)
+  produces a positive, non-fragile (F10), F11-significant net OOS PnL — motivated by the
+  2026-07-07 B9 diagnostic finding that Sports carries the Polymarket crowd's WORST per-category
+  ECE (0.091 of 5 assessed categories), i.e. plausibly the most-beatable slice. This is a new,
+  not-previously-tested corpus slice (distinct from EXP-002 "all categories" and EXP-003
+  "politics"). The self-validation / production-forensics portion of this run (below) is not an
+  alpha test.
+- Min sample N: 100 Sports-category markets (this project's standing floor), pre-registered
+  before running.
+- OOS result: **insufficient data — the mechanism correctly ABSTAINED, not refuted.** Fetched
+  1,095 real leakage-safe 7-day-lead records (`max_pages=20`, unmodified
+  `polymarket_history_fetcher` + `validate_real_oos.evaluate()`, seed=42, single run, no retry) →
+  **134 Sports-category markets** (crowd_brier=0.1988, base_rate=0.343, 15.7% pinned — closely
+  reproduces B9's 133-market Sports slice from two days earlier, same order of magnitude Brier
+  0.199, cross-run consistency). `CalibrationBucketStrategy` made **0 trades** — F11
+  `verdict: insufficient_data`, not a measured negative. Diagnosis (arithmetic, not a guess): the
+  model's 10 equal-width price buckets need `min_bucket_n=30` training resolutions each to ever
+  activate; 134 total markets average 13.4/bucket even using the FULL corpus as training, and
+  `walk_forward`'s expanding window means every real decision sees an even SMALLER training slice
+  than that — so no bucket could plausibly ever clear the floor at this N. This is the abstain
+  mechanism working exactly as designed (no fabricated edge, matching the 2026-06-29 B4a build's
+  own tested guarantee) — it is NOT evidence the Sports hypothesis is wrong, only that N=134 is
+  structurally too small to test it.
+- Calibration (Brier / reliability): not measured beyond the crowd-only corpus stats above (0
+  active predictions to score — B2 requires non-abstaining predictions).
+- Costs modeled: yes (unmodified `cost_model.py` via `walk_forward`); moot here (0 trades).
+- Verdict: **insufficient data (EXP-005, not tested — mechanism abstained on sub-floor N).** Do
+  **not** read this as "Sports is not beatable" — it is "134 Sports markets is not enough to ask
+  the bucket model the question." A first attempt at `max_pages=40` (~4,000 raw markets, aiming
+  for ~400+ Sports records) hit Gamma's own pagination ceiling (a 422 at offset≈2100) AND a
+  280s wall-clock budget before finishing — so a future run should budget more wall-clock time (or
+  fetch across `--merge`-accumulated multiple runs) rather than assume a bigger `max_pages` alone
+  will complete. Not proposing a retry within this run (that would just be re-running the same
+  under-powered config expecting a different answer — the honest fix is more N, not a re-roll).
+- Why this run's SELF-VALIDATION took priority over chasing a bigger EXP-005 corpus (the real
+  headline finding):
+
+### (1) URGENT — `MarkToMarketEngine.check_resolutions()` never returns a value, and NOTHING in this codebase configures Python logging — so the forward-paper JSON's `"resolutions"` field, and every `[MTM] Position resolved` log line, are STRUCTURALLY INCAPABLE of ever showing a resolution happened, independent of whether one actually did
+  Every research run since 2026-07-02 (Runs 12/13/15) has read `"resolutions": null` in
+  `run_paper_cycle.py --json` output across 32 `live-validation.yml` runs and diagnosed the
+  binding constraint as "elapsed real time" (positions haven't matured yet). This run traced the
+  ACTUAL code path (not just the log field) and found two independent, currently-active defects
+  that make that field meaningless as a signal, verified by direct code read (not inference):
+  1. **`scripts/run_paper_cycle.py:86-93`** sets `settled = mtm.check_resolutions()` and reports
+     it verbatim as `"resolutions": settled` in the JSON (`run_paper_cycle.py:100`).
+     **`MarkToMarketEngine.check_resolutions()`** (`orchestrator.py:322-485`) builds a local
+     `resolved` list, persists/realizes PnL/removes each settled position from
+     `self.executor.positions` as a SIDE EFFECT — but the function has **no `return` statement
+     anywhere in its body**; it falls off the end and implicitly returns `None`. So `settled` is
+     **always `None`**, whether 0 or 50 positions resolved and were correctly processed inside
+     the call. The JSON field's `null` is a constant of the code, not evidence about the world.
+  2. **`grep -rn basicConfig backend/ scripts/` returns ZERO matches** — no module anywhere in
+     this codebase ever configures the Python `logging` module. With no handler attached, the
+     root logger falls back to `logging.lastResort`, which only emits records at **WARNING
+     severity or above**; INFO-level calls are silently discarded, never reaching stdout/stderr
+     at all. `orchestrator.py:475`'s `logger.info(f"[MTM] Position resolved: ...")` — the ONE
+     log line that would prove a resolution fired — is INFO level, so it can **never** appear in
+     a captured GitHub Actions job log regardless of whether it fires. Independently confirmed
+     both directions: `logger.warning("rehydrated a LEGACY short position ...")`
+     (`persistence.py:256`, a real WARNING call) DOES appear in every inspected log (matching
+     `lastResort`'s WARNING-only behavior); zero `"[MTM]"` info-level lines appear in ANY of 9+
+     inspected runs spanning 2026-07-02→07-08 — consistent with "these lines are structurally
+     invisible," not with "this line never executes."
+  **What this does NOT mean:** the underlying settlement side effects (DB persist, PnL
+  realization, position removal, kill-switch/drawdown feed) are UNTOUCHED by either bug — both
+  bugs are purely in REPORTING, not in the settlement logic itself (verified: the background
+  `_mtm_loop`, `orchestrator.py:1249`, also calls `check_resolutions()` and also ignores its
+  return value — so its behavior was never gated on this return value in the first place).
+  Positions genuinely MAY be resolving correctly right now, silently. **What this DOES mean:**
+  every prior "still zero resolutions, this is expected, keep waiting" diagnosis (Research Runs
+  12/13/15) rests on a signal that could not have shown otherwise even if resolutions WERE
+  accumulating — it is **unverifiable, not necessarily wrong**. Per the fail-closed instruction,
+  I am not reporting "the forward-paper track record has zero resolutions" as a fact this run —
+  that metric is currently **unavailable**, not zero. Several short-dated positions opened
+  2026-07-02/03 (an MLB game, a Wimbledon ATP match, an esports match, a within-2-weeks Iran
+  deadline, an Elon tweet-count window) should plausibly have resolved by 2026-07-08 in the real
+  world; whether the system's own records reflect that is currently impossible to confirm from
+  any existing log or JSON signal — only a direct DB query (outside this research agent's access)
+  could confirm it, and I did not fabricate one.
+  **Recommended for the factory (loop-buildable, no data/egress/owner action needed):** (a) make
+  `check_resolutions()` `return` a summary (e.g. `{"resolved_count": len(resolved),
+  "net_pnl": ...}`) so `run_paper_cycle.py`'s `"resolutions"` field carries real information
+  instead of a permanent `null`; (b) add a `logging.basicConfig(level=logging.INFO, ...)` call at
+  the entrypoint of `run_paper_cycle.py` (and/or wherever the backend server boots) so INFO-level
+  events — the resolution log line, and any other INFO-level signal in the whole system — are
+  actually captured instead of silently discarded; this is a systemic gap (grep found zero
+  `basicConfig` calls anywhere), not specific to MTM. Until fixed, treat the forward-paper
+  track record's resolution count as **unknown**, not **zero** — a materially different, more
+  urgent framing than the prior three research runs used.
+
+### (2) Egress RE-CONFIRMED (routine re-probe, consistent with 2026-07-04/05, not new news)
+  Direct `curl` from this session: `gamma-api.polymarket.com` (301→real content),
+  `clob.polymarket.com` (200), `data-api.polymarket.com` (200), `huggingface.co` (200) all
+  reachable; `dune.com` still 403 (unchanged since 2026-07-03). `api.elections.kalshi.com`'s bare
+  root path 404s (expected — no path given; the `/trade-api/v2/...` paths used elsewhere in this
+  project work, per B8/B9's own runs).
+
+### (3) A caught WebFetch over-summarization on the "mention markets Yes Bias" candidate (Research Run 15) — logged as a methodology caution, NOT a new finding either way
+  Followed up on the 2026-07-05 unverified "Yes Bias in low-liquidity mention markets" SSRN lead
+  (primary paper still 403's) by searching for corroborating academic work. Found and fetched (via
+  WebFetch, directly reachable, unlike the SSRN source) **arxiv 2602.21229, "Forecasting Future
+  Language: Context Design for Mention Markets"** (Kim, Kwon, Kim, Kagan, Khatchadourian, Ahn,
+  Lopez-Lira, Lee, Hwang, Levy, Lee, Choi; submitted 2026-02-04). A FIRST WebFetch pass summarizing
+  the PDF reported specific numbers — "a Yes bias, ~10 percentage-point overpricing, N=1,447
+  mention contracts, on Polymarket" — that looked like exactly the corroboration Run 15 needed.
+  **A second, independent WebFetch directly against the arxiv abstract page returned the ACTUAL
+  abstract, which describes a DIFFERENT paper than the first summary implied:** this paper builds
+  an LLM forecasting method (Market-Conditioned Prompting / MixMCP) for **earnings-call
+  keyword-mention markets** specifically, and reports that "MixMCP outperforms the market
+  baseline" via LLM+market-signal blending — it does **not** state a standalone empirical
+  Yes-bias magnitude, an N=1,447 contract count, or a 10-point overpricing figure anywhere in the
+  verified abstract. **Treated as: the first WebFetch pass over-summarized/conflated content into
+  numbers not supported by the paper's own abstract — a caution, not a finding.** The 2026-07-05
+  "Yes Bias" hypothesis therefore remains exactly where Run 15 left it: **unverified, no reachable
+  primary source with real magnitude/N, not newly confirmed nor refuted.** Logged so a future run
+  does not cite the fabricated-sounding "10pp / N=1,447" figures as if verified, and as a standing
+  reminder to this agent's own practice: cross-check any WebFetch-summarized QUANTITATIVE claim
+  against a second, independent fetch before it enters the record (done here; caught the
+  discrepancy before it was reported as data).
+  Separately (lower-value, logged for completeness): a Vanderbilt study (Clinton & Huang, via
+  DL News/Yahoo Finance coverage) claims Polymarket is LESS accurate / less reactive to new
+  information than Kalshi — the OPPOSITE direction of the 2026-07-01 "Calibration City" secondary
+  source (which found Polymarket BETTER calibrated than Kalshi). Two non-reproduced secondary
+  sources now point opposite directions on the same cross-venue question — reinforces the
+  standing "treat contradictory non-academic secondary sources as noise, not evidence" discipline,
+  not new information either way.
+
+### Candidate alphas NOT proposed this run (reasons)
+- EXP-005 stays open/insufficient-data (see above) — not retried this run (more N, not a re-roll,
+  is the honest next step).
+- No other new EXP-00N proposed. The URGENT self-validation finding (1) is the highest-value
+  output of this run and is a reporting/observability defect, not an alpha — flagged for the
+  factory, not built (research-agent scope).
+
+### Self-validation (sources this run)
+- Finding (1): direct `Read`/`Grep` of `scripts/run_paper_cycle.py` and
+  `backend/app/prediction_markets/orchestrator.py` in this session's own checkout (commit
+  `3a59cbc`), plus a repo-wide `grep -rn basicConfig backend/ scripts/` (zero matches) and a
+  cross-check of `persistence.py:256`'s `logger.warning` call against 9 previously-inspected
+  `live-validation.yml` job logs (2026-07-02→07-08) that DO show that WARNING line but never show
+  the sibling `[MTM]` INFO line — not asserted from a single log, cross-referenced across the
+  full previously-gathered sample.
+- Finding EXP-005: live-fetched this run via the unmodified `polymarket_history_fetcher` +
+  `validate_real_oos.evaluate()` (same harness B9/EXP-002/B4a use), seed=42, single run, script
+  is research-agent scratch (not a factory commit) — independently re-derivable by anyone running
+  the same fetch (subject to the corpus drifting as markets resolve, same caveat as every prior
+  live-fetch research run).
+- Finding (3): WebFetch of `arxiv.org/pdf/2602.21229` (first pass, later found to over-summarize)
+  and `arxiv.org/abs/2602.21229` (second pass, the verified abstract) — both directly fetched,
+  cross-checked against each other, not against an external claim.
+- Egress (2): direct `curl` from this session, same method as every prior run.
+
+**Binding constraint STANDS:** no validated real-money OOS edge. But this run changes WHAT is
+known about the forward-paper validation loop itself: its own resolution telemetry cannot
+currently be trusted one way or the other (finding 1) — a more urgent, more precise framing than
+"just wait for elapsed time," and squarely loop-buildable (no owner/egress action needed).
