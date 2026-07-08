@@ -114,6 +114,41 @@ def test_paper_mode_with_auth_disabled_is_allowed():
     assert s.backend_auth_disabled is True
 
 
+def test_get_settings_boot_error_does_not_leak_secrets(monkeypatch):
+    """A boot-time config error must FAIL LOUD without printing any secret VALUE.
+
+    pydantic's native ValidationError repr embeds ``input_value={...}`` — the raw env dict,
+    which carries SECRET values (BACKEND_API_TOKEN, GEMINI_API_KEY, venue keys). That error
+    is logged by the ASGI server at startup, so unmodified it leaks secrets into the process
+    logs. get_settings() re-raises with the messages ONLY. This asserts the real boot path
+    (get_settings) neither prints a secret nor exposes the leaky input dict, while still
+    failing loud (§12/§13/§28).
+    """
+    import app.config as cfg
+
+    secret_token = "tok_SUPER_SECRET_DO_NOT_LOG_9zX"
+    secret_llm = "sk_live_LLMKEY_DO_NOT_LOG_7qP"
+    for k in _VENUE_CREDS:  # missing venue creds → the live validator raises
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "true")
+    monkeypatch.setenv("BACKEND_API_TOKEN", secret_token)
+    monkeypatch.setenv("GEMINI_API_KEY", secret_llm)
+    cfg.get_settings.cache_clear()
+    try:
+        with pytest.raises(ValueError) as ei:  # sanitized ValueError, NOT the native ValidationError
+            cfg.get_settings()
+    finally:
+        cfg.get_settings.cache_clear()
+
+    text = f"{ei.value}\n{repr(ei.value)}"
+    assert secret_token not in text, "BACKEND_API_TOKEN leaked into the boot error"
+    assert secret_llm not in text, "GEMINI_API_KEY leaked into the boot error"
+    assert "input_value" not in text, "the leaky pydantic input dict reached the error"
+    # Still fails LOUD + names the missing credential so the owner can act.
+    assert "refusing to boot" in text.lower()
+    assert "POLYMARKET_API_KEY" in text
+
+
 def test_paper_mode_needs_no_control_token():
     """Paper/dev (live OFF, the default) boots fine with no token.
 

@@ -6,7 +6,7 @@ Uses pydantic-settings for type-safe configuration.
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 
 def find_env_file():
@@ -236,5 +236,27 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+    """Get cached settings instance.
+
+    SECRET HYGIENE (FACTORY_STANDARD §12/§13): pydantic's default ``ValidationError``
+    repr embeds the raw input dict (``input_value={...}``), which contains SECRET VALUES
+    read from the environment (``BACKEND_API_TOKEN``, ``GEMINI_API_KEY``, the venue keys).
+    A boot-time config error (e.g. ``LIVE_TRADING_ENABLED`` set with a missing venue
+    credential) is logged by the ASGI server at startup, so the unmodified error would
+    leak those secrets into the process logs — exactly when the owner is reading them.
+    Re-raise with the validator MESSAGES ONLY (``include_input=False``; our messages name
+    the missing var NAMES, never values) and suppress the original exception chain
+    (``from None``) so no ``input_value`` dict reaches the logs. The check still FAILS
+    LOUD (§28) — it just never prints a secret. Callers that construct ``Settings()``
+    directly (e.g. the config-safety tests) still get the native ``ValidationError``.
+    """
+    try:
+        return Settings()
+    except ValidationError as e:
+        details = "; ".join(
+            f"{'.'.join(str(p) for p in err.get('loc', ())) or 'config'}: {err.get('msg', '')}"
+            for err in e.errors(include_url=False, include_input=False)
+        )
+        raise ValueError(
+            f"Invalid configuration — refusing to boot ({e.error_count()} error(s)): {details}"
+        ) from None
