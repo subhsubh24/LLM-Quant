@@ -110,7 +110,11 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_walk_forward_category.py \
            backend/tests/test_bootstrap_oos_significance.py \
            backend/tests/test_per_category_diagnostics.py \
-           backend/tests/test_manifold_history_fetcher.py; do
+           backend/tests/test_manifold_history_fetcher.py \
+           backend/tests/test_max_per_trade_cap.py \
+           backend/tests/test_near_certainty_edge_units.py \
+           backend/tests/test_sell_reduce_drawdown.py \
+           backend/tests/test_no_position_edge_units.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done
   if [ -n "$_testfiles" ]; then
