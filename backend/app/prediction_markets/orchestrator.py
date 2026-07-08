@@ -174,6 +174,7 @@ def size_from_scan_result(
     bankroll: float,
     config: KellyConfig,
     mc_kelly: Optional["MonteCarloKelly"] = None,
+    max_per_trade_usd: Optional[float] = None,
 ) -> Tuple[float, float]:
     """
     Calculate bet size from a scan result.
@@ -252,14 +253,40 @@ def size_from_scan_result(
                 f"mc=${mc_bet:.2f} (method={mc_diag.get('method')})"
             )
 
+    # PER-TRADE NOTIONAL CEILING (ROADMAP D3): honor the owner's MAX_PER_TRADE_USD by
+    # RESIZING the bet down to it — never let a full-Kelly bet be DROPPED at the executor
+    # gate. A per-trade cap is a risk ceiling, so the correct behavior is to deploy up to
+    # the cap (sub-Kelly, the safe/conservative direction), not to reject the opportunity
+    # and starve the paper-validation loop. The executor's own per-trade gate stays as the
+    # defense-in-depth backstop. bet_usd is cost-inclusive capital and the resulting
+    # notional (= contracts x price) is strictly < bet_usd, so clamping bet_usd <= cap
+    # keeps notional under the ceiling and the gate never trips. None => no clamp
+    # (standalone/harness sizing is unchanged).
+    if max_per_trade_usd is not None and bet_usd > max_per_trade_usd:
+        bet_usd = max_per_trade_usd
+
     # Convert USD to contracts at the COST-INCLUSIVE price: bet_usd is the capital we
     # intend to deploy, and the executor charges slippage + fee on top, so the real
     # contract count is bet_usd / effective_cost — using the raw price would overstate
     # the position and deploy more cash than bet_usd (ROADMAP C2).
     price = market_price if market_price > 0 else 0.50
-    num_contracts = DEFAULT_COST_MODEL.contracts_for_budget(bet_usd, price)
+    num_contracts = round(DEFAULT_COST_MODEL.contracts_for_budget(bet_usd, price), 1)
 
-    return bet_usd, round(num_contracts, 1)
+    # Keep the ROUNDED order within the per-trade ceiling. Clamping bet_usd above keeps
+    # notional < bet_usd <= cap for any realistic cap, but rounding contracts up to the
+    # nearest 0.1-lot could nudge a small cap's notional materially over — which the gate
+    # would then reject, defeating the resize. Trim to the largest 0.1-lot whose notional
+    # (contracts*price) stays within the cap. The executor gate carries a matching 1e-9
+    # money-precision tolerance so a non-round cap's sub-nanocent float noise (e.g. 1.8*0.65
+    # == 1.17 mathematically but 1.17000000000000002 in float) can't reject the resized
+    # order. Together the resized order always passes the gate. No-op for the default $5 cap
+    # (already within) and when the cap is disabled. NB: a hard per-trade cap below
+    # KellyConfig.min_bet_usd intentionally WINS over that soft floor (the risk ceiling is
+    # authoritative), so a sub-$1 cap may execute a below-floor trade — the safe direction.
+    if max_per_trade_usd is not None and num_contracts * price > max_per_trade_usd + 1e-9:
+        num_contracts = int((max_per_trade_usd / price) * 10) / 10.0
+
+    return bet_usd, num_contracts
 
 
 # Type import for MC Kelly (avoids circular imports at module level)
@@ -939,9 +966,11 @@ class PredictionMarketOrchestrator:
                     pass
                 continue
 
-            # Kelly sizing
+            # Kelly sizing — clamped to the executor's per-trade ceiling so an over-sized
+            # bet is RESIZED down (not dropped at the gate). None when the cap is disabled.
             bet_usd, num_contracts = size_from_scan_result(
-                opp, bankroll, self.kelly_config
+                opp, bankroll, self.kelly_config,
+                max_per_trade_usd=getattr(self.executor, "max_per_trade_usd", None),
             )
             if num_contracts <= 0:
                 skipped.append({"market": opp.market.question[:60], "reason": "Kelly size = 0"})

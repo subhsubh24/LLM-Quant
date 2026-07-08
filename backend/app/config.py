@@ -107,7 +107,10 @@ class Settings(BaseSettings):
     e2e_disable_rate_limit: bool = False  # env: E2E_DISABLE_RATE_LIMIT — CI gate ONLY, never prod
 
     # Hard loss / spend ceilings (USD). Conservative defaults; owner sets real values.
-    # These are enforced in code; a breach auto-trips the kill switch.
+    # The loss caps are enforced in code AND auto-trip the kill switch on breach.
+    # max_per_trade_usd is a per-ORDER notional ceiling enforced at the execution gate
+    # (execution._check_risk, wired via get_executor): a single order exceeding it is
+    # REJECTED (it does not trip the kill switch — it bounds one order's size).
     max_per_trade_usd: float = 5.0       # env: MAX_PER_TRADE_USD
     max_daily_loss_usd: float = 25.0     # env: MAX_DAILY_LOSS_USD
     max_total_loss_usd: float = 100.0    # env: MAX_TOTAL_LOSS_USD
