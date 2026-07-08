@@ -10,6 +10,8 @@ Each entry: **PATTERN** — CONTEXT it worked in — WHY it worked — EVIDENCE.
 
 ---
 
+- **A per-trade/notional CEILING must RESIZE the order down, not DROP it at the gate — and money comparisons need a 1e-9 epsilon.** — Wiring an owner per-trade cap that was previously inert. — Enforcing the cap only at the execution gate silently REJECTED ordinary Kelly-sized bets (Kelly max $50 vs a $5 cap), starving the paper-validation loop; two review cycles converged on the right shape: clamp the bet DOWN to the cap in the sizer (defense-in-depth gate as backstop), then a 1e-9 money-precision tolerance so a NON-round cap's float noise (1.8×0.65 == 1.17 but 1.17000000000000002 in float) can't reject the resized order. Test with non-round caps + a cent sweep — clean 0.10-lot fixtures never expose the float gap. — Evidence: #264.
+
 - **Dedicated tractability scout for a recurring-deferred "too big / outside the gate" gap.** — A ship-critical
   A→A+ gap kept getting deferred as "a ~22-file refactor." — Spending ONE of the 8 scouts purely on "is this
   tractable THIS run?" returned the exact file list + the safety argument (the eager-import test gate catches any
