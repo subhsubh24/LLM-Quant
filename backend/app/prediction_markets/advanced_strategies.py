@@ -33,9 +33,9 @@ class ReversalEstimate:
     """Bayesian reversal probability estimate for a near-certain market."""
     base_rate: float          # Category base reversal rate
     time_decay_factor: float  # Multiplier from time-to-resolution
-    adjusted_rate: float      # Final reversal probability
-    edge: float               # Kelly edge: P(reversal) * (1/NO_price - 1) - (1 - P(reversal))
-    kelly_fraction: float     # Optimal Kelly fraction
+    adjusted_rate: float      # Final reversal probability P(reversal)
+    edge: float               # Probability edge = P(reversal) - NO_price (the units the orchestrator's win_probability reconstruction expects)
+    kelly_fraction: float     # Optimal Kelly fraction (derived from the EV-per-dollar term, not `edge`)
 
 
 # Category-specific base reversal rates.
@@ -123,7 +123,9 @@ class NOPositionScanner(BaseStrategy):
         above dust even close to resolution.  If a market resolves in 6 hours
         and NO is still at 3c, someone is holding for a reason.
 
-        Kelly edge = P(reversal) * (1/NO_price - 1) - (1 - P(reversal))
+        Returns the probability edge (P(reversal) - NO_price) for the orchestrator plus a
+        Kelly fraction derived from the EV-per-dollar (P(reversal)*(1/NO_price - 1) -
+        (1 - P(reversal))). The two are DISTINCT units — see the inline note below.
         """
         base_rate = self._get_reversal_rate(category)
 
@@ -144,22 +146,33 @@ class NOPositionScanner(BaseStrategy):
         # Adjusted reversal probability
         adjusted_rate = min(base_rate * time_decay_factor, 0.50)
 
-        # Kelly edge for asymmetric bet:
-        # Win: pay NO_price, receive $1.00 → profit = (1/NO_price - 1) per dollar
-        # Lose: lose entire NO_price
-        # Edge = P(win) * payout_ratio - P(lose)
+        # Two DISTINCT quantities — do not conflate their UNITS (the #263 bug class):
+        #   * `edge` is the field the orchestrator consumes, and it reconstructs
+        #     win_probability = entry_price + edge (size_from_scan_result), then gates the
+        #     trade COST-NET on that win_probability. So `edge` MUST be in absolute
+        #     PROBABILITY units — here P(reversal) - NO_price (our estimate minus the market's
+        #     implied NO probability). Emitting the Kelly EV-per-dollar instead (as before)
+        #     produced win_probability = NO_price + EV > 1.0, which fooled the cost-net gate
+        #     into passing trades whose TRUE net edge is <= 0 (identical to the NearCertainty
+        #     fix, #263). The Kelly clamp bounds the SIZE but never un-fools the GATE.
+        #   * `kelly_ev` is the EV per dollar risked, used ONLY to derive the display
+        #     kelly_fraction below — that computation was correct and is preserved.
         if no_price > 0:
             payout_ratio = (1.0 / no_price) - 1.0
-            # Cap edge at 200% — at micro-prices the formula blows up but the
-            # actual opportunity is bounded by liquidity and execution risk.
-            edge = min(adjusted_rate * payout_ratio - (1.0 - adjusted_rate), 2.0)
+            # EV per dollar risked (Win: profit = 1/NO_price - 1; Lose: lose NO_price).
+            # Cap at 200% — at micro-prices the ratio blows up but the real opportunity is
+            # bounded by liquidity and execution risk.
+            kelly_ev = min(adjusted_rate * payout_ratio - (1.0 - adjusted_rate), 2.0)
+            # Edge in PROBABILITY units for the orchestrator's win_probability reconstruction.
+            edge = adjusted_rate - no_price
         else:
             edge = 0.0
             payout_ratio = 0.0
+            kelly_ev = 0.0
 
-        # Kelly fraction: f* = edge / payout_ratio (simplified for binary)
-        if payout_ratio > 0 and edge > 0:
-            kelly_fraction = edge / payout_ratio
+        # Kelly fraction: f* = EV_per_dollar / payout_ratio (simplified for binary)
+        if payout_ratio > 0 and kelly_ev > 0:
+            kelly_fraction = kelly_ev / payout_ratio
         else:
             kelly_fraction = 0.0
 
