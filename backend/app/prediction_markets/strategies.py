@@ -285,8 +285,20 @@ class NearCertaintyStrategy(BaseStrategy):
                     # Assume ~2% chance of reversal (conservative)
                     reversal_risk = 0.02
                     expected_value = (1.0 - reversal_risk) * profit_per_share - reversal_risk * price
-                    # Cap edge to avoid astronomical values at micro-prices
-                    edge = min(expected_value / price, 2.0)
+                    # `expected_value` is ALREADY the edge in absolute price units: a binary
+                    # bet's per-share EV is true_prob·(1−price) − (1−true_prob)·price, which
+                    # simplifies to (true_prob − price), and here true_prob = 1 − reversal_risk
+                    # (== the `confidence` field below). The orchestrator reconstructs
+                    # win_probability = market_price + edge (see orchestrator.size_from_scan_result),
+                    # so `edge` MUST be in those same absolute units to be interpreted correctly.
+                    # The previous `expected_value / price` produced a RELATIVE return instead,
+                    # which the orchestrator then misread as an absolute delta — inflating
+                    # win_probability ABOVE the strategy's own `confidence` (e.g. at price 0.95,
+                    # 0.95 + 0.03/0.95 = 0.9816 vs the intended 0.98) and, at the low end of the
+                    # band (price 0.80: 0.80 + 0.18/0.80 = 1.025), pushing win_probability ABOVE
+                    # 1.0 — a systematic Kelly over-sizing bug on the active default paper
+                    # strategy. Emit the absolute EV directly so win_probability == confidence.
+                    edge = expected_value
 
                     if edge > 0 and self.can_open_position():
                         time_info = f"{hours_left:.0f}h to resolution" if hours_left is not None else "no end date"
