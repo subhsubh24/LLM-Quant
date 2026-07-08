@@ -117,3 +117,25 @@ def test_report_includes_f11_significance_and_serializes_valid_json():
         "insufficient_data", "significant_positive", "significant_negative",
         "indistinguishable_from_zero",
     }
+
+
+def test_floor_lane_refuses_research_only_play_money_records():
+    """ROADMAP A8 STRUCTURAL guardrail: the real-money floor lane must REFUSE play-money
+    (research_only) records — a Manifold edge validates a METHOD but never counts toward the
+    real-money profit floor. Fail LOUD, never silently average play money into the floor."""
+    import pytest
+
+    play = _synthetic()
+    # Stamp ONE record research_only (as the Manifold fetcher does) — simulating an accidental
+    # copy-paste of the play-money venue into the floor lane.
+    p = play[7]
+    play[7] = wf.HistoricalMarket(
+        market_id=p.market_id, decision_time=p.decision_time, resolution_time=p.resolution_time,
+        market_price=p.market_price, model_prob=p.model_prob, outcome=p.outcome,
+        research_only=True,
+    )
+    with pytest.raises(ValueError, match="research_only"):
+        v.evaluate(play, wf, cal, seed=42)
+
+    # A pure real-money corpus (default research_only=False) is unaffected.
+    assert v.evaluate(_synthetic(), wf, cal, seed=42)["corpus"]["n_markets"] == 300

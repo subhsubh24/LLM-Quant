@@ -12,16 +12,14 @@ floor, go-live-eligibility, or any real-money decision (the floor is real-money 
 record this module produces is `research_only`; callers must treat it as method-validation +
 RESEARCH_MEMORY signal only. This module places NO orders, touches NO money, needs NO credentials.
 
-HONEST SCOPE OF THE GUARDRAIL (an adversarial auditor's finding, disclosed not hidden): the
-research-only property is currently enforced by CONVENTION — the module name + the `research_only`
-marker + the fact that NOTHING wires Manifold records into the real-money lane (they never reach
-`validate_real_oos` / the DB-persisted floor). It is NOT yet enforced STRUCTURALLY: this fetcher
-emits a plain `walk_forward.HistoricalMarket`, byte-indistinguishable from a real-money Polymarket
-/Kalshi record, so a FUTURE copy-paste that fed these into the floor lane would not be refused by a
-type/field guard. NAMED FOLLOW-UP (A8): add a positive `source`/`research_only` tag that
-`walk_forward`/`floor_met` refuse — a shared-type change deferred so it does not collide with the
-`walk_forward.py` seed_hash reproducibility contract this run. Until then: do NOT route a Manifold
-record into any real-money path (the floor is real-money OOS only).
+STRUCTURAL GUARDRAIL (the named A8 follow-up, now IMPLEMENTED): every `HistoricalMarket` this
+module emits carries `research_only=True` (the positive provenance tag on `walk_forward.HistoricalMarket`).
+The real-money OOS floor lane (`scripts/validate_real_oos.evaluate`) REFUSES any record with that
+flag set (raises loudly), so a Manifold corpus can never inflate the real-money profit floor / go-
+live-eligibility even by an accidental copy-paste — the property is no longer convention-only. The
+tag is pure metadata (EXCLUDED from `_seed_hash`), so it changes no backtest number or hash; it only
+fails-closed the one place a play-money record must never reach. (Previously this was enforced only
+by CONVENTION — module name + a marker + non-wiring — an adversarial-auditor-disclosed gap.)
 
 Leakage-safety is IDENTICAL to the Polymarket/Kalshi fetchers and reuses their audited
 guard (`polymarket_history_fetcher._last_pre_decision_price`):
@@ -78,8 +76,9 @@ class ManifoldHistoryFetcher:
     real-money / floor / go-live decision (see the module docstring).
     """
 
-    research_only = True  # ADVISORY marker (no consumer reads it yet — see the docstring's named
-    #                       follow-up for the positive structural tag on HistoricalMarket)
+    research_only = True  # class-level marker; ALSO stamped positively onto every emitted
+    #                       HistoricalMarket(research_only=True) — the real-money floor lane
+    #                       (validate_real_oos.evaluate) refuses those records (structural guardrail).
 
     def __init__(self, session: Optional[requests.Session] = None):
         self.session = session or requests.Session()
@@ -225,6 +224,7 @@ class ManifoldHistoryFetcher:
             model_prob=market_price,   # naive crowd baseline; a real strategy overrides this
             outcome=resolved.outcome,
             category=resolved.category,
+            research_only=True,        # PLAY-MONEY provenance — refused by the real-money floor lane
         )
 
     def build_historical_markets(
