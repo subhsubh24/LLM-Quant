@@ -805,3 +805,24 @@ covering the roadmap (the diversity-collapse failure mode).
 - **Honest signal:** if genuinely only one category has value-bar-clearing work this run (common
   pre-launch), concentrate there and SAY so in LOOP_HEALTH — forced diversity against an empty field is
   the same failure inverted.
+
+## 38. Owner-action lifecycle — resolve, re-confirm, prune (keep OWNER_ACTIONS bounded)
+PENDING_OPS / OWNER_ACTIONS is a LIVING ledger (§14): an item left `open` after it is actually done
+nags the owner, and a pile of never-pruned `done` items bloats the file (§35). Close the loop honestly
+AND keep it small:
+- **Resolve only with dated proof.** Flip an item to `status: done` ONLY with a `resolved:`/`done_on:`
+  date AND a `verification:` note stating HOW it was confirmed — a real §28 re-probe round-trip (what the
+  probe returned), a merged artifact, or `owner-attested` when the repo genuinely cannot see it (a
+  provider-dashboard setting). Never mark done on assumption; an unverifiable "done" is the same failure
+  as a fabricated metric.
+- **Re-confirm, don't trust the flag.** Each run, an env/source-probeable `done` item is RE-CHECKED by
+  the §28 probe (not assumed from its stored status). If the probe now fails, flip it BACK to `open` — a
+  regression (a rotated-away key, a disconnected source) — and say so; a stale `done` hiding a broken
+  dependency is a lie. An `owner-attested` item the loop cannot probe stays done unless the owner says
+  otherwise.
+- **Prune to stay bounded (§35 curator pass).** Once a `done` item is re-confirmed AND stale (resolved
+  more than ~2 runs ago), ARCHIVE it: move it out of the live `items:` list into a collapsed `RESOLVED`
+  tail (or drop it, keeping the dated one-line record as a `decision` entry in loop-memory). The live list
+  then carries only `open` + freshly-resolved work — fewer, current items beat a 600-line audit scroll.
+- **Honest only (anti-gaming):** never mass-flip to `done` to look clear, and never delete an `open` item
+  to shrink the list. Bounded means CURATED, not hidden.
