@@ -247,6 +247,18 @@ def load_positions_into_executor(executor: PredictionMarketExecutor):
                     opened_at=db_pos.opened_at,
                     updated_at=db_pos.updated_at,
                 )
+                # Surface a LEGACY short (side="short") anomaly loudly. Shorts cannot be
+                # opened since #215 (the executor's SELL guard rejects opening one), so a
+                # rehydrated short is a stale pre-#215 DB row. The executor now QUARANTINES
+                # it (a BUY on it is rejected, not scaled — D4 follow-up), but it should be
+                # cleaned up manually; a WARNING makes it visible rather than silent.
+                if str(getattr(pos, "side", "long")) == "short":
+                    logger.warning(
+                        "rehydrated a LEGACY short position (token_id=%r, size=%s) — shorts "
+                        "cannot be opened since #215; this stale row is quarantined (BUYs "
+                        "rejected), resolve it manually",
+                        db_pos.token_id, db_pos.size,
+                    )
             except Exception as e:
                 skipped += 1
                 logger.error(
