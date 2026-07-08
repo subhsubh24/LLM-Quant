@@ -634,11 +634,22 @@ class PredictionMarketExecutor:
         live_enabled: Optional[bool] = None,
         max_daily_loss_usd: Optional[float] = None,
         max_total_loss_usd: Optional[float] = None,
+        max_per_trade_usd: Optional[float] = None,
     ):
         self.polymarket = polymarket or PolymarketExecutor()
         self.dry_run = dry_run
         self.max_position_usd = max_position_usd
         self.max_portfolio_usd = max_portfolio_usd
+        # HARD PER-TRADE NOTIONAL CEILING (ROADMAP D3). The owner-facing MAX_PER_TRADE_USD
+        # setting (config.py, default $5) is a distinct, TIGHTER bound than the per-POSITION
+        # cap (max_position_usd) and the cumulative portfolio cap (max_portfolio_usd): it
+        # limits how much a SINGLE order may deploy. It was defined in config but read
+        # NOWHERE, so setting MAX_PER_TRADE_USD silently protected nothing. Enforced at the
+        # execution gate (_check_risk) when set. None DISABLES the gate — the default for
+        # standalone/test/harness constructions, so their behavior is bit-identical; the
+        # production singleton (get_executor) passes the real setting so a live host actually
+        # honors the owner's per-trade ceiling. Raising it is HUMAN-CORE (owner-only).
+        self.max_per_trade_usd = max_per_trade_usd
 
         # OPTIONAL per-strategy drawdown circuit (ROADMAP D2). The orchestrator sets this to
         # its RiskManager so the SELL/partial-reduce path can feed realized PnL into the
@@ -1010,6 +1021,15 @@ class PredictionMarketExecutor:
 
         notional = req.notional
 
+        # PER-TRADE ceiling (D3) — a SINGLE order can never deploy more than the owner's
+        # MAX_PER_TRADE_USD. Checked before the per-position cap so the tighter bound wins
+        # and the rejection message names the right ceiling. None => gate disabled.
+        if self.max_per_trade_usd is not None and notional > self.max_per_trade_usd:
+            return (
+                f"Order notional ${notional:.2f} exceeds max per-trade "
+                f"${self.max_per_trade_usd:.2f}"
+            )
+
         if notional > self.max_position_usd:
             return f"Order notional ${notional:.2f} exceeds max position ${self.max_position_usd:.2f}"
 
@@ -1280,11 +1300,36 @@ def get_executor(
     dry_run: bool = True,
     max_position_usd: float = 50.0,
     max_portfolio_usd: float = 500.0,
+    max_per_trade_usd: Optional[float] = None,
 ) -> PredictionMarketExecutor:
     """Get or create the global prediction market executor."""
     global _executor
     if _executor is None:
         import os
+
+        # Per-trade notional ceiling: read the owner's MAX_PER_TRADE_USD (config default
+        # $5) so the setting is ENFORCED on the production path, not left inert. Fail LOUD
+        # on a malformed value in the SAFE direction (conservative $5 fallback, never
+        # looser). None here means "resolve from settings" — an explicit caller value wins.
+        if max_per_trade_usd is None:
+            try:
+                from ..config import get_settings
+                _cfg_per_trade = get_settings().max_per_trade_usd
+                try:
+                    max_per_trade_usd = float(_cfg_per_trade)
+                except (TypeError, ValueError):
+                    if _cfg_per_trade is not None:
+                        logger.warning(
+                            "[EXECUTOR] MAX_PER_TRADE_USD=%r is unparseable; using "
+                            "conservative fallback $5", _cfg_per_trade
+                        )
+                    max_per_trade_usd = 5.0
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "[EXECUTOR] could not read MAX_PER_TRADE_USD setting; using "
+                    "conservative fallback $5: %s", e
+                )
+                max_per_trade_usd = 5.0
 
         poly = PolymarketExecutor(
             api_key=os.environ.get("POLYMARKET_API_KEY", ""),
@@ -1298,6 +1343,7 @@ def get_executor(
             dry_run=dry_run,
             max_position_usd=max_position_usd,
             max_portfolio_usd=max_portfolio_usd,
+            max_per_trade_usd=max_per_trade_usd,
         )
         # Wire durable safety-state persistence onto the production singleton and
         # rehydrate (run-risk-readiness). Best-effort + lazy import (same dual-import
