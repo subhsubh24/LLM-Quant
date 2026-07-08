@@ -79,6 +79,18 @@ class HistoricalMarket:
     # from _seed_hash (reproducibility invariant: category=None vs a value → identical hash).
     # Defaulted to None so every existing construction is byte-unchanged.
     category: Optional[str] = None
+    # RESEARCH-ONLY provenance flag. TRUE marks a record sourced from a PLAY-MONEY venue
+    # (e.g. Manifold, A8) — usable for METHOD validation only, and which must NEVER count
+    # toward the real-money profit floor / go-live-eligibility (a play-money edge does not
+    # transfer to real money). It is a STRUCTURAL guardrail: the real-money OOS floor lane
+    # (scripts/validate_real_oos.evaluate) REFUSES any record with this set, so a play-money
+    # corpus can never inflate the floor even by an accidental copy-paste — replacing the
+    # prior convention-only (module-name + comment) marker (named A8 follow-up). Pure
+    # METADATA: it never enters the decision (leakage-neutral) NOR the PnL, so — like
+    # `category` — it is EXCLUDED from _seed_hash (reproducibility invariant: the flag never
+    # changes a hash or a number). Defaulted to False so every existing construction is
+    # byte-unchanged and real-money records are unaffected.
+    research_only: bool = False
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.market_price <= 1.0):

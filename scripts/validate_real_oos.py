@@ -43,6 +43,18 @@ def _imp(a, b):
 def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: float = 2.0) -> dict:
     """Pure OOS evaluation on already-fetched leakage-safe markets (injectable for tests):
     crowd baseline vs. the B4a calibration alpha, + corpus stats + an honest verdict."""
+    # STRUCTURAL RESEARCH-ONLY GUARDRAIL (ROADMAP A8): this is the REAL-MONEY OOS floor lane —
+    # its verdict feeds go-live-eligibility. A PLAY-MONEY (research_only) record (e.g. Manifold)
+    # validates a METHOD but a play-money edge does NOT transfer to real money, so it must NEVER
+    # be scored here. Fail LOUD if any slips in (an accidental copy-paste of the research venue
+    # into the floor lane) — never silently average play money into the real-money floor.
+    research = [getattr(m, "market_id", "?") for m in markets if getattr(m, "research_only", False)]
+    if research:
+        raise ValueError(
+            "validate_real_oos.evaluate is the REAL-MONEY floor lane and refuses research_only "
+            f"(play-money) records — {len(research)} found (e.g. {research[:3]}). A play-money edge "
+            "never counts toward the profit floor / go-live-eligibility (ROADMAP A8 guardrail)."
+        )
     prices = [m.market_price for m in markets]
     outs = [m.outcome for m in markets]
     n = len(markets)
