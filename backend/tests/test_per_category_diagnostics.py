@@ -1,6 +1,7 @@
 """Deterministic tests for the B9 per-category crowd-calibration diagnostic."""
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from typing import Optional
 
 from backend.app.prediction_markets.per_category_diagnostics import (
@@ -101,3 +102,22 @@ def test_note_discloses_diagnostic_and_bonferroni():
     assert "Diagnostic only" in r.note
     assert "NOT a validated edge" in r.note
     assert "Bonferroni" in r.note
+
+
+def test_empty_corpus_brier_is_none_not_nan_and_json_valid():
+    # An empty corpus (e.g. the fetch timed out / returned nothing) must NOT poison the
+    # report with float("nan"): asdict()+json.dumps of the report emits the invalid RFC-8259
+    # `NaN` token that jq / non-Python parsers reject (the same class the F11 #249 fix caught).
+    # scripts/per_category_edge_search.py --json serializes exactly this shape.
+    r = per_category_calibration([], min_category_n=30)
+    assert r.n_markets == 0
+    assert r.aggregate_crowd_brier is None            # None, never NaN
+    payload = {
+        "categories": [asdict(c) for c in r.categories],
+        "aggregate_crowd_brier": r.aggregate_crowd_brier,
+        "bonferroni_alpha": r.bonferroni_alpha,
+        "most_beatable": r.most_beatable,
+    }
+    dumped = json.dumps(payload)                        # would raise-free but emit NaN pre-fix
+    assert "NaN" not in dumped                          # RFC-8259 valid
+    assert json.loads(dumped)["aggregate_crowd_brier"] is None

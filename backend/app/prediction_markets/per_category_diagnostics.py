@@ -55,7 +55,7 @@ class PerCategoryReport:
     n_categories_assessed: int                 # those with n >= min_category_n
     min_category_n: int
     bonferroni_alpha: float                    # alpha / n_categories_assessed (K), for downstream tests
-    aggregate_crowd_brier: float
+    aggregate_crowd_brier: Optional[float]     # None on an empty corpus (never NaN — keeps JSON RFC-8259 valid)
     most_beatable: Optional[str]               # highest-ECE sufficient category, or None
     note: str
 
@@ -130,7 +130,7 @@ def per_category_calibration(
         n_categories_assessed=k,
         min_category_n=min_category_n,
         bonferroni_alpha=round(bonferroni_alpha, 6),
-        aggregate_crowd_brier=round(aggregate_brier, 6) if n else float("nan"),
+        aggregate_crowd_brier=round(aggregate_brier, 6) if n else None,
         most_beatable=most_beatable,
         note=note,
     )
