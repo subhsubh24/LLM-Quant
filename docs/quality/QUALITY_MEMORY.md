@@ -5,6 +5,109 @@
 
 ---
 
+## 2026-07-09 — overall `B` · ship gate NOT met (6th grade — substantive safety/units-contract cycle; the prior partial-reduce A→A+ gap CLOSED; business_case still the lone binding B)
+
+**Diff vs 2026-07-07:** overall unchanged at **B**, letters unchanged across all ten
+dimensions — but this was a **substantive** cycle (26 commits, ~3,500 LOC, +13 test files),
+not a token one, and the composition improved materially. The headline: **#253 genuinely
+CLOSED the prior correctness_reliability / run_risk_readiness A→A+ gap** (SELL/partial-reduce
+now feeds the per-strategy drawdown circuit). Five more safety/security fixes and the
+units-contract family landed and were re-verified **non-tautological** by fresh, independent,
+adversarial per-dimension graders (none the maker). The research loop ran two more real-data
+probes to **no new edge** and honestly **corrected a prior Manifold overclaim downward**. The
+binding constraint (`business_case_strength`, B) is unchanged.
+
+**What the factory closed since 2026-07-07 (fresh adversarial graders, verified not trusted):**
+- **#253 (the prior A→A+ gap) — GENUINE + CLOSED.** The SELL/reduce branch now feeds realized
+  PnL to the per-strategy drawdown circuit (`execution.py:1219-1227`,
+  `risk_manager.record_pnl(pos.strategy, pnl)`; wired via `orchestrator.py:640`).
+  Non-tautological: pre-#253 (`git show 41ab6da^`) had **0** `record_pnl` sites in the reduce
+  path, HEAD has 3; `test_sell_reduce_drawdown.py` proves a strategy bleeding on reduces ALONE
+  now auto-disables — structurally impossible pre-fix. No double-count (reduce shrinks
+  `pos.size` first; the remainder settles via MTM later — disjoint portions).
+- **#264 (per-order MAX_PER_TRADE_USD ceiling)** — `execution.py:1051` rejects
+  `notional > max_per_trade_usd` before the max-position check; `test_max_per_trade_cap.py:43`
+  would have FILLED pre-fix.
+- **#272 (live fills charge the venue fee)** — both live paths set the fee at
+  `DEFAULT_FEE_RATE` (`execution.py:406,557`), netted into `record_realized_pnl` so hard loss
+  caps trip **earlier**; paper `_simulate_fill` untouched → determinism intact.
+- **#260 (BUY-on-short quarantine)** — `execution.py:1016-1029` rejects a BUY on a legacy
+  short row (loss-cap-bypass closed; `test_short_open_rejected.py:67`).
+- **#269 (boot-error secret-value log hygiene)** — `config.py:253-262` re-raises with
+  `errors(include_input=False)` + `from None`; only var names leak, never values
+  (`test_config_safety.py:117-149`, in the blocking gate; fails pre-fix).
+- **#265 (security headers + /health info-hygiene)** — nosniff/X-Frame-Options DENY/Referrer/
+  HSTS via non-clobbering `setdefault`; `/health` no longer leaks `live_trading_enabled`.
+- **#263/#268/#275 (units-contract)** — edge/confidence in absolute probability units;
+  behavioral flips, not renames (`test_confidence_units.py:147-170`: a 0.40-fair-value BUY now
+  sizes to $0 where pre-fix `confidence=0.85` bypassed the gate).
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**
+  (import smoke + curated tests + safety + secret scan + runtime harness + scorecard parse +
+  self-validation + GTM honesty).
+- `python3 scripts/runtime_harness.py` → **PASSED** (live gate REJECTS real order, kill switch
+  blocks, max-position rejects $900>$50, loss cap trips net-of-fees at −$41.20 vs −$10 and
+  blocks subsequent orders, deterministic exposure 10.000000==10.000000).
+- `python3 scripts/run_walk_forward.py` twice → **reproduces** (`seed 42 / hash
+  b3a8d5e0e9579853`, PnL 910,880.71 identical; SYNTHETIC demo, labeled NOT a validated edge).
+- `python3 -m pytest backend --collect-only` → **1107 collected, 14 errors** (13
+  `No module named pandas` + 1 `No module named fastapi` on `test_security_headers.py`). New
+  units/reduce/cap tests (60) pass; verified non-tautological.
+- `python3 scripts/check_scorecard.py gate` → **NOT-READY (business_case_strength: B)** (honest).
+
+**Grades (fresh adversarial per-dimension graders, none the maker):**
+functional_reality **A**, backtest_integrity **A**, correctness_reliability **A**,
+security **A**, run_risk_readiness **A**, artifact_integrity **A**,
+business_case_strength **B**, design_taste **A**, tests_evals **A**, performance **A**.
+
+**Anti-inflation note:** #253 closed the named prior A→A+ gap on both correctness_reliability
+and run_risk_readiness — but I did **NOT** promote either to A+, because each grader surfaced
+a real NEW non-blocking finding: correctness has the **NOPositionScanner confidence residual**
+(`advanced_strategies.py:265`, `confidence=min(adjusted_rate*2.0, 0.95)` decoupled from
+entry+edge — the same units-contract bug class, unfixed on this executing default-scan
+strategy); run-risk has the **live kill-switch fee-estimate residual** (nets on
+`DEFAULT_FEE_RATE` + assumed fill==limit, not a real venue fee field). A world-class dimension
+with a named non-blocking gap is the textbook **A**, not A+. No grade exceeds its evidence.
+
+**Backtest integrity (make-or-break) — reproduction attempted again:** engine remains
+leak-free (structural `MarketView` guard; all three fetchers — including the new
+`manifold_history_fetcher` — RAISE rather than fabricate a decision price), cost-realistic
+(single source of truth with the executor), reproducible (identical hash + PnL). The new
+`research_only` field is excluded from `_seed_hash`. The #259 play-money guardrail was
+exercised directly (`validate_real_oos.evaluate` RAISES on any `research_only=True` record).
+**No unreproducible backtest, no fabricated PnL, no banked edge found.** Held at **A** (not
+A+) only because the sole reproducing number is synthetic and `DEFAULT_IMPACT_COEFF=0.5`
+remains an uncalibrated placeholder.
+
+**Business case (the binding B) — unchanged:** still no validated OOS cost-net edge. EXP-005
+(Sports-category bucket, motivated by B9's worst-ECE finding) ran on real leakage-safe data
+and **abstained on sub-floor N** (134–135 Sports markets vs. `min_bucket_n=30`×10 required):
+0 trades, F11 `insufficient_data` — an honest zero, NOT a measured negative. Run 17 replicated
+N≈135 across three pulls and diagnosed a `volumeNum` sampling-axis fetch ceiling (fetcher-
+design gap, not an edge). Bucket-calibration family still REFUTED across 4 corpora. The prior
+"materially softer Manifold crowd" framing was **corrected downward** to "less-pinned research
+corpus, not a proven beatable crowd." Revenue $0, floor unmet, ship gate correctly closed.
+
+**Artifact-integrity correction this cycle:** the prior scorecard's "1040 collected / 13
+errors (all pandas)" is now **stale and incomplete** — actual is **1107 collected, 14 errors
+(13 pandas + 1 fastapi)**. Direction was understated (conservative), never inflated, and
+self-disclosed; corrected in this scorecard. The recurring lesson: sync the reported count
+with actual collection, or cite the curated-green subset rather than a drifting raw total.
+
+**Issues:** **#79 kept open + refreshed** with the 2026-07-09 evidence (EXP-005 abstain,
+Manifold correction, the volumeNum-ceiling next step) — the ship-critical binding constraint,
+still egress/owner-gated. The four A→A+ nits (NOPositionScanner confidence, security-header
+gate coverage, live-fee real-field, impact-coeff calibration) are named in the scorecard
+`top_gaps` for the factory; not separately filed to avoid issue spam (they are non-ship-
+critical A-dimension improvements, tracked on the dashboard via the scorecard).
+
+**Weakest link (honest, unchanged):** there is still no validated out-of-sample edge. The
+engine to find one is high quality and materially better hardened this cycle, but the edge
+itself is unproven, and everything downstream is gated correctly and honestly.
+
+---
+
 ## 2026-07-07 — overall `B` · ship gate NOT met (5th grade — small hardening cycle; two more verified safety fixes; business_case still the lone binding B)
 
 **Diff vs 2026-07-05:** overall unchanged at **B**, letters unchanged across all ten
