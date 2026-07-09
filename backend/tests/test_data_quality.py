@@ -181,6 +181,44 @@ class TestCompleteness:
         dims = [i.dimension for i in issues]
         assert "completeness" in dims
 
+    # ── Non-finite volume/liquidity (regression) ──
+    # `NaN < 0` and `inf < 0` are BOTH False, so the negativity check alone let a
+    # non-finite volume/liquidity pass completeness. That is a real hole in this
+    # belt-and-suspenders choke-point: a NaN liquidity then defeats the strategies'
+    # own `liquidity_below(floor)` gate downstream (see the consumer test below).
+
+    def test_nan_volume_flagged(self):
+        market = _make_binary_market(total_volume=float("nan"))
+        details = " ".join(i.detail for i in self.v.check_completeness(market))
+        assert "total_volume" in details and "non-finite" in details
+
+    def test_inf_volume_flagged(self):
+        market = _make_binary_market(total_volume=float("inf"))
+        details = " ".join(i.detail for i in self.v.check_completeness(market))
+        assert "total_volume" in details and "non-finite" in details
+
+    def test_nan_liquidity_flagged(self):
+        market = _make_binary_market(liquidity=float("nan"))
+        details = " ".join(i.detail for i in self.v.check_completeness(market))
+        assert "liquidity" in details and "non-finite" in details
+
+    def test_inf_liquidity_flagged(self):
+        market = _make_binary_market(liquidity=float("inf"))
+        details = " ".join(i.detail for i in self.v.check_completeness(market))
+        assert "liquidity" in details and "non-finite" in details
+
+    def test_nan_liquidity_market_rejected_by_check_market(self):
+        # End-to-end: the full gate (what the orchestrator calls before sizing) now
+        # REJECTS a NaN-liquidity market, so it is skipped rather than traded.
+        market = _make_binary_market(liquidity=float("nan"))
+        assert not self.v.check_market(market).ok
+
+    def test_nan_liquidity_defeats_downstream_liquidity_gate(self):
+        # WHY the DQ gate must catch it: the strategies' own liquidity filter cannot.
+        # `NaN < floor` is False, so a NaN-liquidity market reads as "liquid enough".
+        market = _make_binary_market(liquidity=float("nan"))
+        assert market.liquidity_below(1_000_000) is False
+
 
 # ============================================================
 # Price-sanity checks

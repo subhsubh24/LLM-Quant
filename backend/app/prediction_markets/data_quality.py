@@ -16,6 +16,7 @@ Three dimensions are checked:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -170,6 +171,20 @@ class DataQualityValidator:
                     QualityIssue(
                         "completeness",
                         f"{field_name} is missing or non-numeric",
+                    )
+                )
+            elif not math.isfinite(float(val)):
+                # NaN/inf must be caught EXPLICITLY: `NaN < 0` and `inf < 0` are both
+                # False, so a non-finite volume/liquidity would sail past the negativity
+                # check below — and a NaN liquidity then defeats the strategies' own
+                # `liquidity_below(floor)` gate (`NaN < floor` is False → treated as
+                # "liquid enough" → the market is traded on garbage depth). This gate is
+                # the single choke-point (A5), so it must reject non-finite here even
+                # though the parsers coerce upstream (belt-and-suspenders / new ingest paths).
+                issues.append(
+                    QualityIssue(
+                        "completeness",
+                        f"{field_name} is non-finite ({val})",
                     )
                 )
             elif float(val) < 0:
