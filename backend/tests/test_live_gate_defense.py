@@ -38,6 +38,7 @@ from app.prediction_markets.execution import (
     PolymarketExecutor,
     PredictionMarketExecutor,
 )
+from app.prediction_markets.cost_model import DEFAULT_FEE_RATE
 
 
 # ---------------------------------------------------------------------------
@@ -430,3 +431,75 @@ class TestOpenOrderCreatesNoPhantomPosition:
         ex.execute(req)
         assert req.token_id in ex.positions
         assert ex.positions[req.token_id].size == pytest.approx(10.0)
+
+
+# ---------------------------------------------------------------------------
+# D3/D4  Live fills charge the venue fee (so the hard loss caps net it)
+# ---------------------------------------------------------------------------
+
+class TestLiveFillChargesVenueFee:
+    """The live venue methods (_place_via_clob_client / _place_via_rest) must populate
+    OrderResult.fees on a real fill — the SAME cost-model fee paper's _simulate_fill
+    charges. Before this fix they left fees=0.0, so a live EXIT fill's fee never reached
+    record_realized_pnl (execution.py:~1188 nets result.fees + reconstructed entry_fee) —
+    only the entry fee was netted, and the hard loss caps + kill switch undercounted the
+    real cash loss on the LIVE path by exactly the exit fee.
+
+    The three `*_charges_*_fee` tests FAIL on pre-fix code (a live matched fill would carry
+    fees=0.0); `test_clob_open_order_books_no_fee` is a control (0 fee was always correct
+    for a non-fill). The end-to-end loss-counter netting is covered separately via the
+    public execute() path in test_loss_cap_fees.py::test_reduce_loss_nets_entry_and_exit_fees."""
+
+    def _call_clob(self, resp_dict, req=None) -> OrderResult:
+        poly = _poly_executor()
+        mock_client = MagicMock()
+        mock_client.create_and_sign_order.return_value = MagicMock()
+        mock_client.post_order.return_value = resp_dict
+        return poly._place_via_clob_client(mock_client, req or _req())
+
+    def _call_rest(self, data_dict, req=None) -> OrderResult:
+        poly = _poly_executor()
+        poly.session = MagicMock()
+        http_resp = MagicMock()
+        http_resp.raise_for_status.return_value = None
+        http_resp.json.return_value = data_dict
+        poly.session.post.return_value = http_resp
+        return poly._place_via_rest(req or _req())
+
+    def test_clob_matched_fill_charges_cost_model_fee(self):
+        """A CLOB 'matched' fill of 10 @ $0.50 charges 10*0.50*DEFAULT_FEE_RATE, not 0."""
+        result = self._call_clob(
+            {"status": "matched", "matchedAmount": 10.0, "orderID": "order-fee"}
+        )
+        assert result.status == OrderStatus.FILLED
+        expected = 10.0 * 0.50 * DEFAULT_FEE_RATE
+        assert result.fees == pytest.approx(expected)
+        assert result.fees > 0.0  # the pre-fix bug: fees defaulted to 0.0
+
+    def test_clob_open_order_books_no_fee(self):
+        """A resting/OPEN order (no match) must NOT book a fee — filled_size==0 → fees==0."""
+        result = self._call_clob(
+            {"status": "matched", "matchedAmount": 0, "orderID": "order-open"}
+        )
+        assert result.status == OrderStatus.OPEN
+        assert result.filled_size == 0.0
+        assert result.fees == pytest.approx(0.0)
+
+    def test_clob_fee_scales_with_matched_size_and_price(self):
+        """Fee is on the ACTUAL matched size at the fill price (partial fill / other price)."""
+        result = self._call_clob(
+            {"status": "matched", "matchedAmount": 7.0, "orderID": "order-part"},
+            req=_req(size=10.0, price=0.30),
+        )
+        assert result.status == OrderStatus.FILLED
+        assert result.filled_size == pytest.approx(7.0)
+        assert result.fees == pytest.approx(7.0 * 0.30 * DEFAULT_FEE_RATE)
+
+    def test_rest_matched_fill_charges_cost_model_fee(self):
+        """The REST fallback path must also charge the venue fee on a real match."""
+        result = self._call_rest(
+            {"status": "matched", "matchedAmount": 10.0, "orderID": "rest-fee"}
+        )
+        assert result.status == OrderStatus.FILLED
+        assert result.fees == pytest.approx(10.0 * 0.50 * DEFAULT_FEE_RATE)
+        assert result.fees > 0.0
