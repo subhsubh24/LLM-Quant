@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult
+from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult, gate_confidence
 from .market_text import DEFAULT_MIN_SHARED, content_tokens, is_content_related
 from .cost_model import DEFAULT_COST_MODEL
 
@@ -616,7 +616,10 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                 entry_price=p_child,
                                 expected_value=p_parent,
                                 edge=gap,
-                                confidence=0.85,
+                                # UNITS CONTRACT: win_probability = entry + edge = p_parent
+                                # (the fair value the child should trade at). Gate on it, not
+                                # a hardcoded heuristic. See polymarket_client.gate_confidence.
+                                confidence=gate_confidence(p_child, gap),
                                 reason=(
                                     f"IMPLICATION VIOLATION: \"{parent.question[:50]}\" "
                                     f"({p_parent:.0%}) implies \"{child.question[:50]}\" "
@@ -640,7 +643,7 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                 entry_price=sell_price,
                                 expected_value=sell_price - gap,
                                 edge=gap,
-                                confidence=0.80,
+                                confidence=gate_confidence(sell_price, gap),
                                 reason=(
                                     f"EXCLUSION VIOLATION: \"{parent.question[:50]}\" "
                                     f"({p_parent:.0%}) + \"{child.question[:50]}\" "
@@ -699,7 +702,7 @@ class CrossMarketArbitrageStrategy(BaseStrategy):
                                     entry_price=min(p1, p2),
                                     expected_value=max(p1, p2),
                                     edge=gap,
-                                    confidence=0.60,
+                                    confidence=gate_confidence(min(p1, p2), gap),
                                     reason=(
                                         f"Cross-market gap: \"{m1.question[:60]}\" "
                                         f"({p1:.0%}) vs \"{m2.question[:60]}\" "
