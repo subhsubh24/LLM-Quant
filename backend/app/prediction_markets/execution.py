@@ -393,6 +393,17 @@ class PolymarketExecutor:
                 # it so a None req.price (schema-valid) can't set filled_price=None and crash
                 # the downstream market_value / PnL math after a real order was placed.
                 filled_price=(req.price or 0.50) if filled_size > 0 else 0.0,
+                # Charge the venue fee on the ACTUAL matched size, from the cost_model single
+                # source of truth (the SAME 2% notional `_simulate_fill` charges paper). The
+                # live venue methods previously left fees=0.0, so a live EXIT fill's fee never
+                # reached record_realized_pnl / the hard loss caps — only the reconstructed
+                # ENTRY fee did (execution.py:~1187) — so the caps + kill switch undercounted
+                # the real cash loss on the LIVE path by exactly the exit fee (paper was
+                # already correct: _simulate_fill sets fees). Netting it is the CONSERVATIVE
+                # direction (caps trip earlier, never later) and restores paper/live symmetry.
+                # (If a future venue response carries a real fee field, prefer it over this
+                # estimate.) filled_size==0 → 0.0, so a resting/OPEN order books no fee.
+                fees=filled_size * ((req.price or 0.50) if filled_size > 0 else 0.0) * DEFAULT_FEE_RATE,
                 raw_response=resp,
             )
         except Exception as e:
@@ -536,6 +547,14 @@ class PolymarketExecutor:
                         # TypeError in market_value math AFTER a real order placed — the exact
                         # crash the None-safe expression avoids.)
                         filled_price=req.price or 0.50,
+                        # Charge the venue fee on the ACTUAL matched size from the cost_model
+                        # single source of truth (the SAME 2% notional paper charges). Live
+                        # fills previously left fees=0.0, so a live exit fill's fee never
+                        # reached the hard loss caps (only the reconstructed entry fee did) —
+                        # the caps undercounted real cash loss on the live path by exactly the
+                        # exit fee. Netting it is the CONSERVATIVE direction and restores
+                        # paper/live symmetry. Mirrors the CLOB path above.
+                        fees=parsed * (req.price or 0.50) * DEFAULT_FEE_RATE,
                         status=OrderStatus.FILLED,
                         raw_response=data,
                     )
