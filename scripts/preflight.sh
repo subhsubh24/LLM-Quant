@@ -113,6 +113,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_manifold_history_fetcher.py \
            backend/tests/test_max_per_trade_cap.py \
            backend/tests/test_near_certainty_edge_units.py \
+           backend/tests/test_confidence_units.py \
            backend/tests/test_sell_reduce_drawdown.py \
            backend/tests/test_no_position_edge_units.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"

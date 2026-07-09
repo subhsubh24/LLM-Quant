@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult
+from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult, gate_confidence
 from .strategies import BaseStrategy, StrategyConfig
 from .market_text import content_tokens
 
@@ -653,7 +653,10 @@ class LogicalImplicationDetector(BaseStrategy):
                             entry_price=p_target,
                             expected_value=p_source,
                             edge=edge,
-                            confidence=chain_conf,
+                            # UNITS CONTRACT: gate on the reconstructed win_probability
+                            # (entry + edge), NOT the relationship confidence chain_conf.
+                            # See polymarket_client.gate_confidence.
+                            confidence=gate_confidence(p_target, edge),
                             reason=(
                                 f"TRANSITIVE IMPLICATION: "
                                 f"\"{market.question[:40]}\" ({p_source:.0%}) → "
@@ -691,7 +694,7 @@ class LogicalImplicationDetector(BaseStrategy):
                             entry_price=buy_price,
                             expected_value=buy_price + deviation / 2.0,
                             edge=edge,
-                            confidence=conf,
+                            confidence=gate_confidence(buy_price, edge),
                             reason=(
                                 f"EXHAUSTIVE UNDERPRICED: "
                                 f"\"{src.question[:40]}\" ({p_src:.0%}) + "
@@ -713,7 +716,7 @@ class LogicalImplicationDetector(BaseStrategy):
                             entry_price=sell_price,
                             expected_value=sell_price - deviation / 2.0,
                             edge=edge,
-                            confidence=conf,
+                            confidence=gate_confidence(sell_price, edge),
                             reason=(
                                 f"EXHAUSTIVE OVERPRICED: "
                                 f"\"{src.question[:40]}\" ({p_src:.0%}) + "
@@ -750,7 +753,7 @@ class LogicalImplicationDetector(BaseStrategy):
                             entry_price=cheapest.price,
                             expected_value=cheapest.price + edge,
                             edge=edge,
-                            confidence=0.75,
+                            confidence=gate_confidence(cheapest.price, edge),
                             reason=(
                                 f"MULTI-OUTCOME SUM: {len(market.outcomes)} outcomes "
                                 f"sum to {price_sum:.3f} (should be ~1.0, "
@@ -775,7 +778,7 @@ class LogicalImplicationDetector(BaseStrategy):
                             entry_price=expensive.price,
                             expected_value=expensive.price - edge,
                             edge=edge,
-                            confidence=0.75,
+                            confidence=gate_confidence(expensive.price, edge),
                             reason=(
                                 f"MULTI-OUTCOME SUM: {len(market.outcomes)} outcomes "
                                 f"sum to {price_sum:.3f} (should be ~1.0, "

@@ -158,6 +158,26 @@ class ScanResult:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+def gate_confidence(entry_price: float, edge: float) -> float:
+    """The confidence value the orchestrator's ``min_confidence`` gate must compare against.
+
+    UNITS CONTRACT (the #263/#268 class). ``orchestrator.kelly_size`` reconstructs
+    ``win_probability = entry_price + edge`` and sizes Kelly on it, but the *only* thing it
+    does with ``ScanResult.confidence`` is the pre-filter ``if confidence < min_confidence:
+    skip`` — i.e. confidence is read as the signal's OWN probability estimate, exactly the
+    contract ``NearCertaintyStrategy`` documents ("win_probability == confidence"). A
+    strategy that emits a heuristic confidence DECOUPLED from ``entry_price + edge`` (a
+    hardcoded 0.85, a relationship ``chain_conf``, ...) makes the gate filter on the wrong
+    quantity: it ADMITS BUYs whose true fair value is below ``min_confidence`` and REJECTS
+    strong signals whose relationship confidence happens to be low. A strategy calls this to
+    pin its emitted confidence to the reconstructed win-probability (clamped to [0, 1] — a
+    SELL's ``entry_price + edge`` can exceed 1), so the ``min_confidence`` gate filters on the
+    true fair value. It is a per-strategy helper each strategy opts into at its own emission
+    sites — not a global normalizer that every strategy is guaranteed to use.
+    """
+    return max(0.0, min(1.0, entry_price + edge))
+
+
 class PolymarketClient:
     """
     Read-only Polymarket scanner for market discovery and pricing.
