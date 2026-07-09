@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-07-05 (2nd factory run — B8 resolved-history feasibility probe + ingest finiteness guard #238)
+  as_of: 2026-07-09 (Research Run 17 — resolution-telemetry fix CONFIRMED live at 0; EXP-005 Sports-fetch ceiling diagnosed)
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -216,20 +216,33 @@ GROWTH_STATUS:
       name: "Sports-Category Calibration Bucket (targeting the worst-ECE Polymarket category)"
       status: insufficient-data
       proposed_date: 2026-07-08
-      tested_date: 2026-07-08
+      tested_date: 2026-07-09
       real_oos_result: >
-        Research Run 16: fetched 1,095 real leakage-safe 7-day-lead Polymarket records
-        (max_pages=20, unmodified polymarket_history_fetcher + validate_real_oos.evaluate(),
+        Research Run 16 (2026-07-08): fetched 1,095 real leakage-safe 7-day-lead Polymarket
+        records (max_pages=20, unmodified polymarket_history_fetcher + validate_real_oos.evaluate(),
         seed=42) -> 134 Sports-category markets (crowd_brier=0.1988, base_rate=0.343, 15.7%
         pinned -- closely reproduces B9's independent 133-market Sports slice from two days
         earlier). CalibrationBucketStrategy made 0 trades; F11 verdict=insufficient_data (NOT a
-        measured negative). Diagnosis: 134 markets / 10 buckets averages 13.4 training records
-        per bucket even using the WHOLE corpus as training -- below min_bucket_n=30 for every
-        bucket, so the model correctly abstained throughout (the designed anti-fabrication
-        behavior, not a bug). A first attempt at max_pages=40 (targeting ~400+ Sports records)
-        hit Gamma's own pagination ceiling (422 at offset~2100) plus a 280s wall-clock budget
-        before finishing -- a future attempt needs more wall-clock budget and/or --merge-style
-        accumulation across runs, not just a bigger max_pages in one shot.
+        measured negative).
+        Research Run 17 (2026-07-09): re-ran the IDENTICAL pre-registered config one calendar day
+        later (same seed=42, decision_lead_days=7, order=volumeNum, max_pages=20; 387.5s
+        wall-clock, no --merge). Result: 2,000 raw resolved markets -> 1,095 leakage-safe (same
+        count to the market) -> Sports n=135 (vs 134 the day before, vs B9's 133 two days before
+        that) -- three independent same-day-of-week pulls land within +/-2 markets of each other.
+        Still 0 trades, F11 insufficient_data (unchanged). DIAGNOSIS SHARPENED (why "fetch more"
+        does not fix this, superseding Run 16's "budget more wall-clock" framing): order=volumeNum
+        ranks by ALL-TIME cumulative volume, so the top-2,000-by-volume resolved set is dominated
+        by long-settled, high-profile historical markets that barely change week to week --
+        re-fetching the same order/limit/max-pages re-discovers almost the SAME markets, not new
+        ones. This is compounded by, but distinct from, Gamma's pagination ceiling (~offset 2100
+        before a 422, unchanged since Run 16) -- even with an unlimited page budget, this
+        particular sampling axis is close to exhausted for Sports. CONCLUSION: EXP-005 cannot be
+        advanced by re-running the existing single-order fetch with a bigger --max-pages or more
+        wall-clock -- that lever is already near-saturated (confirmed empirically, not assumed).
+        Growing Sports N requires a DIFFERENT sampling axis (e.g. paginate by recency/createdAt
+        instead of volumeNum, or a dedicated per-category/per-series targeted fetch) -- a
+        fetcher-design change, not a parameter tweak; this is factory-build scope, not a research-
+        agent re-run.
       edge_source: "crowd-miscalibration, category-targeted (in-scope per PLAYBOOK)"
       hypothesis: >
         A CalibrationBucketStrategy fit EXCLUSIVELY on Polymarket's Sports-category resolved
@@ -255,14 +268,50 @@ GROWTH_STATUS:
         - "The bucket-calibration family (static + recency) is already CONFIRMED non-robust across 4 general corpora (2026-07-04) -- a Sports-only slice of the SAME mechanism could show the identical sign-instability once N is large enough to trade at all."
         - "Sports markets resolve on short horizons (game-day) -- at a 7-day lead many are still pre-season/early, so the 'least calibrated' signal from B9 (also 7-day lead) may itself reflect thin early-life liquidity rather than a persistent crowd bias worth trading."
         - "Liquidity-selection bias (volumeNum order) still applies -- popular (heavily-arbed) Sports markets dominate the sample."
-      blocking_dependency: "N=134 is below the floor for the 10-bucket model to activate on any bucket. Needs a larger Sports-only fetch (loop-buildable, egress open from at least the research-agent's own environment; unconfirmed for the autonomous factory build-loop this specific run -- re-probe per standing discipline)."
+      blocking_dependency: >
+        N~135 is below the floor for the 10-bucket model to activate on any bucket, and (per Run
+        17) is NOT growing across independent same-config pulls -- the volumeNum sampling axis is
+        near-exhausted for Sports, not merely under-fetched. Needs a NEW fetch strategy (recency-
+        ordered or per-category paginated), not a bigger --max-pages on the current one.
       factory_next_action: >
-        Not retried this run (more N, not a re-roll, is the honest next step). A future run:
-        fetch a much larger raw corpus (budget >=10 min wall-clock, or accumulate via --merge
-        across several runs) to reach >=300-400 Sports-category leakage-safe records, then
-        re-run validate_real_oos.evaluate() on the Sports-only slice ONCE with the same
-        pre-registered params (seed=42, decision_lead_days=7, no retry after seeing the number).
+        Not retried again on the same order/config this run (would be a third data point
+        confirming the same ceiling, not new information). Recommended next build (loop-buildable,
+        no owner/egress action needed): add a recency-ordered (e.g. Gamma `order=createdAt` or
+        `endDate` restricted to closed=true) fetch path to polymarket_history_fetcher or a
+        dedicated per-category paginator, so a Sports-only pull can accumulate genuinely NEW
+        markets across repeated calls instead of re-drawing the same all-time top-volume set.
+        Once a >=300-400-record Sports-only corpus is reachable, re-run
+        validate_real_oos.evaluate() on it ONCE with the same pre-registered params (seed=42,
+        decision_lead_days=7), no retry after seeing the number.
   learnings:
+    - "Research Run 17 (2026-07-09): SELF-VALIDATION — the factory's #267 fix (`check_resolutions()`
+      now returns a settled-count summary instead of falling off the end) is CONFIRMED live and
+      trustworthy, not just merged: directly read 2 post-fix `live-validation.yml` job logs
+      (2026-07-09T04:16 run 28993644145, 2026-07-09T09:59 run 29010084415), both report
+      `\"resolutions\": 0` as a real integer (not the structural `null` Research Run 16 diagnosed
+      as dead code). This upgrades Run 16's \"resolution count is UNKNOWN\" back to \"CONFIRMED
+      real zero\" — a materially more precise, more trustworthy state than either extreme. Still
+      genuinely ZERO settled positions after 11+ days of OA-17 operation; bankroll continued
+      shrinking ($102.87 on 07-05 → $72.83 on 07-09) as capital sits in unresolved positions.
+      Sports ($152.75) and General ($211.00 — itself now over its own $200 cap, plausibly MTM
+      appreciation of open longshot positions rather than a bug) categories remain saturated,
+      freezing new deployment — same D2-cap-working-as-designed diagnosis as Run 15 (2026-07-05),
+      now resting on a trustworthy signal instead of an assumption. No action recommended (not a
+      bug); keep watching for the first real resolution now that the telemetry can actually show
+      one. Also this run: EXP-005 (Sports-category CalibrationBucketStrategy) re-tested with the
+      identical pre-registered config one day after Run 16 — Sports N replicated at 135 (vs 134,
+      vs B9's 133) — and the diagnosis was SHARPENED: the volumeNum sampling axis is near-static
+      week-to-week (re-fetching re-draws almost the same all-time top-volume set), so \"budget more
+      wall-clock / bigger --max-pages\" (Run 16's framing) will NOT grow Sports N — a genuinely
+      different sampling axis (recency-ordered fetch, or a per-category paginator) is needed, which
+      is a factory-build task, not a research-agent re-run. Egress reconfirmed open (gamma/clob 200,
+      dune.com still 403). The \"Yes Bias in mention markets\" SSRN lead (Deleep et al.) remains
+      unverifiable — 2 more secondary sources checked (advancedinvesting.org, QuantPedia), neither
+      discloses N/magnitude; a tangential sports-forecasting paper (Goto 2026, arXiv 2604.17194,
+      FL-GLM on 90,014 bookmaker-odds football matches) was checked and ruled out — different asset
+      class (fixed-odds bookmakers, not prediction-market crowd prices), no transferable magnitude.
+      No new EXP-00N proposed; binding constraint (no validated real-money OOS edge) STANDS. Full
+      detail: RESEARCH_MEMORY 2026-07-09 (Research Run 17)."
     - "Research Run 16 (2026-07-08): URGENT — `MarkToMarketEngine.check_resolutions()`
       (orchestrator.py:322-485) has NO return statement (always implicitly returns None), so
       `run_paper_cycle.py`'s `\"resolutions\"` JSON field has been structurally incapable of
@@ -381,25 +430,26 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
-    - "URGENT, loop-buildable, no owner/data action needed (Research Run 16, 2026-07-08): the
-      forward-paper track record's OWN resolution telemetry cannot currently prove or disprove
-      that any position has ever resolved. `MarkToMarketEngine.check_resolutions()`
-      (orchestrator.py:322-485) never returns a value (falls off the end → implicit None), so
-      `run_paper_cycle.py`'s `\"resolutions\"` JSON field (run_paper_cycle.py:86-100) is a
-      structural constant (`null`), not a signal — true whether 0 or 50 positions settled this
-      cycle. Separately, `basicConfig` is called NOWHERE in backend/ or scripts/ (grep-confirmed),
-      so the root logger has no handler and Python's `logging.lastResort` silently drops every
-      INFO-level record — including the one `[MTM] Position resolved` line
-      (orchestrator.py:475) that would prove a resolution fired in the GH Actions job log.
-      Fix (two independent, small, loop-buildable changes): (a) have `check_resolutions()`
-      `return` a summary dict (resolved count + net PnL) instead of falling off the end;
-      (b) add `logging.basicConfig(level=logging.INFO)` at `run_paper_cycle.py`'s entrypoint (a
-      systemic gap — zero basicConfig calls anywhere, not MTM-specific) so INFO-level events
-      are actually captured. Until fixed, do NOT read \"resolutions: null\" as evidence that
-      zero positions have resolved — the correct framing is UNKNOWN, and the three prior
-      research-run diagnoses (Runs 12/13/15) built on \"just elapsed time\" should be understood
-      as unverifiable, not necessarily wrong. Full detail: RESEARCH_MEMORY 2026-07-08 (Research
-      Run 16)."
+    - "RESOLVED + SELF-VALIDATED (Research Run 17, 2026-07-09): Research Run 16's URGENT
+      resolution-telemetry flag (`check_resolutions()` never returning a value, so
+      `\"resolutions\"` was a structural `null`) was fixed by the factory (#267, landed
+      2026-07-08T17:00). This run independently confirmed the fix on 2 real post-fix
+      `live-validation.yml` runs (2026-07-09T04:16 + 09:59) — both report a real
+      `\"resolutions\": 0`, not `null`. The telemetry is now trustworthy; the value is genuinely
+      zero. No further factory action needed on this item — just keep watching for the first
+      non-zero reading now that it can actually show one. (basicConfig/INFO-logging visibility,
+      the second half of Run 16's recommendation, was not independently re-checked this run.)
+      Full detail: RESEARCH_MEMORY 2026-07-09 (Research Run 17)."
+    - "LOOP-BUILDABLE, not yet built (Research Run 17, 2026-07-09): EXP-005's Sports-category
+      corpus is stuck at N~135 because `order=volumeNum` draws from an almost-static all-time
+      top-volume ranking — re-fetching with a bigger `--max-pages` re-discovers nearly the SAME
+      markets (confirmed empirically: 133→134→135 across 3 independent pulls on 07-07/07-08/07-09).
+      Recommended factory build: add a recency-ordered fetch path (e.g. Gamma `order=createdAt` or
+      a dedicated per-category/per-series paginator) to `polymarket_history_fetcher.py` so a
+      Sports-only pull can accumulate genuinely NEW markets instead of re-drawing the same set.
+      Once a >=300-400-record Sports-only corpus is reachable, re-run
+      `validate_real_oos.evaluate()` on it ONCE with the pre-registered params (seed=42,
+      decision_lead_days=7). Full detail: RESEARCH_MEMORY 2026-07-09 (Research Run 17)."
     - "NEW, loop-buildable, not yet built (Research Run 15, 2026-07-05): a 'mention/narrative
       market' classifier (keyword/tag heuristic in the style of market_category.py — question
       patterns like 'will X say/tweet/mention Y') would unlock testing the 'Yes Bias' candidate
