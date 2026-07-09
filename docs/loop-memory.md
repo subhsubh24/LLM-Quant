@@ -2141,3 +2141,71 @@ safety / security) + this bookkeeping. 6 first-round Sonnet reviewers (all workt
 - **Concurrent routines can pre-empt your candidate:** the Sports-bucket alpha the alpha-scout ranked
   #1 was already probed → insufficient by a sibling research run (#262) that merged mid-run. Re-read
   the default branch log after the scout sweep — a candidate may already be answered.
+
+## 2026-07-09 (model/strategy factory) — 1-PR run: live fills must charge the venue fee so the hard loss caps net it (D3/D4 live-safety)
+
+Egress OPEN (gamma 200). Ran the FULL 8-Haiku scout sweep across every track (model/alpha
+correctness · backtest/leakage · risk/live-safety · data/venue ingest · learning/research-
+integrity · quality/tests-coverage · security/abuse · quality-reconcile+self-validation).
+Binding constraint STANDS (business_case_strength B — no validated real-money OOS edge; a
+research problem a sibling routine owns). Shipped the MAXIMAL file-disjoint value-bar-clearing
+set the sweep actually surfaced: exactly ONE genuine code PR + this bookkeeping. This is NOT
+artificial scarcity — every other finding was verified NOTHING-GENUINE, churn on gated-off/dead
+code, or a wrong fix (see triage). A quiet coherent run is a success.
+
+- **#272 (D3/D4 live-safety):** the live Polymarket order methods (`_place_via_clob_client` /
+  `_place_via_rest`) built the fill `OrderResult` WITHOUT setting `fees` → defaulted 0.0, while
+  paper's `_simulate_fill` charges `req.size*fill_price*DEFAULT_FEE_RATE` (2% of notional). On a
+  live SELL close, `_update_position` nets `result.fees + reconstructed entry_fee` into
+  `record_realized_pnl` (the counter the hard daily/total loss caps + kill switch gate on) — so
+  with `result.fees=0` on live, only the ENTRY fee was netted; the EXIT fill's fee was silently
+  dropped and the caps undercounted real cash loss on the LIVE path by exactly the exit fee (an
+  asymmetry vs paper, which `record_realized_pnl`'s own docstring says was already fixed for the
+  entry side). Fix: both live paths set `fees = filled_size*filled_price*DEFAULT_FEE_RATE` (only
+  when filled_size>0 — a resting/OPEN order books no fee), the cost_model single source of truth.
+  CONSERVATIVE direction (caps trip earlier, never later); no double-count (record_execution is
+  the sole fee-subtracting risk_manager call; entry fee reconstructed independently at SELL). 5
+  regression tests in the blocking gate, 3 FAIL on pre-fix code. Gated-off by default; exercised
+  in paper/mock via the mode flag (same code paths).
+
+### Scout triage (anti-padding — findings verified NOT-genuine or churn, recorded so future runs don't re-raise)
+- **Ingest NaN-guards (data-scout, 7 findings: whale_feed price/size/pnl/amount, noaa_weather
+  temp/precip, polymarket_client tick_size/spread):** DROP — verified via orchestrator
+  `_build_default_scanner`: WhaleCopyTrading + WalletBehaviorDivergence + WeatherArbitrage are ALL
+  gated OFF behind ENABLE_UNVALIDATED_STRATEGIES (default off; wallet gated #222); the
+  polymarket_client OrderBook.tick_size/min_order_size are never read and get_spread() is never
+  called (dormant). Fixing invisible NaN math on gated-off/dead code is churn (consistent with the
+  prior WeatherArb-formula DROP). Not the #165 class (that was on the ACTIVE volume/liquidity
+  BUY-gate).
+- **NOPositionScanner confidence (model-scout, advanced_strategies.py:265
+  `min(adjusted_rate*2,0.95)`):** DROP — the scout's proposed fix (`confidence=adjusted_rate`) is
+  self-contradictory (adjusted_rate ≤0.50, typically «0.50, so it'd gate off MORE, not fewer,
+  signals at the 0.50 min_confidence pre-filter). NOPositionScanner is a LOW-probability reversal
+  strategy — win_prob<0.5 by design — so the `*2` is a deliberate hack to lift some signals over a
+  gate that structurally conflicts with the thesis. The "correct" fix would make an UNVALIDATED
+  strategy trade MORE (off-thesis, risky). Ambiguous design question + wrong fix → don't ship.
+- **Live exit-fee risk-scout finding #2 (add fees to risk_manager.record_pnl):** SUBSUMED — the
+  #272 fix (populate result.fees on the live fill) automatically feeds record_execution's existing
+  `_daily_pnl -= result.fees`; a separate record_pnl fee arg would DOUBLE-count. The single
+  root-cause fix (populate the fee at the source) is correct; the scout's downstream patch was not.
+- **Backtest/leakage, learning/research-integrity, security/abuse, self-validation, quality/tests-
+  coverage:** all NOTHING-GENUINE / clean. Self-validation GREEN (11 caps, unmet=[], declared==read,
+  no stub-masquerade). Scorecard reconcile: only buildable gap was SELL/reduce→drawdown, STALE-
+  CLOSED (#253); business_case_strength B + impact-coeff are research/deferred, not maker-buildable.
+
+### Lessons
+- **Populate a side-effect's cost at its SOURCE, not at each downstream consumer.** The live-fee
+  bug had one root (result.fees=0 on the live fill) and three symptoms (loss cap, total_fees,
+  risk circuit all understated). Fixing the source fixes all three with zero double-count risk;
+  patching each consumer (the scout's instinct) would have double-subtracted. When paper and a
+  gated live path diverge on a computed cost, close it at the ONE place they diverge.
+- **A gated-OFF strategy's internal math is not value-bar work.** Two scouts surfaced real quirks
+  (NaN guards, a confidence hack) on strategies behind ENABLE_UNVALIDATED_STRATEGIES. Fixing them
+  changes no active behavior and risks arming unvalidated trading — churn. Confirm a finding is on
+  the DEFAULT scanner before it counts.
+- **A Haiku scout's proposed FIX can be wrong even when it spots a real smell.** The NOPosition
+  confidence fix was internally contradictory; the risk-scout's record_pnl patch double-counted.
+  Verify the fix against the code, not just the finding — a mis-fix that ships is worse than a drop.
+- **Heavily-mined repo → honest 1-PR runs are the norm now.** The full 8-scout sweep yielded one
+  genuine item; the discipline is to ship that one and NOT manufacture more. Padding is the equal-
+  and-opposite failure to scarcity.
