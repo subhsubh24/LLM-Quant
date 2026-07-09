@@ -1710,3 +1710,136 @@ has one fewer easy target than the 2026-07-07 framing implied — an honest narr
 known about the forward-paper validation loop itself: its own resolution telemetry cannot
 currently be trusted one way or the other (finding 1) — a more urgent, more precise framing than
 "just wait for elapsed time," and squarely loop-buildable (no owner/egress action needed).
+
+---
+
+## 2026-07-09 — Research Run 17: SELF-VALIDATION — the #267 resolution-telemetry fix is CONFIRMED live and trustworthy (real zero, not dead code); EXP-005 Sports re-attempt REPLICATES N~135 and sharpens the diagnosis (the volumeNum sampling axis is near-static, not under-fetched); external "Yes Bias" lead remains unverifiable; no new EXP-00N
+
+- Hypothesis (falsifiable): **EXP-005 continuation** (unchanged from 2026-07-08) — a
+  `CalibrationBucketStrategy` fit exclusively on Polymarket's Sports-category resolved markets
+  (7-day decision lead) produces a positive, non-fragile (F10), F11-significant net OOS PnL, once
+  N is large enough to clear `min_bucket_n=30` per bucket. The self-validation portion of this run
+  (the resolution-telemetry check) is not an alpha test.
+- Min sample N: 100 (EXP-005's pre-registered floor), pre-registered before this run.
+- OOS result: **still insufficient data — REPLICATED, not refuted, with a sharpened diagnosis.**
+  Re-ran the identical pre-registered config from Research Run 16 (seed=42, decision_lead_days=7,
+  order=volumeNum, max_pages=20, unmodified `polymarket_history_fetcher` +
+  `validate_real_oos.evaluate()`) one calendar day later: 2,000 raw resolved markets fetched in
+  7.1s → 1,095 leakage-safe `HistoricalMarket` records (identical count to Run 16) → **Sports
+  n=135** (vs. Run 16's 134, vs. B9's independent 133 two days before that — three pulls across
+  three separate days land within ±2 markets of each other). `CalibrationBucketStrategy` again
+  made 0 trades; F11 `verdict: insufficient_data` (not a measured negative). Aggregate corpus
+  stats also replicated near-exactly: `aggregate_crowd_brier=0.1153` (vs. B9's 0.115), 5 categories
+  assessed (Sports/General/Economics/Crypto/Politics, plus 2 sub-floor ScienceTech/Entertainment).
+- Calibration (Brier / reliability): Sports crowd_brier=0.198, ECE not separately recomputed this
+  run (matches Run 16/B9's ~0.199/0.091 order of magnitude); 0 active predictions to score beyond
+  the corpus-level stats (min_bucket_n abstention, as designed).
+- Costs modeled: yes (unmodified `cost_model.py` via `walk_forward`); moot at 0 trades.
+- Verdict: **insufficient data (EXP-005 unchanged) — but the REASON is now precisely diagnosed,
+  superseding Run 16's "budget more wall-clock" framing.** `order=volumeNum` ranks Gamma's
+  `/markets?closed=true` results by ALL-TIME cumulative volume, so the top-2,000-by-volume
+  resolved set is dominated by long-settled, high-profile historical markets that barely change
+  week to week. Re-fetching the SAME order/limit/max-pages combination re-discovers almost the
+  SAME markets rather than surfacing new ones — this is a **sampling-axis ceiling**, not merely an
+  under-fetch. It is compounded by, but mechanistically distinct from, Gamma's separate pagination
+  ceiling (a 422 past roughly offset 2100, first found in Run 16, not re-tested this run since
+  max_pages stayed at the already-known-safe 20). **Concretely: even an unlimited wall-clock
+  budget on this exact fetch configuration would not grow Sports N materially** — the honest
+  next step is a different sampling axis (recency-ordered, or a dedicated per-category/per-series
+  paginator), which is a fetcher-DESIGN change, not a bigger `--max-pages` parameter. This is
+  factory-build scope; logged to `next_actions`, not re-attempted again this run (a third identical
+  pull would only reconfirm the same ceiling, not add information).
+- Why / self-validation methodology: `python3` scratch script (research-agent scratch, not a
+  factory commit; not committed to the repo) imported the unmodified
+  `polymarket_history_fetcher.PolymarketHistoryFetcher`, `per_category_diagnostics`, and
+  `scripts/validate_real_oos.evaluate()` directly — zero code changes to any factory module.
+  387.5s wall-clock for the full fetch+assemble+evaluate pipeline (dominated by
+  `build_historical_markets`'s per-market CLOB price-history call, independently timed this run at
+  ~0.2s/market — the actual bottleneck Run 16's "280s timeout" hit, now measured precisely rather
+  than just observed). Reproducible by re-running the same command on any host with open
+  Polymarket egress (subject to the corpus drifting by resolution date, same caveat as every prior
+  live-fetch research run).
+
+### Self-validation: the #267 resolution-telemetry fix is CONFIRMED live, not just merged
+  Research Run 16 (2026-07-08) found `MarkToMarketEngine.check_resolutions()` never returned a
+  value, making `run_paper_cycle.py`'s `"resolutions"` JSON field a structural `null` regardless of
+  whether any position had actually settled — and recommended the factory fix it. The factory
+  shipped that fix same-day (commit `0ae20a1`, 2026-07-08T17:00, "check_resolutions() returns the
+  settled count — revive dead forward-paper telemetry", #267). This run independently verified the
+  fix HOLDS on real production data (not just that the PR merged): directly read the
+  `live-validation.yml` job logs for the two `live-smoke-and-paper` runs scheduled AFTER the fix
+  landed — 2026-07-09T04:16 (run 28993644145, commit `bd9654c`) and 2026-07-09T09:59 (run
+  29010084415, commit `f9f34af`) — both report **`"resolutions": 0`** as a real JSON integer, not
+  the constant `null` every pre-fix run showed (independently reconfirmed on the run immediately
+  BEFORE the fix, 2026-07-08T19:57 / run 28971595902 / commit `3e73313`, which still shows
+  `"resolutions": null` — the fix boundary is precisely where expected, between commits `3e73313`
+  and `bd9654c`). **This upgrades Run 16's "resolution count is UNKNOWN" finding to "CONFIRMED real
+  zero" — a materially more precise, more trustworthy state than either "assume it's fine" or
+  "distrust everything."** Still genuinely ZERO settled positions after 11+ days of OA-17
+  operation (the workflow's first run was 2026-06-28 per prior memory entries). Secondary
+  observations from the same two logs (not new bugs, logged for trend continuity): bankroll
+  continued its slow decline ($102.87 on 2026-07-05 → $72.83 on 2026-07-09) as capital remains
+  locked in unresolved positions; `Sports` ($152.75) and, newly, `General` ($211.00 — itself now
+  ABOVE its own $200 cap, most plausibly unrealized MTM appreciation of open near-zero-price
+  longshot positions rather than a bug, since the cap is enforced at entry, not continuously) both
+  saturate and skip most scanned opportunities each cycle (`Kelly size = 0` accounts for the rest)
+  — the same D2-cap-working-as-designed diagnosis Research Run 15 made on 2026-07-05, now resting
+  on a trustworthy signal instead of an assumption that the field even reflected reality. **No
+  action recommended** — this is not a new bug; the correct next step is simply to keep checking
+  whether the now-reliable `resolutions` field turns non-zero as this week's shorter-dated
+  positions (an Iran deadline, in-progress FIFA World Cup group matches) mature.
+
+### External research this run (checked, not new evidence either way)
+- Re-searched the 2026-07-05/07-08 "Yes Bias in low-liquidity mention markets" lead (Deleep, Lee,
+  Bai, Suresh, Dhawan, SSRN, ~Feb/March 2026). The primary SSRN page (abstract_id=6322678) is still
+  **403 Forbidden** on direct WebFetch — unchanged from every prior attempt. Checked two NEW
+  secondary sources not previously read (`advancedinvesting.org`'s summary + a fresh QuantPedia
+  pull): neither disc loses a sample size, date range, or magnitude for the "Yes Bias" claim —
+  `advancedinvesting.org` was directly asked for exactly these figures and confirmed it has none,
+  only the qualitative claim ("traders systematically overpay for the affirmative outcome" in
+  mention markets once contract-lifecycle timing is controlled for). **Status unchanged from Run
+  15/16: unverified, no reachable primary source with real N/magnitude, not newly confirmed nor
+  refuted.** Not escalated to a numbered EXP (same discipline as before — formalizing on an
+  unverifiable input would violate the never-fabricate-an-edge rule by proxy).
+- New this run: checked Goto (2026), "Forecast Sports Outcomes under Efficient Market Hypothesis"
+  (arXiv 2604.17194, April 2026) — a Favourite-Longshot-Bias-Adjusted Generalised Linear Model
+  (FL-GLM) fit on **90,014 football matches across five bookmakers**. Verified abstract directly
+  (reachable, unlike SSRN). **Ruled out as inapplicable to EXP-005**, not merely low-value: this is
+  a fixed-odds BOOKMAKER dataset (traditional sportsbooks pricing with a built-in vig), not a
+  prediction-market CROWD price — different microstructure, different incentive structure, and the
+  abstract discloses no transferable bias-magnitude figure anyway. Logged so a future run does not
+  re-check this specific paper expecting Polymarket-Sports relevance.
+- Egress RE-CONFIRMED open (routine re-probe, consistent with every run since 2026-07-04, not new
+  news): `gamma-api.polymarket.com`/`clob.polymarket.com` HTTP 200 (direct `curl`, real content);
+  `dune.com` still 403.
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N proposed. EXP-005 stays `insufficient-data` (see above) — the corpus-growth path
+  attempted this run (bigger fetch, same order) is now confirmed exhausted; re-attempting it again
+  identically would not produce new information. The honest next step is a factory-side fetcher
+  redesign (recency-ordered or per-category pagination), logged to `next_actions`, not a research-
+  agent re-run.
+- The "Yes Bias" mention-market hypothesis remains un-formalizable (no reachable primary source);
+  not proposed as EXP-006.
+
+### Self-validation (sources this run)
+- Resolution-telemetry finding: direct `github` MCP reads of `live-validation.yml` job logs for
+  run IDs 28971595902 (2026-07-08T19:57, pre-fix), 28993644145 (2026-07-09T04:16, post-fix),
+  29010084415 (2026-07-09T09:59, post-fix), cross-referenced against `git log` commit timestamps
+  to confirm the fix boundary (`3e73313` pre-fix → `0ae20a1`/`edf082c` fix commits, 2026-07-08
+  17:00-17:05 → `bd9654c` first post-fix scheduled run).
+- EXP-005 re-attempt: live-fetched this run via the unmodified `polymarket_history_fetcher.py` +
+  `scripts/validate_real_oos.evaluate()` (same harness as Run 16/B9), seed=42, single run, script
+  is research-agent scratch (not a factory commit) — independently re-derivable by anyone running
+  the same fetch (subject to the corpus drifting as markets resolve).
+- External research: WebSearch + WebFetch of `papers.ssrn.com/sol3/papers.cfm?abstract_id=6322678`
+  (403, unreachable — confirmed directly, not assumed), `advancedinvesting.org`'s summary page
+  (fetched directly, confirmed no N/magnitude present), and `arxiv.org/abs/2604.17194` (fetched
+  directly, abstract verified).
+- Egress: direct `curl` from this session against the same domain set as every prior run.
+
+**Binding constraint STANDS:** no validated real-money OOS edge. This run's real contribution is
+epistemic hygiene on two fronts: the forward-paper telemetry is now KNOWN-trustworthy (and known
+to be genuinely zero, not unknown), and EXP-005's stalled corpus growth has a precise, actionable
+diagnosis instead of a vague "try harder" — both are more useful to the next run than a forced,
+premature EXP-006.
