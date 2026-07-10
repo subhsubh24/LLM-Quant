@@ -92,33 +92,6 @@ def test_flag_enables_unvalidated_strategies(monkeypatch):
     assert _VALIDATED_NAMES <= names
 
 
-# --- NOPositionScanner (EXP-001) is an INNER strategy of the AdaptiveBuySignalThreshold
-# wrapper, so it is NOT a top-level scanner.strategies name — inspect the wrapper's inner
-# strategies. It is the UNVALIDATED longshot-reversal hypothesis (RESEARCH_MEMORY Run 3,
-# adversarial pre-mortem #1 = "dead on arrival"); now that its confidence is units-correct
-# (#263→#280) an honest signal self-gates under min_confidence, so it is gated OFF by
-# default with its unvalidated peers rather than sitting in the default scan as dead weight.
-def _all_names(monkeypatch, enabled: bool):
-    monkeypatch.setattr(get_settings(), "enable_unvalidated_strategies", enabled)
-    scanner = orchestrator._build_default_scanner()
-    names = set()
-    for s in scanner.strategies:
-        names.add(s.name)
-        for inner in getattr(s, "_inner_strategies", []):
-            names.add(inner.name)
-    return names
-
-
-def test_no_position_scanner_gated_off_by_default(monkeypatch):
-    """The unvalidated EXP-001 reversal strategy must NOT be in the default scan."""
-    assert "no_position_scanner" not in _all_names(monkeypatch, enabled=False)
-
-
-def test_no_position_scanner_enabled_by_flag(monkeypatch):
-    """The owner can still opt into it via ENABLE_UNVALIDATED_STRATEGIES."""
-    assert "no_position_scanner" in _all_names(monkeypatch, enabled=True)
-
-
 def test_default_flag_is_off():
     """Ship-safe default: the flag is off unless the owner sets it."""
     # A fresh Settings() (no env override) must default to off.

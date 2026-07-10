@@ -15,11 +15,11 @@ profitability gate into passing trades whose TRUE net edge is <= 0. The Kelly cl
 the SIZE but never un-fools the GATE — which is exactly why #263 mattered despite the clamp.
 
 NOPositionScanner is the UNVALIDATED EXP-001 longshot-reversal hypothesis. As of the
-#263→#280 units-contract series it is (a) units-correct on both ``edge`` and ``confidence``
-and (b) gated OFF by default (ENABLE_UNVALIDATED_STRATEGIES) with its unvalidated peers — so
-it deploys no capital in the default scan, and the units contract still governs it when the
-owner opts in. The edge-units regression below exercises the strategy directly (offline),
-independent of the scanner gating.
+#263→#280 units-contract series it is units-correct on BOTH ``edge`` and ``confidence``: its
+``confidence`` is now pinned to ``gate_confidence(entry, edge)``, so an honest sub-0.5
+reversal signal SELF-GATES under ``min_confidence`` instead of the prior ``*2`` bypass.
+(Whether it should ALSO be gated OFF of the default scan is a separate DESIGN decision,
+deferred — ROADMAP B1.) The regressions below exercise the strategy directly (offline).
 """
 
 from __future__ import annotations

@@ -269,8 +269,11 @@ class NOPositionScanner(BaseStrategy):
                             # on the WRONG quantity. The prior min(adjusted_rate*2, 0.95) was an
                             # intentional *2 bypass of the min_confidence safety gate for a
                             # sub-0.5-win-probability longshot; pinning it makes the gate honest
-                            # (this UNVALIDATED strategy correctly self-gates under min_confidence
-                            # and is gated OFF by default in the scanner — see orchestrator).
+                            # (an honest reversal signal now correctly SELF-GATES under
+                            # min_confidence instead of evading it). Whether this UNVALIDATED
+                            # strategy should also be gated OFF of the default scan is a separate
+                            # DESIGN decision, deferred (ROADMAP B1) — not folded into this
+                            # units-contract correctness fix.
                             confidence=gate_confidence(no_price, estimate.edge),
                             reason=(
                                 f"NO at ${no_price:.3f} (YES={outcome.price:.3f}) | "

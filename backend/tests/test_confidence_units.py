@@ -13,11 +13,11 @@ Deliberately NOT changed, each for a documented reason:
   * ``NOPositionScanner`` was the last trade-executing residual (``outcome_idx = no_idx``,
     single-outcome) still carrying a decoupled confidence (``min(adjusted_rate*2, 0.95)``).
     NOW RESOLVED (the #280 follow-up): its confidence is pinned to
-    ``gate_confidence(no_price, edge)`` AND, because it is the UNVALIDATED EXP-001
-    longshot-reversal hypothesis whose honest sub-0.5 win-probability self-gates under
-    ``min_confidence``, it is gated OFF by default with its unvalidated peers
-    (ENABLE_UNVALIDATED_STRATEGIES). Coverage lives in ``test_no_position_edge_units.py``
-    (confidence pinned) + ``test_unvalidated_strategy_gating.py`` (gated off by default).
+    ``gate_confidence(no_price, edge)`` (units contract), so an honest sub-0.5 reversal
+    signal SELF-GATES under ``min_confidence`` instead of the prior ``*2`` bypass. Coverage:
+    ``test_no_position_edge_units.py::test_confidence_is_pinned_to_win_probability``.
+    (NOPositionScanner is the UNVALIDATED EXP-001 hypothesis; whether it should ALSO be
+    gated OFF of the default scan is a separate DESIGN decision, deferred — ROADMAP B1.)
   * ``NearCertaintyStrategy`` is already contract-correct (``win_probability == confidence``).
 
 Why it matters (the exact bug):
