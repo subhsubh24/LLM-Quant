@@ -154,10 +154,21 @@ def _top_slice_pnl_share(slices) -> "float | None":
     return round(max(shares), 4) if shares else None
 
 
-def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
+def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float, tag_id=None):
     """Fetch leakage-safe HistoricalMarket records for a venue. Returns (markets, status).
     NEVER raises on egress/empty (returns []+note); only a genuine code bug returns a 'code-error'
-    status. For Kalshi this doubles as the OA-15 live-contract check: real records = contract holds."""
+    status. For Kalshi this doubles as the OA-15 live-contract check: real records = contract holds.
+
+    ``tag_id`` (Polymarket only) is Gamma's INTEGER server-side category filter (ROADMAP A7/#285):
+    it breaks the ``order=volumeNum`` per-category N ceiling so a whole page budget lands inside one
+    pre-registered category (resolve the id once from ``GET /tags``; a string category NAME is
+    silently ignored by Gamma — only the int filters). It is NOT applicable to the kalshi or
+    polymarket_v1_hf lanes; passing it there is a no-op for those venues (reported in the status)."""
+    # A --tag-id passed with a non-Polymarket venue is IGNORED — surface it in EVERY return
+    # status of that lane (incl. the polymarket_v1_hf early returns) so it is never silently
+    # dropped (honest, matches the docstring's "reported in the status" claim).
+    note = "" if (tag_id is None or venue == "polymarket") else \
+        f" (note: --tag-id is Polymarket-only; ignored for {venue})"
     try:
         if venue == "polymarket_v1_hf":
             # ROADMAP A6 — the HuggingFace Polymarket-v1 archive (~1.3M markets). Streams +
@@ -172,15 +183,19 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
                     decision_lead=timedelta(days=lead_days), max_rows=limit * max_pages,
                 )
             except ImportError as e:
-                return [], f"N/A — {e} (install `datasets` on a permitted host to run the HF lane)"
+                return [], f"N/A — {e} (install `datasets` on a permitted host to run the HF lane)" + note
             if markets:
-                return markets, "ok"
-            return [], "N/A — 0 leakage-safe records (HF egress-blocked / schema-unconfirmed / lead too large)"
+                return markets, "ok" + note
+            return [], "N/A — 0 leakage-safe records (HF egress-blocked / schema-unconfirmed / lead too large)" + note
         if venue == "polymarket":
             m = _imp("backend.app.prediction_markets.polymarket_history_fetcher",
                      "app.prediction_markets.polymarket_history_fetcher")
             f = m.PolymarketHistoryFetcher()
-            resolved = f.fetch_resolved_markets(limit=limit, max_pages=max_pages, order="volumeNum")
+            # tag_id (int, optional) forwards to Gamma's server-side category filter so a
+            # pre-registered category (e.g. 100639="Games") fills the whole page budget
+            # instead of being starved by the global volumeNum ranking (ROADMAP A7/#285).
+            resolved = f.fetch_resolved_markets(
+                limit=limit, max_pages=max_pages, order="volumeNum", tag_id=tag_id)
         else:  # kalshi (public market data — no credentials)
             m = _imp("backend.app.prediction_markets.kalshi_history_fetcher",
                      "app.prediction_markets.kalshi_history_fetcher")
@@ -188,8 +203,8 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float):
             resolved = f.fetch_resolved_markets(limit=limit, max_pages=max_pages)
         markets = f.build_historical_markets(resolved, timedelta(days=lead_days))
         if markets:
-            return markets, "ok"
-        return [], "N/A — 0 leakage-safe records (egress-blocked / contract-unconfirmed / lead too large)"
+            return markets, "ok" + note
+        return [], "N/A — 0 leakage-safe records (egress-blocked / contract-unconfirmed / lead too large)" + note
     except Exception as e:  # a real code break in the fetcher/parser (NOT egress)
         return [], f"code-error {type(e).__name__}: {e}"
 
@@ -201,6 +216,12 @@ def main() -> int:
     ap.add_argument("--max-pages", type=int, default=10,
                     help="BOUND on paging; grow the corpus via THIS, not --limit")
     ap.add_argument("--decision-lead-days", type=float, default=2.0)
+    ap.add_argument("--tag-id", type=int, default=None,
+                    help="Polymarket-only INTEGER Gamma tag id (server-side category filter, "
+                         "ROADMAP A7/#285) — breaks the volumeNum per-category N ceiling so a "
+                         "PRE-REGISTERED category fills the page budget. Resolve once from GET /tags "
+                         "(e.g. 100639='Games'); a category NAME is silently ignored by Gamma. "
+                         "Ignored for the kalshi / polymarket_v1_hf lanes.")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--venues", default="polymarket,kalshi",
                     help="comma-separated: polymarket,kalshi,polymarket_v1_hf "
@@ -215,7 +236,8 @@ def main() -> int:
 
     per_venue, all_markets, code_error = {}, [], False
     for venue in [v.strip() for v in args.venues.split(",") if v.strip()]:
-        markets, status = fetch_venue(venue, args.limit, args.max_pages, args.decision_lead_days)
+        markets, status = fetch_venue(venue, args.limit, args.max_pages, args.decision_lead_days,
+                                      tag_id=args.tag_id)
         if status.startswith("code-error"):
             code_error = True
         if markets:
