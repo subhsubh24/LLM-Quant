@@ -14,8 +14,12 @@ the reconstructed win_probability = NO_price + EV was well ABOVE 1.0 (e.g. 0.03 
 profitability gate into passing trades whose TRUE net edge is <= 0. The Kelly clamp bounds
 the SIZE but never un-fools the GATE — which is exactly why #263 mattered despite the clamp.
 
-NOPositionScanner is on the DEFAULT (non-gated) scan path (orchestrator build_default_scanner,
-inside the AdaptiveBuySignalThreshold wrapper), so this manifests in real paper scans.
+NOPositionScanner is the UNVALIDATED EXP-001 longshot-reversal hypothesis. As of the
+#263→#280 units-contract series it is (a) units-correct on both ``edge`` and ``confidence``
+and (b) gated OFF by default (ENABLE_UNVALIDATED_STRATEGIES) with its unvalidated peers — so
+it deploys no capital in the default scan, and the units contract still governs it when the
+owner opts in. The edge-units regression below exercises the strategy directly (offline),
+independent of the scanner gating.
 """
 
 from __future__ import annotations
@@ -74,6 +78,29 @@ def test_scan_result_reconstructs_a_valid_win_probability():
     assert 0.0 < reconstructed_win_prob <= 1.0
     # And it equals the reported P(reversal) the strategy estimated (expected_value=adjusted_rate).
     assert reconstructed_win_prob == r.expected_value
+
+
+def test_confidence_is_pinned_to_win_probability():
+    """UNITS CONTRACT (#263→#280, the last executing default-scan strategy): ``confidence``
+    MUST equal ``gate_confidence(entry_price, edge) = clip(entry+edge, 0, 1)`` — the
+    win-probability ``orchestrator.kelly_size`` compares against in its
+    ``confidence < min_confidence`` pre-filter while it SIZES on that same win-probability.
+    The pre-fix ``min(adjusted_rate*2, 0.95)`` inflated confidence ABOVE the win-probability
+    to bypass the min_confidence gate; pinning it makes an honest sub-0.5 longshot correctly
+    self-gate (the safe outcome for an unvalidated strategy)."""
+    from app.prediction_markets.polymarket_client import gate_confidence
+
+    scanner = _scanner()
+    results = scanner.scan([_crypto_market(no_price=0.03, hours=24.0)])
+    assert results, "precondition: the scenario produces a NO signal"
+    r = results[0]
+    # Pinned to the reconstructed win-probability — no decoupled heuristic.
+    assert r.confidence == gate_confidence(r.entry_price, r.edge)
+    # At these micro-price values entry+edge is in-range (no clip), so it equals the sum.
+    assert r.confidence == r.entry_price + r.edge
+    # A longshot NO buy's honest win-probability sits well below the default min_confidence
+    # (0.50) gate — so it self-gates. The pre-fix *2 confidence (>= 0.5) bypassed that gate.
+    assert r.confidence < 0.50
 
 
 def test_kelly_fraction_still_derived_from_ev_per_dollar():

@@ -10,17 +10,14 @@ Deliberately NOT changed, each for a documented reason:
     orchestrator SKIPS at ``skip_multi_leg`` (orchestrator.py:1013) BEFORE any order is
     placed (per-leg execution is an unbuilt B1 follow-up). Their confidences are INERT —
     they never gate a real trade — so touching them would be churn on non-executing signals.
-  * ``NOPositionScanner`` IS trade-executing (``outcome_idx = no_idx``, single-outcome) and
-    DOES still carry a decoupled confidence (``min(adjusted_rate*2, 0.95)`` at
-    advanced_strategies.py:265; #268 fixed only its ``edge`` units, not its ``confidence``).
-    It is a RESIDUAL FINDING, deliberately out of scope here: it is a longshot-reversal
-    strategy whose thesis is ``P(reversal) = adjusted_rate < 0.5`` by design, and its
-    ``*2`` confidence is an intentional bypass of the ``min_confidence`` gate. Pinning its
-    confidence to the honest win-probability (``= adjusted_rate``, typically < 0.5) would
-    gate out most of its signals — i.e. effectively DISABLE the strategy. Whether a
-    sub-0.5-win-probability strategy that structurally evades the safety gate should exist
-    is a separate DESIGN decision (twice deferred, loop-memory 2026-07-08c), not a
-    units-contract correctness fix — so it is tracked, not folded in here.
+  * ``NOPositionScanner`` was the last trade-executing residual (``outcome_idx = no_idx``,
+    single-outcome) still carrying a decoupled confidence (``min(adjusted_rate*2, 0.95)``).
+    NOW RESOLVED (the #280 follow-up): its confidence is pinned to
+    ``gate_confidence(no_price, edge)`` AND, because it is the UNVALIDATED EXP-001
+    longshot-reversal hypothesis whose honest sub-0.5 win-probability self-gates under
+    ``min_confidence``, it is gated OFF by default with its unvalidated peers
+    (ENABLE_UNVALIDATED_STRATEGIES). Coverage lives in ``test_no_position_edge_units.py``
+    (confidence pinned) + ``test_unvalidated_strategy_gating.py`` (gated off by default).
   * ``NearCertaintyStrategy`` is already contract-correct (``win_probability == confidence``).
 
 Why it matters (the exact bug):
