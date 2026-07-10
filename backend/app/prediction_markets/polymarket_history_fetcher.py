@@ -162,6 +162,7 @@ class PolymarketHistoryFetcher:
         max_pages: int = 10,
         categories: Optional[Sequence[str]] = None,
         order: str = "endDate",
+        tag: Optional[str] = None,
     ) -> List[ResolvedMarket]:
         """Page Gamma ``/markets`` for closed, unambiguously-settled binary markets.
 
@@ -176,12 +177,23 @@ class PolymarketHistoryFetcher:
         ``order="volumeNum"`` to harvest markets that ACTUALLY TRADED (liquid, multi-day,
         retrievable CLOB history) — the only ones that yield a leakage-safe record.
 
+        ``tag`` is a Gamma SERVER-SIDE category filter (e.g. ``"Sports"``, ``"Politics"``,
+        ``"Crypto"``) — DISTINCT from ``categories`` (a LOCAL post-parse filter on our
+        derived ``rm.category``). When you need a per-category corpus, ``tag`` is the lever
+        that matters: WITHOUT it, ``order="volumeNum"`` fills the first ``max_pages`` with
+        the globally-highest-volume markets (dominated by Crypto/Politics), leaving a niche
+        category (e.g. Sports) only a thin slice — the "volumeNum sampling-axis ceiling"
+        that starved EXP-005's Sports panel to ~135 markets, below the min_bucket_n×buckets
+        floor. Passing ``tag="Sports"`` makes Gamma return ONLY that category, so all
+        ``≈ min(limit,100)*max_pages`` fetched rows count toward it — the path to testable N
+        per category. Anti-leakage is unchanged (still a strictly-pre-resolution tick).
+
         SELECTION/SURVIVORSHIP BIAS (see module docstring): excluding ambiguous /
         contested / re-resolved markets biases the sample toward clean crowd-friendly
         outcomes — and ``order="volumeNum"`` adds a LIQUIDITY-selection bias (only deep
         markets). Both are defensible + PRE-REGISTERED here, but any eval built on this
-        sample overstates crowd calibration and must say so. ``categories`` must be
-        PRE-REGISTERED, not chosen after seeing results.
+        sample overstates crowd calibration and must say so. ``categories`` / ``tag`` must
+        be PRE-REGISTERED, not chosen after seeing results.
         """
         cats = {c.lower() for c in categories} if categories else None
         # Gamma's ``/markets`` endpoint SILENTLY caps each response at
@@ -205,6 +217,9 @@ class PolymarketHistoryFetcher:
                 "limit": page_size,
                 "offset": page * page_size,
             }
+            # Server-side category filter (breaks the volumeNum per-category ceiling).
+            if tag:
+                params["tag"] = tag
             data = self._get(f"{GAMMA_API}/markets", params)
             if isinstance(data, dict):
                 data = data.get("data")
