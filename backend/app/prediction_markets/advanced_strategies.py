@@ -262,7 +262,19 @@ class NOPositionScanner(BaseStrategy):
                             entry_price=no_price,
                             expected_value=estimate.adjusted_rate * 1.0,
                             edge=estimate.edge,
-                            confidence=min(estimate.adjusted_rate * 2.0, 0.95),
+                            # UNITS CONTRACT (#263/#268/#275/#280): confidence MUST equal the
+                            # win-probability the orchestrator reconstructs (entry_price+edge),
+                            # because kelly_size gates on `confidence < min_confidence` while
+                            # sizing on that win-probability — so a decoupled confidence gates
+                            # on the WRONG quantity. The prior min(adjusted_rate*2, 0.95) was an
+                            # intentional *2 bypass of the min_confidence safety gate for a
+                            # sub-0.5-win-probability longshot; pinning it makes the gate honest
+                            # (an honest reversal signal now correctly SELF-GATES under
+                            # min_confidence instead of evading it). Whether this UNVALIDATED
+                            # strategy should also be gated OFF of the default scan is a separate
+                            # DESIGN decision, deferred (ROADMAP B1) — not folded into this
+                            # units-contract correctness fix.
+                            confidence=gate_confidence(no_price, estimate.edge),
                             reason=(
                                 f"NO at ${no_price:.3f} (YES={outcome.price:.3f}) | "
                                 f"P(reversal)={estimate.adjusted_rate:.1%} "
