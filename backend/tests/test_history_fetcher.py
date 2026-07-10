@@ -501,36 +501,46 @@ def test_order_param_forwarded_default_and_override():
 
 
 # ---------------------------------------------------------------------------
-# tag: Gamma SERVER-SIDE category filter — the fix for the volumeNum per-category
-# sampling ceiling (EXP-005 Sports N~135). Every paged request must carry it; absent by
-# default (back-compat). Filtering at the source (not just the local `categories` filter)
-# is what lets a niche category reach testable N.
+# tag_id: Gamma SERVER-SIDE category filter — the fix for the volumeNum per-category
+# sampling ceiling (EXP-005 Sports N~135). It MUST be the INTEGER tag_id: verified live
+# 2026-07-10 that Gamma silently ignores a string `tag` but honors integer `tag_id`. Every
+# paged request must carry it; absent by default (back-compat). Filtering at the source (not
+# just the local `categories` filter) is what lets a niche category reach testable N.
 # ---------------------------------------------------------------------------
-def test_tag_absent_by_default():
-    """Back-compat: no tag arg → no 'tag' key on any Gamma request."""
+def test_tag_id_absent_by_default():
+    """Back-compat: no tag_id arg → no 'tag_id' key on any Gamma request."""
     session = FakeSession(lambda u, p: [])
     PolymarketHistoryFetcher(session=session).fetch_resolved_markets(limit=10, max_pages=1)
-    assert "tag" not in session.calls[-1]["params"]
+    assert "tag_id" not in session.calls[-1]["params"]
 
 
-def test_tag_forwarded_to_every_page():
-    """tag='Sports' must reach Gamma on EVERY page (server-side filter), so the whole
-    max_pages budget is spent inside the target category rather than on the globally
-    highest-volume markets that starve it."""
-    # Non-empty first page + empty second so paging exercises >1 request.
-    rows = [_gamma_market("s1", ["1", "0"])]
+def test_tag_id_forwarded_to_every_page():
+    """tag_id must reach Gamma on EVERY page (server-side filter), so the whole max_pages
+    budget is spent inside the target category rather than on the globally highest-volume
+    markets that starve it.
+
+    Fixture forces >1 page: page 0 returns a FULL page (page_size=10 rows) so the
+    short-page-break does NOT fire, and page 1 (offset=10) returns a short page so paging
+    stops after recording it — exercising the tag_id on ≥2 recorded requests."""
+    page0 = [_gamma_market(f"s{i}", ["1", "0"]) for i in range(10)]  # full page → continue
+    page1 = [_gamma_market("s10", ["1", "0"])]                        # short page → stop
 
     def router(url, params):
-        return rows if params.get("offset", 0) == 0 else []
+        off = params.get("offset", 0)
+        if off == 0:
+            return page0
+        if off == 10:
+            return page1
+        return []
 
     session = FakeSession(router)
     fetcher = PolymarketHistoryFetcher(session=session)
-    out = fetcher.fetch_resolved_markets(limit=10, max_pages=3, order="volumeNum", tag="Sports")
+    out = fetcher.fetch_resolved_markets(limit=10, max_pages=3, order="volumeNum", tag_id=100639)
 
-    assert session.calls, "expected at least one Gamma request"
+    assert len(session.calls) >= 2, f"tag_id test must exercise >1 page, got {len(session.calls)}"
     for call in session.calls:
-        assert call["params"].get("tag") == "Sports", (
-            f"tag missing on a paged request: {call['params']}"
+        assert call["params"].get("tag_id") == 100639, (
+            f"tag_id missing/wrong on a paged request: {call['params']}"
         )
-    # The tag does not break parsing — a settled market still yields a record.
-    assert [m.market_id for m in out] == ["s1"]
+    # The filter does not break parsing — the 11 settled markets all yield records.
+    assert [m.market_id for m in out] == [f"s{i}" for i in range(10)] + ["s10"]

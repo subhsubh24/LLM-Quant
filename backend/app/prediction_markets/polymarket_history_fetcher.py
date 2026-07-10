@@ -162,7 +162,7 @@ class PolymarketHistoryFetcher:
         max_pages: int = 10,
         categories: Optional[Sequence[str]] = None,
         order: str = "endDate",
-        tag: Optional[str] = None,
+        tag_id: Optional[int] = None,
     ) -> List[ResolvedMarket]:
         """Page Gamma ``/markets`` for closed, unambiguously-settled binary markets.
 
@@ -177,23 +177,31 @@ class PolymarketHistoryFetcher:
         ``order="volumeNum"`` to harvest markets that ACTUALLY TRADED (liquid, multi-day,
         retrievable CLOB history) — the only ones that yield a leakage-safe record.
 
-        ``tag`` is a Gamma SERVER-SIDE category filter (e.g. ``"Sports"``, ``"Politics"``,
-        ``"Crypto"``) — DISTINCT from ``categories`` (a LOCAL post-parse filter on our
-        derived ``rm.category``). When you need a per-category corpus, ``tag`` is the lever
-        that matters: WITHOUT it, ``order="volumeNum"`` fills the first ``max_pages`` with
-        the globally-highest-volume markets (dominated by Crypto/Politics), leaving a niche
-        category (e.g. Sports) only a thin slice — the "volumeNum sampling-axis ceiling"
-        that starved EXP-005's Sports panel to ~135 markets, below the min_bucket_n×buckets
-        floor. Passing ``tag="Sports"`` makes Gamma return ONLY that category, so all
-        ``≈ min(limit,100)*max_pages`` fetched rows count toward it — the path to testable N
-        per category. Anti-leakage is unchanged (still a strictly-pre-resolution tick).
+        ``tag_id`` is Gamma's SERVER-SIDE category filter — an INTEGER tag id, DISTINCT
+        from ``categories`` (a LOCAL post-parse filter on our derived ``rm.category``). It
+        is the lever that breaks the per-category "volumeNum sampling ceiling": WITHOUT it,
+        ``order="volumeNum"`` fills the first ``max_pages`` with the globally-highest-volume
+        markets (dominated by Politics/Crypto), leaving a niche category only a thin slice —
+        the ceiling that starved EXP-005's Sports panel to ~135 markets, below the
+        min_bucket_n×buckets floor. With ``tag_id`` set, Gamma returns ONLY that category, so
+        all ``≈ min(limit,100)*max_pages`` fetched rows count toward it — the path to
+        testable N per category. Anti-leakage is unchanged (still a strictly-pre-resolution
+        tick).
+
+        IMPORTANT — it MUST be the integer ``tag_id``, NOT a category NAME. Verified live
+        (2026-07-10) against ``gamma-api.polymarket.com/markets``: the string ``tag=Sports``
+        param is SILENTLY IGNORED (a garbage ``tag`` value returns the identical top-volume
+        list), whereas ``tag_id=<int>`` genuinely filters server-side (a bogus id → ``[]``).
+        Resolve the id ONCE from ``GET /tags`` (each tag has ``id`` + ``label``/``slug``) and
+        PRE-REGISTER it — e.g. tag_id ``100639`` ("Games") returns soccer/NFL/etc. markets
+        under ``order=volumeNum``. Do NOT pick the category after seeing results.
 
         SELECTION/SURVIVORSHIP BIAS (see module docstring): excluding ambiguous /
         contested / re-resolved markets biases the sample toward clean crowd-friendly
         outcomes — and ``order="volumeNum"`` adds a LIQUIDITY-selection bias (only deep
         markets). Both are defensible + PRE-REGISTERED here, but any eval built on this
-        sample overstates crowd calibration and must say so. ``categories`` / ``tag`` must
-        be PRE-REGISTERED, not chosen after seeing results.
+        sample overstates crowd calibration and must say so. ``categories`` / ``tag_id``
+        must be PRE-REGISTERED, not chosen after seeing results.
         """
         cats = {c.lower() for c in categories} if categories else None
         # Gamma's ``/markets`` endpoint SILENTLY caps each response at
@@ -218,8 +226,11 @@ class PolymarketHistoryFetcher:
                 "offset": page * page_size,
             }
             # Server-side category filter (breaks the volumeNum per-category ceiling).
-            if tag:
-                params["tag"] = tag
+            # MUST be the integer `tag_id` — Gamma silently ignores a string `tag` (verified
+            # live 2026-07-10). `is not None` (not truthiness) so a legitimate tag_id of 0 is
+            # honored, while the default None omits the key (back-compat).
+            if tag_id is not None:
+                params["tag_id"] = int(tag_id)
             data = self._get(f"{GAMMA_API}/markets", params)
             if isinstance(data, dict):
                 data = data.get("data")

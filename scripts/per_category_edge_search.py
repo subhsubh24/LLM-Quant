@@ -44,13 +44,16 @@ def main() -> int:
     ap.add_argument("--decision-lead-days", type=float, default=7.0)
     ap.add_argument("--min-category-n", type=int, default=30)
     ap.add_argument(
-        "--tag",
+        "--tag-id",
+        type=int,
         default=None,
         help=(
-            "Gamma server-side category filter (e.g. 'Sports'). Breaks the volumeNum "
-            "per-category sampling ceiling: without it, volume-ordering fills the pages "
-            "with globally-highest-volume markets and starves a niche category to a thin "
-            "slice (the EXP-005 Sports N~135 problem). Pre-register the tag before running."
+            "Gamma server-side category filter — an INTEGER tag id (NOT a name; Gamma "
+            "silently ignores a string 'tag'). Breaks the volumeNum per-category sampling "
+            "ceiling: without it, volume-ordering fills the pages with the "
+            "globally-highest-volume markets and starves a niche category to a thin slice "
+            "(the EXP-005 Sports N~135 problem). Resolve the id once from GET /tags "
+            "(e.g. 100639='Games') and PRE-REGISTER it before running."
         ),
     )
     ap.add_argument("--json", action="store_true")
@@ -63,7 +66,7 @@ def main() -> int:
 
     fetcher = pmf.PolymarketHistoryFetcher()
     resolved = fetcher.fetch_resolved_markets(
-        limit=args.limit, max_pages=args.max_pages, order="volumeNum", tag=args.tag
+        limit=args.limit, max_pages=args.max_pages, order="volumeNum", tag_id=args.tag_id
     )
     markets = fetcher.build_historical_markets(resolved, timedelta(days=args.decision_lead_days))
     report = diag.per_category_calibration(markets, min_category_n=args.min_category_n)
