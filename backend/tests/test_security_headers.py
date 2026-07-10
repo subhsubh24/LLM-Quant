@@ -7,13 +7,16 @@ deployment posture to unauthenticated callers.
 - /health must be liveness-only: it must NOT expose `live_trading_enabled` (previously
   it did, letting anyone probe whether the host is armed for real money).
 
-This imports the api package, which needs fastapi. Rather than sit OUTSIDE the curated
-CI list (where a header/hygiene regression would be invisible to the required gate — the
-prior state flagged by QUALITY_SCORECARD), each test guards on `pytest.importorskip`
-(the established pattern in `test_backend_auth_fastapi.py`): it SKIPS cleanly where the
-lightweight gate omits fastapi, and RUNS wherever fastapi is installed (local + the full
-CI gate). It is now registered in `scripts/preflight.sh` so #265's hardening is exercised
-by the gate whenever fastapi is present, instead of being registered nowhere.
+This imports the api package, which needs fastapi. To give #265 REAL blocking-gate
+coverage (the prior state, flagged by QUALITY_SCORECARD, was "registered nowhere → a
+header/hygiene regression is invisible to required CI"), two things change together:
+(1) fastapi + httpx are added to `backend/requirements-ci.txt`, so the required
+`preflight.sh code` gate now INSTALLS them and this test actually RUNS there — it is no
+longer skipped in every CI job; and (2) it is registered in `scripts/preflight.sh`'s
+curated list. The `pytest.importorskip("fastapi")` guard (the `test_backend_auth_fastapi.py`
+pattern) remains defence-in-depth: in an environment that genuinely lacks fastapi the test
+SKIPS cleanly instead of erroring collection — but in CI, where fastapi is now installed,
+it runs and asserts the headers for real.
 """
 
 import pytest
