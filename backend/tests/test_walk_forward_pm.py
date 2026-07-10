@@ -58,6 +58,42 @@ def test_determinism_same_seed_same_pnl():
     assert [t.pnl_usd for t in a.trades] == [t.pnl_usd for t in b.trades]
 
 
+def _stochastic_strategy():
+    """A strategy that draws its decisions from the GLOBAL ``random`` stream — the
+    documented way a strategy 'consumes seed'. Reproducibility therefore depends entirely
+    on walk_forward_backtest seeding the RNG."""
+    import random as _r
+
+    def strategy(training, view):
+        if _r.random() < 0.5:
+            return TradeDecision(trade=False)
+        side = "YES" if _r.random() < 0.5 else "NO"
+        return TradeDecision(trade=True, side=side, kelly_fraction=0.05 + 0.10 * _r.random())
+
+    return strategy
+
+
+def test_determinism_holds_for_a_stochastic_strategy():
+    """The seed_hash contract promises 'same data + seed → identical PnL' — and the seed_hash
+    MATCHES across runs regardless. So a stochastic strategy MUST also reproduce, or the
+    engine reports a matching hash for diverging PnL (a silent reproducibility violation).
+
+    This FAILS on pre-fix code: nothing seeded the RNG, so the 2nd call continued the global
+    stream the 1st advanced → the two runs drew different sequences → different trades/PnL.
+    """
+    data = _edge_dataset(120)
+    a = walk_forward_backtest(data, strategy_fn=_stochastic_strategy(), seed=42)
+    b = walk_forward_backtest(data, strategy_fn=_stochastic_strategy(), seed=42)
+    # Same seed → identical trades AND PnL (the core contract).
+    assert [(t.market_id, t.side) for t in a.trades] == [(t.market_id, t.side) for t in b.trades]
+    assert [t.pnl_usd for t in a.trades] == [t.pnl_usd for t in b.trades]
+    assert a.total_pnl_usd == b.total_pnl_usd
+    # And the seed genuinely DRIVES the draws: a different seed yields a different trade set
+    # (with 120 random decisions a collision is astronomically unlikely).
+    c = walk_forward_backtest(data, strategy_fn=_stochastic_strategy(), seed=999)
+    assert [(t.market_id, t.side) for t in c.trades] != [(t.market_id, t.side) for t in a.trades]
+
+
 def test_no_lookahead_view_has_no_outcome():
     """The object the strategy receives must not carry the future."""
     seen = {}
