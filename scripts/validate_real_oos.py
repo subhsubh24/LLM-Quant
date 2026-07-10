@@ -164,6 +164,11 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float, tag_id
     pre-registered category (resolve the id once from ``GET /tags``; a string category NAME is
     silently ignored by Gamma — only the int filters). It is NOT applicable to the kalshi or
     polymarket_v1_hf lanes; passing it there is a no-op for those venues (reported in the status)."""
+    # A --tag-id passed with a non-Polymarket venue is IGNORED — surface it in EVERY return
+    # status of that lane (incl. the polymarket_v1_hf early returns) so it is never silently
+    # dropped (honest, matches the docstring's "reported in the status" claim).
+    note = "" if (tag_id is None or venue == "polymarket") else \
+        f" (note: --tag-id is Polymarket-only; ignored for {venue})"
     try:
         if venue == "polymarket_v1_hf":
             # ROADMAP A6 — the HuggingFace Polymarket-v1 archive (~1.3M markets). Streams +
@@ -178,10 +183,10 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float, tag_id
                     decision_lead=timedelta(days=lead_days), max_rows=limit * max_pages,
                 )
             except ImportError as e:
-                return [], f"N/A — {e} (install `datasets` on a permitted host to run the HF lane)"
+                return [], f"N/A — {e} (install `datasets` on a permitted host to run the HF lane)" + note
             if markets:
-                return markets, "ok"
-            return [], "N/A — 0 leakage-safe records (HF egress-blocked / schema-unconfirmed / lead too large)"
+                return markets, "ok" + note
+            return [], "N/A — 0 leakage-safe records (HF egress-blocked / schema-unconfirmed / lead too large)" + note
         if venue == "polymarket":
             m = _imp("backend.app.prediction_markets.polymarket_history_fetcher",
                      "app.prediction_markets.polymarket_history_fetcher")
@@ -197,8 +202,6 @@ def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float, tag_id
             f = m.KalshiHistoryFetcher()
             resolved = f.fetch_resolved_markets(limit=limit, max_pages=max_pages)
         markets = f.build_historical_markets(resolved, timedelta(days=lead_days))
-        note = "" if (tag_id is None or venue == "polymarket") else \
-            f" (note: --tag-id is Polymarket-only; ignored for {venue})"
         if markets:
             return markets, "ok" + note
         return [], "N/A — 0 leakage-safe records (egress-blocked / contract-unconfirmed / lead too large)" + note

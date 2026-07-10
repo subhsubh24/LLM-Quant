@@ -91,6 +91,36 @@ def test_tag_id_ignored_for_kalshi_lane_with_honest_note(monkeypatch):
         "an ignored tag_id on a non-Polymarket lane must be surfaced honestly, not silent"
 
 
+def test_tag_id_ignored_for_hf_lane_with_honest_note(monkeypatch):
+    """The polymarket_v1_hf lane returns early (N/A/ok) BEFORE the shared path — a --tag-id
+    passed there must still be flagged as ignored in the status, never silently dropped
+    (regression for the PR #295 review defect: the early returns bypassed the note)."""
+    mod = _load_module()
+    from backend.app.prediction_markets import polymarket_v1_hf_fetcher as hf
+
+    # Force the "0 leakage-safe records" early-return path (no `datasets` install needed).
+    monkeypatch.setattr(hf.PolymarketV1HFFetcher, "build_historical_markets",
+                        lambda self, decision_lead, max_rows=None: [])
+
+    markets, status = mod.fetch_venue("polymarket_v1_hf", limit=20, max_pages=1, lead_days=3.0,
+                                      tag_id=100639)
+    assert markets == []
+    assert "Polymarket-only" in status and "ignored for polymarket_v1_hf" in status, \
+        "a --tag-id on the HF lane must be surfaced as ignored, not silently dropped"
+
+
+def test_no_ignored_note_when_tag_id_absent_on_hf_lane(monkeypatch):
+    """No spurious 'ignored' note when --tag-id was never passed (back-compat status text)."""
+    mod = _load_module()
+    from backend.app.prediction_markets import polymarket_v1_hf_fetcher as hf
+
+    monkeypatch.setattr(hf.PolymarketV1HFFetcher, "build_historical_markets",
+                        lambda self, decision_lead, max_rows=None: [])
+
+    _, status = mod.fetch_venue("polymarket_v1_hf", limit=20, max_pages=1, lead_days=3.0)
+    assert "ignored" not in status, "no ignored-note should appear when tag_id is None"
+
+
 def test_cli_accepts_tag_id_argument():
     """--tag-id parses as an int (the CLI surface the pipeline calls)."""
     mod = _load_module()
