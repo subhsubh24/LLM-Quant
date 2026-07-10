@@ -173,7 +173,13 @@ class WeatherArbitrageStrategy(BaseStrategy):
                                     entry_price=outcome.price,
                                     expected_value=1.0 * forecast.confidence,
                                     edge=edge,
-                                    confidence=forecast.confidence,
+                                    # UNITS CONTRACT (#263/#268/#275): the orchestrator's
+                                    # min_confidence gate compares against the reconstructed
+                                    # win-probability entry_price+edge = (1-price)*forecast_conf,
+                                    # NOT the raw forecast confidence (which OVERSTATES it by
+                                    # 1/(1-price), admitting BUYs whose true fair value is below
+                                    # the gate). See polymarket_client.gate_confidence.
+                                    confidence=gate_confidence(outcome.price, edge),
                                     reason=(
                                         f"NOAA forecasts {forecast.temp_mean_f:.0f}°F for {location}, "
                                         f"bucket [{low}-{high}°F] priced at only ${outcome.price:.2f} "
@@ -1202,7 +1208,12 @@ class WhaleCopyTradingStrategy(BaseStrategy):
                     entry_price=entry_price,
                     expected_value=entry_price * 1.15,  # Estimate 15% edge from whale alpha
                     edge=0.15,
-                    confidence=min(0.90, buy_consensus),
+                    # UNITS CONTRACT (#263/#268/#275): the min_confidence gate compares against
+                    # the reconstructed win-probability entry_price+edge, NOT the whale-consensus
+                    # fraction (an independent quantity that can OVERSTATE the win-probability
+                    # and admit BUYs whose true fair value is below the gate). See
+                    # polymarket_client.gate_confidence.
+                    confidence=gate_confidence(entry_price, 0.15),
                     reason=(
                         f"WHALE CONSENSUS: {len(buy_wallets)}/{n_tracked} tracked wallets "
                         f"buying \"{top_outcome}\" at ${entry_price:.2f} | "
