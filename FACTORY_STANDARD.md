@@ -925,3 +925,24 @@ first-class work:
 - **Honesty + value bar.** Strengthening the domain model IS value-bar-clearing (it transfers + serves the
   north star), but only with REAL, grounded understanding — never pad it with generic filler or unverified
   claims (same anti-gaming rule). Keep it sharp + curated (§35); a bloated model goes unread.
+
+## 43. Reference playbooks — consult the RIGHT one when the work calls for it (don't read them all every run)
+Beyond the read-every-run orient set (§41), the repo carries deeper REFERENCE playbooks for recurring
+specialized work. Per §41 (read the relevant slice), consult the matching one WHEN that work comes up — do
+NOT read them all every run, and do NOT let a run reinvent what a playbook already codifies. Index (read the
+one that fits the run; applicability noted):
+- **`docs/autonomous-loop/FLEET_LESSONS.md`** (all products) — cross-fleet failure-modes / anti-patterns.
+  Read at ORIENT every run (§41).
+- **`docs/DOMAIN_MODEL.md`** (all products) — this product's reusable subject-matter expertise. Read every
+  run (§42).
+- **`docs/growth/STORE_GROWTH_PLAYBOOK.md`** (store / mobile products) — ASO, App Store Connect automation,
+  Apple Search Ads. Consult for store / ASO / paid-search work.
+- **`docs/growth/ONBOARDING_CONVERSION_PLAYBOOK.md`** (consumer products) — the personalized onboarding →
+  paywall funnel + honesty guardrails. Consult for activation / conversion / paywall work.
+- **`docs/growth/DEMAND_VALIDATION_PLAYBOOK.md`** (GTM, pre-launch) — content-first demand validation (hero
+  feature → demo → hooks → comment signal). Consult when validating demand.
+- **`docs/growth/PRODUCT_SIGNALS_PLAYBOOK.md`** (post-launch) — turn telemetry / support / churn into
+  prioritized work. Consult once analytics / billing / support are connected.
+When you author a NEW reference playbook, ADD a line here so future runs discover it. A playbook that exists
+but no run reads is wasted scaffolding. (Products without a given surface — e.g. a non-store or personal-bot
+product — simply won't have that playbook; that's expected, not a gap.)
