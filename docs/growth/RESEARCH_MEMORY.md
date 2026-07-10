@@ -1843,3 +1843,156 @@ epistemic hygiene on two fronts: the forward-paper telemetry is now KNOWN-trustw
 to be genuinely zero, not unknown), and EXP-005's stalled corpus growth has a precise, actionable
 diagnosis instead of a vague "try harder" — both are more useful to the next run than a forced,
 premature EXP-006.
+
+---
+
+## 2026-07-10 — Research Run 18: EXP-005's Sports-corpus ceiling FALSIFIED — an existing, untried fetcher parameter (`order="volume24hr"`) grows Sports N 135→253 in one fetch; still insufficient data (mechanism correctly abstains); Le 2026's exact per-horizon table tempers the expected edge size; external leads corroborated, none new
+
+- Hypothesis (falsifiable): **EXP-005 continuation** (unchanged since 2026-07-08) — a
+  `CalibrationBucketStrategy` fit exclusively on Polymarket's Sports-category resolved markets
+  (7-day decision lead) produces a positive, non-fragile (F10), F11-significant net OOS PnL, once
+  N is large enough to clear `min_bucket_n=30` per bucket. This run's real contribution is a
+  sampling-axis probe, not a completed alpha test.
+- Min sample N: 100 (EXP-005's pre-registered floor, unchanged).
+- OOS result: **still insufficient data — but the "no lever left" diagnosis from Research Run 17
+  is FALSIFIED.** Run 17 (2026-07-09) concluded the `order=volumeNum` sampling axis was
+  near-exhausted for Sports (133→134→135 across 3 independent same-config pulls on
+  07-07/07-08/07-09) and that growing N required "a fetcher-DESIGN change... factory-build scope,
+  not a research-agent re-run." This run re-read `PolymarketHistoryFetcher.fetch_resolved_markets`
+  (`backend/app/prediction_markets/polymarket_history_fetcher.py:159-227`) and found it already
+  accepts an `order` parameter with several Gamma-supported sort fields; every script in this repo
+  (`scripts/fetch_polymarket_history.py`, `scripts/validate_real_oos.py`, `scripts/per_category_edge_search.py`)
+  hardcodes or defaults to `order="volumeNum"`, and the fetcher's own docstring already documents
+  trying (and rejecting) `order="endDate"` ("surfaces never-traded junk... EMPTY CLOB price
+  history"). Neither script had ever tried Gamma's `order="volume24hr"` (trailing-24h volume rank)
+  — a live `curl` against `gamma-api.polymarket.com/markets?closed=true&order=volume24hr` showed it
+  returns currently-hot, recently-resolved markets (today's FIFA World Cup matches at the time of
+  this run) with real trade activity, a plausibly different, not-yet-exhausted slice from the
+  all-time top-volume list. A research-agent scratch run (unmodified `PolymarketHistoryFetcher` +
+  `validate_real_oos.evaluate()`, no repo code changes, not committed; seed=42,
+  decision_lead_days=7, limit=100, max_pages=20, single run, no retry after seeing the number;
+  383s wall-clock) confirmed it: **1,998 raw resolved markets → 347 leakage-safe records → Sports
+  n=253** (vs. 133/134/135 on the volumeNum axis) — an **87% increase in Sports N from the SAME
+  fetch budget**, via a parameter no one had tried, not a code build. `CalibrationBucketStrategy`
+  still made **0 trades**; F11 `verdict: insufficient_data` (unchanged — 253 records / 10 buckets
+  averages 25.3/bucket even using the FULL corpus as training, still under `min_bucket_n=30` before
+  `walk_forward`'s expanding window shrinks the effective training slice further for any individual
+  decision). So EXP-005 remains **untested**, not refuted — but the specific "there is no cheap
+  lever left" framing from Run 17 was wrong, and is corrected here rather than carried forward.
+- Calibration (Brier / reliability): Sports crowd_brier=0.2227, ECE=0.0745, base_rate=0.435 on this
+  axis's 253 records (vs. B9/Run16/17's volumeNum-axis Sports crowd_brier≈0.198-0.199, ECE≈0.091,
+  base_rate≈0.343-0.345) — a genuinely DIFFERENT, not directly comparable sample: only 0.8% of this
+  corpus is price-pinned (<0.05 or >0.95) vs. volumeNum's ~16%, consistent with `volume24hr`
+  surfacing currently-live/near-even-money game markets rather than long-settled historical ones.
+  Full-corpus (all categories, n=347) per-category diagnostic (`per_category_diagnostics.per_category_calibration`,
+  min_category_n=30, Bonferroni α=0.025 for 2 categories assessed): General n=85
+  brier=0.2059/ECE=0.1052; Sports n=253 brier=0.2227/ECE=0.0745 — General now ranks as
+  MORE-beatable-by-ECE than Sports on this specific axis (opposite of B9's volumeNum-axis
+  ranking), a DIAGNOSTIC-only observation (this module never trades or fits a model), reported
+  honestly as sample-composition-dependent, not a stable finding.
+- Costs modeled: yes (unmodified `cost_model.py` via `walk_forward`); moot at 0 trades.
+- Verdict: **insufficient data (EXP-005 unchanged, still not tested)** — but the corpus-growth
+  path is now KNOWN-tractable via an existing flag, correcting Run 17's "needs a fetcher rebuild"
+  framing. NOT a like-for-like replacement for the volumeNum corpus: the two axes are near-disjoint
+  in category composition — this pull's leakage-safe set carried **zero** Crypto/Economics/Politics
+  records of any size despite 1,089 raw Crypto markets in the fetch (all skipped by the leakage
+  guard for the same reason as `order=endDate` — recently-hot markets are often too new to have a
+  tick 7 days before eventual resolution), vs. volumeNum's 5-category spread. The honest next step
+  is **merging** both axes (dedupe by `market_id`, which the fetcher's existing `--merge` CLI flag
+  already does) toward the pre-registered ≥300-400 Sports-only floor, not replacing one axis with
+  the other.
+- Why / self-validation methodology: `python3` scratch scripts (research-agent scratch, not
+  committed to the repo) imported the unmodified `PolymarketHistoryFetcher`,
+  `per_category_diagnostics.per_category_calibration`, `walk_forward`, `calibration_bucket_strategy`,
+  and `scripts/validate_real_oos.evaluate()` directly — zero code changes to any factory module. Two
+  separate live fetches this run (~383s and ~378s wall-clock respectively, both `order=volume24hr`):
+  the first characterized the raw+leakage-safe category breakdown only (1,998→346 records, Sports
+  252); the second (1,998→347, Sports 253) additionally ran the full `evaluate()` OOS harness on the
+  Sports-filtered subset. The 1-record day-to-day difference (252 vs. 253, 346 vs. 347) is ordinary
+  drift from Gamma's live result set changing between the two calls minutes apart — not a
+  discrepancy, consistent with this project's prior cross-run drift observations. Reproducible by
+  re-running the same fetcher call on any host with open Polymarket egress (subject to the corpus
+  drifting further as more markets resolve).
+
+### External research this run (checked, cross-verified, none new EXP-worthy)
+- **Le 2026 (arxiv 2602.19520) exact sports-calibration-by-horizon table, verified via 2 independent
+  WebFetch passes** against the paper's own text (not a single-pass summary, per this project's
+  standing over-summarization caution): Table 3 reports sports calibration SLOPE by horizon bucket
+  (Kalshi-primary, 55,637 markets/43.2M trades; Polymarket cross-validation, 25,340 markets/49.1M
+  trades) — 0-1h:1.10, 1-3h:0.96, 3-6h:0.90, 6-12h:1.01, 12-24h:1.05, 24-48h:1.08, **2d-1w:1.04**,
+  1w-1mo:1.24, 1mo+:1.74. The bucket closest to this project's 7-day `decision_lead` (2d-1w) shows a
+  MILD slope (1.04, near-perfect calibration), far below the 1.74 seen only beyond 1 month. Also:
+  large-position-trader compression, which the paper finds POLITICS-dominant (intercept +0.53,
+  95% CI [0.29,0.75] on Kalshi), shows NO significant sports analog (+0.07, 95% CI [-0.07,0.26] —
+  "in sports markets, no such gap exists"). **Implication for EXP-005 (a tempering caution, not a
+  refutation):** if this Kalshi-anchored, Polymarket-cross-validated magnitude transfers to our
+  specific 7-day-lead Polymarket-only slice, the a priori expected sports miscalibration there is
+  SMALL — B9/this-run's raw ECE (0.091/0.0745) may reflect sample noise or an ECE-vs-slope
+  divergence rather than a large, exploitable, persistent bias. Added to EXP-005
+  `how_it_could_be_wrong` in GROWTH_STATUS. Standard caveat unchanged: cross-platform transfer is
+  unconfirmed, not disproven — this is DATA, not a claim either way.
+- **CEPR DP20631 / GWU working paper 2026-001 ("Makers and Takers: The Economics of the Kalshi
+  Prediction Market")** — confirmed via 2 independent sources (a WebSearch summary + a direct
+  `ideas.repec.org` abstract fetch; the CEPR page itself 403's, paywalled) as the SAME paper already
+  logged 2026-06-30 as "the GWU/UCD 2026 paper" (a deferred maker-strategy candidate). Now
+  QUANTIFIED, not newly discovered: Kalshi-only, 300K+ contracts since 2021; confirms a
+  favorite-longshot pattern for BOTH makers and takers, with makers earning materially higher
+  average returns (a specific magnitude — "~1.9% avg positive return above 50¢ after fees" per the
+  WebSearch summary — was NOT independently re-verified against the paper's own text this run, so
+  is reported as a secondary-source figure, not a verified one). No new EXP; still deferred
+  (building a market-making strategy needs bid-ask inventory management this project does not have
+  — the 2026-06-30 decision stands unchanged).
+- **Cross-venue Polymarket/Kalshi arbitrage** — reconfirmed (public 2026 sources, not independently
+  reproduced) bot/speed-dominated: cited ~25ms dual-leg execution, 30-second opportunity windows,
+  1-5% typical edge before competition. Consistent with, not new information beyond, this project's
+  standing "out of scope for a non-speed bot" conclusion (2026-06-30 and earlier).
+- **Generic "paper trading realism" industry caution** (2026 Polymarket-bot-building guides, not
+  academic): a cited example of a momentum strategy profiting in paper mode using Gamma bid prices
+  but failing live on CLOB ask prices. Checked against this project's own architecture:
+  `outcome.price` is sourced from the CLOB **midpoint** (`polymarket_client.get_midpoint`), and
+  `cost_model.py` applies fee+slippage on top of it as an approximation of the real bid/ask spread —
+  this is the SAME gap already disclosed in the 2026-06-29 SameMarketArbitrage entry ("prices are
+  CLOB midpoints not asks... flat 0.5% slippage ≠ the real half-spread"). This external source
+  CORROBORATES an already-logged, already-disclosed caveat; it does not surface anything new.
+- Egress RE-CONFIRMED open from this environment (routine re-probe, consistent with every prior
+  run since 2026-07-04): direct `curl` — `gamma-api.polymarket.com` (301→real content),
+  `clob.polymarket.com` (200), `data-api.polymarket.com` (200), `huggingface.co` (200);
+  `dune.com` still 403 (unchanged since 2026-07-03); `api.elections.kalshi.com` root path 404s
+  (expected — no path given, same as prior runs' finding).
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N proposed. EXP-005 stays `insufficient-data` — the corpus now has a known,
+  cheap, tractable growth path (merge the volumeNum + volume24hr axes via the existing `--merge`
+  flag) rather than a vague "needs more N" or a mis-diagnosed "needs a fetcher rebuild"; the merge
+  itself is a mechanical CLI operation this run did not execute (time-bounded to one new-axis probe
+  + its OOS test this run, per the standing "one pre-registered test, no retry" discipline — running
+  the merge AND a fresh eval in the same run would blur which config produced which result).
+- The "Yes Bias" mention-market hypothesis (Deleep et al., SSRN) was not re-checked this run (no
+  new secondary source found; the primary SSRN page is still 403, reconfirmed by a direct `curl`
+  this run) — status unchanged from Run 15/16/17.
+
+### Self-validation (sources this run)
+- EXP-005 volume24hr finding: two live-fetched research-agent scratch runs this run via the
+  unmodified `polymarket_history_fetcher.py` + `per_category_diagnostics.py` +
+  `scripts/validate_real_oos.evaluate()` (same harness as Run 16/17/B9), seed=42, single run each,
+  scripts are research-agent scratch (not committed) — independently re-derivable by anyone running
+  the same fetch (subject to the corpus drifting as markets resolve). Direct code read of
+  `polymarket_history_fetcher.py:159-227` and the 3 scripts' `order=` call sites confirmed
+  `volume24hr` had never been passed anywhere in the repo before this run.
+- Le 2026 Table 3: two independent WebFetch passes against `arxiv.org/html/2602.19520v1`, each
+  asking a different, specific question (general sports-vs-politics comparison, then the exact
+  per-horizon table + platform breakdown) — cross-checked against each other for consistency
+  (both reported the same 2d-1w=1.04 / 1mo+=1.74 figures), not taken from a single pass.
+- GWU/CEPR paper: WebSearch + a direct WebFetch of `ideas.repec.org/p/gwc/wpaper/2026-001.html`
+  (reachable, plain abstract text); the CEPR page itself (`cepr.org/publications/dp20631`) returned
+  HTTP 403 (paywalled, disclosed, not hidden) and the raw GWU-hosted PDF did not extract cleanly via
+  WebFetch (binary/compressed stream, disclosed) — the "~1.9%"/"~32%" figures come from the
+  WebSearch summary only and are flagged above as unverified against the paper's own text.
+- Egress: direct `curl` from this session against the same domain set as every prior run.
+
+**Binding constraint STANDS:** no validated real-money OOS edge. This run's real contribution is
+correcting an over-pessimistic diagnosis from the prior run (EXP-005's Sports corpus was NOT
+structurally stuck — an existing, untried parameter grew it 87% in one fetch) while adding an
+external, cross-checked caution (Le 2026's exact horizon table) that tempers how large an edge to
+expect even once N is sufficient — both more useful to the next run than either a forced EXP-006 or
+an uncritical re-statement of Run 17's "needs a rebuild" framing.
