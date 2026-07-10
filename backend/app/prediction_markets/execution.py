@@ -758,9 +758,11 @@ class PredictionMarketExecutor:
         # production singleton wires a real store via attach_state_store() in
         # get_executor(), which then REHYDRATES a tripped kill switch / accumulated loss
         # across restarts (a restart must not silently un-halt trading or reset the loss
-        # budget). SAVE is best-effort (never breaks the trade path); but REHYDRATE FAILS
-        # CLOSED — if the store is attached but unreadable, the executor halts rather than
-        # resume un-halted (see attach_state_store).
+        # budget). SAVE is best-effort EXCEPT on a realized LOSS: if a loss cannot be durably
+        # persisted, record_realized_pnl FAILS CLOSED (halts) so a restart cannot rehydrate a
+        # pre-loss row and reset the loss cap. REHYDRATE also FAILS CLOSED — if the store is
+        # attached but unreadable, the executor halts rather than resume un-halted (see
+        # attach_state_store).
         self._state_store = None
 
     @property
@@ -892,14 +894,23 @@ class PredictionMarketExecutor:
                 self._kill_switch_reason,
             )
 
-    def _persist_state(self) -> None:
-        """Persist safety state (best-effort, never raises). No-op without an attached store."""
+    def _persist_state(self) -> bool:
+        """Persist safety state (best-effort, never raises).
+
+        Returns True when the state is durable — either it was SAVED, or there is no store
+        attached so there is nothing to persist (the paper default). Returns False ONLY when
+        an attached store's ``save`` FAILED. The boolean lets a safety-critical caller (a
+        realized-LOSS update) fail CLOSED when it cannot durably record the loss; every other
+        caller ignores it, so behavior there is bit-identical.
+        """
         if self._state_store is None:
-            return
+            return True
         try:
             self._state_store.save(self._state_snapshot())
+            return True
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("[EXECUTOR STATE] persist failed: %s", e)
+            return False
 
     def _roll_daily_loss_window(self):
         """Reset the daily realized-loss tally when the UTC day rolls over."""
@@ -941,7 +952,21 @@ class PredictionMarketExecutor:
         # activate_kill_switch() already persisted the full snapshot (counters included) —
         # skip the redundant write; otherwise persist the counter update here.
         if not (self._kill_switch_active and not was_tripped):
-            self._persist_state()
+            persisted = self._persist_state()
+            # FAIL-CLOSED (ROADMAP D3/D4 durability): a realized LOSS that could NOT be
+            # durably persisted is a safety-integrity failure — on a restart, _rehydrate_state
+            # would load the last GOOD row (pre-loss) and RESET the accumulated loss budget,
+            # silently handing back loss headroom the cap already spent. Left running, each
+            # further un-persisted loss compounds the bypass. So halt NOW via the in-memory
+            # kill switch (activate_kill_switch sets _kill_switch_active before it persists, so
+            # the halt holds even if that write also fails): no new order is placed this
+            # session, bounding the un-persisted loss to this single realization. A profit /
+            # break-even update (net_pnl >= 0) never trips — it cannot spend loss headroom.
+            if net_pnl < 0 and not persisted and not self._kill_switch_active:
+                self.activate_kill_switch(
+                    "loss-persist failure: a realized loss could not be durably recorded — "
+                    "halting so a restart cannot reset the loss cap (fail-closed)"
+                )
 
     def _loss_cap_breach(self) -> Optional[str]:
         """Return a reason string if a daily/total realized-loss cap is breached, else
