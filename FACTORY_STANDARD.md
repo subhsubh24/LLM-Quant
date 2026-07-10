@@ -877,3 +877,25 @@ chart/dashboard — the maker's word on how it LOOKS is not enough:
 - **Scope + cost + honesty.** Only for genuinely visual surfaces (skip pure logic/API changes); one grader per
   surface; Haiku vision keeps it cheap. Feeds the design_taste dimension the Quality Auditor grades (consume,
   never self-grade, §8/§31). A "looks good" that no grader actually EYEBALLED does not count (anti-gaming rule).
+
+## 41. Context discipline — keep each run's working context narrow, relevant, and budget-aware
+The model degrades as its context window fills (lost-in-the-middle / context rot): early instructions fade and
+the agent gets distracted by its own accumulated diffs, logs, and tool output. Stateless cold-start (state on
+disk, §35) is the first cure — but WITHIN a run the context still grows, so keep it lean on purpose:
+- **Read the relevant SLICE, not the whole repo.** Orient from the durable state (ROADMAP / VISION / loop-
+  memory / SUCCESS_PATTERNS / FLEET_LESSONS / the scorecards) + the SPECIFIC thing being worked on + only the
+  files that thing actually touches (the failing test's trace, the last diff, the imports). Assemble it from
+  signals that already exist (deterministic + cheap) — do NOT dump the tree, and do NOT make a subagent guess
+  across everything. This is exactly what the Haiku scouts are for: cheap targeted discovery → a narrow
+  candidate set, not the whole repo in context.
+- **Budget-aware.** Treat context as a finite budget: prefer summaries + the relevant slice over raw dumps;
+  don't re-read what hasn't changed; when a run accumulates large tool output / diffs / logs, DISTILL to the
+  state file (§35) and drop the raw. A run that started clean but drowns in its own history after many changes
+  has re-created context rot — just smuggled through files instead of a chat window.
+- **State on disk carries the continuity, not the window.** Each change is one coherent unit read from + written
+  back to the durable state (§4 / §39); the next unit starts from that clean state, not from a bloated running
+  context. This is WHY the loop is stateless and why per-run cost stays roughly LINEAR (§16 / §25) instead of
+  quadratic — keep it that way.
+- **Don't over-engineer the slice.** The dumb, deterministic heuristic (durable state + stack-trace + last-diff
+  + imports) is the right default — cheap, explainable, debuggable. Add smarter retrieval (embeddings, a
+  dependency graph) ONLY if it demonstrably misses; complexity there costs its own debugging.
