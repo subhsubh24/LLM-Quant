@@ -230,7 +230,7 @@ class PolymarketClient:
         offset: int = 0,
         active: bool = True,
         closed: bool = False,
-        tag: Optional[str] = None,
+        tag_id: Optional[int] = None,
         order: str = "volume24hr",
         ascending: bool = False,
     ) -> List[Market]:
@@ -242,7 +242,12 @@ class PolymarketClient:
             offset: Pagination offset
             active: Only active markets
             closed: Include closed markets
-            tag: Filter by category tag (e.g., "weather", "politics", "crypto")
+            tag_id: Server-side category filter — an INTEGER Gamma tag id (resolve it
+                once from ``GET /tags``, e.g. ``100639`` = "Games"). It MUST be the
+                integer ``tag_id``, NOT a category NAME: Gamma SILENTLY IGNORES a string
+                ``tag`` (returns the unfiltered global top — verified live 2026-07-10),
+                whereas ``tag_id=<int>`` genuinely filters server-side (a bogus id → []).
+                Mirrors ``PolymarketHistoryFetcher.fetch_resolved_markets``.
             order: Sort field (e.g., "volume24hr", "liquidity", "startDate")
             ascending: Sort direction (False = highest first)
         """
@@ -251,8 +256,11 @@ class PolymarketClient:
             params["active"] = "true"
         if closed:
             params["closed"] = "true"
-        if tag:
-            params["tag"] = tag
+        # `is not None` (not truthiness) so a legitimate tag_id of 0 is honored, while the
+        # default None omits the key (back-compat). Sending a string `tag` here would be a
+        # SILENT no-op — Gamma only filters on the integer `tag_id` (ROADMAP A7).
+        if tag_id is not None:
+            params["tag_id"] = int(tag_id)
         # Sort by volume/liquidity so we get the most active markets first,
         # not stale resolved markets from years ago.
         if order:
