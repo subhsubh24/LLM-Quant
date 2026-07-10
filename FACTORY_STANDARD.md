@@ -856,3 +856,24 @@ first-class, GOVERNED property of the line here — not a hope:
   incident — never "as-is, verification is the owner's problem." The owner is the accountable party; the loop
   is the production system that self-heals. Honesty: a coherence/traceability claim counts ONLY if the check
   actually ran (same anti-gaming rule as the number).
+
+## 40. Vision verification — for a VISUAL surface, an independent grader checks the RENDERED pixels, not the code
+"It compiles / the DOM is green" is NOT "it looks right," and a text-only check misses the failure mode that
+matters on a visual surface (§6 BUILDS ≠ WORKS, extended to the pixels; ties to the §6b design bar). For any
+genuinely visual surface — a screen, a paywall, onboarding, a landing page, a rendered mockup/export, a
+chart/dashboard — the maker's word on how it LOOKS is not enough:
+- **Render → screenshot → INDEPENDENT vision grader.** After a UI change, render the surface (the journey
+  suite / a served build / §29 the real deployed app) and capture a screenshot. A FRESH vision-capable
+  subagent that did NOT make the change (Haiku vision tier is fine — the cheap grader role) reads the
+  screenshot and judges it against: (a) the GOAL/spec for that surface, (b) the VISION design bar + the design
+  tokens/system (§6b — are the tokens used; is it generic-AI slop or intentionally designed?), and (c) the
+  PREVIOUS accepted screenshot on record (did this change REGRESS the look?).
+- **Verdict → loop (maker ≠ checker applies to pixels too, §4).** Match → the surface passes. Mismatch → the
+  grader returns a STRUCTURED diff (spacing / hierarchy / contrast / token drift / broken layout / missing
+  empty-or-error state) and it goes back to the maker like any REQUEST_CHANGES. A model grading its OWN render
+  prefers what it already produced — that is exactly why the grader must be independent (§6/§39 verifier bias).
+- **Record the reference.** Store the accepted screenshot (or its description + key visual metrics) so the next
+  run has a baseline to diff against; a visual regression is a coherence defect (§39) — fix now.
+- **Scope + cost + honesty.** Only for genuinely visual surfaces (skip pure logic/API changes); one grader per
+  surface; Haiku vision keeps it cheap. Feeds the design_taste dimension the Quality Auditor grades (consume,
+  never self-grade, §8/§31). A "looks good" that no grader actually EYEBALLED does not count (anti-gaming rule).
