@@ -37,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import random
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Sequence
@@ -343,10 +344,26 @@ def walk_forward_backtest(
     sizing). It deliberately does NOT fingerprint the ``strategy_fn`` callable (an
     arbitrary closure cannot be hashed reliably), so a hash match proves identical PnL
     only when compared across runs that used the SAME strategy. Given that, identical
-    inputs ⇒ identical hash ⇒ identical PnL (a stochastic strategy may consume ``seed``;
-    the default strategy is deterministic).
+    inputs ⇒ identical hash ⇒ identical PnL. A STOCHASTIC ``strategy_fn`` that draws from
+    the global ``random`` / ``numpy.random`` streams is made reproducible because this
+    function seeds BOTH from ``seed`` before running (below); the default strategy is
+    deterministic, so the seeding is a no-op for it.
     """
     strategy = strategy_fn or make_net_edge_strategy(cost_model=cost_model)
+    # Determinism (the seed_hash contract: same data + seed ⇒ identical PnL). The engine's
+    # own accounting is pure arithmetic, but a STOCHASTIC strategy_fn may draw from the
+    # global RNG — the documented way ``seed`` is "consumed". Previously nothing seeded the
+    # RNG, so the docstring's "a stochastic strategy may consume seed" was FALSE: two runs
+    # with the same seed diverged while the seed_hash still MATCHED (a silent reproducibility
+    # violation). Seed both streams here so a stochastic strategy is genuinely reproducible.
+    # numpy is best-effort (a numpy-free strategy needs no numpy seed; numpy is a CI dep).
+    random.seed(seed)
+    try:
+        import numpy as _np
+
+        _np.random.seed(seed % (2**32))
+    except ImportError:  # numpy absent → nothing to seed (stdlib random already seeded)
+        pass
     # market_id must be unique: it is the settlement/heap key and the hash sort key, so a
     # duplicate would crash the heap (comparing un-orderable trades) and make the config
     # fingerprint order-sensitive. A real resolved-market dataset that lists a market
