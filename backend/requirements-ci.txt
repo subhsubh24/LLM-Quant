@@ -11,6 +11,14 @@ requests>=2.31.0
 websockets>=12.0
 pyyaml>=6.0
 pytest>=7.4.0
+# fastapi + httpx: needed so the api-layer regression tests actually RUN in the gate
+# rather than skip. test_security_headers.py exercises the #265 security-header +
+# /health-hygiene middleware (backend/app/api/main.py), which only exists on the real
+# FastAPI app — without fastapi present the test would skip and #265 would have ZERO CI
+# coverage. app.api.main imports cleanly under this dep set (no ML/heavy deps); httpx is
+# starlette.TestClient's transport. Kept light — this is the web framework, not the ML stack.
+fastapi>=0.110
+httpx>=0.27
 # ruff: enforces the CORRECTNESS-only lint gate (E9,F821,F811) in preflight step 3
 # (ROADMAP F7). Present in CI so the required gate actually RUNS the ratchet; the
 # ~150 remaining hygiene findings are NOT enforced (narrow --select in preflight.sh),
