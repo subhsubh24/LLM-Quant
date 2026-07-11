@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-07-10 (Research Run 18 — a new Gamma sampling axis (order=volume24hr) grows the Sports corpus 135->253 (+87%) in one fetch; EXP-005 still insufficient-data, mechanism correctly abstains)
+  as_of: 2026-07-11 (Research Run 19 — EXP-005 finally TESTED (tag_id=1 Sports, N=814) -- 268 trades, +$16,993.97 OOS, but F11 indistinguishable-from-zero + F10 fragile (125% PnL in one category bucket) -- edge-not-proven, not a data-access gap anymore)
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -214,9 +214,9 @@ GROWTH_STATUS:
         the political corpus and feed EXP-003.
     - id: EXP-005
       name: "Sports-Category Calibration Bucket (targeting the worst-ECE Polymarket category)"
-      status: insufficient-data
+      status: tested-fragile-not-significant
       proposed_date: 2026-07-08
-      tested_date: 2026-07-10
+      tested_date: 2026-07-11
       real_oos_result: >
         Research Run 16 (2026-07-08): fetched 1,095 real leakage-safe 7-day-lead Polymarket
         records (max_pages=20, unmodified polymarket_history_fetcher + validate_real_oos.evaluate(),
@@ -272,6 +272,29 @@ GROWTH_STATUS:
         size despite 1,089 raw Crypto markets, vs. volumeNum's 5-category spread), so the honest next
         step is MERGING both axes (dedupe by market_id via the fetcher's existing `--merge` flag), not
         replacing one with the other.
+        Research Run 19 (2026-07-11): SUPERSEDES the Run 18 merge recommendation -- found a stronger
+        lever instead of executing the merge. `validate_real_oos.py` already ships a `--tag-id`
+        server-side Gamma category filter (ROADMAP A7/#295, landed 2026-07-10) but no run had yet
+        pointed it at the correct id (Run 17/18 only tried `tag_id=100639`, "Games"). Resolved the
+        real id via `GET gamma-api.polymarket.com/tags/slug/sports` -> `tag_id=1` ("Sports"),
+        live-spot-checked (5-record `GET /markets?tag_id=1` -> Kings/Raptors NBA-Finals,
+        Egypt/Morocco/USA World-Cup -- genuinely Sports) BEFORE the pre-registered run. Single run:
+        `validate_real_oos.py --tag-id 1 --decision-lead-days 7 --seed 42 --max-pages 20 --limit 100
+        --json`, unmodified code, ~9 min wall-clock, no retry after seeing the number. Result: **814
+        leakage-safe Sports records** -- more than double the ~300-400 floor in ONE fetch, no merge,
+        no code change (vs. 134/135/253 on the three prior axes). `CalibrationBucketStrategy` FINALLY
+        traded: 268 trades, net +$16,993.97 OOS -- but **F11 verdict=indistinguishable_from_zero**
+        (95% CI [-17164.66, 49793.75], spans 0; hit_rate 49.25%, at/below a coin flip) and **F10
+        fragile**: 125% of net PnL from one category bucket ('General'), 100% from one horizon bucket
+        ('3-7d'), 112% from one confidence bucket ('25-50%'), leave-one-out on the top category flips
+        the total to -$4,319.43. EXP-005 is now genuinely TESTED (not insufficient-data) and the
+        answer is negative: fragile + statistically insignificant, joining EXP-002 and the 4th-run
+        HuggingFace/recency-alpha test as another corpus on which the bucket-calibration family fails
+        both the significance and concentration bars. Also surfaced (not fixed, not asserted as a
+        bug): despite the corpus being 100% Gamma-tag-Sports, this repo's OWN keyword-based
+        `market_category.py` deriver labels most of it 'General', not 'Sports' -- the regime-slice's
+        category buckets and Gamma's own tag disagree, a labeling-taxonomy gap for a future run.
+        Full detail: RESEARCH_MEMORY 2026-07-11 (Research Run 19).
       edge_source: "crowd-miscalibration, category-targeted (in-scope per PLAYBOOK)"
       hypothesis: >
         A CalibrationBucketStrategy fit EXCLUSIVELY on Polymarket's Sports-category resolved
@@ -298,27 +321,59 @@ GROWTH_STATUS:
         - "Sports markets resolve on short horizons (game-day) -- at a 7-day lead many are still pre-season/early, so the 'least calibrated' signal from B9 (also 7-day lead) may itself reflect thin early-life liquidity rather than a persistent crowd bias worth trading."
         - "Liquidity-selection bias (volumeNum order) still applies -- popular (heavily-arbed) Sports markets dominate the sample."
         - "Research Run 18 (2026-07-10), external corroboration -- Le 2026 (arxiv 2602.19520) Table 3 reports Kalshi-primary (Polymarket cross-validated) sports calibration SLOPE by exact horizon bucket: 0.90-1.10 from 0-48h, 1.04 at 2d-1w (closest bucket to this project's 7-day decision_lead), rising to 1.24 at 1w-1mo and 1.74 only beyond 1 month. Verified via 2 independent WebFetch passes against the paper's own text/table (cross-checked per this project's WebFetch-over-summarization discipline, not taken from a single pass). If this Kalshi-anchored, Polymarket-cross-validated magnitude transfers, sports markets AT ~7 DAYS specifically should be only mildly underconfident (slope~1.04, near 1.0) -- NOT the badly-miscalibrated regime B9's raw Polymarket-only ECE (0.091, later 0.0745 on this run's corpus) suggested. This tempers (does not refute) EXP-005's prior: even with sufficient N, the a priori expected edge magnitude at exactly this horizon may be small. Standard caveat applies: cross-platform/cross-methodology (slope vs. ECE) transfer is unconfirmed, not disproven."
+        - "CONFIRMED, not just theorized (Research Run 19, 2026-07-11): at N=814 (tag_id=1 Sports, the largest Sports corpus tested), the bucket-calibration mechanism DID produce a positive headline OOS PnL (+$16,993.97) that a naive read could mistake for an edge -- exactly the failure mode this pre-mortem item warned about. The F10/F11 gates caught it: statistically indistinguishable from zero (CI spans 0, hit_rate below 50%) AND fragile (125% of PnL from one category, leave-one-out goes negative). This is direct evidence the concentration risk named above is real and load-bearing, not hypothetical."
       blocking_dependency: >
-        Research Run 18 (2026-07-10) FALSIFIED the Run 17 diagnosis that the volumeNum sampling axis
-        was fully exhausted with no cheap fix available: `order="volume24hr"` (an existing, already-
-        supported fetcher parameter no script had tried) grew Sports N 135->253 (+87%) in one fetch,
-        no code change. Still below the ~300-400 floor needed for the 10-bucket model to reliably
-        activate (253/10=25.3 avg/bucket even before walk_forward's expanding window shrinks it
-        further) -- but the remaining gap is now a MERGE-the-two-axes operational step (dedupe by
-        market_id via the fetcher's existing `--merge` flag), not a fetcher-design/code-build task.
+        RESOLVED as a data-access question, CLOSED as an edge question (Research Run 19, 2026-07-11):
+        `tag_id=1` (Gamma's real "Sports" tag, resolved via `GET /tags/slug/sports`) reached N=814 in
+        one pre-registered run -- more than double the ~300-400 floor, no merge, no code change,
+        superseding Run 18's "merge volumeNum+volume24hr" plan. With N no longer the constraint, the
+        CalibrationBucketStrategy mechanism was tested and produced a fragile, statistically
+        insignificant result (see real_oos_result above) -- so the remaining blocker for EXP-005 is
+        no longer DATA, it is that this specific mechanism (static per-price-bucket empirical
+        calibration) does not survive F10/F11 on a real Sports corpus, joining EXP-002 and the 4th-run
+        HuggingFace test as the same family's Nth non-robust result. A different mechanism (not a
+        bigger Sports corpus) would be needed to revisit this category.
       factory_next_action: >
-        Loop-buildable, cheap (an operational recipe with EXISTING flags, not new code): run
-        `scripts/fetch_polymarket_history.py --order volumeNum --decision-lead-days 7 --max-pages 20
-        --merge --out data/polymarket_history_sports_merged.json` followed by the SAME command with
-        `--order volume24hr` (same --out, --merge dedupes by market_id) to combine both axes into one
-        corpus; filter to Sports; if merged Sports N clears ~300, run
-        `validate_real_oos.evaluate()` on it ONCE with the pre-registered params (seed=42,
-        decision_lead_days=7), no retry after seeing the number, and cite the Le-2026-Table-3 caution
-        above when interpreting the magnitude. If a factory run does this instead, no code change is
-        required -- this is two CLI invocations, not a fetcher rewrite (revises Run 17's "fetcher-
-        design change" framing, which this run's finding falsified for the *axis-discovery* part but
-        not necessarily the *merge automation* part, which is a matter of convenience, not necessity).
+        No further data-access work needed for EXP-005 specifically (N=814 already exceeds the
+        pre-registered floor and produced a real, non-fragile-gate-failing result). If a future run
+        wants to explore Sports further, it should test a DIFFERENT mechanism (not another
+        parameterization of the same static bucket-calibration family, which is now confirmed
+        non-robust on 3+ independent real corpora incl. this one) or investigate the surfaced
+        category-labeling mismatch (Gamma tag_id=1 vs. this repo's `market_category.py` keyword
+        deriver disagreeing on what counts as "Sports") if a clean internally-labeled Sports slice is
+        wanted for a future EXP. Neither is loop-buildable-and-cheap the way the tag_id fetch was --
+        both are genuine design questions, not CLI-flag discoveries. The reusable, higher-value
+        takeaway for OTHER categories (e.g. EXP-003 politics): resolve the real `tag_id` via
+        `GET /tags/slug/<name>` FIRST, then pass `--tag-id` to `validate_real_oos.py` directly --
+        this is now the preferred per-category sampling lever project-wide, ahead of the `order=`
+        sort-field workarounds tried in Runs 17/18.
   learnings:
+    - "Research Run 19 (2026-07-11): EXP-005 TESTED for the first time (was insufficient-data since
+      2026-07-08) — resolved Gamma's real \"Sports\" tag id (`tag_id=1`, via `GET
+      /tags/slug/sports`; prior runs had only tried `tag_id=100639` \"Games\") and ran the ALREADY-
+      SHIPPED `validate_real_oos.py --tag-id` flag (#295, landed 2026-07-10 but not yet exercised
+      against the correct id) in one pre-registered run: N=814 leakage-safe Sports records (more
+      than double the ~300-400 floor, no merge, no code change — supersedes Run 18's \"merge
+      volumeNum+volume24hr\" plan). `CalibrationBucketStrategy` finally traded (268 trades, net
+      +$16,993.97 OOS) but F11 significance=indistinguishable_from_zero (95% CI spans 0, hit_rate
+      49.25%) AND F10=fragile (125% of PnL from one category bucket, leave-one-out flips the total
+      negative to -$4,319.43) — NOT a validated edge, joining EXP-002 and the 4th-run
+      HuggingFace/recency-alpha test as another corpus on which the bucket-calibration family fails
+      both bars. Also surfaced (not fixed): this repo's internal `market_category.py` keyword
+      deriver disagrees with Gamma's own Sports tag on most of this corpus (labels it 'General'),
+      a taxonomy gap for a future run, not asserted as a bug. Reusable project-wide takeaway: resolve
+      a category's real Gamma `tag_id` via `GET /tags/slug/<name>` and pass `--tag-id` directly —
+      now the preferred per-category sampling lever, ahead of the `order=` sort-field workarounds
+      tried in Runs 17/18 (directly applicable to EXP-003 politics next). External research this
+      run (DATA only, no new EXP): cross-venue arb windows reported compressing to ~30s in 2026
+      (vs ~5min in 2024, non-academic industry sourcing) — reinforces, does not change, the standing
+      out-of-scope conclusion; UMA oracle dispute rates reported rising sharply in 2026 (1,150+
+      disputes, WSJ-sourced via secondary reporting, not independently fetched) — logged as a
+      growing selection-bias caveat on this project's \"cleanly-resolved-only\" corpora, not a new
+      alpha; a second maker-taker paper (Palumbo 2026, Kalshi NFL orderbook, ~$29M/season to LPs who
+      DON'T flatten inventory) corroborates, does not change, the standing market-making deferral.
+      Binding constraint (no validated real-money OOS edge) STANDS. Full detail: RESEARCH_MEMORY
+      2026-07-11 (Research Run 19)."
     - "Research Run 18 (2026-07-10): EXP-005 sampling-axis fix found + tested — `order=\"volume24hr\"`
       (an existing, already-supported PolymarketHistoryFetcher parameter no script in this repo had
       ever passed) grew the leakage-safe Sports-category corpus from N=135 (the volumeNum axis,
@@ -496,6 +551,22 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "SUPERSEDES the Run 18 item below (DONE, not just recommended — Research Run 19, 2026-07-11):
+      Run 18 recommended merging the volumeNum + volume24hr axes to push EXP-005's Sports N toward
+      300-400. This run found and used a stronger lever instead: resolved Gamma's real \"Sports\"
+      tag id (`tag_id=1` via `GET /tags/slug/sports`) and ran the already-shipped
+      `validate_real_oos.py --tag-id 1 --decision-lead-days 7 --seed 42 --max-pages 20` (one
+      pre-registered run) — N=814, more than double the floor, no merge needed. EXP-005 is now
+      TESTED (not insufficient-data): fragile + statistically insignificant (see GROWTH_STATUS
+      EXP-005 for the full F10/F11 result) — a real negative result, not a further data-access gap.
+      NEW, loop-buildable recommendation for the next run: apply the SAME `tag_id`-resolution lever
+      to EXP-003 (Domain-Calibrated Political Strategy, still `proposed`/blocked on corpus size) —
+      resolve the real Politics tag id via `GET gamma-api.polymarket.com/tags/slug/politics` (or
+      `/elections`), spot-check a handful of live markets before committing, then run
+      `validate_real_oos.py --tag-id <resolved id> --decision-lead-days 7 --seed 42 --max-pages 20`
+      as ONE pre-registered run. This is the same mechanism EXP-005 just proved works at scale (N=814
+      in ~9 minutes, zero code changes) — it should unblock EXP-003's corpus-size blocker the same
+      way. Full detail: RESEARCH_MEMORY 2026-07-11 (Research Run 19)."
     - "RESOLVED + SELF-VALIDATED (Research Run 17, 2026-07-09): Research Run 16's URGENT
       resolution-telemetry flag (`check_resolutions()` never returning a value, so
       `\"resolutions\"` was a structural `null`) was fixed by the factory (#267, landed
@@ -506,7 +577,10 @@ GROWTH_STATUS:
       non-zero reading now that it can actually show one. (basicConfig/INFO-logging visibility,
       the second half of Run 16's recommendation, was not independently re-checked this run.)
       Full detail: RESEARCH_MEMORY 2026-07-09 (Research Run 17)."
-    - "SUPERSEDES the Run 17 item below (LOOP-BUILDABLE, cheap — an operational recipe with
+    - "SUPERSEDED by the item above (kept for history — Research Run 18, 2026-07-10): the merge
+      recipe below was never executed — Research Run 19 found a stronger lever (`tag_id` resolved
+      via `GET /tags/slug/<name>`) that reached the target N directly, without a merge.
+      SUPERSEDES the Run 17 item below (LOOP-BUILDABLE, cheap — an operational recipe with
       EXISTING flags, no fetcher code change; Research Run 18, 2026-07-10): Run 17 diagnosed
       EXP-005's Sports corpus as stuck at N~135 and recommended a fetcher-DESIGN change (a new
       recency-ordered code path). This run found that fix already exists and works: passing

@@ -1996,3 +1996,155 @@ structurally stuck — an existing, untried parameter grew it 87% in one fetch) 
 external, cross-checked caution (Le 2026's exact horizon table) that tempers how large an edge to
 expect even once N is sufficient — both more useful to the next run than either a forced EXP-006 or
 an uncritical re-statement of Run 17's "needs a rebuild" framing.
+
+## 2026-07-11 — Research Run 19: EXP-005 finally TESTED (N=814, real trades) — FRAGILE + statistically insignificant, not a validated edge; a much stronger sampling lever found (`tag_id=1`, Gamma's real "Sports" tag, supersedes the Run 18 merge recommendation); UMA dispute-rate DATA point logged as a growing selection-bias caveat
+
+- Hypothesis (falsifiable): **EXP-005**, unchanged since 2026-07-08 — a `CalibrationBucketStrategy`
+  fit exclusively on Polymarket Sports-category resolved markets (7-day decision lead) produces a
+  positive, non-fragile (F10), F11-significant net OOS PnL, once N clears `min_bucket_n=30` per
+  bucket. Prior runs (16/17/18) could never reach that floor (Sports N stuck at 134→135→253 across
+  three different sampling axes). This run's contribution: found and used a stronger axis, which
+  finally let the mechanism trade — and the result answers the hypothesis for the first time.
+- Min sample N: 100 (EXP-005's pre-registered floor) / ≥300-400 (the floor needed for the 10-bucket
+  model to reliably clear `min_bucket_n=30` per bucket, per Run 18).
+- OOS result: **TESTED — not insufficient data anymore. NOT a validated edge (fragile + statistically
+  insignificant).** Method: re-read `PolymarketHistoryFetcher`/`validate_real_oos.py` and found
+  `validate_real_oos.py` already exposes a `--tag-id` CLI flag (ROADMAP A7/#285/#295, landed
+  2026-07-10, apparently not yet exercised by a research run against the correct id). Prior runs
+  (17/18) had only tried `tag_id=100639` ("Games", the example id named in the #285 commit message) —
+  this run first resolved the CORRECT id via Gamma's own tag API: `GET
+  gamma-api.polymarket.com/tags/slug/sports` → `id=1`, `label="Sports"` (a real Gamma tag, `forceHide:
+  true` on the consumer site's nav, but still server-side filterable via `/markets?tag_id=1`; verified
+  with a 5-record live curl before committing to the run — top hits were the Kings/Raptors NBA-Finals
+  and Egypt/Morocco/USA World-Cup markets, i.e. genuinely Sports). PRE-REGISTERED
+  (before running, not tuned after seeing PnL): `python scripts/validate_real_oos.py --tag-id 1
+  --decision-lead-days 7 --seed 42 --max-pages 20 --limit 100 --json`, single run, ~9 minutes
+  wall-clock, unmodified repo code (research-agent scratch invocation only). Result: **814
+  leakage-safe Polymarket Sports records** — by far the largest single-run Sports-tagged corpus this
+  project has ever assembled (vs. 134/135/253 on the three prior axes; exceeds the ≥300-400 floor in
+  one fetch, no merge needed) — crowd_brier=0.2072, base_rate=0.4189, 9.3% pinned.
+  `CalibrationBucketStrategy` FINALLY traded: **268 trades, net +$16,993.97 OOS.** But:
+  - **F11 significance: `indistinguishable_from_zero`.** 95% bootstrap CI on total OOS PnL =
+    `[-17164.66, 49793.75]` — spans zero by a wide margin. `is_significant_edge: false`. Hit rate
+    49.25% (95% CI [43.3%, 55.2%]) — at or below a coin flip; the positive total PnL comes from
+    payoff asymmetry (Kelly-sized wins on underpriced favorites), not from picking more winners than
+    losers, which is exactly the profile the significance gate exists to catch.
+  - **F10 regime-slice: FRAGILE (concentrated), same failure mode as every prior positive
+    bucket-calibration result on this project.** 125% of net PnL from a single category bucket
+    (`General`) — over 100% because the other 2 categories in this corpus were net NEGATIVE; 100% of
+    net PnL from a single horizon bucket (`3-7d`); 112% from a single confidence bucket (`25-50%`);
+    leave-one-out on the top category flips the total to **-$4,319.43** — remove the one bucket
+    carrying the "edge" and the whole result goes negative. This is textbook overfitting/curve-fit
+    concentration, not a real, generalizable edge.
+  - **A genuine labeling mismatch, surfaced honestly (not asserted as a code bug, no fix attempted —
+    research-agent scope ends at the finding):** the corpus was fetched via Gamma's own `tag_id=1`
+    ("Sports") filter — every raw market IS Sports by Polymarket's own tagging. Yet the regime-slice's
+    INTERNAL category breakdown (this repo's `market_category.py` keyword-based deriver, a different,
+    independent classifier from Gamma's tag) buckets the overwhelming majority of these same markets
+    as `"General"`, not `"Sports"` (only 3 categories appear at all in the slice, and `General` alone
+    exceeds 100% of PnL). So "EXP-005: Sports-category CalibrationBucketStrategy" as originally
+    specified (which relies on the INTERNAL deriver's `category=="Sports"` label, per the
+    `oos_plan` in GROWTH_STATUS) and this run's Gamma-tag-driven corpus are not quite the same
+    population — most of these Gamma-tagged-Sports markets' question text apparently doesn't match
+    `market_category.py`'s Sports keyword list closely enough to be internally re-labeled Sports. Not
+    re-tested with the internal filter applied on top (would be a second, un-pre-registered look at
+    the same corpus — deferred to a fresh run with its own pre-registration if the factory wants to
+    close this gap).
+- Calibration (Brier / reliability): reported above (crowd_brier=0.2072 on this corpus); the alpha's
+  own calibration was not separately re-run (F11/F10 are the load-bearing gates here, per the existing
+  `validate_real_oos.py` harness — unchanged from prior runs' methodology).
+- Costs modeled: yes, unmodified `cost_model.py` via `walk_forward` (same as every prior EXP-002/003/005
+  run) — the reported PnL is already net of fees + slippage.
+- Verdict: **tested — fragile + not significant (edge-not-proven).** This is the FIRST time EXP-005 has
+  produced a real trading result (not an abstention), which resolves the "insufficient data" status
+  that has stood since 2026-07-08 — but the answer is negative: the bucket-calibration mechanism does
+  NOT produce a robust Sports edge on this corpus, joining EXP-002 (2026-07-04, clean negative) and the
+  4th-run HuggingFace/recency-alpha tests (2026-07-04, sign-unstable/fragile) as the Nth independent
+  corpus on which this strategy FAMILY fails to clear both the significance bar AND the
+  concentration/robustness bar. Per the standing "bucket-calibration family confirmed non-robust"
+  finding (2026-07-04, 4th run), this is corroboration, not a new discovery — but it is the first
+  Sports-specific data point, closing that gap.
+- Why / self-validation methodology: direct code read of `scripts/validate_real_oos.py --help` (already
+  supports `--tag-id`, landed by the factory 2026-07-10 per ROADMAP A7 #295 — this run is the first to
+  actually invoke it against a correctly-resolved Sports id); `curl` against
+  `gamma-api.polymarket.com/tags/slug/sports` + a 5-record live spot-check of `/markets?tag_id=1` BEFORE
+  committing to the pre-registered run (to confirm the id resolves to real sports markets, not to tune
+  the run after seeing a result); one single `validate_real_oos.py` invocation, no retry after seeing
+  the number (per the standing "pre-registered, no p-hacking" discipline); raw JSON output saved to a
+  research-agent scratch path (not committed — reproducible by any host with open Polymarket egress,
+  subject to the live corpus drifting as more Sports markets resolve). Egress re-confirmed open
+  (gamma-api/clob/data-api.polymarket.com, huggingface.co all 200; dune.com still 403 — unchanged
+  since 2026-07-03).
+- **CORRECTS Run 18's `next_actions` recommendation:** Run 18 recommended merging the `volumeNum` +
+  `volume24hr` axes via `--merge` to push Sports N toward 300-400. That recommendation is now
+  SUPERSEDED, not merely completed differently — `tag_id=1` alone reached N=814 (more than double the
+  floor) in one run, zero merge operation, zero code change, using a flag the factory had ALREADY
+  shipped (#295) for exactly this purpose but that no run (research or factory) had yet pointed at the
+  correct id. Any future per-category corpus growth (for EXP-003 politics, or other categories) should
+  reach first for `--tag-id` with the id resolved via `GET /tags/slug/<name>`, not the `order=` sort-field
+  workarounds explored in Runs 17/18 — `tag_id` is a genuine server-side category filter; `order` is
+  only a re-sort of a fixed top-N window.
+
+### External research this run (checked, none new-EXP-worthy; one operational data-integrity caveat added)
+- **Cross-venue arbitrage compression, reconfirmed with a sharper number:** multiple 2026 industry
+  sources (non-academic, consistent with each other and with this project's standing conclusion) now
+  describe cross-venue Polymarket/Kalshi arbitrage windows compressing from "~5 minutes in 2024" to
+  "~30 seconds in 2026" as bot competition intensifies, alongside a separate claim that AI agents now
+  run 30%+ of Polymarket wallets and account for 14 of the top 20 most profitable accounts. Treated as
+  DATA (marketing/industry blog sourcing, not academic, not independently reproduced) that reinforces —
+  does not newly justify — the existing "cross-venue arb is bot/speed-dominated, out of scope for a
+  non-speed bot" conclusion (standing since 2026-06-30). No change to B8's status.
+- **UMA oracle dispute rate rising sharply in 2026 (Wall Street Journal investigation, cited via
+  secondary industry sources, not independently fetched — the primary WSJ piece is paywalled):**
+  Polymarket has logged 1,150+ disputed markets in 2026 already, surpassing all of 2025; more than half
+  of UMA votes in disputed markets reportedly come from the platform's ten largest wallets, and roughly
+  1-in-5 disputes reportedly involve a voter with a financial stake in the outcome being judged. **Not a
+  new alpha candidate** (governance-quality issues on a third-party oracle are not an in-scope
+  calibration/logical-consistency edge per the PLAYBOOK's edge thesis), but a legitimate DATA-INTEGRITY
+  caveat worth carrying forward: this project's resolved-history fetchers already exclude
+  contested/disputed markets by design (disclosed selection bias, logged since 2026-06-28). If dispute
+  rates are structurally rising, that exclusion increasingly filters out a growing, not-necessarily-random
+  slice of "hard" markets — a reason to treat the calibration numbers this project measures (crowd Brier
+  ~0.08-0.21 across various corpora) as representative of "cleanly-resolved" Polymarket, not "all of
+  Polymarket," and to re-state that caveat more prominently as time passes. No EXP proposed; logged for
+  future disclosure language only.
+- **Market-making / maker-taker research reconfirmed, still deferred:** the already-logged GWU/CEPR
+  Kalshi maker-taker paper was joined by a second, consistent 2026 preprint (Palumbo, "A Microstructure
+  Perspective on Prediction Markets") finding NFL-market liquidity providers on Kalshi profit (~$29M
+  aggregate over one season) by deliberately NOT flattening inventory to zero — managing directional
+  imbalance rather than eliminating it, unlike a classical market maker. Corroborates, does not change,
+  the 2026-06-30 decision to defer market-making (this project has no bid-ask inventory/depth
+  infrastructure).
+- Egress RE-CONFIRMED open (routine re-probe, same domain set as every prior run since 2026-07-04):
+  `gamma-api.polymarket.com` 200, `clob.polymarket.com` 200, `data-api.polymarket.com` 200,
+  `huggingface.co` 200; `dune.com` still 403.
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N proposed. EXP-005 moves from `insufficient-data` to a tested, negative
+  (fragile + insignificant) result — see GROWTH_STATUS. The internal-vs-Gamma category-label mismatch
+  surfaced above is a data-quality observation for a future factory run, not a new alpha hypothesis.
+- The "Yes Bias" mention-market hypothesis (Deleep et al., SSRN) was re-checked this run: the primary
+  SSRN page (`papers.ssrn.com/sol3/papers.cfm?abstract_id=6322678`) is directly identified now (prior
+  runs only had it via a QuantPedia summary) but still returns HTTP 403 to a direct fetch from this
+  environment — unchanged, still unverifiable against the paper's own text/N/magnitude.
+
+### Self-validation (sources this run)
+- EXP-005 tag_id=1 finding: one live-fetched, pre-registered `validate_real_oos.py --tag-id 1` run this
+  session (seed=42, decision_lead_days=7, max_pages=20, limit=100), unmodified repo code, output saved
+  to a research-agent scratch path (not committed) — independently re-derivable by anyone running the
+  same command (subject to the corpus drifting as more Sports markets resolve, and to Gamma's own
+  `tag_id=1` assignment changing). Gamma tag resolution (`id=1`↔"Sports") independently confirmed via
+  `GET /tags/slug/sports` and a 5-record `GET /markets?tag_id=1` spot-check before the pre-registered run.
+- UMA dispute-rate figures: secondary industry-source summaries only (WSJ primary piece paywalled, not
+  independently fetched) — flagged above as unverified-primary, DATA not a claim.
+- Cross-venue arb / AI-agent-wallet-share figures: non-academic industry/marketing blog sourcing, not
+  independently reproduced — DATA, consistent with the standing conclusion, not new evidence for it.
+- Palumbo maker-taker paper: identified via WebSearch summary only, not independently fetched against
+  its own text this run (mirrors the existing GWU/CEPR paper's verification level).
+
+**Binding constraint STANDS:** no validated real-money OOS edge. This run's real contribution is
+answering EXP-005 for the first time (tested, not insufficient-data; result is fragile + insignificant,
+not an edge) and finding a materially better per-category sampling lever (`tag_id`, resolved via
+`GET /tags/slug/<name>`) that should replace the `order=`-sort-field workarounds in future per-category
+corpus-growth attempts (EXP-003 politics is the next direct beneficiary — same `--tag-id` mechanism,
+different id).
