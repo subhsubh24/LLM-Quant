@@ -260,15 +260,27 @@ class RiskManager:
         )
 
     def _reset_daily_if_needed(self):
-        """Reset daily tracking at midnight UTC."""
+        """Reset the daily P&L budget + order-rate window at midnight UTC.
+
+        The circuit-breaker cooldown is a WALL-CLOCK timeout
+        (``circuit_breaker_cooldown_min``) and must be honored for its full configured
+        duration. Its SOLE authority for clearing is the wall-clock expiry check in
+        ``check_opportunity`` (the ``_circuit_breaker_until`` comparison). This method used
+        to ALSO clear the breaker on the UTC day-roll, which truncated the cooldown: a
+        breach shortly before midnight (e.g. 23:55 with a 60-min cooldown → 00:55) lost
+        almost all of its cool-off, resuming trading at the first post-midnight scan (~00:00)
+        instead of 00:55 — precisely when a step-back after blowing the daily loss cap is
+        most valuable. The day-roll now resets ONLY the daily budget + rate window and never
+        truncates the breaker (strictly more protective; the cooldown can only last as long
+        as configured, never shorter). An expired or already-inactive breaker is still
+        cleared by the wall-clock check on the next ``check_opportunity``.
+        """
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._daily_date != today:
             if self._daily_date is not None:
                 logger.info(f"[RISK] Daily reset | Yesterday's P&L: ${self._daily_pnl:.2f}")
             self._daily_date = today
             self._daily_pnl = 0.0
-            self._circuit_breaker_active = False
-            self._circuit_breaker_until = None
             self._order_timestamps.clear()
 
     def _check_rate_limit(self) -> bool:
