@@ -628,6 +628,58 @@ class TestRiskManagerHardening:
         assert isinstance(score, float)
         assert 0.0 <= score <= 1.0
 
+    def _yesterday(self):
+        return (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    def test_circuit_breaker_cooldown_survives_utc_day_roll(self):
+        """The wall-clock cooldown must NOT be truncated by the midnight daily reset.
+
+        A breach shortly before midnight arms a cooldown that extends into the next UTC
+        day. When ``check_opportunity`` runs after midnight, ``_reset_daily_if_needed``
+        detects the day change — but it must reset ONLY the daily budget, NOT wipe the
+        still-active breaker. Pre-fix (the day-roll cleared the breaker) the bot resumed
+        trading immediately after midnight; this test would FAIL there (result.approved is
+        True). Post-fix the breaker holds until its configured ``_circuit_breaker_until``.
+        """
+        from app.prediction_markets.risk_manager import RiskManager, RiskConfig
+        from app.prediction_markets.execution import PredictionMarketExecutor
+        rm = RiskManager(config=RiskConfig(circuit_breaker_cooldown_min=60))
+        executor = PredictionMarketExecutor(dry_run=True)
+        # Arm the breaker with a cooldown 30 min in the FUTURE, and stamp the last-seen day
+        # as YESTERDAY so the next check triggers the day-roll reset.
+        rm._circuit_breaker_active = True
+        rm._circuit_breaker_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+        rm._daily_pnl = -999.0
+        rm._daily_date = self._yesterday()
+
+        result = rm.check_opportunity(_make_scan_result(), executor)
+
+        # The breaker STILL blocks (its wall-clock cooldown has not elapsed)...
+        assert not result.approved
+        assert "Circuit breaker" in result.reason
+        assert rm._circuit_breaker_active is True
+        # ...while the daily budget WAS still reset by the day-roll (0.0, not -999.0).
+        assert rm._daily_pnl == 0.0
+        assert rm._daily_date == datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def test_circuit_breaker_clears_once_wall_clock_cooldown_expires(self):
+        """The fix must not strand a breaker: once the wall-clock cooldown has elapsed, the
+        next ``check_opportunity`` clears it and trading resumes (with a fresh daily budget).
+        """
+        from app.prediction_markets.risk_manager import RiskManager, RiskConfig
+        from app.prediction_markets.execution import PredictionMarketExecutor
+        rm = RiskManager(config=RiskConfig(circuit_breaker_cooldown_min=60))
+        executor = PredictionMarketExecutor(dry_run=True)
+        # Breaker armed but its cooldown already EXPIRED (until-time in the past).
+        rm._circuit_breaker_active = True
+        rm._circuit_breaker_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+        rm._daily_date = self._today()
+
+        result = rm.check_opportunity(_make_scan_result(), executor)
+
+        assert result.approved
+        assert rm._circuit_breaker_active is False
+
 
 # ============================================================
 # Orchestrator Tests
