@@ -5,6 +5,104 @@
 
 ---
 
+## 2026-07-11 — overall `B` · ship gate NOT met (7th grade — improved cycle: `security` A→A+ and `tests_evals` A→A+; the last standing alpha candidate TESTED and correctly REJECTED; business_case still the lone binding B)
+
+**Diff vs 2026-07-09:** overall unchanged at **B**, but **two ship-critical dimensions crossed a
+threshold UPWARD** — `security` **A→A+** and `tests_evals` **A→A+** — because the factory closed
+the exact gate-coverage gaps the last scorecard named, and each fix was verified by a fresh,
+independent, adversarial grader to genuinely *run* (not skip) and to *fail against pre-fix code*.
+Four named A→A+ gaps closed in all. The make-or-break event: the research loop **finally TESTED**
+its last standing alpha candidate (EXP-005) at real N=814, and the F10/F11 integrity gates
+**correctly rejected** the +$16,993.97 headline as fragile + statistically insignificant — the
+discipline working exactly as designed. The binding constraint (`business_case_strength`, B) is
+unchanged: still no validated OOS cost-net edge.
+
+**What the factory closed since 2026-07-09 (fresh adversarial graders, verified not trusted):**
+- **#284 (correctness — the prior A→A+ gap) — GENUINE + CLOSED.** `NOPositionScanner.confidence`
+  pinned to the units contract (`advanced_strategies.py:277`,
+  `confidence=gate_confidence(no_price, estimate.edge)`), replacing the `min(adjusted_rate*2, 0.95)`
+  **gate-bypass**. Non-tautological: grader reverted the pin → 3 gate tests fail, restored clean.
+- **#280 (correctness — Weather + Whale)** — the two remaining executing strategies pinned
+  (`strategies.py:182,1216`); `test_confidence_units_gated.py` fails pre-fix.
+- **#283 (security / tests — the prior A→A+ gate-coverage gap) — GENUINE + CLOSED.**
+  `test_security_headers.py` registered in the blocking gate (`preflight.sh:119`) AND `fastapi`+
+  `httpx` added to `requirements-ci.txt` so it actually RUNS (a second review round caught that a
+  bare `importorskip` would SKIP in 100% of CI). Verified → 3 passed, not skipped.
+- **#298 (tests)** — registered `test_loss_cap_persist_failclosed.py` + `test_confidence_units_gated.py`
+  into the gate (`preflight.sh:122-123`), honestly noting #280's own commit had mis-claimed it.
+- **#281 (run-risk durability)** — a realized loss that cannot be durably persisted now **fails
+  CLOSED** (`activate_kill_switch("loss-persist failure")`) so a restart can't reset the loss cap;
+  `_FailingSaveStore` test + profit/breakeven/no-store controls (in the gate).
+- **#297 (run-risk)** — circuit-breaker cooldown now honors its full wall-clock duration across the
+  UTC day-roll (`risk_manager.py:262` no longer clears the breaker on daily reset).
+- **#295/#294 (research tooling)** — `validate_real_oos.py --tag-id` threads an integer Gamma
+  category filter — the lever Run 19 used to reach N=814.
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**.
+- `E2E_RUN_PASSED=0 python3 scripts/runtime_harness.py` → **PASSED** (live gate REJECTS, kill switch
+  blocks, max-position rejects $900>$50, loss cap trips net-of-fees −$41.20 vs −$10 + blocks
+  subsequent orders, deterministic exposure 10.000000==10.000000).
+- `python3 scripts/run_walk_forward.py` twice → **reproduces** (`seed 42 / hash b3a8d5e0e9579853`,
+  PnL 910,880.71 identical; SYNTHETIC demo, labeled NOT a validated edge).
+- `python3 -m pytest backend --collect-only` → **1134 collected, 13 errors (all `No module named
+  pandas`)** — the fastapi/`test_security_headers.py` error from last cycle is RESOLVED (#283).
+- `python3 scripts/check_scorecard.py gate` → **NOT-READY (business_case_strength: B)** (honest).
+
+**Grades (fresh adversarial per-dimension graders, none the maker):**
+functional_reality **A**, backtest_integrity **A**, correctness_reliability **A**,
+security **A+**, run_risk_readiness **A**, artifact_integrity **A**,
+business_case_strength **B**, design_taste **A**, tests_evals **A+**, performance **A**.
+
+**Anti-inflation note:** I promoted `security` and `tests_evals` to A+ ONLY because each grader
+verified the named gate-coverage gap is genuinely closed AND found NO new hole (the security-header
+test provably RUNS rather than skips; the new gate tests fail against pre-fix code). I did **NOT**
+promote `correctness_reliability` despite #284 closing its named prior gap, because the grader
+surfaced a **NEW residual**: `WalletBehaviorDivergence` (`advanced_strategies.py:1289`,
+`confidence=self._compute_confidence(...)` decoupled from entry+edge) — the identical wrong-units
+bug class the #280 sweep missed on one executing class-member. A world-class dimension with a named
+non-blocking gap is the textbook **A**, not A+. No grade exceeds its evidence.
+
+**Backtest integrity (make-or-break) — reproduction + gate-exercise:** engine remains leak-free
+(structural `MarketView` guard; fetchers RAISE rather than fabricate), reproducible (identical
+hash + PnL; #286 RNG-seed fix verified — seed=42 reproduces, seed=999 diverges). The F10/F11 gates
+were shown to **exist in code and demonstrably reject** EXP-005's +$16,993.97 headline
+(`bootstrap_oos_significance.py:161`, `regime_slice.py:315-323`) — not narrative. Held at **A** (not
+A+) only because the sole *offline-reproducible* number is synthetic (the N=814 real corpus is not
+committed) and `DEFAULT_IMPACT_COEFF=0.5` remains an uncalibrated placeholder.
+
+**Business case (the binding B) — EXP-005 TESTED, negative:** Research Run 19 (2026-07-11) resolved
+Gamma's real Sports tag (`tag_id=1` via `GET /tags/slug/sports`) and ran `validate_real_oos.py
+--tag-id 1` in one pre-registered run → **N=814** leakage-safe Sports records (>2× the ~300-400
+floor, no code change). `CalibrationBucketStrategy` finally traded (268 trades, +$16,993.97 OOS
+headline) but F11 `indistinguishable_from_zero` (95% CI [-17164.66, 49793.75] spans 0, hit_rate
+49.25%) AND F10 **fragile** (125% of PnL from one category bucket; leave-one-out flips to
+−$4,319.43). A real **negative** result — the bucket-calibration family is now refuted across 3+
+independent real corpora (EXP-002, the 4th-run HuggingFace/recency test, and now EXP-005). The
++$16,993.97 propagates into NO revenue field (`weekly_pnl_paper: null`, `arr_year1: 0`). Revenue
+$0, floor unmet, ship gate correctly closed. Reusable lever proven: resolve a category's real Gamma
+`tag_id` via `GET /tags/slug/<name>` then `--tag-id` (directly applicable to EXP-003 politics).
+
+**Artifact-integrity correction this cycle:** the prior scorecard's "1107 collected / 14 errors (13
+pandas + 1 fastapi)" is now **stale** — true current is **1134 collected, 13 errors, all pandas**
+(the fastapi error resolved with #283). Third consecutive cycle the reported raw count lags reality
+(894→1040→1107→1134); direction always conservative/understated, never inflated. The standing fix:
+cite the curated preflight-green gate rather than a raw collection total that drifts every cycle.
+
+**Issues:** **#79 refreshed** with the 2026-07-11 evidence (EXP-005 TESTED at N=814 → fragile +
+statistically insignificant, the tag_id per-category lever, next-mechanism guidance) — the
+ship-critical binding constraint, still egress/owner-gated. The A→A+ nits (WalletBehaviorDivergence
+confidence, frozen real corpus + impact-coeff calibration, live-fee real-field, test-count drift)
+are named in the scorecard `top_gaps` for the factory; not separately filed to avoid issue spam
+(non-ship-critical A-dimension improvements, tracked on the dashboard via the scorecard).
+
+**Weakest link (honest, unchanged):** there is still no validated out-of-sample edge. The engine to
+find one is high quality and materially better hardened + gate-covered this cycle (2 dims to A+),
+and it just demonstrated it will *reject* a plausible-but-fragile headline rather than bank it — but
+the edge itself is unproven, and everything downstream is gated correctly and honestly.
+
+---
+
 ## 2026-07-09 — overall `B` · ship gate NOT met (6th grade — substantive safety/units-contract cycle; the prior partial-reduce A→A+ gap CLOSED; business_case still the lone binding B)
 
 **Diff vs 2026-07-07:** overall unchanged at **B**, letters unchanged across all ten
