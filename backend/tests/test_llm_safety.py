@@ -222,3 +222,94 @@ def test_no_api_key_returns_none_no_exception():
     assert result is None
     # No spend should have been accrued (budget check is skipped when no client)
     assert get_spend_tracker().total_usd == 0.0
+
+
+# ---- Margin cost-per-outcome telemetry (#310/#312) ---------------------------
+# The Margin economics meter emits cost-per-outcome telemetry AFTER each Gemini
+# call. It MUST be a BLOCKING call in the same synchronous flow as the request —
+# NOT a fire-and-forget daemon thread — because on serverless (Render) the
+# function is frozen the instant it returns, which kills a background thread
+# before its POST completes and drops every emit (the #312 regression). And it
+# MUST degrade safely: the meter package is absent in the CI/default env
+# (not in requirements-ci.txt), so the call path must still return the model
+# text with no error. These tests validate the `cost_telemetry` capability
+# declared in docs/ci/SELF_VALIDATION.md.
+
+
+def test_margin_meter_emits_blocking_in_the_call_flow(monkeypatch):
+    """Regression (#312): the Margin emit runs BLOCKING, in the SAME thread as the
+    Gemini request — proving it is synchronous, not a fire-and-forget daemon thread the
+    serverless freeze would drop. With margin_meter present, record_call + record_outcome
+    must have fired by the time _call_llm returns, in generate_content's own thread."""
+    import sys
+    import threading
+    import types
+
+    seen = {"gen": None, "record_call": None, "record_outcome": None}
+
+    class _Usage:
+        prompt_token_count = 100
+        candidates_token_count = 20
+        cached_content_token_count = 0
+
+    class _Resp:
+        text = "analysis text"
+        usage_metadata = _Usage()
+
+    class _Client:
+        def __init__(self):
+            self.models = self
+
+        def generate_content(self, **kwargs):
+            seen["gen"] = threading.get_ident()
+            return _Resp()
+
+    class _FakeMeter:
+        def __init__(self, timeout=2.0):
+            pass
+
+        def record_call(self, **kwargs):
+            seen["record_call"] = threading.get_ident()
+
+        def record_outcome(self, **kwargs):
+            seen["record_outcome"] = threading.get_ident()
+
+    fake_mod = types.ModuleType("margin_meter")
+    fake_mod.MarginMeter = _FakeMeter
+    monkeypatch.setitem(sys.modules, "margin_meter", fake_mod)
+
+    analyst = _make_analyst(_Client(), cap_usd=20.0)
+    result = analyst._call_llm("prompt", max_tokens=50)
+
+    assert result == "analysis text"
+    # The emit MUST have completed by the time _call_llm returned (blocking)...
+    assert seen["record_call"] is not None, "record_call must fire (blocking) within the call"
+    assert seen["record_outcome"] is not None, "record_outcome must fire (blocking) within the call"
+    # ...and in the SAME thread as the Gemini request — a fire-and-forget daemon thread
+    # (the #312 regression) would run the emit in a DIFFERENT thread (or not yet at all).
+    assert seen["record_call"] == seen["gen"], "emit must be synchronous with the request, not a background thread"
+    assert seen["record_outcome"] == seen["gen"]
+
+
+def test_margin_meter_absent_degrades_safely(monkeypatch):
+    """The cost_telemetry capability degrades safely: when margin_meter is NOT importable
+    (the CI/default env — it is not in requirements-ci.txt), _call_llm still returns the
+    model text with no error and simply skips the emit."""
+    import sys
+
+    # A None entry in sys.modules makes `from margin_meter import MarginMeter` raise
+    # ImportError — modeling the package being absent, exactly as in CI.
+    monkeypatch.setitem(sys.modules, "margin_meter", None)
+
+    class _Resp:
+        text = "ok"
+
+    class _Client:
+        def __init__(self):
+            self.models = self
+
+        def generate_content(self, **kwargs):
+            return _Resp()
+
+    analyst = _make_analyst(_Client(), cap_usd=20.0)
+    assert analyst._call_llm("p", max_tokens=10) == "ok"

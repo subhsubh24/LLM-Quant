@@ -28,7 +28,7 @@ active flow depends on an unvalidated path. Live real-money keys are HUMAN-CORE 
 
 ```yaml
 SELF_VALIDATION:
-  as_of: 2026-07-08
+  as_of: 2026-07-12
   # ci_validatable: can the gate REALLY validate this with NO owner-only secret? An ACTIVE
   # capability with ci_validatable:false is UNMET -> it surfaces (urgent OWNER_ACTION +
   # LOOP_HEALTH validation.unmet) and blocks merges. real_flow_note (pitfall #5): for a
@@ -128,11 +128,20 @@ SELF_VALIDATION:
       ci_validatable: true          # no secret needed; parsing + anti-leakage tested on injected fixtures; live probe is a thin read
       real_flow_note: "RESEARCH ONLY — Manifold is PLAY MONEY. A Manifold finding validates the METHOD (can a model beat a softer crowd?) and NEVER counts toward the profit floor, go-live-eligibility, or any real-money decision. NO orders, NO money, NO credentials. The critical logic is PARSING + anti-leakage (offline fixtures); the live read (scripts/manifold_research_probe.py) is a thin GET with no side-effect. Live probe RAN 2026-07-07: 2147 leakage-safe records, crowd Brier 0.144, ECE 0.027, only 18.5% pinned (7-day lead). HONEST framing (per an adversarial auditor): the 0.144 Brier is NOT apples-to-apples with the real-money crowds' ~0.09 — it is driven by far LESS pinning (18.5% vs ~70%) + a longer lead (7d vs 2d), not worse calibration; ECE 0.027 is LOW, so the play crowd is actually well-calibrated on this sample. So this is a less-pinned/longer-horizon research corpus, NOT proven a 'softer, beatable' crowd — a method must still be run and beat it OOS. (2026-07-08: the 'materially softer crowd' overclaim was corrected across ROADMAP/loop-memory/LOOP_HEALTH to match THIS framing; and the research-only property is now STRUCTURALLY enforced, not convention-only — #259.)"
       status: validated
+    - id: cost_telemetry
+      desc: "emit LLM cost-per-outcome economics to the external Margin ingest service (unit-economics observability, §24/§25) — advisory telemetry, NEVER on the trading/order path"
+      validates_via: "test_llm_safety.py::test_margin_meter_emits_blocking_in_the_call_flow (a fake margin_meter proves the emit is a BLOCKING call in the request's OWN thread — the #312 fix; a fire-and-forget daemon thread the serverless freeze drops would run it in a different thread and FAIL the test) + test_margin_meter_absent_degrades_safely (margin_meter absent => returns model text, no error, no emit)"
+      mode: degrades_without_dep       # the margin-meter PyPI dep is deliberately NOT in requirements-ci.txt; absent => a safe no-op
+      requires_env: [MARGIN_INGEST_URL, MARGIN_INGEST_KEY]  # owner-optional; both unset => telemetry disabled (no network I/O), never blocks
+      active: true
+      ci_validatable: true             # the BLOCKING-emit contract AND the safe-degrade are both validated in-gate with a fake meter; no secret needed
+      real_flow_note: "PURELY ADVISORY telemetry — every emit is wrapped in try/except and bounded by the meter's 2.0s timeout, so it can NEVER affect the trading/order path or its result (`return response.text` is unchanged whether the emit succeeds, fails, or is skipped). The MARGIN_INGEST_URL/KEY credentials are read INSIDE the margin_meter PyPI package (not repo code), so the self-validation credential scanner does not force them — declared here for capability-honesty (#310/#312 added the active capability without declaring it). Absent dep OR unset URL/KEY => a safe no-op, never a fabricated emit."
+      status: degrades_safely          # absent margin_meter dep or unset MARGIN_INGEST_* => no emit, never fake output
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 11
+    capabilities_total: 12
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
@@ -144,6 +153,8 @@ SELF_VALIDATION:
     POLYMARKET_PASSPHRASE: {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
     POLYMARKET_PRIVATE_KEY: {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
     POLYMARKET_FUNDER:     {capability: live_trading_path, needed_to: activate_live, owner_action: OA-5}
+    MARGIN_INGEST_URL:     {capability: cost_telemetry, needed_to: emit_cost_telemetry, owner_action: null}
+    MARGIN_INGEST_KEY:     {capability: cost_telemetry, needed_to: emit_cost_telemetry, owner_action: null}
   unvalidated_blocking: []   # active + unvalidated capabilities. NON-EMPTY => gate fails. Empty = green.
 ```
 
