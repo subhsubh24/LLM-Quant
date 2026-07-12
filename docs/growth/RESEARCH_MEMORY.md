@@ -2148,3 +2148,241 @@ not an edge) and finding a materially better per-category sampling lever (`tag_i
 `GET /tags/slug/<name>`) that should replace the `order=`-sort-field workarounds in future per-category
 corpus-growth attempts (EXP-003 politics is the next direct beneficiary — same `--tag-id` mechanism,
 different id).
+
+---
+
+## 2026-07-12 — Research Run 20: EXP-003 (Politics, tag_id=2) TESTED — N=1,369, 472 trades, +$28,815.49
+OOS, but F11 indistinguishable-from-zero + F10 fragile — same failure pattern as EXP-005; the
+bucket-calibration family is now non-robust on 3 independent real per-category corpora (general,
+Sports, Politics); a genuinely different mechanism (political-market price-reversal after hype spikes)
+surfaced from a new named academic source, logged as candidate EXP-006 (not tested this run)
+
+- Hypothesis (falsifiable): **EXP-003**, unchanged since 2026-06-30 — a `CalibrationBucketStrategy`
+  fit exclusively on Polymarket political-category resolved markets (7-day decision lead) produces a
+  positive, non-fragile (F10), F11-significant net OOS PnL — motivated by Le 2026's political
+  bilateral-partisan-cancellation finding. This run applies the `tag_id`-resolution lever Research
+  Run 19 (2026-07-11) found for EXP-005/Sports to EXP-003/Politics, per that run's own `next_actions`
+  recommendation.
+- Min sample N: 100 (EXP-003's pre-registered floor) / ~300-400 (the floor needed for the 10-bucket
+  model to reliably clear `min_bucket_n=30` per bucket, per the EXP-005 precedent).
+- OOS result: **TESTED — not insufficient data. NOT a validated edge (fragile + statistically
+  insignificant), joining EXP-002 and EXP-005.** Method: resolved the real Gamma tag ids for both
+  candidate labels named in the EXP-003 hypothesis text (`"politics" or "elections"`) via
+  `GET gamma-api.polymarket.com/tags/slug/politics` → `id=2` and `.../tags/slug/elections` → `id=144`;
+  spot-checked both with a live 5-record `GET /markets?tag_id=<id>&closed=true` BEFORE committing to
+  the run (both returned genuine 2024 presidential-nomination markets — Trump/DeSantis/Haley/Biden/
+  Harris — confirming both ids are real and on-topic). The two tags overlap heavily on this sample
+  (near-identical top hits), so testing both would not be an independent second look; PRE-REGISTERED
+  `tag_id=2` ("Politics", the broader parent label matching the hypothesis's primary wording) as the
+  single run, not both. Command (unmodified repo code, no retry after seeing the number):
+  `python3 scripts/validate_real_oos.py --tag-id 2 --decision-lead-days 7 --seed 42 --max-pages 20
+  --limit 100 --json`. Result: **1,369 leakage-safe Polymarket Politics records** (more than 3x the
+  ~300-400 floor in one fetch, no merge, no code change — same `tag_id` mechanism Run 19 validated on
+  Sports) — crowd_brier=0.0886, base_rate=0.2001, 60.7% pinned (a much MORE pinned corpus than
+  EXP-005's Sports pull (9.3% pinned) — political tag markets skew toward long-settled, heavily-arbed
+  presidential-nomination contracts). `CalibrationBucketStrategy` traded: **472 trades, net
+  +$28,815.49 OOS** — a larger nominal PnL than EXP-005's Sports result. But:
+  - **F11 significance: `indistinguishable_from_zero`.** 95% bootstrap CI on total OOS PnL =
+    `[-36648.21, 105232.67]` — spans zero by an even wider margin than EXP-005's CI. `is_significant_edge:
+    false`. Hit rate **25.64%** (95% CI [21.6%, 29.7%]) — starkly below a coin flip (lower than
+    EXP-005's already-poor 49.25%), confirming the positive total PnL is pure payoff-asymmetry from a
+    small number of large wins on deep longshots, not genuine predictive skill.
+  - **F10 regime-slice: FRAGILE (concentrated), the identical failure mode as EXP-005 and every prior
+    positive bucket-calibration result on this project.** 134% of net PnL from a single category
+    bucket (`General`, 51.6% of budget) — over 100% because other categories net negative; 100% from a
+    single horizon bucket (`3-7d`); 109% from a single confidence bucket (`10-25%`); leave-one-out on
+    the top category flips the total to **-$9,665.99**; and (new this run, a sharper concentration flag
+    than EXP-005 surfaced) **57% of net PnL from ONE single market** — over half the "edge" is one
+    trade. Textbook overfitting/concentration, not a generalizable edge.
+  - **The internal-vs-Gamma category-label mismatch Research Run 19 surfaced on Sports is CONFIRMED on
+    a second corpus, not a one-off:** the corpus was fetched via Gamma's own `tag_id=2` ("Politics")
+    filter — every raw market IS Politics by Polymarket's own tagging. Yet this repo's independent,
+    keyword-based `market_category.py` deriver buckets the majority of the SAME markets as `"General"`,
+    not `"Politics"` (the top fragile-reason bucket, 51.6% of budget). Same taxonomy gap as EXP-005,
+    now observed on a second, disjoint category — raises this from "a labeling gap for a future run"
+    to a **recurring, systematic limitation of the internal keyword-based classifier** relative to
+    Polymarket's own tag taxonomy. Not fixed this run (research-agent scope ends at the finding).
+- Calibration (Brier / reliability): crowd_brier=0.0886 on this corpus (a SHARPER/more-calibrated
+  crowd than EXP-005's Sports corpus, crowd_brier 0.2072 — consistent with the much higher pinned
+  fraction here); the alpha's own calibration was not separately re-run (F11/F10 are the load-bearing
+  gates, unchanged methodology from every prior EXP-002/003/005 run).
+- Costs modeled: yes, unmodified `cost_model.py` via `walk_forward` (same as every prior run) — the
+  reported PnL is already net of fees + slippage.
+- Verdict: **tested — fragile + not significant (edge-not-proven).** This is the FIRST time EXP-003
+  has produced a real trading result (prior status: `proposed`, blocked on corpus size since
+  2026-06-30) — resolves the corpus-size blocker exactly as Run 19 predicted, but the answer is
+  negative, the SAME shape as EXP-005: large nominal PnL driven by a low hit rate and extreme
+  single-bucket/single-market concentration, failing both the significance and robustness bars.
+- Why / self-validation methodology: direct `curl` resolution of both candidate tag ids
+  (`/tags/slug/politics` → 2, `/tags/slug/elections` → 144) + a live 5-record spot-check of each via
+  `GET /markets?tag_id=<id>&closed=true&limit=5` BEFORE committing to the pre-registered run (to
+  confirm the ids resolve to real political markets, not to tune after seeing a result); one single
+  `validate_real_oos.py` invocation, no retry after seeing the number; raw JSON output saved to a
+  research-agent scratch path (not committed — reproducible by any host with open Polymarket egress,
+  subject to the live corpus drifting as more markets resolve). Egress re-confirmed open this run
+  (gamma-api/clob/data-api.polymarket.com, huggingface.co all 200; dune.com still 403 — unchanged
+  since 2026-07-03).
+- **Operational finding (new, not previously logged): Kalshi's candlestick endpoint rate-limits
+  heavily under this script's default batch fetch.** The run's default `--venues` includes Kalshi
+  alongside Polymarket (the `--tag-id` flag is Polymarket-only per the script's own `--help` text,
+  correctly ignored for Kalshi); this run's Kalshi lane logged **854 HTTP 429 (Too Many Requests)**
+  responses from `api.elections.kalshi.com/.../candlesticks` and consequently skipped **1,200** Kalshi
+  markets for "no leakage-safe price" — the fetcher's honest, no-fabrication behavior (never invents a
+  decision price when the API rate-limits it away), so the Kalshi lane correctly reported `N/A — 0
+  leakage-safe records` rather than a corrupted result. Not a correctness bug and not blocking (the
+  Polymarket lane, which `--tag-id` targets, was unaffected) — logged as a DATA point for a future run
+  that specifically wants a real Kalshi OOS corpus: at this batch size, Kalshi's public candlesticks
+  endpoint needs throttling/backoff to yield usable N, a fetcher-hardening item, not investigated
+  further this run (out of scope for a Polymarket-tag_id-focused test).
+
+### THE headline finding this run: the static bucket-calibration family is now non-robust on 3
+### independent real per-category corpora — re-testing more categories with the SAME mechanism is
+### low-value; a genuinely different mechanism is needed
+  Combining this run with the prior two real per-category/all-category tests of
+  `CalibrationBucketStrategy` on real Polymarket data:
+  - EXP-002 (all categories, 7-day lead, N=510, 2026-07-04): walk-forward PnL **-$2,938.70**/46
+    trades (net NEGATIVE); static 60/40 split B2 gate also negative and significant the WRONG way.
+  - EXP-005 (Sports, `tag_id=1`, N=814, 2026-07-11): **+$16,993.97**/268 trades nominal, but F11
+    indistinguishable-from-zero (hit rate 49.25%) + F10 fragile (125% of PnL in one category bucket,
+    leave-one-out flips to -$4,319.43).
+  - EXP-003 (Politics, `tag_id=2`, N=1,369, this run): **+$28,815.49**/472 trades nominal, but F11
+    indistinguishable-from-zero (hit rate 25.64%, even further below a coin flip) + F10 fragile (134%
+    of PnL in one category bucket, leave-one-out flips to -$9,665.99, 57% from ONE market).
+  Every one of the three real-corpus results that actually traded (Sports, Politics) shows the SAME
+  shape: a large nominal positive headline PnL that a naive read could mistake for a strong edge,
+  produced by a hit rate at-or-below chance and extreme concentration in a handful of longshot bets —
+  caught only because F10/F11 exist. This is not three independent coin flips landing the same way by
+  chance; it is a **structural property of the mechanism**: a static per-price-bucket empirical
+  calibration model, sized with cost-net Kelly, systematically finds a small number of very-low-price
+  ("longshot") markets where the fitted bucket rate exceeds the crowd price by more than the cost
+  band, bets big on them via Kelly's convexity at low prices, and the resulting PnL is dominated by
+  whichever few of those bets happen to resolve YES in the OOS window — a payoff-lottery, not a
+  calibration edge. **Recommendation (RECOMMEND-only, not a ROADMAP steer — this is a negative,
+  not a high-confidence positive finding): a fourth category-only re-run of the SAME static
+  bucket-calibration mechanism (e.g. Economics/Crypto via their own `tag_id`) is low expected
+  information value — the mechanism itself, not the category, is now the suspect. Future OOS-testing
+  effort is better spent on a mechanism that does NOT concentrate on illiquid longshot convexity by
+  construction:** e.g. a rolling/recency-weighted bucket fit (raised as a candidate in EXP-002's
+  2026-07-04 entry, never built), a bucket model with an explicit per-trade concentration/liquidity
+  cap, or a structurally different edge source (B8 cross-venue coherence; a genuine reversal/momentum
+  strategy — see EXP-006 below).
+
+### New candidate this run (from external research, NOT tested — proposed as EXP-006)
+- **Political-market price-reversal after hype-driven spikes (Clinton & Huang, Vanderbilt, 2025/2026,
+  OSF preprint `ideas.repec.org/p/osf/socarx/d5yx2_v1.html`, also covered by DL News/Yahoo
+  Finance/financialcontent.com secondary reporting):** N>2,500 political prediction markets across
+  Polymarket/Kalshi/PredictIt/Iowa Electronic Markets, final 5 weeks of the 2024 U.S. presidential
+  election, $2B+ in transactions. The paper's OWN abstract text (fetched directly, not just a
+  secondary summary) states daily price changes were "weakly correlated or negatively autocorrelated"
+  — i.e., a price spike tends to partially reverse, not persist, consistent with herd/hype-driven
+  overreaction rather than durable information arrival. **CAVEAT (methodology discipline applied):**
+  the specific "58% of Polymarket's national presidential markets showed negative serial correlation"
+  figure appears ONLY in secondary reporting (DL News, financialcontent.com), not verified against the
+  primary abstract's own text this run (the abstract only gives the qualitative direction, no
+  percentage) — flagged as an unverified-primary secondary-source figure, not a confirmed one, per this
+  project's standing WebFetch-over-summarization discipline. Structurally DIFFERENT from the refuted
+  bucket-calibration family: this is a **resolution-timing / overreaction edge** (fade a price spike
+  after unusually large short-window moves), not a static price-level calibration bucket — a null
+  result on one family does not predict a null result on the other, and it is squarely in-scope per
+  the PLAYBOOK edge thesis (resolution-timing / news-reaction speed; crowd overreaction is a form of
+  miscalibration in TIME, not just in price level).
+  - **Falsifiable hypothesis (if built as EXP-006):** Polymarket political-market YES prices that move
+    by more than a threshold Δ within a short window (e.g. 1-3 days) exhibit negative serial
+    correlation over the following 1-3 days — i.e., a large short-window price move partially reverses
+    — and a strategy that fades such spikes (buys the opposite side after an outsized move, sized via
+    cost-net Kelly, capped per-market to avoid the single-market-concentration failure mode surfaced
+    above) produces a positive, F11-significant, F10-non-fragile net OOS PnL after realistic costs.
+  - **Min sample N (proposed):** at least 100 qualifying spike events (a Δ-threshold crossing), spanning
+    ≥3 distinct election cycles/news events to avoid a single-event concentration failure (the SAME
+    failure mode that just sank EXP-003 here) — a single election cycle (e.g. only 2024 U.S.
+    presidential) would risk the identical single-market-dominance problem.
+  - **OOS plan (proposed, not yet built):** requires a NEW data capability this repo does not have —
+    a short-interval (sub-daily) price-history puller keyed to political-tag markets (the existing
+    `HistoricalMarket` fetchers capture ONE pre-decision snapshot per market, not an intraday price
+    series), plus a spike-detection + reversal-labeling pipeline. This is genuinely NEW factory-build
+    scope, not a parameter tweak on existing code — logged to `next_actions`, not built this run.
+  - **Cost assumptions:** 2% fee + 0.5% slippage baseline (cost_model.py) PLUS an explicit
+    per-trade/per-market notional cap (the single-market-57%-of-PnL failure mode above shows an
+    uncapped mechanism will over-concentrate regardless of the underlying signal's quality) — a NEW
+    requirement this project's existing strategies do not yet enforce.
+  - **How EXP-006 could be wrong (adversarial pre-mortem, applied to a proposal not yet tested):**
+    (1) the reversal effect may be specific to the extreme volume/attention of a presidential election
+    ($2B+ over 5 weeks) and not generalize to the much lower-volume political markets available for a
+    fresh OOS test today (2026 is not an election year); (2) "negative serial correlation" in DAILY
+    price changes does not automatically imply a profitable TRADEABLE reversal once bid-ask
+    spread/slippage on the reversal trade itself is charged — the QuantPedia "mean-reversion on
+    Polymarket" backtest (checked this run, see below) is a direct cautionary example of exactly this
+    gap; (3) a spike-detection threshold is a NEW free parameter with real overfitting risk (which Δ,
+    which window) — must be pre-registered before any real data is seen, not tuned post-hoc; (4) the
+    single-market-concentration failure mode that just sank EXP-003 is a live risk here too if
+    reversal opportunities cluster around a small number of high-profile events (e.g. one election
+    night) — the proposed per-market notional cap is a mitigation, not a guarantee.
+  - **NOT proposed as ready-to-test:** genuinely new fetcher-build scope (intraday price series +
+    spike labeling), not a re-run of an existing script — the honest "insufficient infrastructure",
+    not "insufficient data".
+
+### Adversarial cross-check this run: a "mean-reversion on Polymarket" backtest exists and is a
+### cautionary example, not independent corroboration
+  Found via the same search thread: QuantPedia's "Exploiting Mean-Reversion in Decentralized
+  Prediction Markets: Evidence from Polymarket Binary Contracts" (Cyril Dujava, Quantpedia — original
+  research, not a peer-reviewed academic source; fetched directly, not just a summary). Checked in
+  detail because it sounds like independent corroboration of the EXP-006 direction above — **it is
+  NOT**, and is logged here specifically so a future run does not mistake it for supporting evidence:
+  - **N=3 contracts only** ("Jesus Christ return in 2025", "China invade Taiwan in 2025", "US confirm
+    aliens exist in 2025") — novelty/meme markets, not a representative political or economic universe.
+  - **12 strategy variants tested per contract** (lookback ∈ {5,10,20} days × holding ∈ {1,2,3,5} days)
+    — a 3-asset × 12-variant search is a severe multiple-comparisons/curve-fit setup with no
+    correction disclosed.
+  - **Cost-fragile:** the BEST zero-spread variant on the "Jesus" contract (+7.95% CAR, Sharpe +2.97)
+    FLIPS NEGATIVE at a realistic 10bps/trade cost (-7.83% CAR, Sharpe -2.60) — the theoretical edge
+    does not survive modest realistic friction, the exact failure mode this project's cost_model
+    discipline exists to catch. Only one of the ~36 tested combinations (China contract, 20-day
+    lookback/5-day hold) survives cost-adjustment (+18.91% CAR, Sharpe +1.96) — one surviving cell out
+    of 36 on 3 idiosyncratic assets is consistent with noise, not evidence of a real, generalizable
+    reversal edge.
+  - **Conclusion:** this is a textbook illustration of the SAME p-hacking/small-N/cost-fragility risks
+    named in EXP-006's own pre-mortem above, not independent support for it. Logged so a future run
+    citing "mean-reversion on Polymarket has been shown to work" catches itself — it has not been shown
+    to work by this source; if anything it is evidence FOR treating EXP-006 cautiously and building it
+    only with a pre-registered, uncherry-picked design.
+
+### Candidate alphas NOT proposed as ready-to-test this run (reasons)
+- EXP-006 (political price-reversal) is logged as a candidate hypothesis with a falsifiable spec, not
+  a ready-to-run EXP — it needs new fetcher infrastructure (intraday price series) this repo does not
+  have. Not proposed as `proposed` status in GROWTH_STATUS experiments[] this run (that status is
+  reserved for experiments with a runnable OOS plan against EXISTING infra, per this project's own
+  convention for EXP-001 through EXP-005); logged here in RESEARCH_MEMORY + `next_actions` instead, so
+  a future run/factory build can pick it up once the infra question is resolved.
+- A fourth static-bucket-calibration category re-run (Economics/Crypto via their own `tag_id`) was
+  considered and explicitly NOT run this run — see "the headline finding" above: the mechanism, not
+  the category, is now the suspect, so another same-mechanism data pull is low expected value relative
+  to the "one pre-registered test per run" discipline already spent on EXP-003 above.
+
+### Self-validation (sources this run)
+- EXP-003 tag_id=2 finding: one live-fetched, pre-registered `validate_real_oos.py --tag-id 2` run
+  this session (seed=42, decision_lead_days=7, max_pages=20, limit=100), unmodified repo code, output
+  saved to a research-agent scratch path (not committed) — independently re-derivable by anyone
+  running the same command (subject to the corpus drifting as more Politics markets resolve, and to
+  Gamma's own `tag_id=2` assignment changing). Gamma tag resolution (`id=2`↔"Politics", `id=144`↔
+  "Elections") independently confirmed via `GET /tags/slug/politics` + `GET /tags/slug/elections` and a
+  5-record spot-check of each before the pre-registered run.
+- Clinton & Huang (Vanderbilt): primary abstract fetched directly from `ideas.repec.org` (a plain
+  abstract-hosting page, reachable unlike SSRN); the specific "58%" serial-correlation figure is
+  secondary-source-only (DL News, financialcontent.com), flagged as such, not independently verified
+  against the primary text.
+- QuantPedia mean-reversion backtest: fetched directly (quantpedia.com, reachable); all figures
+  (CAR/Sharpe by variant, cost-fragility) taken from the page's own reported numbers, not a
+  third-party summary.
+- Egress: direct `curl` from this session against the same domain set as every prior run
+  (gamma/clob/data-api.polymarket.com, huggingface.co 200; dune.com still 403).
+
+**Binding constraint STANDS:** no validated real-money OOS edge. This run's real contribution is
+completing the `tag_id`-lever rollout Research Run 19 recommended (EXP-003 now tested, not
+insufficient-data) and — more importantly — recognizing the PATTERN across three real-corpus tests
+(EXP-002/003/005) as a property of the bucket-calibration MECHANISM, not of any one category, which
+should redirect future OOS-testing effort away from a fourth same-mechanism category re-run and toward
+either a differently-shaped mechanism (a concentration-capped/recency-weighted bucket model, or the
+genuinely different EXP-006 price-reversal candidate surfaced this run) or the still-open B8
+cross-venue coherence direction. EXP-006 is a hypothesis with a real, checked academic anchor and an
+honest adversarial cross-check (the QuantPedia cautionary example) — not yet an EXP with a runnable OOS
+plan, logged for a future run/factory-build cycle.
