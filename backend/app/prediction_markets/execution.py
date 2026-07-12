@@ -751,6 +751,11 @@ class PredictionMarketExecutor:
         self._kill_switch_active: bool = False
         self._kill_switch_reason: str = ""
         self._kill_switch_time: Optional[datetime] = None
+        # Set True whenever a safety-state persist FAILS (best-effort store momentarily
+        # unwritable); retried on subsequent activity so a transient outage cannot
+        # permanently lose a durable kill-switch/loss record. See
+        # _retry_pending_safety_persist().
+        self._safety_persist_pending: bool = False
 
         # Durable SAFETY-state persistence (ROADMAP D3/D4 / run-risk-readiness).
         # OPT-IN: None here means no persistence and fresh in-memory state — so a bare
@@ -907,10 +912,39 @@ class PredictionMarketExecutor:
             return True
         try:
             self._state_store.save(self._state_snapshot())
+            self._safety_persist_pending = False
             return True
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("[EXECUTOR STATE] persist failed: %s", e)
+            # Mark for retry: a FAILED safety-state write (e.g. a kill-switch auto-trip
+            # while the store is momentarily unwritable) must be re-attempted on
+            # subsequent activity, else a store recovery + restart silently loses it.
+            self._safety_persist_pending = True
             return False
+
+    def _retry_pending_safety_persist(self) -> None:
+        """Re-attempt a previously-FAILED safety-state persist (durability, D3/D4).
+
+        ``activate_kill_switch`` (and every other safety-state write) persists
+        best-effort. When that write FAILS — e.g. a realized loss BREACHES a cap and
+        AUTO-TRIPS the kill switch while the durable store is momentarily unwritable —
+        the trip + loss counters live only in memory. If the store then RECOVERS and the
+        process later restarts, ``_rehydrate_state`` loads the last GOOD (pre-trip) row
+        and silently un-trips the halt / resets the loss budget: the readable-but-stale
+        restart the boot-time fail-closed guard does NOT catch (the store IS readable, so
+        ``_rehydrate_state`` doesn't raise). Retrying the pending write on the next order
+        attempt durably records the halt the moment the store is writable again, so a
+        later restart re-loads it. (A subsequent realization already self-heals via
+        ``record_realized_pnl``'s own persist of the updated counters; the order-gate
+        retry closes the case where a halted bot only ever REJECTS orders — the scan loop
+        keeps calling ``execute`` — and never realizes again before a restart.) Idempotent
+        + monotone: it only ever
+        re-writes the CURRENT snapshot and never clears a halt; ``_persist_state`` clears
+        the pending flag on the first success. No-op (bit-identical) when no store is
+        attached or nothing is pending — the paper default never touches this path.
+        """
+        if self._safety_persist_pending and self._state_store is not None:
+            self._persist_state()
 
     def _roll_daily_loss_window(self):
         """Reset the daily realized-loss tally when the UTC day rolls over."""
@@ -992,6 +1026,11 @@ class PredictionMarketExecutor:
 
     def _check_risk(self, req: OrderRequest) -> Optional[str]:
         """Pre-trade risk checks. Returns error message or None if OK."""
+        # Durability self-heal (D3/D4): if a prior safety-state write (e.g. a kill-switch
+        # auto-trip) could not be persisted, re-attempt it now — BEFORE admitting any new
+        # order — so a recovered store durably records the halt and a later restart
+        # re-loads it (never resumes trading having lost a trip). No-op on the happy path.
+        self._retry_pending_safety_persist()
         # Kill switch overrides everything
         if self._kill_switch_active:
             return f"KILL SWITCH ACTIVE: {self._kill_switch_reason}"
