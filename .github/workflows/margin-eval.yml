@@ -1,0 +1,93 @@
+name: margin-eval
+
+# CHANGE-TRIGGERED cost-per-outcome refresh for the `llmquant-signal-check`
+# LLM workflow. When AI/eval code actually ships to trunk, this re-runs the
+# Margin eval suite (backend/evals/margin) so Margin's statistical
+# cost-per-outcome for the workflow reflects the new code.
+#
+# NON-BLOCKING by design — this is NOT a required status check; the only
+# required check remains the deterministic `code + safety gate (blocking)` in
+# preflight.yml. This job makes REAL Gemini calls and emits to Margin, so an
+# external outage or a missing secret must never freeze merges.
+#
+# INERT UNTIL SECRETS ARE SET: with no GEMINI_API_KEY the guard step skips the
+# run cleanly (exit 0) — the workflow never fails CI. The runner
+# (scripts/margin_eval.py) is itself fail-safe: no Gemini key -> skip; no
+# MARGIN_INGEST_* -> run + grade without emitting; cost-capped either way.
+#
+# Owner must set these repository SECRETS to activate:
+#   - GEMINI_API_KEY     (required to run at all)
+#   - MARGIN_INGEST_URL  (required to emit to Margin)
+#   - MARGIN_INGEST_KEY  (required to emit to Margin; the mgk_... project key)
+
+on:
+  push:
+    branches: ["claude/llm-stock-trading-app-fXupf"]
+    # Only when the AI call path or the eval suite itself changes — NOT docs,
+    # bookkeeping, research, or unrelated trading code.
+    paths:
+      - "backend/app/llm/**"
+      - "backend/evals/margin/**"
+      - "scripts/margin_eval.py"
+      - ".github/workflows/margin-eval.yml"
+  workflow_dispatch:
+
+# Don't pile up runs on rapid successive pushes to the same ref.
+concurrency:
+  group: margin-eval-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest   # GitHub runners have open internet -> reach Gemini + Margin
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      MARGIN_INGEST_URL: ${{ secrets.MARGIN_INGEST_URL }}
+      MARGIN_INGEST_KEY: ${{ secrets.MARGIN_INGEST_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Guard: inert until the owner sets GEMINI_API_KEY. No secret -> clean skip.
+      - name: Guard — skip cleanly if secrets absent
+        id: guard
+        run: |
+          if [ -z "${GEMINI_API_KEY}" ]; then
+            echo "GEMINI_API_KEY is not set — margin-eval is inert until the owner adds"
+            echo "repository secrets (GEMINI_API_KEY, MARGIN_INGEST_URL, MARGIN_INGEST_KEY)."
+            echo "Skipping cleanly; this never fails CI."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "GEMINI_API_KEY present — will run the cost-per-outcome eval."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always safe: offline harness self-check (no Gemini, no network).
+      - name: Offline self-test (grader + matrix)
+        run: python3 scripts/margin_eval.py --self-test
+
+      - name: Install runtime deps (google-genai + margin-meter + app deps)
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run margin eval (cost-capped) + regression note
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          set -o pipefail
+          python3 scripts/margin_eval.py \
+            --run-id "ci-${GITHUB_SHA::7}" \
+            --max-cost-usd 0.50 | tee /tmp/margin_eval.out
+          {
+            echo "### Margin eval — llmquant-signal-check (ci-${GITHUB_SHA::7})"
+            echo ""
+            echo '```'
+            grep -E "pass_rate=|measured_spend=|emit:|model=" /tmp/margin_eval.out || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
