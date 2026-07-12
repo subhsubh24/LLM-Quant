@@ -144,6 +144,30 @@ OWNER_ACTIONS:
         an ephemeral SQLite that resets each run. NEVER add POLYMARKET_* trading keys (real orders are
         human-core). Fuller always-on alternative: the deployed Railway backend running the orchestrator
         loop (OA-10). Trigger a first run now: `gh workflow run live-validation.yml`.
+    - id: OA-18
+      title: "Next.js major bump 14 → 15+ (14.x line is EOL for security backports) — DECISION + migration"
+      priority: medium
+      status: pending
+      why: >
+        Surfaced during G5 (2026-07-12c, #313). The public prod trading UI is now on the vendor-patched
+        next@14.2.35 (G5 cleared the specifically-warned Dec-11-2025 RSC DoS, CVE-2025-55184/67779). BUT the
+        live npm/GHSA advisory DB now flags ~15 OTHER Next.js advisories against even 14.2.35 — SSRF via
+        WebSocket upgrades, XSS via CSP nonces, cache poisoning in RSC responses, HTTP request smuggling in
+        rewrites, image-optimizer DoS, middleware/proxy bypass — whose fixes land ONLY in 15.5.16+ / 16.x
+        (NO 14.x backport; the 14.x line no longer receives security patches). Most are lower-severity /
+        config-dependent for this small 4-route auth-gated app, but a full `npm audit` clear requires a
+        major bump. This is HUMAN-CORE because it is a §21-class major-version commitment on a LIVE surface
+        AND it forces React 18 → 19 (Next 15's App Router requires React 19), a second coupled major bump —
+        NOT the narrow frontend-one-liner G5 was.
+      how: >
+        OWNER decides whether/when to take the 14 → 15+ (and coupled React 18 → 19) migration. It is NOT a
+        real-money/live-trading action (frontend only), so once the owner authorizes it the LOOP can build it
+        through the two gates: bump next to the latest patched 15.x (or 16.x), bump react/react-dom to 19,
+        adopt the async request APIs (cookies/headers/params) + review caching-default changes, then
+        re-validate EVERY route (`/`, `/login`, `/predictions`, `/api/auth/*`) + middleware/auth end-to-end
+        (`npm run build` green + the flows still wire). No new secret, no backend change, independent of the
+        alpha tracks. Until taken, the app runs on 14.2.35 with the residual advisories DOCUMENTED here +
+        ROADMAP G6, not silently ignored. No credentials needed.
 ```
 
 ## Quick reference
@@ -165,6 +189,7 @@ OWNER_ACTIONS:
 | OA-15 | Kalshi price-history 404 FIXED (#170); only optional owner egress remains | ⚪ low | in progress |
 | OA-16 | Polymarket-v1 HF schema CONFIRMED + remapped + ran from the build env (#226); no owner step for the loop | 🟢 low | in progress |
 | OA-17 | Live-validation workflow APPLIED (#PR); optional Neon `DATABASE_URL` secret for durable persistence | 🟡 medium | in progress |
+| OA-18 | Next.js major bump 14→15+ (14.x EOL for security; forces React 18→19) — owner decision, then loop builds it (G5 #313 shipped the safe 14.2.35 patch) | 🟡 medium | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
 | OA-8 | Wire gate into CI (workflow scope) | 🟡 medium | pending |
 
