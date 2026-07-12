@@ -11,6 +11,7 @@ import logging
 import json
 import concurrent.futures
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,19 @@ Be concise but thorough. A busy trader should be able to scan and get key points
 
         model_name = self.settings.gemini_model
 
+        # --- Margin economics meter (lazy + guarded + fail-safe) ---
+        # Imported here (NOT at module top) so the module still imports and
+        # tests still collect when margin-meter is absent (e.g. the CI env,
+        # which installs requirements-ci.txt without it). The meter only
+        # emits when MARGIN_INGEST_URL + MARGIN_INGEST_KEY are set; unset in
+        # CI means no network I/O. All emission is non-blocking and swallows
+        # every error so telemetry can never affect the trading path.
+        try:
+            from margin_meter import MarginMeter
+            _meter = MarginMeter(timeout=2.0)
+        except Exception:
+            _meter = None
+
         def _do_call() -> Optional[str]:
             kwargs: Dict[str, Any] = {
                 "model": model_name,
@@ -205,7 +219,44 @@ Be concise but thorough. A busy trader should be able to scan and get key points
             }
             if _call_config is not None:
                 kwargs["config"] = _call_config
+            _t0 = time.perf_counter()
             response = client.models.generate_content(**kwargs)
+            _latency_ms = (time.perf_counter() - _t0) * 1000.0
+
+            # Emit cost-per-outcome telemetry to Margin without blocking the
+            # trading path. gemini-2.5-flash can return empty .text without
+            # raising, so a non-empty stripped body is the outcome signal.
+            if _meter is not None:
+                _text = response.text
+
+                def _emit() -> None:
+                    try:
+                        um = response.usage_metadata
+                        _meter.record_call(
+                            workflow_id="llmquant-signal-check",
+                            provider="google",
+                            model=model_name,
+                            input_tokens=um.prompt_token_count,
+                            output_tokens=um.candidates_token_count,
+                            cache_read_tokens=getattr(
+                                um, "cached_content_token_count", 0
+                            ) or 0,
+                            latency_ms=_latency_ms,
+                            status="ok",
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        _meter.record_outcome(
+                            workflow_id="llmquant-signal-check",
+                            passed=bool(_text and _text.strip()),
+                            quality_method="ground_truth",
+                        )
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_emit, daemon=True).start()
+
             return response.text
 
         try:

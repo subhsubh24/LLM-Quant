@@ -34,6 +34,12 @@ psycopg2-binary>=2.9.9
 google-genai>=0.3.0
 httpx>=0.26.0
 
+# Margin economics meter — non-blocking cost-per-outcome telemetry.
+# Published on PyPI (registry dep, installable at Render deploy time).
+# Imported lazily (see backend/app/llm/analyst.py) so its absence from the
+# CI manifest (requirements-ci.txt) does not break import-smoke or tests.
+margin-meter>=0.1.0
+
 # Real-time Data
 websockets>=12.0
 
