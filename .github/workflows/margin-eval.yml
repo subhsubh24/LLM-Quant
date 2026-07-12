@@ -79,6 +79,13 @@ jobs:
 
       - name: Run margin eval (cost-capped) + regression note
         if: steps.guard.outputs.run == 'true'
+        env:
+          # GitHub Actions sets CI=true, and the runner treats CI as the
+          # hermetic keyless-gate signal and REFUSES to emit under it. Clear CI
+          # for THIS secrets-backed step ONLY so the intended run actually emits
+          # to Margin. CI stays true everywhere else, keeping the required
+          # `preflight code` gate hermetic (never emits).
+          CI: ""
         run: |
           set -o pipefail
           python3 scripts/margin_eval.py \
