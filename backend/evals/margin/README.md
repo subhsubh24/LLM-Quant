@@ -1,17 +1,31 @@
-# Margin eval suite — `llmquant-signal-check`
+# Margin eval suite — LLM-Quant AI workflows
 
 A repo-specific evaluation suite that gives **Margin** an accurate *statistical
-cost-per-outcome* for LLM-Quant's LLM workflow, instead of the coarse
-"did the model return text" signal the app path emits for live traffic.
+cost-per-outcome* **per LLM workflow**, instead of the coarse "did the model
+return text" signal the app path emits for live traffic.
 
 It is **additive only** — nothing here touches the trading/app path.
 
-## What it measures
+**Workflow map + coverage frontier:** see [`COVERAGE.md`](./COVERAGE.md). Four
+suites ship today (`--workflow` picks one, default `all`):
 
-The workflow under test is `llmquant-signal-check`: given a prediction-market
-entry decision (market price, an independent fair-value estimate, liquidity,
-signal confidence, horizon), the model must return a trading verdict —
-`allocate` / `hold` / `pass` — with a confidence.
+| Suite | Workflow id | Grading |
+|---|---|---|
+| `signal-check` | `llmquant-signal-check` | ground-truth (derived) |
+| `analyze-stock` | `llmquant-analyze-stock` | rubric |
+| `analyze-portfolio` | `llmquant-analyze-portfolio` | rubric |
+| `critique-strategy` | `llmquant-critique-strategy` | rubric + flaw-catching |
+
+Registry: `suites.py`. Signal-check matrix/grader: `cases.py` / `grader.py`.
+Advisory matrices/graders: `analyst_cases.py` / `analyst_graders.py`.
+
+## What it measures (signal-check example)
+
+The `signal-check` workflow: given a prediction-market entry decision (market
+price, an independent fair-value estimate, liquidity, signal confidence,
+horizon), the model must return a trading verdict — `allocate` / `hold` / `pass`
+— with a confidence. The advisory suites (stock/portfolio/critique) grade genuine
+task completion of the real analyst methods.
 
 - **`cases.py`** — a representative input matrix (~60 cases) spanning the full
   outcome spectrum: clear edge, overpriced YES, no edge, thin liquidity, and
@@ -55,14 +69,17 @@ signal confidence, horizon), the model must return a trading verdict —
 # Offline harness check (no key, no network) — run this in CI or locally:
 python3 scripts/margin_eval.py --self-test
 
-# Inspect the matrix + derived ground truth:
+# Inspect all suites + case matrices:
 python3 scripts/margin_eval.py --list
 
-# Real run: measure + grade + emit to Margin
+# Real run: measure + grade + emit to Margin (ALL suites by default)
 GEMINI_API_KEY=...            \
 MARGIN_INGEST_URL=https://<margin-app>/  \
 MARGIN_INGEST_KEY=mgk_...     \
   python3 scripts/margin_eval.py --run-id 2026-07-12a
+
+# Run a single workflow suite:
+python3 scripts/margin_eval.py --workflow critique-strategy --run-id 2026-07-12a
 
 # Re-run with a model/config override (comparison), first 20 cases, tighter cap:
 python3 scripts/margin_eval.py --model gemini-2.5-pro --limit 20 --max-cost-usd 0.50
