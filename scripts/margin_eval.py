@@ -22,6 +22,10 @@ SAFETY / GUARDS
     With no Gemini key it prints a skip and exits 0. It is NOT wired into
     scripts/preflight.sh. Use ``--self-test`` for an offline (no-network,
     no-Gemini) check of the harness itself, safe to run anywhere.
+  - Hermetic in CI: if ``CI`` is set the runner NEVER emits (the keyless gate
+    must stay inert even if creds leak into its env). The dedicated margin-eval
+    workflow clears ``CI`` (``env: CI: ""``) on its secrets-backed step so an
+    intended run emits; ``--allow-ci-emit`` forces emit in a local CI-like shell.
   - Fail-safe emit: if MARGIN_INGEST_URL/KEY are unset it still runs + grades and
     prints the summary, just without emitting.
   - Cost-capped: stops the batch once measured spend crosses ``--max-cost-usd``;
@@ -50,9 +54,8 @@ import argparse
 import os
 import sys
 import time
-import uuid
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # Make `backend` importable whether run from repo root or backend/.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -227,8 +230,20 @@ def run(args: argparse.Namespace) -> int:
     session_id = f"eval:{run_id}"
     ingest_url = args.ingest_url or os.environ.get("MARGIN_INGEST_URL")
     ingest_key = args.ingest_key or os.environ.get("MARGIN_INGEST_KEY")
+    # HERMETIC GUARD: never emit real telemetry from a CI context. A keyless
+    # gate (e.g. `preflight code`) runs with CI=true and must stay inert — this
+    # ensures it can never accidentally emit even if ingest creds are present in
+    # the env. The dedicated on-merge margin-eval workflow explicitly clears CI
+    # (env: CI: "") on its secrets-backed step so a genuine, intended run DOES
+    # emit. Override with --allow-ci-emit for a local CI-like shell if needed.
+    ci_hermetic = bool(os.environ.get("CI")) and not args.allow_ci_emit
     meter = None
-    if ingest_key:
+    if ci_hermetic:
+        print("margin_eval: CI is set — HERMETIC mode, NOT emitting to Margin "
+              "(the keyless gate must stay inert). The margin-eval workflow clears "
+              "CI on its secrets-backed step so that run emits; use --allow-ci-emit "
+              "to force emit in a CI-like shell.")
+    elif ingest_key:
         try:
             from margin_meter import MarginMeter
             meter = MarginMeter(ingest_url=ingest_url, api_key=ingest_key, timeout=args.timeout)
@@ -245,7 +260,7 @@ def run(args: argparse.Namespace) -> int:
           f"max_cost=${args.max_cost_usd:.2f}")
 
     tracker = get_spend_tracker()
-    start_spend = tracker.total_usd()
+    start_spend = tracker.total_usd
 
     results: List[GradeResult] = []
     emitted_calls = 0
@@ -254,7 +269,7 @@ def run(args: argparse.Namespace) -> int:
 
     for i, case in enumerate(cases, 1):
         # Cost guard: stop before exceeding the batch cap.
-        if tracker.total_usd() - start_spend >= args.max_cost_usd:
+        if tracker.total_usd - start_spend >= args.max_cost_usd:
             print(f"margin_eval: reached max-cost ${args.max_cost_usd:.2f} — "
                   f"stopping after {i-1}/{len(cases)} cases.")
             stopped_early = True
@@ -318,7 +333,7 @@ def run(args: argparse.Namespace) -> int:
     # --- Summary ---
     total = len(results)
     passed = sum(1 for r in results if r.passed)
-    spend = tracker.total_usd() - start_spend
+    spend = tracker.total_usd - start_spend
     print("\n=== margin_eval summary ===")
     print(f"run_id={run_id} session_id={session_id} model={settings.gemini_model}")
     print(f"cases_run={total} passed={passed} "
@@ -369,6 +384,9 @@ def main() -> int:
     p.add_argument("--timeout", type=float, default=2.0, help="meter HTTP timeout (s).")
     p.add_argument("--ingest-url", default=None, help="override MARGIN_INGEST_URL.")
     p.add_argument("--ingest-key", default=None, help="override MARGIN_INGEST_KEY.")
+    p.add_argument("--allow-ci-emit", action="store_true",
+                   help="emit even when CI is set (the margin-eval workflow instead "
+                        "clears CI on its step; use this only for a local CI-like shell).")
     args = p.parse_args()
 
     if args.self_test:
