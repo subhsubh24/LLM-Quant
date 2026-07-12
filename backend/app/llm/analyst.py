@@ -223,39 +223,40 @@ Be concise but thorough. A busy trader should be able to scan and get key points
             response = client.models.generate_content(**kwargs)
             _latency_ms = (time.perf_counter() - _t0) * 1000.0
 
-            # Emit cost-per-outcome telemetry to Margin without blocking the
-            # trading path. gemini-2.5-flash can return empty .text without
-            # raising, so a non-empty stripped body is the outcome signal.
+            # Emit cost-per-outcome telemetry to Margin. This MUST be a
+            # BLOCKING call, not a fire-and-forget daemon thread: on
+            # serverless (Render), the function is frozen the instant it
+            # returns, which would kill a background thread before its POST
+            # completes and drop every emit. The extra latency is bounded by
+            # the meter's own 2.0s timeout and is negligible next to the
+            # multi-second Gemini call. Fail-safe: every error is swallowed
+            # so telemetry can never affect the trading path.
             if _meter is not None:
                 _text = response.text
-
-                def _emit() -> None:
-                    try:
-                        um = response.usage_metadata
-                        _meter.record_call(
-                            workflow_id="llmquant-signal-check",
-                            provider="google",
-                            model=model_name,
-                            input_tokens=um.prompt_token_count,
-                            output_tokens=um.candidates_token_count,
-                            cache_read_tokens=getattr(
-                                um, "cached_content_token_count", 0
-                            ) or 0,
-                            latency_ms=_latency_ms,
-                            status="ok",
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        _meter.record_outcome(
-                            workflow_id="llmquant-signal-check",
-                            passed=bool(_text and _text.strip()),
-                            quality_method="ground_truth",
-                        )
-                    except Exception:
-                        pass
-
-                threading.Thread(target=_emit, daemon=True).start()
+                try:
+                    um = response.usage_metadata
+                    _meter.record_call(
+                        workflow_id="llmquant-signal-check",
+                        provider="google",
+                        model=model_name,
+                        input_tokens=um.prompt_token_count,
+                        output_tokens=um.candidates_token_count,
+                        cache_read_tokens=getattr(
+                            um, "cached_content_token_count", 0
+                        ) or 0,
+                        latency_ms=_latency_ms,
+                        status="ok",
+                    )
+                except Exception:
+                    pass
+                try:
+                    _meter.record_outcome(
+                        workflow_id="llmquant-signal-check",
+                        passed=bool(_text and _text.strip()),
+                        quality_method="ground_truth",
+                    )
+                except Exception:
+                    pass
 
             return response.text
 
