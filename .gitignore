@@ -54,3 +54,4 @@ htmlcov/
 *.tmp
 .cache/
 backtest_run_output.txt
+.vercel
