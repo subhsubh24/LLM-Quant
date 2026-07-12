@@ -2,6 +2,24 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-12 (owner-directed) — filed G5: bump `next` off the vulnerable 14.1.0 pin
+
+- The prod `vercel --prod` build surfaced that `frontend/package.json` pins `next: 14.1.0`, which
+  carries a **known security advisory** (`nextjs.org/blog/security-update-2025-12-11`). This is the
+  PUBLIC prod trading UI (auth-gated), so it's a real exposure. Filed G5: pin the lowest patched
+  14.2.x (stay on major 14), refresh the lockfile, `npm run build` must stay green with no route/
+  middleware behaviour change. Frontend-only — NOT a trading-loop change (no execution/risk/gate).
+- **Vercel deploy facts learned (for any future frontend/deploy work):** (1) The real prod project
+  is **`llm-quant`** (alias `llm-quant-six.vercel.app`), root-directory = `frontend`, so deploy from
+  the REPO ROOT (`vercel --prod`), never from inside `frontend/` (that made Vercel look for
+  `frontend/frontend`). (2) `vercel.json` sets `git.deploymentEnabled:false` on purpose — Vercel does
+  NOT auto-deploy on push (correct for a self-committing factory repo: otherwise every merged commit
+  would deploy). Deploy is HUMAN-CORE / manual. The dashboard's git-commit chip therefore freezes at
+  the last git-integration deploy and does NOT reflect CLI `vercel --prod` deploys — a live CLI deploy
+  can look "stale" on the card while actually being current. (3) `vercel --prod --yes` on an UNLINKED
+  dir creates a NEW project named after the dir (spawned a junk `frontend` project once) — link to the
+  existing project first. `.vercel/` is gitignored (no secret/link leak).
+
 ## 2026-07-12b — a 2nd QUIET, HONEST ALL-DROP run of the day: a FRESH full 8-Haiku scout sweep across ALL tracks A–H at the SAME HEAD (9e51053) the morning run swept, doubling as the ~daily DEEP AUDIT. 8/8 lenses NOTHING-GENUINE; the one non-trivial LIVE candidate (E: calibration gross-vs-net edge) DROPPED as a FALSE POSITIVE by the maker's own trace. Shipped 0 code PRs + this bookkeeping. Binding constraint (business_case_strength B) STANDS.
 
 - **DEEP AUDIT — 2026-07-12b (8-Haiku scout sweep across tracks A–H; egress OPEN: gamma HTTP 200, manifold HTTP 200).** preflight code GREEN (after `pip install -r backend/requirements-ci.txt` on the fresh container — a MISSING-DEP local step, NOT a HEAD regression); live-validation.yml GREEN (latest run 2026-07-12T08:32Z success — no red eval to action, §23); self-validation OK (11 caps, unmet=[]). HEAD is EXACTLY the morning all-DROP swept state (9e51053) — no code landed since. Result: **0 GENUINE file-disjoint items**; 8/8 lenses NOTHING-GENUINE or DROP-with-proof.
