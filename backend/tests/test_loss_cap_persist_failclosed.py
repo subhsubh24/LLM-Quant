@@ -153,7 +153,7 @@ class _PreloadedStore:
 
 
 def _low_cap_executor():
-    # Caps LOW so the loss under test BREACHES the total cap → the auto-trip path
+    # Caps LOW so the loss under test BREACHES a loss cap → the auto-trip path
     # (activate_kill_switch), the complement of the high-cap non-breach branch above.
     return PredictionMarketExecutor(
         dry_run=True, max_position_usd=60.0, max_portfolio_usd=500.0,
@@ -184,8 +184,9 @@ def test_auto_trip_failed_persist_is_retried_at_order_gate_and_survives_restart(
     ex.attach_state_store(store)
     assert not ex._kill_switch_active, "clean rehydrate must not pre-trip"
 
-    # A loss that breaches the $25 total cap → _enforce_loss_caps → activate_kill_switch,
-    # whose (first, transient) persist FAILS — the trip is in-memory only.
+    # A loss that breaches a loss cap ($10 daily / $25 total — the -$30 loss breaches both,
+    # daily checked first) → _enforce_loss_caps → activate_kill_switch, whose (first,
+    # transient) persist FAILS — the trip is in-memory only.
     ex.record_realized_pnl(-30.0)
     assert ex._kill_switch_active, "a cap breach must auto-trip the kill switch"
     assert ex._safety_persist_pending, "a FAILED trip-persist must mark a pending retry"
