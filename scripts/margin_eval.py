@@ -2,12 +2,19 @@
 """
 margin_eval.py — repo-specific eval runner for Margin cost-per-outcome.
 
-Runs the ``llmquant-signal-check`` workflow across a representative matrix of
-prediction-market scenarios (see ``backend/evals/margin/cases.py``), grades each
-reply genuinely (``backend/evals/margin/grader.py``), and emits the measured
-economics + GRADED outcomes to Margin via the published ``margin-meter`` SDK.
-This gives Margin an accurate STATISTICAL cost-per-outcome for the workflow —
-not just "did the model return text".
+Runs one or more AI-workflow eval SUITES (see ``backend/evals/margin/suites.py``)
+across representative input matrices, grades each reply genuinely, and emits the
+measured economics + GRADED outcomes to Margin via the published ``margin-meter``
+SDK — giving Margin an accurate STATISTICAL cost-per-outcome PER WORKFLOW, not
+just "did the model return text".
+
+Suites (``--workflow`` to pick one, default ``all``):
+  - ``signal-check``       llmquant-signal-check      (ground-truth graded)
+  - ``analyze-stock``      llmquant-analyze-stock     (rubric graded)
+  - ``analyze-portfolio``  llmquant-analyze-portfolio (rubric graded)
+  - ``critique-strategy``  llmquant-critique-strategy (rubric + flaw-catching)
+
+Coverage frontier + the full workflow map: ``backend/evals/margin/COVERAGE.md``.
 
 It exercises the REAL metered path: each case is sent through the production
 ``QuantAnalyst._call_llm`` (same Gemini client, model, system prompt, spend cap
@@ -66,12 +73,10 @@ from backend.evals.margin.cases import (  # noqa: E402
     ALL_CASES,
     Case,
     bucket_of,
-    build_signal_prompt,
     ground_truth,
 )
-from backend.evals.margin.grader import GradeResult, grade  # noqa: E402
-
-WORKFLOW_ID = "llmquant-signal-check"
+from backend.evals.margin.grader import GradeResult, grade as signal_grade  # noqa: E402
+from backend.evals.margin.suites import SUITES, SUITE_KEYS, Suite  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -157,40 +162,48 @@ def self_test() -> int:
         return f"Reasoning...\nVERDICT: {v}\nCONFIDENCE: {conf:.2f}"
 
     # 1) Empty / malformed replies MUST fail (not always-pass).
-    check("empty-fails", not grade(directional, "").passed, "empty passed")
-    check("none-fails", not grade(directional, None).passed, "None passed")
-    check("noverdict-fails", not grade(directional, "I think allocate maybe").passed,
+    check("empty-fails", not signal_grade(directional, "").passed, "empty passed")
+    check("none-fails", not signal_grade(directional, None).passed, "None passed")
+    check("noverdict-fails", not signal_grade(directional, "I think allocate maybe").passed,
           "unparseable passed")
-    check("noconf-fails", not grade(directional, "VERDICT: allocate").passed,
+    check("noconf-fails", not signal_grade(directional, "VERDICT: allocate").passed,
           "missing confidence passed")
-    check("badconf-fails", not grade(directional, "VERDICT: allocate\nCONFIDENCE: 5").passed,
+    check("badconf-fails", not signal_grade(directional, "VERDICT: allocate\nCONFIDENCE: 5").passed,
           "out-of-range confidence passed")
 
     # 2) Correct direction passes; wrong direction fails.
-    g_ok = grade(directional, reply(correct_verdict))
+    g_ok = signal_grade(directional, reply(correct_verdict))
     check("correct-passes", g_ok.passed and g_ok.quality_method == "ground_truth",
           f"correct verdict scored {g_ok}")
     if wrong_pool:
-        g_bad = grade(directional, reply(wrong_pool[0]))
+        g_bad = signal_grade(directional, reply(wrong_pool[0]))
         check("wrong-fails", not g_bad.passed, f"wrong verdict passed: {g_bad}")
 
     # 3) Ambiguous: a well-formed coherent reply passes as heuristic (not GT).
     amb = next(c for c in ALL_CASES if ground_truth(c).acceptable is None)
-    g_amb = grade(amb, reply("hold", 0.5))
+    g_amb = signal_grade(amb, reply("hold", 0.5))
     check("ambiguous-passes", g_amb.passed and g_amb.quality_method == "heuristic",
           f"ambiguous well-formed failed: {g_amb}")
-    g_amb_bad = grade(amb, "totally unparseable")
+    g_amb_bad = signal_grade(amb, "totally unparseable")
     check("ambiguous-malformed-fails", not g_amb_bad.passed,
           "ambiguous malformed passed")
 
-    # 4) Not always-pass overall: at least one canned wrong reply fails.
+    # 5) Every suite's own grader self-test (genuine, not always-pass).
+    for key, suite in SUITES.items():
+        try:
+            for f in suite.selftest():
+                failures.append(f"suite[{key}] {f}")
+        except Exception as exc:
+            failures.append(f"suite[{key}] selftest raised: {exc}")
+
+    total_cases = sum(len(s.cases) for s in SUITES.values())
     if failures:
         print("SELF-TEST FAILED:")
         for f in failures:
             print(f"  - {f}")
         return 1
-    print(f"SELF-TEST PASSED — {len(ALL_CASES)} cases; grader is genuine "
-          f"(empty/malformed/wrong-direction all fail; correct/ambiguous grade sensibly).")
+    print(f"SELF-TEST PASSED — {len(SUITES)} suites, {total_cases} cases; every grader "
+          f"is genuine (empty/refusal/wrong-direction/missed-flaw all fail).")
     return 0
 
 
@@ -254,120 +267,123 @@ def run(args: argparse.Namespace) -> int:
         print("margin_eval: MARGIN_INGEST_KEY unset — running + grading WITHOUT emit "
               "(fail-safe). Set MARGIN_INGEST_URL + MARGIN_INGEST_KEY to emit.")
 
-    cases = ALL_CASES[: args.limit] if args.limit else ALL_CASES
-    print(f"margin_eval: model={settings.gemini_model} cases={len(cases)} "
+    selected = _selected_suites(args.workflow)
+    total_cases = sum(len(s.cases) for s in selected)
+    print(f"margin_eval: model={settings.gemini_model} "
+          f"workflows={[s.key for s in selected]} cases={total_cases} "
           f"run_id={run_id} emit={'on' if meter else 'off'} "
           f"max_cost=${args.max_cost_usd:.2f}")
 
     tracker = get_spend_tracker()
     start_spend = tracker.total_usd
 
-    results: List[GradeResult] = []
+    all_results: List[GradeResult] = []
+    per_suite: Dict[str, Dict[str, int]] = {}
     emitted_calls = 0
     emitted_outcomes = 0
     stopped_early = False
 
-    for i, case in enumerate(cases, 1):
-        # Cost guard: stop before exceeding the batch cap.
-        if tracker.total_usd - start_spend >= args.max_cost_usd:
-            print(f"margin_eval: reached max-cost ${args.max_cost_usd:.2f} — "
-                  f"stopping after {i-1}/{len(cases)} cases.")
-            stopped_early = True
-            break
+    for suite in selected:
+        cases = suite.cases[: args.limit] if args.limit else suite.cases
+        print(f"\n--- {suite.key} ({suite.workflow_id}) — {len(cases)} cases ---")
+        s_results: List[GradeResult] = []
+        for i, case in enumerate(cases, 1):
+            if tracker.total_usd - start_spend >= args.max_cost_usd:
+                print(f"margin_eval: reached max-cost ${args.max_cost_usd:.2f} — stopping.")
+                stopped_early = True
+                break
 
-        prompt = build_signal_prompt(case)
-        holder.pop("response", None)
-        t0 = time.perf_counter()
-        try:
-            with _suppressed_inline_emit():
-                text = analyst._call_llm(prompt, max_tokens=400)
-        except Exception as exc:
-            # Includes LLMBudgetExceeded (spend cap) — stop gracefully.
-            print(f"  [{i:>3}/{len(cases)}] {case.id}: call error ({exc}) — stopping.")
-            stopped_early = True
-            break
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-
-        response = holder.get("response")
-        usage = _usage(response)
-        g = grade(case, text)
-        results.append(g)
-
-        status = "PASS" if g.passed else "FAIL"
-        print(f"  [{i:>3}/{len(cases)}] {case.id:<12} {bucket_of(case):<22} "
-              f"verdict={str(g.verdict):<8} conf={g.confidence} "
-              f"exp={g.expected:<12} q={g.quality_score:<5} {status}  "
-              f"tok(in/out)={usage['input_tokens']}/{usage['output_tokens']}")
-
-        # --- Emit (fail-safe) ---
-        if meter is not None:
+            holder.pop("response", None)
+            t0 = time.perf_counter()
             try:
-                r1 = meter.record_call(
-                    workflow_id=WORKFLOW_ID,
-                    provider="google",
-                    model=settings.gemini_model,
-                    input_tokens=usage["input_tokens"],
-                    output_tokens=usage["output_tokens"],
-                    cache_read_tokens=usage["cache_read_tokens"],
-                    latency_ms=latency_ms,
-                    status="ok" if text else "error",
-                    session_id=session_id,
-                    prompt_id=case.id,
-                )
-                if getattr(r1, "ok", False):
-                    emitted_calls += 1
-            except Exception:
-                pass
-            try:
-                r2 = meter.record_outcome(
-                    workflow_id=WORKFLOW_ID,
-                    passed=g.passed,
-                    quality_score=g.quality_score,
-                    quality_method=g.quality_method,
-                )
-                if getattr(r2, "ok", False):
-                    emitted_outcomes += 1
-            except Exception:
-                pass
+                with _suppressed_inline_emit():
+                    text = suite.invoke(analyst, case)
+            except Exception as exc:
+                # Includes LLMBudgetExceeded (spend cap) — stop gracefully.
+                print(f"  [{i:>3}/{len(cases)}] {case.id}: call error ({exc}) — stopping.")
+                stopped_early = True
+                break
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+
+            usage = _usage(holder.get("response"))
+            g = suite.grade(case, text)
+            s_results.append(g)
+            all_results.append(g)
+
+            status = "PASS" if g.passed else "FAIL"
+            print(f"  [{i:>3}/{len(cases)}] {case.id:<14} {suite.bucket_of(case):<22} "
+                  f"q={g.quality_score:<5} {status:<4} "
+                  f"tok(in/out)={usage['input_tokens']}/{usage['output_tokens']}  {g.reason}")
+
+            if meter is not None:
+                try:
+                    r1 = meter.record_call(
+                        workflow_id=suite.workflow_id, provider="google",
+                        model=settings.gemini_model,
+                        input_tokens=usage["input_tokens"],
+                        output_tokens=usage["output_tokens"],
+                        cache_read_tokens=usage["cache_read_tokens"],
+                        latency_ms=latency_ms, status="ok" if text else "error",
+                        session_id=session_id, prompt_id=case.id,
+                    )
+                    if getattr(r1, "ok", False):
+                        emitted_calls += 1
+                except Exception:
+                    pass
+                try:
+                    r2 = meter.record_outcome(
+                        workflow_id=suite.workflow_id, passed=g.passed,
+                        quality_score=g.quality_score, quality_method=g.quality_method,
+                    )
+                    if getattr(r2, "ok", False):
+                        emitted_outcomes += 1
+                except Exception:
+                    pass
+
+        sp = sum(1 for r in s_results if r.passed)
+        per_suite[suite.key] = {"n": len(s_results), "passed": sp}
+        if stopped_early:
+            break
 
     # --- Summary ---
-    total = len(results)
-    passed = sum(1 for r in results if r.passed)
+    total = len(all_results)
+    passed = sum(1 for r in all_results if r.passed)
     spend = tracker.total_usd - start_spend
     print("\n=== margin_eval summary ===")
     print(f"run_id={run_id} session_id={session_id} model={settings.gemini_model}")
+    for key, agg in per_suite.items():
+        rate = (agg["passed"] / agg["n"] * 100) if agg["n"] else 0.0
+        print(f"  {key:<20} {agg['passed']}/{agg['n']} passed  ({rate:.1f}%)  "
+              f"[{SUITES[key].workflow_id}]")
     print(f"cases_run={total} passed={passed} "
-          f"pass_rate={ (passed/total*100) if total else 0:.1f}%")
-    # Per-bucket pass rate (the statistical shape Margin needs).
-    buckets: Dict[str, List[GradeResult]] = {}
-    for case, r in zip(cases, results):
-        buckets.setdefault(bucket_of(case), []).append(r)
-    for b in sorted(buckets):
-        rs = buckets[b]
-        bp = sum(1 for r in rs if r.passed)
-        print(f"  {b:<24} {bp}/{len(rs)} passed")
+          f"pass_rate={(passed/total*100) if total else 0:.1f}%")
     print(f"measured_spend=${spend:.4f} (cap ${args.max_cost_usd:.2f})")
     print(f"emit: calls={emitted_calls} outcomes={emitted_outcomes} "
           f"{'(no meter)' if meter is None else ''}")
     if stopped_early:
         print("NOTE: batch stopped early (cost cap or call error).")
-    # HONEST gaps note.
     if meter is not None and emitted_outcomes < total:
-        print("NOTE: some outcome emits did not confirm ok (network/ingest); "
-              "see per-call output above.")
+        print("NOTE: some outcome emits did not confirm ok (network/ingest).")
     return 0
 
 
+def _selected_suites(workflow: str) -> List[Suite]:
+    if workflow in (None, "all"):
+        return list(SUITES.values())
+    return [SUITES[workflow]]
+
+
 def list_cases() -> int:
-    print(f"{len(ALL_CASES)} cases in the llmquant-signal-check matrix:\n")
-    print(f"{'id':<12} {'category':<11} {'bucket':<24} {'price':>5} {'fair':>5} "
-          f"{'liq$':>9} {'conf':>5}  expected")
-    for c in ALL_CASES:
-        gt = ground_truth(c)
-        exp = "-" if gt.acceptable is None else "/".join(sorted(gt.acceptable))
-        print(f"{c.id:<12} {c.category:<11} {bucket_of(c):<24} "
-              f"{c.market_price:>5.2f} {c.model_fair_value:>5.2f} "
-              f"{c.liquidity_usd:>9,.0f} {c.signal_confidence:>5.2f}  {exp}")
+    print(f"{sum(len(s.cases) for s in SUITES.values())} cases across "
+          f"{len(SUITES)} workflow suites:\n")
+    for s in SUITES.values():
+        buckets: Dict[str, int] = {}
+        for c in s.cases:
+            buckets[s.bucket_of(c)] = buckets.get(s.bucket_of(c), 0) + 1
+        bstr = ", ".join(f"{k}:{v}" for k, v in sorted(buckets.items()))
+        print(f"  {s.key:<20} [{s.workflow_id:<28}] {len(s.cases):>3} cases  "
+              f"({bstr})")
+        print(f"      {s.description}")
     return 0
 
 
@@ -376,6 +392,8 @@ def main() -> int:
     p.add_argument("--self-test", action="store_true",
                    help="offline harness check (no Gemini, no network); CI-safe.")
     p.add_argument("--list", action="store_true", help="print the case matrix and exit.")
+    p.add_argument("--workflow", default="all", choices=SUITE_KEYS + ["all"],
+                   help="which suite to run (default: all).")
     p.add_argument("--model", default=None, help="override gemini_model for this run.")
     p.add_argument("--run-id", default=None, help="batch id -> session_id=eval:<run-id>.")
     p.add_argument("--limit", type=int, default=0, help="run only the first N cases.")
