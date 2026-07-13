@@ -313,3 +313,133 @@ def test_margin_meter_absent_degrades_safely(monkeypatch):
 
     analyst = _make_analyst(_Client(), cap_usd=20.0)
     assert analyst._call_llm("p", max_tokens=10) == "ok"
+
+
+# -----------------------------------------------------------------------------
+# Journey instrumentation: per-operation labels + shared session_id chaining.
+#
+# Every step of the AI user-journey (signal-check -> analyze-stock /
+# analyze-portfolio -> critique-strategy, plus every other advisory op) must
+# emit its OWN descriptive Margin ``operation`` (workflow_id), and steps run
+# inside one ``journey_session`` must all carry the SAME ``session_id`` so
+# Margin's supply-chain graph reconstructs the multi-step chain.
+# -----------------------------------------------------------------------------
+
+
+def _recording_meter_module():
+    """Return a fake ``margin_meter`` module whose meter records every emit."""
+    import types
+
+    records = []  # list of record_call kwargs
+
+    class _Meter:
+        def __init__(self, timeout=2.0):
+            pass
+
+        def record_call(self, **kwargs):
+            records.append(kwargs)
+
+        def record_outcome(self, **kwargs):
+            records.append({"_outcome": True, **kwargs})
+
+    mod = types.ModuleType("margin_meter")
+    mod.MarginMeter = _Meter
+    return mod, records
+
+
+def _capturing_analyst():
+    class _Usage:
+        prompt_token_count = 10
+        candidates_token_count = 5
+        cached_content_token_count = 0
+
+    class _Resp:
+        text = "some analysis text"
+        usage_metadata = _Usage()
+
+    class _Client:
+        def __init__(self):
+            self.models = self
+
+        def generate_content(self, **kwargs):
+            return _Resp()
+
+    return _make_analyst(_Client(), cap_usd=100.0)
+
+
+def test_each_operation_emits_its_own_workflow_id(monkeypatch):
+    """A distinct ``operation`` per call flows through to the meter's workflow_id
+    instead of the old hardcoded ``llmquant-signal-check`` for everything."""
+    import sys
+    import asyncio
+
+    mod, records = _recording_meter_module()
+    monkeypatch.setitem(sys.modules, "margin_meter", mod)
+    analyst = _capturing_analyst()
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(analyst.analyze_stock("AAPL", {"price": 1.0}))
+        loop.run_until_complete(
+            analyst.analyze_portfolio([{"ticker": "AAPL"}], 1000.0)
+        )
+        loop.run_until_complete(analyst.critique_strategy("buy low sell high"))
+        # signal-check path calls _call_llm directly with the default operation.
+        analyst._call_llm("signal prompt", max_tokens=400)
+    finally:
+        loop.close()
+
+    call_workflows = [r["workflow_id"] for r in records if "_outcome" not in r]
+    assert "llmquant-analyze-stock" in call_workflows
+    assert "llmquant-analyze-portfolio" in call_workflows
+    assert "llmquant-critique-strategy" in call_workflows
+    assert "llmquant-signal-check" in call_workflows
+    # Each of the four steps is its own node — not one collapsed workflow.
+    assert len(set(call_workflows)) >= 4
+
+
+def test_journey_session_links_steps_into_one_chain(monkeypatch):
+    """Steps run inside one ``journey_session`` share a single ``session_id`` so
+    the chain links; each keeps its own ``operation`` label."""
+    import sys
+    import asyncio
+    from app.llm.analyst import journey_session
+
+    mod, records = _recording_meter_module()
+    monkeypatch.setitem(sys.modules, "margin_meter", mod)
+    analyst = _capturing_analyst()
+
+    loop = asyncio.new_event_loop()
+    try:
+        with journey_session() as sid:
+            loop.run_until_complete(analyst.analyze_stock("AAPL", {"price": 1.0}))
+            loop.run_until_complete(
+                analyst.analyze_portfolio([{"ticker": "AAPL"}], 1000.0)
+            )
+            loop.run_until_complete(analyst.critique_strategy("momentum"))
+    finally:
+        loop.close()
+
+    calls = [r for r in records if "_outcome" not in r]
+    session_ids = {r["session_id"] for r in calls}
+    assert session_ids == {sid}, "all steps in one journey share the session_id"
+    # ...yet remain distinct operations (a multi-node chain, not one node).
+    assert len({r["workflow_id"] for r in calls}) == 3
+
+
+def test_standalone_calls_get_independent_sessions(monkeypatch):
+    """Outside a journey, two separate calls do NOT share a session id (they are
+    independent runs, not a single chain)."""
+    import sys
+
+    mod, records = _recording_meter_module()
+    monkeypatch.setitem(sys.modules, "margin_meter", mod)
+    analyst = _capturing_analyst()
+
+    analyst._call_llm("p1", max_tokens=50, operation="llmquant-signal-check")
+    analyst._call_llm("p2", max_tokens=50, operation="llmquant-signal-check")
+
+    calls = [r for r in records if "_outcome" not in r]
+    session_ids = [r["session_id"] for r in calls]
+    assert len(session_ids) == 2
+    assert session_ids[0] != session_ids[1]
