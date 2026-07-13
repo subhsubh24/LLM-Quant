@@ -9,12 +9,17 @@ It is **additive only** — nothing here touches the trading/app path.
 **Workflow map + coverage frontier:** see [`COVERAGE.md`](./COVERAGE.md). Four
 suites ship today (`--workflow` picks one, default `all`):
 
-| Suite | Workflow id | Grading |
+| Suite | Workflow id | Grading (quality_method) |
 |---|---|---|
-| `signal-check` | `llmquant-signal-check` | ground-truth (derived) |
-| `analyze-stock` | `llmquant-analyze-stock` | rubric |
-| `analyze-portfolio` | `llmquant-analyze-portfolio` | rubric |
-| `critique-strategy` | `llmquant-critique-strategy` | rubric + flaw-catching |
+| `signal-check` | `llmquant-signal-check` | ground-truth (derived) / `judge_proxy` (ambiguous) |
+| `analyze-stock` | `llmquant-analyze-stock` | rubric → `judge_proxy` |
+| `analyze-portfolio` | `llmquant-analyze-portfolio` | rubric → `judge_proxy` |
+| `critique-strategy` | `llmquant-critique-strategy` | rubric + flaw-catching → `judge_proxy` |
+
+> The Margin ingest API accepts only `quality_method ∈ {ground_truth, llm_judge,
+> judge_proxy, self_report}`. Deterministic rubric/validity grades are emitted as
+> `judge_proxy` (Margin's label for a bounded deterministic quality proxy) so the
+> outcomes actually land; a label like `rubric`/`heuristic` is rejected (422).
 
 Registry: `suites.py`. Signal-check matrix/grader: `cases.py` / `grader.py`.
 Advisory matrices/graders: `analyst_cases.py` / `analyst_graders.py`.
@@ -34,12 +39,12 @@ task completion of the real analyst methods.
 - **Ground truth is derived, not hand-waved.** `ground_truth(case)` computes the
   economically-correct action from the scenario (fair vs price, friction,
   liquidity, confidence). Ambiguous cases have **no** correct direction and are
-  graded on validity only (method `heuristic`), never claimed as ground truth.
+  graded on validity only (emitted as quality_method `judge_proxy`), never claimed as ground truth.
 - **`grader.py`** — a genuine grader. It **never always-passes**: empty replies,
   unparseable verdicts, missing/out-of-range confidence, and wrong-direction
   calls all FAIL. `quality_score` is a graded number scaled by confidence
   coherence, and `quality_method` is `ground_truth` for directional cases /
-  `heuristic` for ambiguous ones.
+  `judge_proxy` for ambiguous ones (ingest-accepted labels).
 - **`scripts/margin_eval.py`** — the runner. Sends each case through the REAL
   metered production path (`QuantAnalyst._call_llm` — same Gemini client, model,
   system prompt, spend cap, timeout), captures the full response for real token
@@ -96,4 +101,4 @@ python3 scripts/margin_eval.py --model gemini-2.5-pro --limit 20 --max-cost-usd 
   proved right in the market. Realized-outcome grading would need resolved
   historical markets and is a separate, heavier layer.
 - **Ambiguous cases** are graded on validity/coherence only (method
-  `heuristic`), by construction — they have no single correct direction.
+  `judge_proxy`), by construction — they have no single correct direction.

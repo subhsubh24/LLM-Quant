@@ -51,16 +51,22 @@ surfaces.
 
 ## Grading honesty per suite
 
-- **signal-check** — `ground_truth` (derived from scenario economics) for
-  directional cases; `heuristic` (validity only) for ambiguous ones.
-- **analyze-stock / analyze-portfolio** — `rubric`: advisory tasks with no single
-  correct answer, so we grade genuine task completion (non-refusal, min length,
-  names the input symbol/ticker, covers ≥N required topic areas). Never
-  always-pass.
-- **critique-strategy** — `rubric` **plus assertive flaw-catching**: cases built
-  with an obvious flaw carry `expected_flags` the critique MUST raise (e.g. a
-  zero-cost 99%-win-rate backtest MUST trigger cost + overfitting flags), else it
-  FAILS.
+Ingest note: the Margin API accepts only `quality_method ∈ {ground_truth,
+llm_judge, judge_proxy, self_report}`. Deterministic rubric/validity grades are
+therefore emitted as **`judge_proxy`** (Margin's provenance label for a bounded
+deterministic quality proxy) — never `rubric`/`heuristic`, which the API rejects
+(422), which would drop the outcome and zero out cost-per-outcome.
+
+- **signal-check** — emits `ground_truth` (derived from scenario economics) for
+  directional cases; `judge_proxy` (validity only) for ambiguous ones.
+- **analyze-stock / analyze-portfolio** — deterministic **rubric** grading emitted
+  as `judge_proxy`: advisory tasks with no single correct answer, so we grade
+  genuine task completion (non-refusal, min length, names the input
+  symbol/ticker, covers ≥N required topic areas). Never always-pass.
+- **critique-strategy** — rubric (`judge_proxy`) **plus assertive flaw-catching**:
+  cases built with an obvious flaw carry `expected_flags` the critique MUST raise
+  (e.g. a zero-cost 99%-win-rate backtest MUST trigger cost + overfitting flags),
+  else it FAILS.
 
 Every suite ships **edge** (empty/extreme/degenerate) and seeded **fuzz** cases
 for robustness, in addition to normal cases.

@@ -136,7 +136,7 @@ def _rubric_selftest(workflow: str, good: str, must_token: str) -> List[str]:
         if m.lower() not in grounded.lower():
             grounded = f"{m}: " + grounded
     g_ok = analyst_graders.rubric_grade(normal, grounded)
-    if not (g_ok.passed and g_ok.quality_method == "rubric"):
+    if not (g_ok.passed and g_ok.quality_method == "judge_proxy"):
         fails.append(f"{workflow}: good reply should pass ({g_ok.reason})")
     # Empty and refusal must fail.
     if analyst_graders.rubric_grade(normal, "").passed:

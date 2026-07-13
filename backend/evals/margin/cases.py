@@ -78,7 +78,11 @@ class GroundTruth:
 
     acceptable: Optional[Set[str]]
     primary: Optional[str]
-    method: str            # "ground_truth" | "heuristic"
+    # Server-accepted quality_method (src/margin ingest allows only
+    # {ground_truth, llm_judge, judge_proxy, self_report}). Directional cases are
+    # "ground_truth"; ambiguous validity-only grades are "judge_proxy" (a
+    # deterministic quality proxy), NOT "heuristic" — which the ingest API rejects.
+    method: str            # "ground_truth" | "judge_proxy"
     rationale: str
 
 
@@ -135,7 +139,7 @@ def ground_truth(case: Case) -> GroundTruth:
     return GroundTruth(
         acceptable=None,
         primary=None,
-        method="heuristic",
+        method="judge_proxy",
         rationale=f"borderline net edge {net:.2f} / conf {case.signal_confidence:.2f}; "
         f"any well-formed verdict is defensible",
     )

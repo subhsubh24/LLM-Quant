@@ -11,8 +11,12 @@ never "always-pass":
     built to contain (``expected_flags``) FAILS — that is a genuine, assertive
     check, not a structural rubber-stamp.
 
-``quality_method`` is ``rubric`` (honest: not ground_truth). ``quality_score``
-is graded from coverage + input-grounding + flaw-catching.
+``quality_method`` is ``judge_proxy`` — Margin's provenance label for a bounded,
+deterministic answer-quality proxy (NOT an LLM judge, NOT ground truth). This is
+the honest, server-accepted label for a rubric grader: the ingest API only
+accepts {ground_truth, llm_judge, judge_proxy, self_report}, so an outcome
+labeled ``rubric`` is rejected (422) and never lands. ``quality_score`` is graded
+from coverage + input-grounding + flaw-catching.
 """
 
 from __future__ import annotations
@@ -84,7 +88,7 @@ def _is_refusal(text_l: str) -> bool:
 
 
 def rubric_grade(case: AnalystCase, text: str) -> GradeResult:
-    """Grade one advisory reply for one case. quality_method='rubric'."""
+    """Grade one advisory reply for one case. quality_method='judge_proxy'."""
     topics = _TOPICS_BY_WORKFLOW[case.workflow]
     # Normal cases must cover >=3 topic areas; edge/fuzz relax to >=2 (degenerate
     # inputs legitimately yield thinner analysis) but STILL must be valid + on-task.
@@ -95,16 +99,16 @@ def rubric_grade(case: AnalystCase, text: str) -> GradeResult:
 
     # --- Validity gate ---
     if not body or len(body) < _MIN_CHARS:
-        return GradeResult(case.id, False, 0.0, "rubric", None, None,
+        return GradeResult(case.id, False, 0.0, "judge_proxy", None, None,
                            f">={required}topics", f"empty/too-short ({len(body)}<{_MIN_CHARS} chars)")
     if _is_refusal(text_l):
-        return GradeResult(case.id, False, 0.0, "rubric", None, None,
+        return GradeResult(case.id, False, 0.0, "judge_proxy", None, None,
                            f">={required}topics", "refusal / non-answer")
 
     # --- Input grounding: required mentions must appear ---
     missing = [m for m in case.must_mention if m.lower() not in text_l]
     if missing:
-        return GradeResult(case.id, False, 0.1, "rubric", None, None,
+        return GradeResult(case.id, False, 0.1, "judge_proxy", None, None,
                            f">={required}topics",
                            f"ignores input (missing mention: {missing})")
 
@@ -117,13 +121,13 @@ def rubric_grade(case: AnalystCase, text: str) -> GradeResult:
     if case.expected_flags and missed_flags:
         # Built-in flaw not caught -> genuine failure.
         score = round(0.2 + 0.1 * (len(covered) / max(1, len(topics))), 3)
-        return GradeResult(case.id, False, score, "rubric", None, None,
+        return GradeResult(case.id, False, score, "judge_proxy", None, None,
                            "flags:" + ",".join(case.expected_flags),
                            f"missed obvious flaw(s): {missed_flags}")
 
     if not coverage_ok:
         score = round(0.2 + 0.4 * (len(covered) / required), 3)
-        return GradeResult(case.id, False, score, "rubric", None, None,
+        return GradeResult(case.id, False, score, "judge_proxy", None, None,
                            f">={required}topics",
                            f"thin: covered {len(covered)}/{required} topics ({covered})")
 
@@ -132,5 +136,5 @@ def rubric_grade(case: AnalystCase, text: str) -> GradeResult:
     score = round(0.6 + 0.4 * breadth, 3)
     exp = ("flags:" + ",".join(case.expected_flags)) if case.expected_flags \
         else f">={required}topics"
-    return GradeResult(case.id, True, score, "rubric", None, None, exp,
+    return GradeResult(case.id, True, score, "judge_proxy", None, None, exp,
                        f"on-task: covered {covered}")

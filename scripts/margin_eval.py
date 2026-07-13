@@ -182,7 +182,7 @@ def self_test() -> int:
     # 3) Ambiguous: a well-formed coherent reply passes as heuristic (not GT).
     amb = next(c for c in ALL_CASES if ground_truth(c).acceptable is None)
     g_amb = signal_grade(amb, reply("hold", 0.5))
-    check("ambiguous-passes", g_amb.passed and g_amb.quality_method == "heuristic",
+    check("ambiguous-passes", g_amb.passed and g_amb.quality_method == "judge_proxy",
           f"ambiguous well-formed failed: {g_amb}")
     g_amb_bad = signal_grade(amb, "totally unparseable")
     check("ambiguous-malformed-fails", not g_amb_bad.passed,
@@ -195,6 +195,25 @@ def self_test() -> int:
                 failures.append(f"suite[{key}] {f}")
         except Exception as exc:
             failures.append(f"suite[{key}] selftest raised: {exc}")
+
+    # 6) Provenance guard: every emitted quality_method MUST be ingest-accepted,
+    #    else the outcome is rejected (422) and cost-per-outcome silently zeroes.
+    from backend.evals.margin.grader import INGEST_ACCEPTED_QUALITY_METHODS
+    probe_replies = [
+        "", "unparseable",
+        "VERDICT: pass\nCONFIDENCE: 0.5\n" + ("on-topic analysis text " * 60),
+    ]
+    for key, suite in SUITES.items():
+        # Stride-sample across the whole matrix so every bucket (incl. ambiguous /
+        # edge / fuzz) is checked, not just the leading cases.
+        stride = max(1, len(suite.cases) // 12)
+        sample = suite.cases[::stride]
+        for c in sample:
+            for rep in probe_replies:
+                m = suite.grade(c, rep).quality_method
+                check(f"method-accepted[{key}]",
+                      m in INGEST_ACCEPTED_QUALITY_METHODS,
+                      f"emitted quality_method={m!r} (not ingest-accepted)")
 
     total_cases = sum(len(s.cases) for s in SUITES.values())
     if failures:
