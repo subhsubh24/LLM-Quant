@@ -5,6 +5,87 @@
 
 ---
 
+## 2026-07-13 — overall `B` · ship gate NOT met (8th grade — STEADY STATE: no dimension crossed a threshold; EXP-003 Politics TESTED + correctly REJECTED → bucket-calibration family now refuted on a 3rd real corpus; business_case still the lone binding B)
+
+**Diff vs 2026-07-11:** overall unchanged at **B**, and — unlike last cycle — **no dimension crossed
+a threshold in either direction.** All ten grades held exactly: functional_reality A, backtest_integrity
+A, correctness_reliability A, security A+, run_risk_readiness A, artifact_integrity A,
+business_case_strength B, design_taste A, tests_evals A+, performance A. The binding constraint
+(`business_case_strength`, B) is unchanged: still no validated OOS cost-net edge.
+
+**The make-or-break event this cycle — EXP-003 (Politics) TESTED, negative:** Research Run 20
+(2026-07-12) resolved Gamma's Politics tag (`tag_id=2`) and ran `validate_real_oos.py --tag-id 2` →
+**N=1,369** leakage-safe records (the largest per-category corpus tested to date, via the same
+`GET /tags/slug/<name>` lever proven on EXP-005 last cycle — the 2026-07-11 scorecard predicted this
+exact next test). `CalibrationBucketStrategy` traded 472 trades, headline **+$28,815.49 OOS** — but
+F11 `indistinguishable_from_zero` (95% CI [-36648.21, 105232.67] spans 0 by a WIDER margin than
+EXP-005; hit_rate **25.64%**, starkly *below* a coin flip) AND F10 **fragile** (134% of PnL from one
+category bucket, 57% from ONE market; leave-one-out flips to **−$9,665.99**). A real **negative** —
+the bucket-calibration family (static + recency) is now refuted/non-robust across **3** independent
+real per-category corpora (EXP-002 N=510, EXP-005 N=814, EXP-003 N=1,369). EXP-006 (political
+price-reversal after hype spikes) is logged but NOT yet tested (needs intraday-history infra the repo
+lacks). The +$28,815.49 reaches no revenue field.
+
+**What the factory shipped since 2026-07-11 (fresh adversarial graders, verified not trusted):**
+- **#314 (run-risk durability) — GENUINE.** A loss-cap AUTO-TRIP whose safety-state persist fails
+  transiently now fails CLOSED: `_persist_state` marks `_safety_persist_pending`, `_retry_pending_safety_persist()`
+  re-attempts at the order gate, and `record_realized_pnl` halts if a realized loss can't be durably
+  recorded (`execution.py:902-946,984-998`). Closes the durability hole #281 (non-breach branch only)
+  left open; regression test non-tautological (persist-pending assertions FAIL with the retry removed).
+- **#322 (tests — false-coverage trap) — GENUINE.** `test_backend_auth_fastapi.py` registered in the
+  blocking gate (`preflight.sh:120`), closing the #283 false-coverage trap for the auth adapter;
+  verified to RUN + PASS (not skip).
+- **LLM safety hardening + `test_llm_safety.py` (in-gate) — GENUINE.** Fail-loud `LLMBudgetExceeded`
+  under a single lock before dispatch (`analyst.py:76-92,262`), re-raised not swallowed (`:363-365`);
+  30s hard timeout via ThreadPoolExecutor (`:351`). 14 tests pass, non-tautological. A real cost/DoS
+  hardening on the AI path (`preflight.sh:108`).
+- **#313 (security) — GENUINE.** `next` 14.1.0 → 14.2.35 (`frontend/package.json:22`, Dec-11 RSC DoS advisory).
+- **Margin evals (advisory) — GENUINE + correctly NON-blocking.** Cost-per-outcome suite
+  (`backend/evals/margin/`, `scripts/margin_eval.py`) + CI-hermetic runner kept OUT of the blocking
+  gate (`margin` absent from `preflight.sh`) — a non-deterministic advisory eval can't red-block a merge.
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**.
+- `E2E_RUN_PASSED=0 python3 scripts/runtime_harness.py` → **PASSED** (live gate REJECTS, kill switch
+  blocks, max-position rejects $900>$50, loss cap trips net-of-fees −$41.20 vs −$10 + blocks subsequent
+  orders, deterministic exposure 10.000000==10.000000).
+- `python3 scripts/run_walk_forward.py` twice → **reproduces** (`seed 42 / hash b3a8d5e0e9579853`,
+  PnL 910,880.71; a grader confirmed the two JSON outputs are sha256-IDENTICAL; SYNTHETIC demo, labeled
+  NOT a validated edge). 76 walk-forward/F10/F11/cost gate tests pass.
+- `python3 -m pytest backend --collect-only` → **1140 collected, 13 errors (all `No module named
+  pandas`)** — the documented heavy-dep exclusions; drifted +6 from 1134 (new test files).
+- HUMAN-CORE: zero `live_trading_enabled = True` assignments in `backend/app`. Secret scan clean.
+- `python3 scripts/check_scorecard.py gate` → **NOT-READY (business_case_strength: B)** (honest).
+
+**Grades (fresh adversarial per-dimension graders, none the maker — 3 subagents covered the 6
+ship-critical + changed dims; the 4 unchanged dims graded from direct diff + harness evidence):**
+functional_reality **A**, backtest_integrity **A**, correctness_reliability **A**, security **A+**,
+run_risk_readiness **A**, artifact_integrity **A**, business_case_strength **B**, design_taste **A**,
+tests_evals **A+**, performance **A**.
+
+**Anti-inflation note:** I did NOT promote any dimension despite genuine shipped work (#314, #322, LLM
+safety, next.js). None of it addressed the binding constraint (business_case), and each ship-critical
+dim already carries a named non-blocking residual that keeps it at A rather than A+: WalletBehaviorDivergence's
+decoupled confidence (still present, quarantined behind ENABLE_UNVALIDATED_STRATEGIES), the DEFAULT_FEE_RATE
+live-fee estimate (still present, conservative + gated off), the uncalibrated DEFAULT_IMPACT_COEFF, and
+the un-committed real corpora. A world-class dimension with a named non-blocking gap is the textbook **A**,
+not A+. No grade exceeds its evidence.
+
+**Backtest integrity (make-or-break) — reproduction + gate-exercise:** engine remains leak-free
+(structural `MarketView` guard; fetchers RAISE rather than fabricate), reproducible (a grader
+independently re-ran and confirmed sha256-identical outputs). The F10/F11 gates were shown to exist,
+be wired + tested, and demonstrably reject EXP-003's +$28,815.49 headline — matching the recorded
+numbers across GROWTH_STATUS.md + RESEARCH_MEMORY.md line-for-line. Held at **A** (not A+) only because
+the sole offline-reproducible number is synthetic and DEFAULT_IMPACT_COEFF=0.5 remains a placeholder.
+
+**Business case (the binding B) — EXP-003 TESTED, negative:** revenue $0, floor unmet, no validated
+OOS edge, bucket-calibration family now refuted on 3 real corpora. Issue #79 refreshed with the Run 20
+evidence. A validated edge requires a NEW pre-registered mechanism (not another bucket parameterization)
+that clears F10 (non-fragile) + F11 (CI excludes 0) cost-net above the $2k/wk floor. No push notification
+sent — steady-state grade, no regression, the scorecard IS the dashboard.
+
+---
+
 ## 2026-07-11 — overall `B` · ship gate NOT met (7th grade — improved cycle: `security` A→A+ and `tests_evals` A→A+; the last standing alpha candidate TESTED and correctly REJECTED; business_case still the lone binding B)
 
 **Diff vs 2026-07-09:** overall unchanged at **B**, but **two ship-critical dimensions crossed a
