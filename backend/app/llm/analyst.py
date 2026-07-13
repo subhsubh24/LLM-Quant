@@ -7,11 +7,14 @@ Uses Google Gemini for AI capabilities.
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 from datetime import datetime, date
+from contextlib import contextmanager
+import contextvars
 import logging
 import json
 import concurrent.futures
 import threading
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +112,65 @@ def get_spend_tracker() -> _SpendTracker:
     return _spend_tracker
 
 
+# ---------------------------------------------------------------------------
+# Margin journey session (shared session_id linking one multi-step AI run)
+# ---------------------------------------------------------------------------
+# The AI user-journey (signal-check -> analyze-stock / analyze-portfolio ->
+# critique-strategy) is a CHAIN of distinct LLM operations. So Margin's
+# supply-chain graph can reconstruct that chain, every metered call inside one
+# journey run shares a single ``session_id`` while each step carries its own
+# descriptive ``operation`` (workflow_id). This is telemetry scoping ONLY — it
+# never changes product behaviour and is fully fail-safe.
+#
+# A caller wraps a journey with ``with journey_session(): ...`` and every nested
+# ``_call_llm`` (across methods, retries, sub-steps) picks up the same id via
+# this context var. Outside a journey each call falls back to its own per-call
+# id, so standalone operations stay independent.
+_journey_session_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "margin_journey_session", default=None
+)
+
+
+def _new_session_id(prefix: str) -> str:
+    """Generate a short, unique Margin session id. Never raises."""
+    try:
+        return f"{prefix}-{uuid.uuid4().hex[:16]}"
+    except Exception:  # pragma: no cover - uuid failure is not realistically reachable
+        return f"{prefix}-fallback"
+
+
+@contextmanager
+def journey_session(session_id: Optional[str] = None):
+    """Bind a shared Margin ``session_id`` for the duration of one AI user-journey.
+
+    Every metered LLM operation executed inside the ``with`` block links into one
+    chain under the same session, while each step keeps its own ``operation``
+    label. Fail-safe: the meter itself swallows all errors, and leaving the block
+    always restores the prior session. Yields the effective session id.
+
+    Usage::
+
+        with journey_session() as sid:
+            await analyst.analyze_stock(...)     # op=llmquant-analyze-stock
+            await analyst.critique_strategy(...)  # op=llmquant-critique-strategy
+        # both calls emitted with session_id == sid
+    """
+    sid = session_id or _new_session_id("llmquant-journey")
+    token = _journey_session_var.set(sid)
+    try:
+        yield sid
+    finally:
+        _journey_session_var.reset(token)
+
+
+def _current_session_id() -> Optional[str]:
+    """Return the active journey session id, if a journey is open."""
+    try:
+        return _journey_session_var.get()
+    except Exception:  # pragma: no cover - context var get is not expected to fail
+        return None
+
+
 @dataclass
 class AnalysisRequest:
     """Request for AI analysis."""
@@ -156,7 +218,15 @@ Be concise but thorough. A busy trader should be able to scan and get key points
                 logger.warning(f"Failed to initialize Gemini client: {e}")
         return self._client
 
-    def _call_llm(self, prompt: str, max_tokens: int = 1500) -> Optional[str]:
+    def _call_llm(
+        self,
+        prompt: str,
+        max_tokens: int = 1500,
+        *,
+        operation: str = "llmquant-signal-check",
+        session_id: Optional[str] = None,
+        is_retry: bool = False,
+    ) -> Optional[str]:
         """Make a call to the Gemini API with timeout and spend-cap enforcement.
 
         Returns the model's text response, or None when:
@@ -168,7 +238,19 @@ Be concise but thorough. A busy trader should be able to scan and get key points
         cost of this call would push cumulative spend past llm_spend_cap_usd.
         The exception propagates to the route handler so the caller learns the
         budget is exhausted; it is NOT silently swallowed here.
+
+        Margin telemetry (fail-safe, additive):
+        - ``operation`` is the descriptive Margin workflow_id for THIS step
+          (e.g. ``llmquant-analyze-stock``) so each step of the AI user-journey
+          is its own node, not one collapsed workflow.
+        - ``session_id`` links steps into one chain. Precedence: explicit arg >
+          the active ``journey_session`` context > a fresh per-call id (so a
+          standalone operation stays independent).
+        - ``is_retry`` flags a retried attempt so retries are metered as their
+          own (retry-tagged) operation.
         """
+        # Resolve the Margin session id for this emit (fail-safe: never raises).
+        _session_id = session_id or _current_session_id() or _new_session_id(operation)
         client = self._get_client()
         if not client:
             # No API key — graceful no-op, template fallback handles it.
@@ -236,7 +318,7 @@ Be concise but thorough. A busy trader should be able to scan and get key points
                 try:
                     um = response.usage_metadata
                     _meter.record_call(
-                        workflow_id="llmquant-signal-check",
+                        workflow_id=operation,
                         provider="google",
                         model=model_name,
                         input_tokens=um.prompt_token_count,
@@ -246,12 +328,14 @@ Be concise but thorough. A busy trader should be able to scan and get key points
                         ) or 0,
                         latency_ms=_latency_ms,
                         status="ok",
+                        session_id=_session_id,
+                        is_retry=is_retry,
                     )
                 except Exception:
                     pass
                 try:
                     _meter.record_outcome(
-                        workflow_id="llmquant-signal-check",
+                        workflow_id=operation,
                         passed=bool(_text and _text.strip()),
                         quality_method="ground_truth",
                     )
@@ -310,7 +394,8 @@ Provide analysis covering:
 
 Be specific with numbers. This is for education, not advice."""
 
-        response = self._call_llm(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500,
+                                  operation="llmquant-analyze-stock")
 
         if response:
             return {
@@ -349,7 +434,8 @@ Write a brief but insightful commentary covering:
 
 Write like you're briefing a trading desk at 7am. Concise, actionable."""
 
-        response = self._call_llm(prompt, max_tokens=1000)
+        response = self._call_llm(prompt, max_tokens=1000,
+                                  operation="llmquant-market-commentary")
 
         if response:
             return {
@@ -382,7 +468,8 @@ As a senior quant, ruthlessly critique this:
 
 Be brutally honest. Better to kill a bad idea now than lose money later."""
 
-        response = self._call_llm(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500,
+                                  operation="llmquant-critique-strategy")
 
         if response:
             return {
@@ -427,7 +514,8 @@ Structure the path as:
 
 Be specific. No vague advice like "learn statistics" - instead say "Complete chapters 1-8 of Casella & Berger, focusing on MLE and hypothesis testing."""
 
-        response = self._call_llm(prompt, max_tokens=2000)
+        response = self._call_llm(prompt, max_tokens=2000,
+                                  operation="llmquant-learning-path")
 
         if response:
             return {
@@ -458,7 +546,8 @@ Cover:
 
 Make it rigorous enough for a quant interview, but clear enough for a motivated learner."""
 
-        response = self._call_llm(prompt, max_tokens=2000)
+        response = self._call_llm(prompt, max_tokens=2000,
+                                  operation="llmquant-explain-concept")
 
         if response:
             return {
@@ -498,7 +587,8 @@ Provide institutional-grade analysis:
 
 Be specific with numbers and recommendations."""
 
-        response = self._call_llm(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500,
+                                  operation="llmquant-analyze-portfolio")
 
         if response:
             return {
@@ -534,7 +624,8 @@ Provide analysis covering:
 
 Be specific with numbers. This is for education, not advice."""
 
-        response = self._call_llm(prompt, max_tokens=1500)
+        response = self._call_llm(prompt, max_tokens=1500,
+                                  operation="llmquant-analyze-crypto")
 
         if response:
             return {
@@ -575,7 +666,8 @@ Write a brief market commentary covering:
 
 Be concise and actionable."""
 
-        response = self._call_llm(prompt, max_tokens=1000)
+        response = self._call_llm(prompt, max_tokens=1000,
+                                  operation="llmquant-crypto-commentary")
 
         if response:
             return {
@@ -673,7 +765,8 @@ Key factors to consider:
 
 Write a brief, professional summary explaining why this trade was taken. Include the key factors (IV levels, technical setup, ML signals) in plain English. Keep it under 50 words."""
 
-        response = self._call_llm(prompt, max_tokens=150)
+        response = self._call_llm(prompt, max_tokens=150,
+                                  operation="llmquant-trade-summary")
 
         if response:
             return response.strip()
