@@ -2386,3 +2386,143 @@ genuinely different EXP-006 price-reversal candidate surfaced this run) or the s
 cross-venue coherence direction. EXP-006 is a hypothesis with a real, checked academic anchor and an
 honest adversarial cross-check (the QuantPedia cautionary example) — not yet an EXP with a runnable OOS
 plan, logged for a future run/factory-build cycle.
+
+---
+
+## 2026-07-13 — Research Run 21: EXP-006's claimed infra gap is OVERSTATED (the intraday price primitive
+already exists, live-verified at 1-minute fidelity); a real single-case caveat found (the July 2024
+assassination-attempt spike did NOT reverse); a WebSearch-synthesis fabrication caught + corrected before
+being logged as data; no new EXP proposed, concentration-capped bucket redesign recommended as the
+lower-cost next factory step
+
+- Hypothesis (falsifiable): n/a — this run is a scoping + self-validation pass on EXP-006 (political
+  price-reversal after hype spikes, surfaced 2026-07-12/Run 20) plus a routine research sweep, not a new
+  alpha test. Binding constraint UNCHANGED: no validated real-money OOS edge exists; the bucket-calibration
+  family (EXP-002/003/005) remains non-robust on 3 independent real per-category corpora.
+- Min sample N: n/a this run (a feasibility probe, N=1 illustrative case only — explicitly not a test).
+- OOS result: n/a — no edge tested or claimed this run.
+- Calibration (Brier / reliability): not measured this run.
+- Costs modeled: n/a.
+- Verdict: **edge-not-proven** (scoping + self-validation + methodology-integrity catch only).
+- Why:
+
+### (1) EXP-006's stated blocker ("needs a NEW intraday/sub-daily price-history fetcher") is OVERSTATED —
+### the raw data primitive already exists and already supports 1-minute granularity, LIVE-VERIFIED
+  Run 20 logged EXP-006's OOS plan as needing "a genuine factory-build item... the existing
+  `HistoricalMarket` fetchers capture ONE pre-decision snapshot per market, not an intraday price series."
+  That is true of the ASSEMBLED `HistoricalMarket` records, but a direct code read of
+  `polymarket_history_fetcher.py:317-339` shows `PolymarketHistoryFetcher.fetch_price_history(token_id,
+  start_ts, end_ts, fidelity)` already calls CLOB `/prices-history` and returns the FULL raw tick list
+  (`[{"t":..., "p":...}, ...]`) for the requested window — every `to_historical_market*` method just
+  throws away all but the single last-pre-decision tick via `_last_pre_decision_price`. The raw series was
+  already being fetched and discarded, not absent. **LIVE-VERIFIED this run** (egress open, direct `curl`
+  against `clob.polymarket.com/prices-history`, not just a code read): fetched the real Trump-2024
+  election YES token (`21742633...8836455`, the single largest Polymarket market ever, $1.53B volume, real
+  `clobTokenIds` resolved via `GET gamma-api.polymarket.com/markets?tag_id=2&closed=true&order=volumeNum`)
+  with `fidelity=1` over a real 4-day window (2024-07-12 to 2024-07-16 UTC, spanning the July 13
+  assassination attempt) — returned **5,760 real ticks at EXACTLY 60-second spacing** (median spacing
+  computed directly from the response, not assumed). So `fidelity=1` (1-minute bars) genuinely works
+  end-to-end against the live CLOB API today, no code change. **Revised scope estimate for EXP-006:** what
+  is actually missing is (a) a spike-DETECTION function over an already-fetchable tick series (threshold-Δ
+  crossing within a window) and (b) a reversal-labeling + backtest harness — smaller, more tractable build
+  scope than "a new fetcher," though still genuine factory-build work (a research-agent scratch probe does
+  not build strategy code), and still needs the per-market notional concentration cap Run 20 already
+  flagged as a hard requirement (see finding 2 below for why that requirement is not hypothetical).
+- **Self-validation methodology:** unmodified repo code read (`polymarket_history_fetcher.py`, no changes);
+  the live probe used only direct `curl` against public, no-auth Gamma/CLOB endpoints + a `python3` scratch
+  script (not committed) to parse timestamps/spacing — reproducible by anyone with open Polymarket egress,
+  subject to the CLOB history for this specific window not changing (it is fully historical/settled, so it
+  should not drift). Egress reconfirmed open this run: `clob.polymarket.com` prices-history 200,
+  `gamma-api.polymarket.com` 200, `data-api.polymarket.com` 200 (routine re-probe, consistent with every
+  run since 2026-07-04).
+
+### (2) A real, honest single-case illustration: the highest-salience political price spike of the entire
+### 2024 cycle did NOT reverse — it kept trending in the SAME direction (a live caution for EXP-006's core
+### premise, not a test of it)
+  Using the same live-fetched 1-minute tick series: the YES price was flat at **0.595** for the hour before
+  the July 13, 2024 assassination attempt (~22:11 UTC), then rose to **0.685 by +24h** and **0.705 by +48h**
+  (near the end of the fetched window) — a sustained, monotonic-in-direction move, not a spike-then-fade.
+  **Explicitly flagged as N=1 and NOT a test of EXP-006** — a single anecdote proves nothing statistically
+  and is not offered as one. But it is a directly relevant, verifiable illustration of an ALREADY-LOGGED
+  EXP-006 pre-mortem concern (Run 20, item 1): Clinton & Huang's headline finding is about AGGREGATE daily
+  serial correlation across 2,500+ markets, most of which are far smaller/less newsworthy than "an
+  assassination attempt on a presidential nominee" — a finding that a typical/small spike weakly reverts on
+  average is fully compatible with the LARGEST, most information-laden spikes persisting or even
+  compounding (a real regime shift, not overreaction). If EXP-006 is ever built, this is a concrete reason
+  to (a) stratify spike events by size/salience rather than pooling all Δ-threshold crossings into one test,
+  and (b) treat the per-trade concentration cap Run 20 already specified as load-bearing from day one, not
+  optional — an uncapped mechanism that fades a handful of huge, high-conviction spikes could take a small
+  number of catastrophic opposite-direction losses, the mirror image of the single-market-dominates-PnL
+  failure mode that already sank EXP-003 (57% of nominal PnL from one market) and EXP-005 (125% from one
+  category) via the OPPOSITE mechanism (concentration in wins, not losses) two runs in a row.
+
+### (3) Methodology-integrity catch: a WebSearch synthesis this run invented a precisely-quantified example
+### that its own cited source does NOT contain — caught before being logged as data, not after
+  A `WebSearch` for Polymarket price-spike/reversal research returned a synthesized answer citing a
+  specific, superficially very citable example: "the Iran Ceasefire market ($280M volume, April 2026):
+  prices spiked from 35% to 68% in eight minutes on a ceasefire rumor... settled at 58% before gradually
+  reverting over the following day," attributing it (by proximity/context) to the DL News article in the
+  same result set. Per this project's standing "WebFetch-over-summarization" discipline, that DL News URL
+  was fetched DIRECTLY (not re-summarized) before logging the example as data — **the article's actual text
+  contains no mention of an Iran Ceasefire market, no 35%/68%/8-minute/90-minute/58% figures, and no
+  reversal example of any kind.** A follow-up targeted `WebSearch` confirmed a REAL "Iran Ceasefire"
+  Polymarket market exists (real event, $170M+ reported volume, a real reported drone-rumor
+  spike-then-recovery) but the SPECIFIC numbers from the first search's synthesis could not be corroborated
+  against any fetchable primary source (the one candidate primary source, a Bloomberg piece, 403'd —
+  paywalled, disclosed not hidden). **Conclusion: the "$280M / 35%→68% / 8min / 90min-window / 58%" figures
+  are UNVERIFIED and are explicitly NOT logged as data anywhere in this entry or in GROWTH_STATUS.** This
+  extends the project's existing WebFetch-over-summarization rule one level further: it is not just that a
+  secondary ARTICLE can over-summarize a primary paper — a search tool's own auto-generated synthesis can
+  apparently invent specific, precise-sounding statistics not present in ANY of its own listed sources. A
+  suspiciously precise number is not by itself evidence of anything; every specific quantified claim
+  intended for RESEARCH_MEMORY must be chased to a direct fetch of its actual cited source before being
+  treated as data, no matter how confident or well-formatted the synthesis reads. Filed as a
+  process-hardening note for every future run's self-validation step, not a one-off.
+- The already-logged "58% of Polymarket's national presidential markets showed negative serial
+  correlation" DL News figure (flagged unverified-primary since Run 20) was independently re-fetched this
+  run (direct WebFetch of the same DL News URL): the figure is repeated verbatim but the article STILL
+  attaches no N, methodology, or citation beyond naming "Joshua Clinton and TzuFeng Huang at Vanderbilt
+  University" and "2,500 markets with $2.5 billion in volume" — consistent with, not resolving, Run 20's
+  standing "secondary-source-only, unverified against the primary text" flag. The primary OSF preprint
+  abstract (`ideas.repec.org/p/osf/socarx/d5yx2_v1.html`, re-fetched directly this run) confirms the
+  qualitative direction only ("daily price changes were weakly correlated or negatively autocorrelated")
+  and the N/venue/date-range details already logged Run 20 — no percentage figure appears in the abstract
+  itself, unchanged from Run 20's finding.
+
+### Candidate alphas NOT proposed this run (reasons)
+- No new EXP-00N proposed. EXP-006 remains a scoped-but-not-ready-to-test candidate (the detection +
+  labeling pipeline is still unbuilt; the underlying data primitive is now confirmed cheaper to build on
+  than previously estimated, not confirmed away as a blocker entirely).
+- The "Iran Ceasefire spike/reversal" example is explicitly NOT proposed as supporting evidence for
+  anything — see finding (3) above; it is logged as a caught methodology risk, not a data point.
+
+### Recommendation (RECOMMEND-only — no high-confidence validated edge exists; NOT a ROADMAP steer)
+  Given (a) the concentration-capped/recency-weighted `CalibrationBucketStrategy` redesign (Run 20 option
+  a) can be built and OOS-tested entirely against the THREE corpora already fetched and characterized this
+  project (EXP-002/003/005 — no new data-access work, no new pipeline) while (b) EXP-006 still needs a new
+  detection+labeling pipeline built and validated on top of the now-confirmed-cheaper-but-still-unbuilt
+  intraday primitive, the concentration-capped redesign is the LOWER-cost, HIGHER-certainty next factory
+  step; EXP-006 remains the higher-upside but higher-build-cost candidate for a subsequent run once the
+  redesign result is in. Both remain open, in that priority order.
+
+### Self-validation (sources this run)
+- `polymarket_history_fetcher.py` code read (unmodified, no changes made).
+- Live CLOB/Gamma probes: direct `curl` against `clob.polymarket.com/prices-history` (fidelity=1, real
+  4-day window, 5,760 ticks, 60s median spacing, independently computed) and
+  `gamma-api.polymarket.com/markets` (real Trump-2024 token resolution) — reproducible by anyone with open
+  Polymarket egress against this same fully-historical/settled window.
+- DL News article (`dlnews.com/articles/markets/polymarket-kalshi-prediction-markets-not-so-reliable...`):
+  fetched directly this run, twice (once for the Iran-Ceasefire-example check, once for the 58%-figure
+  re-check) — both direct fetches, not re-summarized from the WebSearch snippet.
+- `ideas.repec.org/p/osf/socarx/d5yx2_v1.html` (Clinton & Huang OSF preprint abstract): re-fetched directly.
+- Bloomberg Iran-bets article: attempted fetch, HTTP 403 (paywalled) — disclosed, not treated as
+  corroboration or refutation of anything.
+- Egress: direct `curl` from this session against `clob.polymarket.com`, `gamma-api.polymarket.com`,
+  `data-api.polymarket.com` — all 200, consistent with every run since 2026-07-04.
+
+**Binding constraint STANDS:** no validated real-money OOS edge. This run's contribution is narrowing
+EXP-006's build-cost estimate with a live-verified fact (not just a code read), surfacing a concrete,
+honest illustration of why an uncapped fade-the-spike mechanism is dangerous on the largest events, catching
+a specific search-synthesis fabrication before it could contaminate RESEARCH_MEMORY as data, and giving the
+next run/factory cycle a clear, evidence-based priority order between the two open non-bucket-family
+candidates (concentration-capped redesign first, EXP-006 second).
