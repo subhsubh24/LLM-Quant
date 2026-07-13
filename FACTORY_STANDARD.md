@@ -185,6 +185,15 @@ every UI surface in every factory; product-specific brand/voice/tokens live in V
   deliberate spacing & rhythm · clear information architecture · premium product aesthetics ·
   thoughtful interaction & meaningful motion · cohesive visual system · high-quality component
   composition · intentional color · human-designed, opinionated decisions · product-level polish.
+- **DESIGN AGAINST REFERENCES — aim at exemplars, not just away from slop:** taste comes from
+  concrete best-in-class examples, not abstract adjectives. Keep a curated, per-product reference set
+  of best-in-class screens for each first-impression surface, in-repo at `docs/design/REFERENCES.md`
+  (real products, organized by surface — onboarding, landing, paywall, the core loop, nav, cards).
+  Design each surface AGAINST that set — "adapt THIS pattern to our brand," NEVER copy — and where a
+  Mobbin / inspiration-grounding MCP is available in the run environment, ground against it too. The
+  set is a LIVING asset: when the DEEP AUDIT (§10) finds a surface that clears the slop-blocklist yet
+  still feels average, the fix ADDS the exemplar it should have aimed at. Build one surface/component
+  at a time against its reference — never a whole screen from a single prompt.
 - **Audit lenses (rank fixes by design impact; first-impression surfaces first — onboarding,
   paywall, landing, the core loop):** layout structure, type scale, spacing, visual hierarchy,
   component quality, color system, navigation, motion, landing/dashboard quality, responsiveness,
