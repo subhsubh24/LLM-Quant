@@ -9,7 +9,7 @@ always-passes:
   - For a case with a correct direction (ground_truth), a verdict OUTSIDE the
     acceptable set FAILS.
   - For an ambiguous case (no correct direction), any well-formed + coherent
-    verdict passes on VALIDITY, graded with method ``heuristic`` (never claimed
+    verdict passes on VALIDITY, graded with method ``judge_proxy`` (never claimed
     as ground_truth) — but a malformed/incoherent one still FAILS.
 
 ``quality_score`` (0..1) is a graded number, not a self-report: 0 for invalid,
@@ -27,6 +27,15 @@ from .cases import Case, GroundTruth, ground_truth
 
 VALID_VERDICTS = ("allocate", "hold", "pass")
 
+# The Margin ingest API accepts ONLY these quality_method provenance labels
+# (mirrors src/margin ingest `_ALLOWED_QUALITY_METHODS`). An outcome that names
+# any other method (e.g. "rubric" or "heuristic") is rejected with 422 and never
+# lands — which zeroes out cost-per-outcome. Every grader in this package MUST
+# emit one of these; `margin_eval --self-test` enforces it so the bug can't recur.
+INGEST_ACCEPTED_QUALITY_METHODS = frozenset(
+    {"ground_truth", "llm_judge", "judge_proxy", "self_report"}
+)
+
 _VERDICT_RE = re.compile(r"verdict\s*[:\-]?\s*(allocate|hold|pass)", re.IGNORECASE)
 _CONF_RE = re.compile(r"confidence\s*[:\-]?\s*([01](?:\.\d+)?|\.\d+|\d\.\d+)", re.IGNORECASE)
 
@@ -36,7 +45,7 @@ class GradeResult:
     case_id: str
     passed: bool
     quality_score: float
-    quality_method: str          # "ground_truth" | "heuristic"
+    quality_method: str          # "ground_truth" | "judge_proxy" (ingest-accepted)
     verdict: Optional[str]
     confidence: Optional[float]
     expected: Optional[str]       # printable acceptable-set / "-" for ambiguous
@@ -112,7 +121,7 @@ def grade(case: Case, text: Optional[str]) -> GradeResult:
         score = round(0.55 + 0.45 * coherence, 3) if passed else round(0.2 * coherence, 3)
         reason = "ambiguous: well-formed + coherent" if passed else \
             "ambiguous: incoherent verdict/confidence"
-        return GradeResult(case.id, passed, score, "heuristic", verdict,
+        return GradeResult(case.id, passed, score, "judge_proxy", verdict,
                            confidence, expected_str, reason)
 
     # --- Directional (ground-truth) case ---
