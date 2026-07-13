@@ -15,6 +15,7 @@ import hmac
 import json
 import logging
 import math
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -37,6 +38,54 @@ from .polymarket_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# LIVE-SAFETY (FACTORY_STANDARD §6): every external/venue call needs a timeout SHORTER
+# than the run budget — "a graceful try/catch is useless if the runtime kills (or, here,
+# HANGS) the function first." The raw REST fallback already bounds its call (`timeout=15`),
+# but the py-clob-client path (`create_and_sign_order` + `post_order`) exposes NO timeout
+# and hangs indefinitely on a slow/stalled socket. Because `place_order` runs SYNCHRONOUSLY
+# inside the orchestrator's async scan loop, an unbounded hang freezes the ENTIRE bot (no
+# kill-switch check, no further orders). This constant bounds those calls; keep it shorter
+# than a scan interval. Read at call time (module global) so tests can monkeypatch it.
+_CLOB_ORDER_TIMEOUT_SEC = 20.0
+
+
+class _CLOBOrderTimeout(Exception):
+    """A py-clob-client call exceeded `_CLOB_ORDER_TIMEOUT_SEC`.
+
+    Distinct from a normal venue error: on a timeout the order's venue state is UNKNOWN
+    (the request may or may not have reached the book), so the caller must NOT fabricate a
+    fill AND must surface it loudly for reconciliation — never silently retry into a
+    possible double-placement.
+    """
+
+
+def _call_with_timeout(fn, timeout_sec: float, label: str):
+    """Run a blocking `fn()` in a daemon thread, bounded by `timeout_sec`.
+
+    Returns fn()'s value, or re-raises whatever fn() raised. Raises `_CLOBOrderTimeout` if
+    fn does not finish in time. A daemon thread is used deliberately (not
+    `ThreadPoolExecutor`, whose atexit join would re-introduce the very hang we are
+    bounding): if the call is genuinely wedged the worker is abandoned and cannot block
+    interpreter shutdown, while the event loop is freed after at most `timeout_sec`.
+    """
+    box: Dict[str, Any] = {}
+
+    def _target() -> None:
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 — propagate the real error to the caller
+            box["error"] = exc
+
+    t = threading.Thread(target=_target, daemon=True, name=f"clob-{label}")
+    t.start()
+    t.join(timeout_sec)
+    if t.is_alive():
+        raise _CLOBOrderTimeout(f"{label} exceeded {timeout_sec:.0f}s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
 
 
 # ============================================================
@@ -318,8 +367,20 @@ class PolymarketExecutor:
             elif req.order_type == OrderType.FOK:
                 order_args["order_type"] = "FOK"
 
-            signed_order = client.create_and_sign_order(order_args)
-            resp = client.post_order(signed_order)
+            # LIVE-SAFETY (§6): bound both blocking venue calls so a stalled socket cannot
+            # hang the synchronous scan loop indefinitely (the REST path is already bounded
+            # by `timeout=15`; py-clob-client exposes no timeout, so we bound it externally).
+            timeout_sec = _CLOB_ORDER_TIMEOUT_SEC
+            signed_order = _call_with_timeout(
+                lambda: client.create_and_sign_order(order_args),
+                timeout_sec,
+                "create_and_sign_order",
+            )
+            resp = _call_with_timeout(
+                lambda: client.post_order(signed_order),
+                timeout_sec,
+                "post_order",
+            )
 
             # SIDE-EFFECT INTEGRITY (ROADMAP G2/F4.1): a reported fill must reflect a
             # REAL matched execution — never an assumed fill from a non-error response.
@@ -405,6 +466,32 @@ class PolymarketExecutor:
                 # estimate.) filled_size==0 → 0.0, so a resting/OPEN order books no fee.
                 fees=filled_size * ((req.price or 0.50) if filled_size > 0 else 0.0) * DEFAULT_FEE_RATE,
                 raw_response=resp,
+            )
+        except _CLOBOrderTimeout as e:
+            # SIDE-EFFECT INTEGRITY + LIVE-SAFETY (§6): the call timed out, so the order's
+            # venue state is UNKNOWN — it may or may not have reached the book. We must NOT
+            # fabricate a fill (return REJECTED, like every other unconfirmed path here), and
+            # we log CRITICAL so the ambiguous state surfaces for reconciliation rather than
+            # a silent retry. (Full auto-reconciliation of a possibly-placed order is ROADMAP
+            # D6, which is why LIVE_TRADING_ENABLED stays gated off until that + the runbook.)
+            logger.critical(
+                "[LIVE ORDER TIMEOUT] Polymarket CLOB order timed out (%s) — venue state "
+                "UNKNOWN; the order may or may not have been placed. Reported REJECTED (no "
+                "fabricated fill); RECONCILE the venue before re-attempting this signal.",
+                e,
+            )
+            return OrderResult(
+                order_id=str(uuid.uuid4()),
+                exchange=Exchange.POLYMARKET,
+                market_id=req.market_id,
+                token_id=req.token_id,
+                side=req.side,
+                order_type=req.order_type,
+                size=req.size,
+                price=req.price,
+                status=OrderStatus.REJECTED,
+                # Our own message (no venue internals) — safe to surface to the caller.
+                error="order placement timed out — venue state unknown; reconcile before retry",
             )
         except Exception as e:
             logger.error(f"Polymarket order failed: {e}")
