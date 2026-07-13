@@ -955,3 +955,29 @@ one that fits the run; applicability noted):
 When you author a NEW reference playbook, ADD a line here so future runs discover it. A playbook that exists
 but no run reads is wasted scaffolding. (Products without a given surface — e.g. a non-store or personal-bot
 product — simply won't have that playbook; that's expected, not a gap.)
+
+## 44. Live-prod validation — re-probe the DEPLOYED app every cycle (self-healing, not just CI)
+CI validates the BUILD; it does NOT prove the DEPLOYED prod app works for a real user. A whole class of
+failure passes green CI and only appears on the live URL: React hydration mismatches (#418/#425), a missing or
+empty `<title>`, broken first paint, dead CTAs, embarrassing empty/placeholder states, wrong-locale UI, a
+logged-out entry with no landing/value prop. So EVERY cycle the factory re-probes LIVE PROD as an outside user
+would — this is §28 (re-probe the real system / anti-fake-green) and §40 (vision-verify rendered pixels)
+applied to the DEPLOYED app, continuously. Two layers, both required:
+- **(A) Deterministic prod smoke (backbone — no LLM or browser-agent needed).** The repo's own journey/e2e
+  suite MUST accept a configurable base URL and run against the LIVE prod URL post-deploy AND on a schedule.
+  For every critical route, at mobile AND desktop, it asserts: HTTP 200; a non-empty, correct `<title>`; ZERO
+  console errors (INCLUDING hydration #418/#425); no failed network request on the critical path; the key
+  journey reachable; and it captures a screenshot artifact. A failure here files a `loop: bug` and blocks
+  "healthy" in LOOP_HEALTH until fixed. This layer is deterministic and always runs.
+- **(B) Agentic vision + journey pass (judgment layer).** On a dedicated cadence (an auditor routine), DRIVE
+  the live prod app in a real browser, walk the critical logged-out AND authed journeys at both widths, and
+  VISION-REVIEW the rendered pixels against §6b (taste / generic-AI slop) and the VISION value anchor: is there
+  a real landing / value prop, is the first impression on-brand, are showcase & empty states honest and
+  non-embarrassing, is the copy in the intended language, do the primary CTAs actually work end-to-end. File
+  findings as OWNER-PRIORITY steers / `loop: bug`. (Requires a browser in the run env; where absent, layer A
+  still runs and this pass degrades to "not run this cycle," logged HONESTLY in LOOP_HEALTH — never skipped
+  silently, §17.)
+- **Self-healing:** every finding from A or B auto-files as a tracked issue and enters the normal maker/checker
+  loop; the next run fixes the ROOT cause (§6c) and the prod-smoke assertion that would have caught it becomes a
+  permanent regression guard, so the same class cannot silently ship again. Authed journeys need a dedicated
+  throwaway test account — an OWNER_ACTIONS item; the loop never fabricates credentials (§9).
