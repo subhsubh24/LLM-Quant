@@ -60,7 +60,7 @@ SELF_VALIDATION:
       status: validated
     - id: backend_route_auth
       desc: "shared-secret bearer token on state-mutating routes (kill-switch/config/execute/bot/scan), DEFAULT-CLOSED: no token => DENY (401) unless BACKEND_AUTH_DISABLED=1 dev opt-out; risk-config bounds-validated (a non-positive loss cap can't disable the control)"
-      validates_via: "test_backend_auth.py (pure token decision: exact-Bearer + constant-time when set) + test_risk_config_validation.py (pure bounds: reject non-positive/NaN/inf/absurd risk limits) in the CI gate; test_backend_auth_fastapi.py exercises the FastAPI adapter POLICY (default-closed 401 when no token + no opt-out; open on BACKEND_AUTH_DISABLED; enforced when a token is set; /scan guard + bounds return 401/422) where fastapi is installed (importorskip — CI-skipped, run locally)"
+      validates_via: "test_backend_auth.py (pure token decision: exact-Bearer + constant-time when set) + test_risk_config_validation.py (pure bounds: reject non-positive/NaN/inf/absurd risk limits) in the CI gate; test_backend_auth_fastapi.py exercises the FastAPI adapter POLICY (default-closed 401 when no token + no opt-out; open on BACKEND_AUTH_DISABLED; enforced when a token is set; /scan guard + bounds return 401/422) and is REGISTERED in the CI gate since fastapi+httpx landed in requirements-ci.txt (#283) — app.api.routes/auth/main import cleanly under the light dep set, so the adapter half now validates IN the required gate (importorskip retained as defence-in-depth for a fastapi-absent standalone run)"
       mode: fail_closed
       requires_env: [BACKEND_API_TOKEN]  # unset => DENY (default-closed); BACKEND_AUTH_DISABLED=1 is the dev opt-out (never honoured with live money — config refuses to boot)
       active: true

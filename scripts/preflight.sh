@@ -117,6 +117,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_sell_reduce_drawdown.py \
            backend/tests/test_no_position_edge_units.py \
            backend/tests/test_security_headers.py \
+           backend/tests/test_backend_auth_fastapi.py \
            backend/tests/test_polymarket_client_tag_id.py \
            backend/tests/test_validate_real_oos_tag_id.py \
            backend/tests/test_loss_cap_persist_failclosed.py \

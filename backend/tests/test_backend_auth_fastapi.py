@@ -1,12 +1,16 @@
 """
 End-to-end FastAPI wiring check for the backend route auth (the adapter, not the decision).
 
-INTENTIONALLY OUTSIDE the curated CI list (scripts/preflight.sh): it imports the api
-package, which needs fastapi — absent in the lightweight CI gate. (It also historically
-tripped the `app.*` vs `backend.app.*` dual-import table-registration collision, now
-resolved by standardizing every test on `app.*`.) The CI gate validates the PURE decision in
-`test_backend_auth.py`; this file proves the FastAPI adapter (Header extraction +
-HTTPException 401) where fastapi is installed. Run it standalone:
+REGISTERED in the curated CI gate (scripts/preflight.sh) since fastapi+httpx were added to
+`backend/requirements-ci.txt` (#283): `app.api.routes`/`app.api.auth`/`app.api.main` import
+cleanly under the light dep set (no pandas/sklearn/torch pulled in), so this suite RUNS in
+the required gate — closing the same false-coverage trap #283 closed for `test_security_headers.py`
+(a shipped security-hardening surface whose adapter half validated NOWHERE in CI). It
+historically tripped the `app.*` vs `backend.app.*` dual-import table-registration collision,
+now resolved by standardizing every test on `app.*`. `test_backend_auth.py` covers the PURE
+token decision; this file proves the FastAPI ADAPTER (Header extraction + HTTPException 401 +
+the §12 route guards/input bounds) end-to-end. The `importorskip("fastapi")` calls remain as
+defence-in-depth so the file still runs standalone where fastapi is absent:
 
     pytest backend/tests/test_backend_auth_fastapi.py
 """
