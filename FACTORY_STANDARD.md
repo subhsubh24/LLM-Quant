@@ -194,8 +194,11 @@ every UI surface in every factory; product-specific brand/voice/tokens live in V
   source, not a fallback: (1) query `mobbin_search_screens` with a natural-language pattern for the
   surface (onboarding / paywall / core-loop / empty-state), or `mobbin_quick_search` →
   `mobbin_get_app_screens` / `mobbin_get_app_flows` for a specific reference app, with `screen_patterns`
-  / `screen_keywords` to target a taxonomy or OCR match; (2) study the top results and adapt to our brand
-  tokens; (3) CAPTURE the chosen exemplar — app + Mobbin link + the ONE specific pattern to steal — back
+  / `screen_keywords` to target a taxonomy or OCR match; (2) the results come back as base64 SCREEN IMAGES — VIEW them with the run's multimodal
+  model (routines run on multimodal Opus 4.8): study the actual PIXELS — layout, type scale, spacing,
+  hierarchy — NOT just the app-name / link / OCR metadata (`get_screen_detail` returns a full-resolution
+  screen to study). This is genuine VISUAL grounding, the same multimodal capability §40 uses to grade
+  rendered output. Adapt what you SEE to our brand tokens; (3) CAPTURE the chosen exemplar — app + Mobbin link + the ONE specific pattern to steal — back
   into `docs/design/REFERENCES.md` so the win COMPOUNDS (§48); (4) §40 vision-verify the rendered result
   against it. Where Mobbin is absent, the in-repo REFERENCES.md set remains the guarantee. The
   set is a LIVING asset: when the DEEP AUDIT (§10) finds a surface that clears the slop-blocklist yet
