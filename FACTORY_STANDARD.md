@@ -1051,6 +1051,11 @@ the relevant slice; this says engineer the whole window per STEP and measure it.
 - **Track leanness and drive it DOWN.** Report input-tokens-per-task, tool-calls-per-task, and turns-per-task
   in LOOP_HEALTH; a rising trend at equal output quality is a regression to fix, not noise. Prefer fewer,
   sharper tools and CODE EXECUTION over chatty tool-by-tool calling.
+- **Factory efficiency = verified output ÷ token cost — the north-star ratio.** Beyond per-task leanness,
+  report the factory-level ratio in LOOP_HEALTH `rolling_7d` (verified changes shipped over the period's
+  token cost, from the cost ledger) and TREND it: the factory should ship MORE per dollar over time. Falling
+  efficiency at flat output is a regression to diagnose — model too expensive for the task (→ re-route, §45),
+  or context too heavy (→ trim, above). This is how the factory is tuned like COGS, not guessed at.
 
 ## 48. Evals from real workflows — grow the gold set from real usage, so every win COMPOUNDS
 The defensible loop is "real workflows IN → benchmarks + features OUT." A gold set grown from REAL user
@@ -1066,3 +1071,22 @@ next run and can never silently regress.
 - **Honest gate.** Pre-launch, cases are seeded from representative tasks + demand-validation signals; the
   corpus shifts to real-usage-sourced the moment telemetry/support exist (see PRODUCT_SIGNALS_PLAYBOOK). Never
   fabricate a gold case or its expected output (§17).
+
+## 49. Orchestration is factory-as-code — version the routines, reconcile against the runner
+The product doctrine, playbooks, and health files are already factory-as-code. The ORCHESTRATION layer is
+NOT: the autonomous routines (cron, environment, prompt, MCP connections) live only in the runner's API/UI —
+invisible to the repos, un-diffable, un-reviewable, and not even reliably enumerable (the runner's `list` is
+paginated/workspace-scoped and silently omits routines). That is the blind spot behind "which routines exist
+and what MCPs does each have?". Close it: the orchestration is code too.
+- **Version the routine manifest.** Each repo maintains `docs/autonomous-loop/ROUTINES.md` — for every
+  routine that operates on this repo: trigger id, cron (UTC), environment, prompt purpose, enabled, and
+  `mcps` (the MCP connections attached). This file is the SOURCE OF TRUTH; the runner config must match it.
+- **Reconcile every cycle.** Diff the manifest against the live runner config; any drift — a routine, cadence,
+  or MCP present in one but not the other — is a finding to FILE, not silently accepted. Never fabricate
+  routine state: a routine the API doesn't return is marked `UNRECONCILED`, never omitted or invented (§17).
+- **Propose orchestration changes as manifest DIFFS.** When the loop wants to change its own orchestration —
+  add a routine, change a cadence, attach an MCP (e.g. Mobbin §6b, or a browser for §44 Layer-B) — it proposes
+  a diff to this file for owner approval (§38), never an opaque UI edit. The loop improves its OWN factory,
+  versioned and reviewable — not just product code.
+- **Why it matters:** the fleet becomes auditable (you can review orchestration like any PR), model/MCP/cron
+  changes get the same rigor as code, and self-improvement (§11/§36) extends to the factory's own wiring.
