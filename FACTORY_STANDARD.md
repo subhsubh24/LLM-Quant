@@ -952,6 +952,9 @@ one that fits the run; applicability noted):
   feature → demo → hooks → comment signal). Consult when validating demand.
 - **`docs/growth/PRODUCT_SIGNALS_PLAYBOOK.md`** (post-launch) — turn telemetry / support / churn into
   prioritized work. Consult once analytics / billing / support are connected.
+- **`docs/growth/OUTBOUND_CONTEXT_PLAYBOOK.md`** (products doing outreach) — the four-layer context window
+  (Role / Case / Evidence / Rules) + assemble→write→refine for evidence-grounded outbound that COMPOUNDS.
+  Consult for outbound / messaging / cold-outreach work (§46, §47).
 When you author a NEW reference playbook, ADD a line here so future runs discover it. A playbook that exists
 but no run reads is wasted scaffolding. (Products without a given surface — e.g. a non-store or personal-bot
 product — simply won't have that playbook; that's expected, not a gap.)
@@ -981,3 +984,75 @@ applied to the DEPLOYED app, continuously. Two layers, both required:
   loop; the next run fixes the ROOT cause (§6c) and the prod-smoke assertion that would have caught it becomes a
   permanent regression guard, so the same class cannot silently ship again. Authed journeys need a dedicated
   throwaway test account — an OWNER_ACTIONS item; the loop never fabricates credentials (§9).
+
+## 45. Model routing & benchmarking — route each task to the winner on OUR evals; portability is a moat
+Operating outside any single lab, the factory's biggest structural advantage is that it may use ANY model —
+closed or open. Ceding that (locking to one family) is the one edge a walled-garden competitor can never take
+back. So model choice is not set-and-forget; it is a standing, benchmarked discipline that lives INSIDE the
+cost contract (cheapest-by-default, escalate only on a deterministic signal — this section governs WHICH model
+per task; the cost contract governs WHEN to escalate).
+- **Route per task-type to the winner on OUR OWN evals — not leaderboards, not brand.** Each distinct task
+  (text gen, reasoning, extraction, image/PDF perception, scoring) routes to the cheapest model that clears the
+  accuracy bar on our eval suite. A cheap multimodal model often beats the frontier at PDF/table extraction at
+  a fraction of the cost; the only way to know is to measure on our tasks.
+- **Re-benchmark on a cadence; swap fast, but only on the eval.** When a new/updated model ships, benchmark it
+  against our evals on the cost-accuracy frontier; if it wins for a task-type, re-route deliberately and
+  quickly (a 24-hour swap is fine when the eval says so) — never on hype, always guarded by the eval. Record
+  the decision and the numbers.
+- **Portability is a resilience guarantee (the "Choice" test).** If the current lead model vanished tomorrow,
+  the loop must still operate and hillclimb our evals on another. Keep the provider abstraction the ONLY path
+  to a model (never call an SDK directly, per Conventions) so a swap is a config change, not a rewrite —
+  guarded by the provider-floors + determinism tests. Our "veteran" capability (evals, memory, doctrine) stays
+  with us even if any one "generalist" model is removed.
+
+## 46. Delegation discipline — delegate early, brief with CONSTRAINTS, review cheap, know when not to
+The cost of an agent is dominated not by price-per-token but by how many turns the lead takes, how much context
+it drags, and — above all — what it decides NOT to do itself. A frontier lead that hand-implements everything
+and reviews by rewriting is a micromanager burning lead-price tokens on intern work. What is worth frontier
+price is judgment: what to build, what to constrain, and who should write it — not the typing. Applies whenever
+a lead spawns subagents/workers (§4, §21).
+- **Delegate EARLY, not after the solo marathon.** Hand off implementation BEFORE the lead has pulled every
+  file into its own context and made the expensive decisions alone. Late delegation only offloads the
+  mechanical tail — by then the savings are already spent.
+- **Briefs specify CONSTRAINTS + a definition of DONE, not the implementation.** A good handoff enumerates the
+  constraints, edge cases, and what "done" means — e.g. *"operator() must be O(1) in pointer length: NO full
+  scan"* — and lets the worker implement. A constraint written into a brief cannot be silently forgotten
+  mid-implementation; one kept only in the lead's head can (and does). Dictating the implementation costs more
+  AND drops constraints.
+- **Review cheap; re-delegate, don't rewrite.** When review finds a defect, the default is a second cheap
+  handoff with the fix stated as a new constraint — NOT pulling files back and rewriting at lead price.
+  Distrust-rewriting does not measurably increase correctness; it just moves cost to the expensive seat.
+- **Know when NOT to delegate.** Short tasks with nothing between deciding and shipping, and serial root-cause
+  debugging where the accumulated context IS the work, don't decompose — forcing delegation there hands off the
+  wrong thing and lowers quality. The judgment that writes a good brief also knows when not to write one.
+
+## 47. Harness leanness — the leanest SUFFICIENT context per step, tracked and falling
+A lean context is not merely cheaper to run, it is SMARTER to reason over: too much in the window makes the
+model average across all of it (and the average of everything is generic slop, §6b); too little makes it guess.
+At the SAME base model, the leaner harness wins on BOTH cost and accuracy. Harness efficiency is therefore a
+first-class, tracked, improving metric — not an afterthought. Extends §41 (context discipline): §41 says read
+the relevant slice; this says engineer the whole window per STEP and measure it.
+- **Smallest sufficient window per step — Role / Case / Evidence / Rules.** Assemble each step's context from
+  exactly four layers and no more: ROLE (the one narrow job of this step — never "do the whole task"), CASE
+  (this specific instance + the signal that fired), EVIDENCE (only the facts/proof this step is allowed to use
+  — a fact not in evidence may NOT be used, §17), RULES (voice / format / hard-bans). Drop a layer and the
+  failure is predictable: no Role → does the whole job badly at once; no Case → generic; no Evidence →
+  fabricates; no Rules → ships off-brand.
+- **Track leanness and drive it DOWN.** Report input-tokens-per-task, tool-calls-per-task, and turns-per-task
+  in LOOP_HEALTH; a rising trend at equal output quality is a regression to fix, not noise. Prefer fewer,
+  sharper tools and CODE EXECUTION over chatty tool-by-tool calling.
+
+## 48. Evals from real workflows — grow the gold set from real usage, so every win COMPOUNDS
+The defensible loop is "real workflows IN → benchmarks + features OUT." A gold set grown from REAL user
+workflows and failures (not synthetic cases) is the moat a generalist competitor can't copy, because your
+vertical isn't their main quest. Every accuracy win captured as a gold case is delivered to ALL users on the
+next run and can never silently regress.
+- **Turn real workflows/failures into gold cases.** When a real user journey, a support issue, a prod-smoke
+  failure (§44), or a diagnosed bug reveals a case the pipeline got wrong, ADD it to `evals/gold` with the
+  correct expectation — so the win is locked in as a permanent regression guard. A static eval set is a
+  stalling moat; the gold set must GROW from reality over time.
+- **Hillclimb the growing set obsessively.** Each improvement is validated against the whole gold set; once
+  won, it guards every user thereafter.
+- **Honest gate.** Pre-launch, cases are seeded from representative tasks + demand-validation signals; the
+  corpus shifts to real-usage-sourced the moment telemetry/support exist (see PRODUCT_SIGNALS_PLAYBOOK). Never
+  fabricate a gold case or its expected output (§17).
