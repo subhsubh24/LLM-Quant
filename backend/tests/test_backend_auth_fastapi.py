@@ -283,6 +283,43 @@ def test_enable_strategy_name_path_is_bounded(monkeypatch):
     assert client.post("/prediction-markets/risk/enable-strategy/NearCertainty").status_code != 422
 
 
+def test_strategy_enable_disable_require_token_when_set(monkeypatch):
+    # ROADMAP B6: the per-strategy enable/disable routes are state-mutating (they change
+    # which strategies the bot trades + persist it) — they must be guarded. With a token set,
+    # a tokenless/wrong-token POST is 401 and the guard runs BEFORE the handler (no scanner
+    # build, no persist).
+    client = _router_client()
+    _set_token(monkeypatch, "s3cret")
+    for verb in ("enable", "disable"):
+        path = f"/prediction-markets/strategies/near_certainty/{verb}"
+        assert client.post(path).status_code == 401
+        assert client.post(path, headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_strategy_disable_name_path_is_bounded(monkeypatch):
+    # §12: the {name} PATH segment on the state-mutating enable/disable routes is bounded
+    # (max_length=100) so an authenticated caller can't echo-back-DoS via the 404 detail or
+    # flood logs. 422 before the handler (no scanner build).
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    assert client.post(
+        "/prediction-markets/strategies/" + "x" * 101 + "/disable"
+    ).status_code == 422
+    assert client.post(
+        "/prediction-markets/strategies/" + "x" * 101 + "/enable"
+    ).status_code == 422
+
+
+def test_strategy_disable_unknown_name_is_404(monkeypatch):
+    # ROADMAP B6: an unknown strategy name is rejected (404) BEFORE anything is persisted —
+    # a typo can't be silently recorded to shadow a future strategy. (Auth open so the
+    # handler runs; the preview scanner build is fully offline.)
+    client = _router_client()
+    _set_token(monkeypatch, "")
+    resp = client.post("/prediction-markets/strategies/definitely_not_a_strategy_xyz/disable")
+    assert resp.status_code == 404
+
+
 def test_cancel_exchange_query_is_bounded(monkeypatch):
     # §12: the {order_id} path was bounded (#188) but the `exchange` QUERY param on the same
     # cancel route was still unbounded — an authenticated caller could push a multi-MB
