@@ -987,9 +987,12 @@ applied to the DEPLOYED app, continuously. Two layers, both required:
   VISION-REVIEW the rendered pixels against §6b (taste / generic-AI slop) and the VISION value anchor: is there
   a real landing / value prop, is the first impression on-brand, are showcase & empty states honest and
   non-embarrassing, is the copy in the intended language, do the primary CTAs actually work end-to-end. File
-  findings as OWNER-PRIORITY steers / `loop: bug`. (Requires a browser in the run env; where absent, layer A
-  still runs and this pass degrades to "not run this cycle," logged HONESTLY in LOOP_HEALTH — never skipped
-  silently, §17.)
+  findings as OWNER-PRIORITY steers / `loop: bug`. The browser IS provisioned in the factory routine
+  environments (Browserbase credentials in the env): drive it via Playwright connected to Browserbase,
+  navigate the live prod URL, screenshot at mobile AND desktop, and VIEW the screenshots with the run's
+  multimodal model (Opus 4.8) — the same see-the-pixels capability as §6b / §40. Where a browser is genuinely
+  absent, Layer A still runs and this pass degrades to "not run this cycle," logged HONESTLY in LOOP_HEALTH —
+  never skipped silently (§17).
 - **Self-healing:** every finding from A or B auto-files as a tracked issue and enters the normal maker/checker
   loop; the next run fixes the ROOT cause (§6c) and the prod-smoke assertion that would have caught it becomes a
   permanent regression guard, so the same class cannot silently ship again. Authed journeys need a dedicated
