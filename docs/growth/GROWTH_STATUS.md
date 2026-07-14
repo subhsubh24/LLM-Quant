@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: '2026-07-13 (Research Run 21 -- EXP-006 scoping: the "needs a new intraday fetcher" blocker is OVERSTATED -- PolymarketHistoryFetcher.fetch_price_history already returns the full raw CLOB tick series, LIVE-VERIFIED this run at fidelity=1 (1-minute bars, 5,760 real ticks, 60s spacing) against the Trump-2024 election token spanning the July 13 2024 assassination-attempt window. That single spike did NOT reverse (0.595 -> 0.685 at +24h -> 0.705 at +48h), a real N=1 caution (not a test) that a fade-the-spike mechanism needs the per-trade concentration cap from day one. Also caught + did NOT log a WebSearch-synthesis-fabricated "Iran Ceasefire" statistic (its cited source contained no such example). No new EXP proposed; RECOMMEND-only priority set for the factory: build the concentration-capped/recency-weighted CalibrationBucketStrategy redesign first (testable on existing EXP-002/003/005 corpora, no new data-access work), EXP-006 second (still needs a detection+labeling pipeline). Binding constraint unchanged: no validated real-money OOS edge -- the bucket-calibration family remains non-robust on 3 independent real per-category corpora (EXP-002/EXP-005/EXP-003).)'
+  as_of: '2026-07-14 (Research Run 22 -- tested Run 21''s own recommended concentration-capped/favorite-band bucket redesign against the real EXP-003 Politics corpus: NEITHER mitigation produces a validated edge. Favorites-only (price 0.5-1.0) kills the fragility flags but flips net PnL negative (-$841.11, N=18, insufficient_data). Drop-extremes (exclude only <0.10/>0.90) shrinks PnL 28815->13585 but stays F10 fragile + F11 indistinguishable-from-zero (hit rate 24.44%). A per-trade notional cap is a structural NO-OP (0/472 trades exceeded even a 2%-of-capital cap) because the concentration is CROSS-TRADE/correlated (many small trades on the same underlying event cluster), not one oversized bet -- raises, not lowers, the cost of the redesign Run 21 called "lower-cost". New verified academic corroboration (Whelan, N=300k+ real Kalshi contracts, ideas.repec.org/p/pra/mprapa/126350.html, directly fetched): classical favorite-longshot bias (longshots overpriced/underperform break-even, favorites slightly outperform) plausibly explains the family''s persistent sub-50% hit rates, Kalshi-only, not confirmed on Polymarket. RECOMMEND-only, no ROADMAP steer. Binding constraint unchanged: no validated real-money OOS edge on any tested mechanism to date.)'
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -638,6 +638,38 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "TESTS the Run 21 item below and finds its recommended mitigation does NOT work as hoped (Research
+      Run 22, 2026-07-14): Run 21 recommended building a 'concentration-capped/recency-weighted
+      CalibrationBucketStrategy redesign' as the lower-cost next step. This run tested the two concrete,
+      cheaply-testable variants of that idea directly against the real EXP-003 Politics corpus (1,369
+      leakage-safe records, byte-identical to Run 20's pull — a useful stability check), using only the
+      EXISTING `make_calibration_bucket_strategy(edges=...)` parameter + a post-hoc trade-level analysis
+      (no new strategy code): (a) FAVORITES-ONLY (price 0.5-1.0, matching EXP-002's original hypothesis
+      band): 18 trades, net -$841.11 — kills the F10 fragility flags (correctly, since the aggregate is
+      negative) but does NOT recover a positive result either; N=18 is below F11's own 30-trade
+      significance floor, so this is honestly `insufficient_data`, not a refutation. (b) DROP-EXTREMES
+      (exclude only price<0.10/>0.90, keep the broad middle): 135 trades, net +$13,584.50 (down from
+      baseline's $28,815.49) but STILL F10 fragile (horizon + confidence concentration) and STILL F11
+      `indistinguishable_from_zero` (hit rate 24.44%, CI spans 0) — excluding only the extreme deciles
+      does not fix the failure mode, which persists broadly across the sub-0.5 price range. (c) A
+      PER-TRADE notional concentration cap (10%/5%/2% of total deployed capital) is a structural NO-OP:
+      0 of 472 baseline trades exceeded even the 2% cap ($3,736 vs. a $395.79 mean trade size) — the
+      single-market-57%/category-134% concentration Run 20/21 flagged is caused by MANY separate,
+      modestly-sized trades on the SAME underlying correlated event cluster (e.g. multiple candidate-
+      outcome markets in one election), not one oversized bet. **This means Run 21's 'lower-cost' framing
+      undersold the real cost: a working redesign needs a per-CLUSTER/entity exposure cap, not a per-trade
+      size cap — a materially harder, unbuilt design problem, not a parameter tweak.** New VERIFIED
+      academic corroboration this run (WebFetch of the primary abstract, not a search synthesis): Karl
+      Whelan's 'Makers and Takers: The Economics of the Kalshi Prediction Market' (N>300,000 real Kalshi
+      contracts, `ideas.repec.org/p/pra/mprapa/126350.html`) confirms classical favorite-longshot bias
+      (`low-price contracts win far less often than required to break even, while high-price contracts
+      win more often and yield small positive returns`) — Kalshi-only, NOT confirmed on Polymarket, but a
+      plausible causal mechanism for why this project's OWN bucket-calibration family keeps finding
+      apparent 'edge' concentrated in longshot buckets with a hit rate far below 50% (a static empirical-
+      rate fit on a bucket the crowd already correctly under-prices is more likely picking up in-sample
+      noise that reverts OOS than a real inefficiency). RECOMMEND-only, no ROADMAP steer (no high-
+      confidence validated edge). Binding constraint unchanged: no validated real-money OOS edge on any
+      tested mechanism to date. Full detail: RESEARCH_MEMORY 2026-07-14 (Research Run 22)."
     - "REFINES the Run 20 item below, does not supersede it (Research Run 21, 2026-07-13): Run 20 offered
       two next steps in no stated order (a concentration-capped/recency-weighted CalibrationBucketStrategy
       redesign, or scoping EXP-006). This run scoped EXP-006 further and found its stated blocker
