@@ -2526,3 +2526,160 @@ honest illustration of why an uncapped fade-the-spike mechanism is dangerous on 
 a specific search-synthesis fabrication before it could contaminate RESEARCH_MEMORY as data, and giving the
 next run/factory cycle a clear, evidence-based priority order between the two open non-bucket-family
 candidates (concentration-capped redesign first, EXP-006 second).
+
+---
+
+## 2026-07-14 — Research Run 22: tested Run 21's own recommended next step (concentration-capped /
+favorite-band-restricted bucket redesign) against the real EXP-003 Politics corpus — NEITHER mitigation
+produces a validated edge; a per-trade notional cap is a NO-OP (0 trades capped at any tested threshold,
+because concentration comes from many small correlated trades, not one oversized bet); new academic
+corroboration (Whelan, N=300k+ Kalshi contracts, directly verified) for the favorite-longshot-bias
+mechanism behind the family's persistent low hit rates
+
+- Hypothesis (falsifiable): Research Run 21 (2026-07-13) recommended, as the lower-cost next step (no
+  new data-access work, testable on the existing EXP-003 corpus), that the factory build a
+  "concentration-capped/recency-weighted `CalibrationBucketStrategy` redesign." This run tests the
+  TWO concrete, cheaply-testable variants of that idea directly against the already-fetched real
+  Politics corpus, using ONLY the existing, already-shipped `make_calibration_bucket_strategy(edges=...)`
+  parameter (no new strategy code) plus a post-hoc analysis of the already-existing `BacktestTrade`
+  fields (no new strategy code): (a) restrict the bucket model's price RANGE to exclude longshots
+  (motivated by favorite-longshot-bias literature — see below); (b) cap each trade's `budget_usd`
+  post-hoc at a fraction of total deployed capital, to see whether the F10 single-market/leave-one-out
+  concentration is caused by a few oversized bets that a notional cap would blunt.
+- Min sample N: reuses EXP-003's own pre-registered floor context (100 min / ~300-400 for reliable
+  bucket coverage); the favorites-only variant fell short of F11's own `min_trades=30` significance
+  floor (N=18), reported honestly as `insufficient_data`, not a refutation. The drop-extremes variant
+  (N=135) and the concentration-cap variants (N=472, unchanged) both cleared the floor.
+- OOS result: **TESTED — neither mitigation rescues the mechanism into a validated edge.** Method: one
+  pre-registered re-fetch of the identical Run 20/21 corpus definition (`tag_id=2` Politics,
+  `decision_lead_days=7`, `seed=42`, `max_pages=20`, `limit=100`, unmodified fetcher/backtest/regime-
+  slice/significance code) — 1,369 leakage-safe records, byte-identical in count to Run 20's pull two
+  days earlier (a useful determinism/stability check: the resolved-Politics-tag universe at this decision
+  lead has not meaningfully drifted in 48h). Three strategy-fitting variants + a post-hoc sizing variant,
+  all run through the SAME unmodified `walk_forward_backtest` + `analyze_regime_slices` (F10) +
+  `bootstrap_oos_significance` (F11) pipeline `validate_real_oos.py` already uses:
+  1. **BASELINE (all 10 default buckets)** — exactly reproduces Run 20: 472 trades, net **+$28,815.49**,
+     F10 fragile (single-market 57%, single-category 134%, leave-one-out flips to -$9,665.99), F11
+     `indistinguishable_from_zero` (hit rate 25.64%). Confirms determinism before testing variants.
+  2. **FAVORITES-ONLY** (`edges=(0.5,0.6,0.7,0.8,0.9,1.0)`, i.e. the model is fit + trades ONLY inside the
+     favorite half of the price range, matching EXP-002's ORIGINAL 2026-06-29 hypothesis band):
+     **18 trades, net -$841.11** (negative). Hit rate 83.3% (15/18) — high, as expected once longshot
+     convexity is removed — but the wins are individually small (favorites near 0.5-1.0 pay a small
+     spread even when right) while enough losses land large enough to net negative. F10 correctly reports
+     "no positive edge to assess" (an honest degenerate case, not a fabricated non-fragile pass). F11:
+     `insufficient_data` (N=18 < the 30-trade significance floor) — **this is NOT a refutation, it is
+     "no edge, and too little data to say more."** Directionally, restricting to favorites does NOT
+     recover a positive result either — the mechanism finds no exploitable edge at ANY price level on
+     this corpus, not just in the longshot buckets.
+  3. **DROP-EXTREMES** (`edges=(0.1,...,0.9)`, i.e. exclude only price<0.10 and price>0.90, keep the
+     broad middle including moderate longshots): **135 trades, net +$13,584.50** — smaller than baseline
+     but still positive nominally. Still **F10 fragile** (horizon: 100% from '3-7d'; confidence: 151% from
+     the '10-25%' bucket — note this is `regime_slice`'s OWN fixed confidence-bucketing, independent of
+     the fitting edges, and it still concentrates in a low-but-not-extreme band) and still **F11
+     `indistinguishable_from_zero`** (CI [-8112.25, 38869.24], hit rate 24.44% — statistically
+     indistinguishable from the baseline's 25.64%). **Conclusion: excluding only the most extreme deciles
+     does NOT fix the failure mode — it persists broadly across the sub-0.5 price range, not just in the
+     <10%/>90% tails.**
+  4. **Per-trade notional concentration cap** (post-hoc: cap each `BacktestTrade.budget_usd` at 10%/5%/2%
+     of the $186,813.83 total capital deployed across baseline's 472 trades, scale `pnl_usd`/`payout_usd`
+     proportionally — CAVEAT disclosed: this linear scaling ignores that a smaller real order would ALSO
+     pay less market-impact cost, so it likely UNDERSTATES any real benefit of capping, a conservative
+     approximation, not a re-run of the actual sizing engine): **at EVERY tested threshold, 0 of 472
+     trades exceeded the cap** — the largest single trade's `budget_usd` is already well under 2% of
+     total deployed capital (~$395.79 mean trade size vs. a $3,736.28 2%-cap floor). **A per-trade
+     notional cap is a complete NO-OP on this corpus.** This is the headline negative finding of this
+     run: the single-market-57%/category-134% concentration Run 20/21 flagged is NOT caused by one or a
+     few oversized individual bets — it is caused by MANY separate, modestly-sized trades that are all
+     effectively betting on the SAME underlying correlated event/entity cluster (e.g. multiple
+     candidate-outcome markets within one election, or repeated same-topic contracts). **A per-trade cap
+     cannot fix cross-trade correlation; only a per-cluster/per-entity or per-category EXPOSURE cap
+     (limiting total capital across all trades that share an underlying correlated driver) could address
+     it** — a materially harder design problem than "cap the position size," and NOT the same lever Run 21
+     characterized as the "lower-cost, higher-certainty next step." This raises, not lowers, the cost
+     estimate for that recommended redesign.
+- Calibration (Brier / reliability): crowd_brier=0.0886 on this corpus (identical to Run 20 — same
+  corpus). No separate alpha calibration re-run; F10/F11 are the load-bearing gates, unchanged
+  methodology from every prior EXP-002/003/005 run.
+- Costs modeled: yes, unmodified `cost_model.py` via `walk_forward` for variants 1-3 (already net of
+  fees+slippage); variant 4's linear pnl-scaling is a post-hoc approximation on top of already-cost-net
+  per-trade PnL (see caveat above — conservative, not a re-run of sizing).
+- Verdict: **tested — neither candidate mitigation produces a validated edge; a new, more precise
+  redesign requirement surfaces (cross-trade correlation exposure cap, not a per-trade notional cap).**
+- Why / new external research this run (verified, not just WebSearch-synthesized): searched for recent
+  favorite-longshot-bias literature to understand WHY the bucket-calibration family keeps finding
+  "edge" concentrated in low-price buckets with a hit rate far below 50%. Found and **directly verified**
+  (via `WebFetch` of `ideas.repec.org/p/pra/mprapa/126350.html`, the primary abstract page — reachable,
+  unlike SSRN which 403'd again this run, consistent with every prior run) Karl Whelan's "Makers and
+  Takers: The Economics of the Kalshi Prediction Market" (2026 working paper, **N > 300,000 real Kalshi
+  contracts**, transaction-level data): **"low-price contracts win far less often than required to break
+  even, while high-price contracts win more often and yield small positive returns"** — a clean, primary-
+  verified statement of classical favorite-longshot bias (crowd systematically OVERPRICES longshots,
+  slightly UNDERPRICES favorites). This is Kalshi-only (the abstract explicitly contains no Polymarket
+  discussion, confirmed via a second direct fetch) — **NOT verified as transferring to Polymarket**, and
+  a WebSearch-synthesized claim that "on Polymarket specifically, low-probability outcomes are overpriced"
+  could NOT be traced to any specific primary source this run (treated as unverified synthesis, per this
+  project's standing WebFetch-over-summarization discipline — the exact failure mode Run 21 caught and
+  named a process risk). **If this mechanism DOES transfer to Polymarket even partially, it plausibly
+  EXPLAINS (not proves) the bucket-calibration family's specific failure shape across all 3 real-corpus
+  tests to date:** a static empirical-rate model fit on a longshot price bucket is measuring a FEW
+  in-sample YES resolutions against a crowd price that (per Whelan) is already the RIGHT side of a real,
+  replicated structural bias (longshots overpriced/less likely to pay than their price implies) — so an
+  apparent "the fitted rate exceeds the crowd price" signal in that bucket is more likely in-sample noise
+  reverting OOS than a real inefficiency, consistent with the observed sub-50% (often far-sub-50%) hit
+  rates. This is offered as a plausible CAUSAL MECHANISM for an already-observed empirical pattern, not
+  new proof of anything — the favorites-only test above (finding 2) shows that simply flipping to the
+  favorite side does NOT recover a positive/significant result either (at least not at N=18), so if a
+  favorite-side edge exists on Polymarket specifically, this project has not yet found it.
+- How this run's findings could be wrong (adversarial pre-mortem on THIS run's own conclusions):
+  1. The favorites-only N=18 result is far too small to conclude "no edge in favorites" — it is
+     `insufficient_data`, not a refutation; a materially larger favorites-only corpus (a dedicated
+     favorite-band fetch across more categories/time, not just Politics) could still show a real,
+     significant, Whelan-consistent edge that this small sample simply can't detect.
+  2. The linear pnl-scaling approximation in the concentration-cap test could be wrong in either
+     direction: it ignores reduced market-impact cost at smaller size (biases toward UNDERSTATING the cap's
+     benefit) but also ignores that Kelly's own optimal-size logic would have picked DIFFERENT trades
+     entirely under a binding cap from decision time forward (a true re-run with the cap wired INTO the
+     sizing engine, not applied post-hoc, could behave differently in either direction) — this is a
+     sensitivity analysis, not a faithful re-simulation.
+  3. This run only tested the Politics corpus (reusing Run 20's exact pull for a clean apples-to-apples
+     comparison); the "many small correlated trades, not one big bet" finding about WHY a per-trade cap is
+     a no-op has not been confirmed on the Sports (EXP-005) or all-category (EXP-002) corpora — it could be
+     Politics-specific (e.g. many correlated same-election candidate markets), not a general property of
+     the mechanism.
+  4. Whelan's paper is Kalshi-only; treating it as an explanatory mechanism for a Polymarket-only empirical
+     result (this project trades no real Kalshi corpus yet) is an analogy, not a same-venue confirmation —
+     flagged explicitly, not silently assumed.
+- Self-validation (sources this run):
+  - Corpus + backtest results: one live-fetched, pre-registered run this session (unmodified repo code —
+    `polymarket_history_fetcher.py`, `walk_forward.py`, `calibration_bucket_strategy.py`,
+    `regime_slice.py`, `bootstrap_oos_significance.py` — same modules `validate_real_oos.py` imports, just
+    invoked directly + parameterized via the EXISTING `edges=` keyword, no new strategy code written or
+    committed); raw HistoricalMarket corpus cached to a research-agent scratch path (not committed) for
+    reproducibility within this session. Output not committed as raw data (per this project's established
+    pattern — RESEARCH_MEMORY entries summarize, not embed, raw research-agent script output).
+  - Whelan paper: `WebFetch` of `ideas.repec.org/p/pra/mprapa/126350.html` (primary abstract page),
+    fetched twice (once for the core claim, once to confirm the absence of a Polymarket discussion and
+    check for a quantitative magnitude/cost-survival claim — neither present in the abstract; the full PDF
+    at `mpra.ub.uni-muenchen.de` was not fetched this run). SSRN (the Krause CPI-market favorite-longshot
+    paper found earlier in this same search sweep) remains 403-blocked, consistent with every prior run —
+    not used as a source, logged only as an unverifiable lead.
+  - Egress: direct `curl`/fetch from this session against gamma-api/clob/data-api.polymarket.com (all 200,
+    consistent with every run since 2026-07-04); dune.com not re-tested this run (no new lead needed it).
+- Verdict: **edge-not-proven** (mitigation-testing + research; RECOMMEND-only, no ROADMAP steer — no
+  high-confidence validated edge exists to justify one).
+
+### Recommendation (RECOMMEND-only — not a ROADMAP steer)
+  The two concrete, cheap variants of Run 21's "concentration-capped/recency-weighted redesign"
+  suggestion have now been tested and neither rescues the mechanism: a price-range restriction either
+  kills the PnL (favorites-only) or fails to fix the significance/fragility gates (drop-extremes), and a
+  PER-TRADE notional cap is a structural no-op because the concentration is cross-trade/correlated, not
+  single-bet. The highest-value next step for this family, if pursued further, is narrower and harder
+  than "cap the trade size": a per-CLUSTER (correlated-entity/event-group) exposure cap, which needs a
+  way to detect that multiple traded markets share an underlying driver (e.g. same election, same
+  underlying asset) — a genuine factory-build item, not a parameter tweak, and NOT yet recommended here
+  as ready-to-build (no falsifiable spec, no min-N, no OOS plan drafted this run). Absent that, the two
+  open non-bucket-family candidates from Run 20/21 remain the better use of future OOS-testing effort:
+  EXP-006 (political price-reversal, now cheaper to build per Run 21's finding) and the still-untested B8
+  cross-venue coherence direction (matcher + backtest built #179, never run against a real dual-venue
+  corpus). Binding constraint STANDS: no validated real-money OOS edge exists on any tested mechanism to
+  date.
