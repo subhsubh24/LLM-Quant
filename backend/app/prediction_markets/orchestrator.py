@@ -1660,6 +1660,26 @@ async def start_orchestrator(
     await _orchestrator.start()
 
 
+def apply_persisted_strategy_states(scanner: PredictionMarketScanner) -> None:
+    """Apply the persisted per-strategy enable/disable set (ROADMAP B6) to ``scanner``.
+
+    Best-effort: a persistence hiccup leaves all strategies enabled (fail-OPEN). A disabled
+    strategy is a soft operational preference, not a safety control — the loss caps / kill
+    switch / live gate remain the hard gates, so failing open is the safe default for a paper
+    bot. Only names matching a currently-registered strategy take effect (``set_strategy_enabled``
+    rejects unknown names), so a stale persisted name for a strategy that is no longer built is
+    silently ignored rather than shadowing anything.
+    """
+    try:
+        from .strategy_enable_store import StrategyEnableStore
+        disabled = StrategyEnableStore().load_disabled()
+        applied = [n for n in sorted(disabled) if scanner.set_strategy_enabled(n, False)]
+        if applied:
+            logger.info(f"[ORCHESTRATOR] Applied persisted disabled strategies (B6): {applied}")
+    except Exception as e:
+        logger.warning(f"[ORCHESTRATOR] Could not apply persisted strategy states (B6): {e}")
+
+
 def _build_default_scanner() -> PredictionMarketScanner:
     """Build a scanner with the validated strategies enabled.
 
@@ -1733,6 +1753,10 @@ def _build_default_scanner() -> PredictionMarketScanner:
             "[ORCHESTRATOR] Unvalidated strategies (whale copy-trading, weather arb, "
             "wallet-behavior divergence) gated OFF (ENABLE_UNVALIDATED_STRATEGIES not set)."
         )
+
+    # ROADMAP B6: honor the operator's persisted per-strategy enable/disable choices so a
+    # disabled strategy stays disabled across restarts (applied to the TRADING scanner).
+    apply_persisted_strategy_states(scanner)
 
     logger.info(f"[ORCHESTRATOR] Auto-configured scanner with {len(scanner.strategies)} strategies")
     return scanner

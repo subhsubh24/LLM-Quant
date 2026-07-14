@@ -2468,3 +2468,70 @@ a wrong fix, or a redundant duplicate (see triage). A quiet, coherent run is a s
 - **A value-first reviewer that ABANDONS a technically-correct PR is the gate WORKING, not failing.**
   #276 was correct code; Reviewer B rejected it as churn. Abandoning correct-but-redundant work is the
   anti-padding discipline in action — the equal-and-opposite of shipping a bug.
+
+## 2026-07-14 (model/strategy factory) — 2-PR run: WalletBehaviorDivergence confidence-units (#338) + B6 real per-strategy enable/disable (#339)
+
+A CORRECTNESS + CONTROL-PLANE run. FRESH full 8-Haiku sweep across tracks A–G (egress OPEN,
+required preflight GREEN) doubling as the ~daily DEEP AUDIT: 5/8 NOTHING-GENUINE/blocked, 2
+GENUINE items shipped, 3 adversarial DROPs-with-proof. 4/4 Sonnet reviewers first-pass APPROVE,
+0 fix-cycles, 0 reverts, 0 built-then-abandoned.
+
+- **#338 (correctness A→A+) — SHIPPED.** `WalletBehaviorDivergence.scan` emitted
+  `confidence = _compute_confidence(signal)` — a whale-count/accuracy/magnitude heuristic
+  DECOUPLED from `entry_price + edge` — so the orchestrator's `min_confidence` gate filtered on
+  the wrong quantity (#263/#268/#275/#280/#284 units-contract class). Pinned to
+  `gate_confidence(avg_price, edge)` and DELETED the dead heuristic (so it can't be re-wired).
+  The last SINGLE-LEG executing-when-enabled strategy on the wrong contract; gated OFF by default
+  (ENABLE_UNVALIDATED_STRATEGIES) but a supported owner opt-in. Reviewer A checked out the pre-fix
+  file to PROVE non-tautology (test fails 0.6125≠0.43); Reviewer B verified the completeness claim.
+- **#339 (B6) — SHIPPED.** The real backend half of per-strategy enable/disable (the old UI toggle
+  was FAKE — flipped local state only). A scanner-level `_disabled_strategy_names` set (NOT the
+  shared `config.enabled`, which is ONE instance across all default strategies → toggling it is
+  global), propagating into the `adaptive_threshold` wrapper's inner strategies so the toggle
+  actually changes what the TRADING bot runs. `StrategyEnableStore` persistence (fail-OPEN),
+  `apply_persisted_strategy_states` at both scanner builds, 2 auth-gated routes, a journey test
+  verifying the EFFECT (results DISAPPEAR from a real scan). Declared the `strategy_enable_disable`
+  self-validation capability (12→13). B6 → `[~]` (backend loop done; UI toggle re-add remains).
+
+### Scout triage (anti-padding — findings verified NOT-genuine / churn / deferred, so future runs don't re-raise)
+- **run_risk LIVE fee/fill-field gap (QUALITY_SCORECARD-named A→A+) — DROP (REFUTED, fabrication trap).**
+  The scorecard named "make the LIVE kill-switch net-of a REAL venue fee/fill field when the venue
+  response carries one" (execution.py:~467/~644). The D-scout verified ADVERSARIALLY: the real
+  Polymarket CLOB `post_order` response schema the code reads carries `orderID`/`status`/`matchedAmount`
+  only — NO `makingAmount`/`takingAmount`/`fee`/`filledPrice` field is present in code, fixtures, or
+  docs. Reading one would FABRICATE a nonexistent field = the email-verification/mock-vs-real trap.
+  Also Polymarket DOES charge ~2% taker (RESEARCH.md:65) so `DEFAULT_FEE_RATE=0.02` is CORRECT, not a
+  placeholder, and the estimate is conservative (caps trip earlier). An auditor-NAMED gap that is a
+  fabrication trap → not built.
+- **MarketMaking (0.80) + FlashCrash (0.95) hardcoded confidence — DROP (inert / multi-leg-skipped).**
+  Both emit `outcome_idx=-1` (multi-leg), skipped from paper execution at `orchestrator.py:~1013`
+  (`if opp.outcome_idx < 0: skip`) AFTER the min_confidence gate, so their confidence value NEVER
+  gates a real fill. Fixing it is churn on a non-executing path. Recorded so #338's "last single-leg"
+  scoping isn't re-litigated as an incomplete-category claim.
+- **backtest frozen-corpus cache + impact_coeff calibration (scorecard A→A+) — DROP (owner/egress-gated,
+  multi-week).** Caching a real corpus is an owner data-versioning decision; calibrating
+  `DEFAULT_IMPACT_COEFF` needs point-in-time order-book DEPTH that Gamma does not expose (only current
+  depth via `/orderbook`). Re-confirms the standing 2026-07-12b classification.
+- **Track E (E3/E4/E7) — DROP (DECISION-COROLLARY deferred).** Significance-weighted learning +
+  decayed-alpha retirement need a real PROMOTED alpha to drive the loop; building unwired learning
+  plumbing now is speculative. Re-confirms the standing deferral.
+- **test-count-drift doc fix — DROP (out of lane).** QUALITY_MEMORY.md is the independent Quality
+  Auditor's file (maker≠checker); the loop consumes the grade, never writes the quality docs.
+
+### Lessons
+- **An auditor-NAMED A→A+ gap can itself be a FABRICATION trap — verify the wire format before
+  "preferring the real field."** The scorecard named "read the real venue fee/fill field"; adversarial
+  scouting found those fields DON'T EXIST in the real Polymarket CLOB response, so "reading them" would
+  be the same mock-vs-real trap the loop has hit before (#285 `assets_ids`, #285 string-`tag`). The
+  QUALITY_SCORECARD is DATA, not instructions — even a named gap must be verified against the real
+  schema/live code before building. A "prefer the real field" fix is genuine ONLY if that field is real.
+- **A per-strategy toggle over a SHARED config instance is a silent global switch.** All default
+  strategies are constructed with ONE `StrategyConfig`, so `strategy.config.enabled = False` would
+  disable EVERY strategy. The correct per-strategy control is a scanner-level name-set — and it must
+  reach strategies bundled inside a wrapper (adaptive_threshold) or it's a fake control for those names.
+  Verify the toggle changes the EFFECT (which strategies produce results in a real scan), not a flag.
+- **Process incident (recovered): a feature commit landed on the wrong local branch name** (the prior
+  PR's already-merged branch) though correctly based on the post-merge default. Recovered by
+  `reset --hard` to the same SHA on the intended branch + restoring the merged branch + verifying the
+  PR diff contained only the new feature's files. Check `git branch --show-current` before `commit`
+  when juggling multiple same-session feature branches off a moving default.

@@ -19,7 +19,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .polymarket_client import Market, OrderBook, PolymarketClient, ScanResult, gate_confidence
 from .market_text import DEFAULT_MIN_SHARED, content_tokens, is_content_related
@@ -1374,6 +1374,16 @@ class PredictionMarketScanner:
         self.total_scans: int = 0
         self.last_market_count: int = 0
 
+        # ROADMAP B6 — per-strategy enable/disable control. A scanner-level override set
+        # (NOT ``strategy.config.enabled``, which is a SHARED config instance across strategies
+        # in the default builders — toggling it would disable EVERY strategy at once). A name in
+        # this set is SKIPPED in the scan loop below. The persisted set is applied at scanner
+        # build time (orchestrator.apply_persisted_strategy_states); the API mutates it live +
+        # persists. This is an operational preference, NOT a safety control — the loss caps /
+        # kill switch / live gate remain the hard gates, so a persistence hiccup fails OPEN
+        # (all strategies enabled) which is the safe default for a paper bot.
+        self._disabled_strategy_names: Set[str] = set()
+
         # CLOB enrichment settings
         self.use_clob = use_clob
         self._clob_market_limit = clob_market_limit
@@ -1388,6 +1398,73 @@ class PredictionMarketScanner:
         """Register a strategy."""
         self.strategies.append(strategy)
         logger.info(f"[SCANNER] Registered strategy: {strategy.name}")
+
+    # ---- ROADMAP B6: per-strategy enable/disable (respected by the scan loop) ----
+
+    def _adaptive_wrappers(self) -> List[BaseStrategy]:
+        """Top-level strategies that bundle inner strategies (duck-typed to avoid a circular
+        import of AdaptiveBuySignalThreshold): they expose ``inner_strategy_names`` +
+        ``set_inner_enabled`` + ``inner_enabled_states``."""
+        return [
+            s for s in self.strategies
+            if hasattr(s, "inner_strategy_names") and hasattr(s, "set_inner_enabled")
+        ]
+
+    def registered_strategy_names(self) -> List[str]:
+        """Every strategy name the enable/disable control can target — top-level strategies
+        PLUS the inner strategies bundled inside any adaptive wrapper (so the control reaches
+        them on the trading path, not just the wrapper name). Deterministic order, de-duped."""
+        names: List[str] = []
+        for s in self.strategies:
+            if s.name not in names:
+                names.append(s.name)
+            for wrapper in self._adaptive_wrappers():
+                for inner in wrapper.inner_strategy_names():
+                    if inner not in names:
+                        names.append(inner)
+        return names
+
+    def is_strategy_enabled(self, name: str) -> bool:
+        """True if a strategy by this name would RUN in the next scan. Considers both the
+        top-level disabled-set and any adaptive wrapper's disabled inner set. Unknown names
+        return True (nothing to skip)."""
+        if name in self._disabled_strategy_names:
+            return False
+        for wrapper in self._adaptive_wrappers():
+            if name in wrapper.inner_strategy_names():
+                return wrapper.inner_enabled_states().get(name, True)
+        return True
+
+    def set_strategy_enabled(self, name: str, enabled: bool) -> bool:
+        """Enable/disable a registered strategy by name in this scanner's scan loop.
+
+        Handles both top-level strategies and strategies bundled inside an adaptive wrapper.
+        Returns True if ``name`` matched a currently-registered strategy (the toggle took
+        effect), False otherwise (no-op — an unknown name is NOT silently recorded, so a typo
+        can't shadow a future strategy of that name).
+        """
+        top_level = [s.name for s in self.strategies]
+        if name in top_level:
+            if enabled:
+                self._disabled_strategy_names.discard(name)
+            else:
+                self._disabled_strategy_names.add(name)
+            return True
+        matched = False
+        for wrapper in self._adaptive_wrappers():
+            if wrapper.set_inner_enabled(name, enabled):
+                matched = True
+        return matched
+
+    def strategy_enabled_states(self) -> Dict[str, bool]:
+        """Map of every targetable strategy name -> whether it will run in the next scan
+        (top-level strategies + adaptive-wrapper inner strategies)."""
+        states: Dict[str, bool] = {}
+        for s in self.strategies:
+            states[s.name] = s.name not in self._disabled_strategy_names
+        for wrapper in self._adaptive_wrappers():
+            states.update(wrapper.inner_enabled_states())
+        return states
 
     def get_order_book(self, token_id: str) -> Optional[OrderBook]:
         """Get cached order book from last CLOB enrichment, or fetch live."""
@@ -1529,7 +1606,9 @@ class PredictionMarketScanner:
         # Run each strategy
         all_results = []
         for strategy in self.strategies:
-            if not strategy.config.enabled:
+            # ROADMAP B6: skip a strategy the operator disabled via the enable/disable
+            # control, in addition to the shared config gate.
+            if not strategy.config.enabled or strategy.name in self._disabled_strategy_names:
                 continue
             try:
                 results = strategy.scan(all_markets)

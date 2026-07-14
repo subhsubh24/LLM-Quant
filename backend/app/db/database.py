@@ -102,6 +102,7 @@ def init_db():
     from ..prediction_markets import audit_log as _pm_audit  # noqa: F401 — durable audit log (G3)
     from ..prediction_markets import strategy_registry_store as _pm_reg  # noqa: F401 — alpha lifecycle (B3)
     from ..prediction_markets import executor_state_store as _pm_state  # noqa: F401 — kill-switch/PnL durability
+    from ..prediction_markets import strategy_enable_store as _pm_enable  # noqa: F401 — per-strategy enable/disable (B6)
     SQLModel.metadata.create_all(engine)
 
     # Seed the default portfolio (id=1) so order/position inserts satisfy their portfolio FK.

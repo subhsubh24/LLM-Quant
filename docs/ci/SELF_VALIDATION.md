@@ -66,6 +66,14 @@ SELF_VALIDATION:
       active: true
       ci_validatable: true             # the default-closed DENY, the dev-opt-out OPEN, AND the enforced-token decision are all tested without any secret; the token only sets the credential
       status: degrades_safely            # absent token => CLOSED (deny), the SAFE degradation; set => enforced; BACKEND_AUTH_DISABLED => open (dev only). Owner activates (OA-14).
+    - id: strategy_enable_disable
+      desc: "per-strategy enable/disable control (ROADMAP B6): auth-gated POST /prediction-markets/strategies/{name}/{enable,disable} toggles which strategies the scan loop runs, PERSISTED (StrategyEnableStore) + respected across restarts; reaches both top-level strategies and adaptive-wrapper inner strategies (not a fake control). No new credential; a persistence hiccup fails OPEN (all enabled) — operational preference, not a safety gate"
+      validates_via: "test_strategy_enable_disable.py — drives a real offline scanner.scan() and asserts a disabled strategy's results DISAPPEAR (top-level AND wrapped-inner), that an unknown name is a rejected no-op, that the disabled set persists+rehydrates on a fresh StrategyEnableStore (in-memory SQLite), and that apply_persisted_strategy_states re-applies it at scanner build; PLUS route-level tests in test_backend_auth_fastapi.py exercise the two HTTP endpoints directly — 401 tokenless-when-token-set (guard before handler), 422 name-path max_length bound, and 404 on an unknown strategy name (rejected before any persist)"
+      mode: in_process_deterministic   # in-memory SQLite; verifies the EFFECT (which strategies run), not the message
+      requires_env: []                  # optional DATABASE_URL for durable persist; falls back to local/in-memory
+      active: true
+      ci_validatable: true             # exercised end-to-end against a fake client + in-memory SQLite; no secret needed
+      status: validated
     - id: live_trading_path
       desc: "real-order placement on Polymarket (the gated live path)"
       validates_via: "runtime_harness asserts the live gate + kill switch BLOCK real orders deterministically"
@@ -141,7 +149,7 @@ SELF_VALIDATION:
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 12
+    capabilities_total: 13
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
