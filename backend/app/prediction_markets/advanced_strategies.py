@@ -1400,10 +1400,37 @@ class AdaptiveBuySignalThreshold(BaseStrategy):
         self._inner_strategies: List[BaseStrategy] = []
         # Track which markets we've already seen, to avoid duplicate signals
         self._seen_market_ids: Set[str] = set()
+        # ROADMAP B6: inner strategies the operator disabled. Consulted in ``scan`` so the
+        # per-strategy enable/disable control reaches the strategies this wrapper bundles
+        # (near_certainty / cross_market_arb / no_position_scanner) on the trading path, not
+        # just the top-level ones — otherwise disabling a wrapped strategy would be a fake
+        # control that never changes what the bot runs.
+        self._disabled_inner_names: Set[str] = set()
 
     @property
     def name(self) -> str:
         return "adaptive_threshold"
+
+    def inner_strategy_names(self) -> List[str]:
+        """Names of the strategies this adaptive wrapper bundles."""
+        return [s.name for s in self._inner_strategies]
+
+    def set_inner_enabled(self, name: str, enabled: bool) -> bool:
+        """Enable/disable a wrapped inner strategy by name. Returns True if it matched."""
+        if name not in self.inner_strategy_names():
+            return False
+        if enabled:
+            self._disabled_inner_names.discard(name)
+        else:
+            self._disabled_inner_names.add(name)
+        return True
+
+    def inner_enabled_states(self) -> Dict[str, bool]:
+        """Map of inner strategy name -> whether it will run in the next scan."""
+        return {
+            s.name: s.name not in self._disabled_inner_names
+            for s in self._inner_strategies
+        }
 
     def add_inner_strategy(self, strategy: BaseStrategy):
         """Add a strategy whose results will be filtered through adaptive thresholds."""
@@ -1511,6 +1538,9 @@ class AdaptiveBuySignalThreshold(BaseStrategy):
         # Collect candidates from all inner strategies
         all_candidates: List[ScanResult] = []
         for strategy in self._inner_strategies:
+            # ROADMAP B6: skip an inner strategy the operator disabled.
+            if strategy.name in self._disabled_inner_names:
+                continue
             try:
                 candidates = strategy.scan(markets)
                 all_candidates.extend(candidates)

@@ -167,6 +167,14 @@ def _get_prediction_scanner():
                 "divergence) gated OFF (ENABLE_UNVALIDATED_STRATEGIES not set)."
             )
 
+        # ROADMAP B6: honor persisted per-strategy enable/disable choices on the preview
+        # scanner too, so GET /strategies and POST /scan reflect the operator's selection.
+        try:
+            from ..prediction_markets.orchestrator import apply_persisted_strategy_states
+            apply_persisted_strategy_states(_prediction_scanner)
+        except Exception as e:
+            logger.warning(f"Could not apply persisted strategy states (B6): {e}")
+
     return _prediction_scanner
 
 
@@ -353,7 +361,8 @@ async def get_prediction_strategies():
         "strategies": [
             {
                 "name": s.name,
-                "enabled": s.config.enabled,
+                # ROADMAP B6: effective run state = shared config gate AND not operator-disabled.
+                "enabled": s.config.enabled and scanner.is_strategy_enabled(s.name),
                 "dry_run": s.config.dry_run,
                 "positions": len(s.positions),
                 "total_pnl": s.total_pnl,
@@ -369,6 +378,68 @@ async def get_prediction_strategies():
         ],
         "recent_opportunities": len(scanner.scan_history),
     }
+
+
+def _apply_strategy_toggle(name: str, enabled: bool) -> dict:
+    """Persist + apply a per-strategy enable/disable across live scanners (ROADMAP B6).
+
+    Validates ``name`` against the preview scanner's targetable strategies (top-level +
+    adaptive-wrapper inner strategies), updates the persisted disabled set (the source of
+    truth across restarts), and applies the change LIVE to the preview scanner and — if the
+    trading orchestrator has been built with a scanner — its scanner too. Raises 404 if the
+    name is not a registered strategy (a typo can't be silently persisted).
+    """
+    scanner = _get_prediction_scanner()
+    if name not in scanner.registered_strategy_names():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Unknown strategy '{name}'. Registered: "
+                f"{scanner.registered_strategy_names()}"
+            ),
+        )
+
+    # Persist the updated disabled set first (source of truth across restarts).
+    from ..prediction_markets.strategy_enable_store import StrategyEnableStore
+    store = StrategyEnableStore()
+    disabled = store.load_disabled()
+    if enabled:
+        disabled.discard(name)
+    else:
+        disabled.add(name)
+    persisted = store.save_disabled(disabled)
+
+    # Apply live to the preview scanner (drives GET /strategies + POST /scan).
+    scanner.set_strategy_enabled(name, enabled)
+
+    # Apply live to the TRADING scanner if the orchestrator has been built with one, so a
+    # running bot honors the change immediately (not only after the next restart's rebuild).
+    try:
+        from ..prediction_markets.orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        if getattr(orch, "scanner", None) is not None:
+            orch.scanner.set_strategy_enabled(name, enabled)
+    except Exception as e:
+        logger.warning(f"Could not apply strategy toggle to trading scanner (B6): {e}")
+
+    return {
+        "strategy": name,
+        "enabled": enabled,
+        "persisted": persisted,
+        "states": scanner.strategy_enabled_states(),
+    }
+
+
+@router.post("/prediction-markets/strategies/{name}/enable", dependencies=_MUTATING_AUTH)
+async def enable_prediction_strategy(name: str = Path(..., min_length=1, max_length=100)):
+    """Enable a strategy in the scan loop (persisted; respected across restarts). ROADMAP B6."""
+    return _apply_strategy_toggle(name, True)
+
+
+@router.post("/prediction-markets/strategies/{name}/disable", dependencies=_MUTATING_AUTH)
+async def disable_prediction_strategy(name: str = Path(..., min_length=1, max_length=100)):
+    """Disable a strategy in the scan loop (persisted; respected across restarts). ROADMAP B6."""
+    return _apply_strategy_toggle(name, False)
 
 
 # ============ Prediction Markets — Execution ============
