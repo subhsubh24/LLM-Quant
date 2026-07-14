@@ -13,7 +13,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: 2026-07-12 (Research Run 20 — EXP-003 TESTED (tag_id=2 Politics, N=1,369) -- 472 trades, +$28,815.49 OOS, but F11 indistinguishable-from-zero (hit_rate 25.6%) + F10 fragile (134% PnL in one category bucket, 57% in one market) -- edge-not-proven, joining EXP-002/EXP-005; the bucket-calibration family is now non-robust on 3 independent real per-category corpora -- a new, structurally-different candidate (political price-reversal after hype spikes) logged as EXP-006, not yet tested)
+  as_of: '2026-07-13 (Research Run 21 -- EXP-006 scoping: the "needs a new intraday fetcher" blocker is OVERSTATED -- PolymarketHistoryFetcher.fetch_price_history already returns the full raw CLOB tick series, LIVE-VERIFIED this run at fidelity=1 (1-minute bars, 5,760 real ticks, 60s spacing) against the Trump-2024 election token spanning the July 13 2024 assassination-attempt window. That single spike did NOT reverse (0.595 -> 0.685 at +24h -> 0.705 at +48h), a real N=1 caution (not a test) that a fade-the-spike mechanism needs the per-trade concentration cap from day one. Also caught + did NOT log a WebSearch-synthesis-fabricated "Iran Ceasefire" statistic (its cited source contained no such example). No new EXP proposed; RECOMMEND-only priority set for the factory: build the concentration-capped/recency-weighted CalibrationBucketStrategy redesign first (testable on existing EXP-002/003/005 corpora, no new data-access work), EXP-006 second (still needs a detection+labeling pipeline). Binding constraint unchanged: no validated real-money OOS edge -- the bucket-calibration family remains non-robust on 3 independent real per-category corpora (EXP-002/EXP-005/EXP-003).)'
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -638,6 +638,32 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "REFINES the Run 20 item below, does not supersede it (Research Run 21, 2026-07-13): Run 20 offered
+      two next steps in no stated order (a concentration-capped/recency-weighted CalibrationBucketStrategy
+      redesign, or scoping EXP-006). This run scoped EXP-006 further and found its stated blocker
+      overstated: `PolymarketHistoryFetcher.fetch_price_history` already fetches the full raw CLOB tick
+      series (not just one snapshot) and was LIVE-VERIFIED this run to support `fidelity=1` (real
+      1-minute bars, 5,760 ticks at exact 60s spacing, fetched against the Trump-2024 election token
+      across the July 13 2024 assassination-attempt window) — so EXP-006's remaining build is a
+      detection+labeling pipeline on an already-fetchable series, not a wholly new fetcher. Despite that
+      good news, priority still favors building the concentration-capped redesign FIRST: it needs zero
+      new data-access work (testable directly on the EXP-002/003/005 corpora already fetched and
+      characterized) vs. EXP-006 which still needs a new pipeline built + its own pre-registered OOS run.
+      A live single-case illustration this run (N=1, explicitly not a test) is a concrete reason any
+      EXP-006 build must ship the per-trade concentration cap from day one: the highest-salience 2024
+      political spike (the assassination attempt) did NOT revert — it persisted (0.595->0.685 at
+      +24h->0.705 at +48h) — the opposite of the aggregate weak-reversal finding EXP-006 is built on,
+      consistent with large information-laden spikes behaving differently from the many small spikes
+      likely dominating an aggregate daily-serial-correlation statistic. Also this run: a WebSearch
+      synthesis invented a precisely-quantified \"Iran Ceasefire market\" spike/reversal example
+      (\"$280M volume... 35% to 68% in eight minutes... settled at 58%\") that its own cited DL News
+      source does not contain anywhere in its text (directly re-fetched and checked, not re-summarized) —
+      caught before being logged as data; NOT used as evidence for or against EXP-006. Filed as a
+      process-hardening note: a search tool's own synthesized answer can fabricate specific statistics
+      not present in any of its listed sources, so every quantified claim destined for RESEARCH_MEMORY
+      needs a direct fetch of its actual cited source, not just a plausible-sounding summary. No new
+      EXP-00N proposed; binding constraint (no validated real-money OOS edge) STANDS. Full detail:
+      RESEARCH_MEMORY 2026-07-13 (Research Run 21)."
     - "SUPERSEDES the Run 19 item below (DONE, not just recommended — Research Run 20, 2026-07-12):
       Run 19 recommended applying the `tag_id` lever to EXP-003/Politics. This run did that (`tag_id=2`
       via `GET /tags/slug/politics`, one pre-registered run, N=1,369) — EXP-003 is now TESTED, not
