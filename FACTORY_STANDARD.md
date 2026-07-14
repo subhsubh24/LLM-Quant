@@ -189,8 +189,15 @@ every UI surface in every factory; product-specific brand/voice/tokens live in V
   concrete best-in-class examples, not abstract adjectives. Keep a curated, per-product reference set
   of best-in-class screens for each first-impression surface, in-repo at `docs/design/REFERENCES.md`
   (real products, organized by surface — onboarding, landing, paywall, the core loop, nav, cards).
-  Design each surface AGAINST that set — "adapt THIS pattern to our brand," NEVER copy — and where a
-  Mobbin / inspiration-grounding MCP is available in the run environment, ground against it too. The
+  Design each surface AGAINST that set — "adapt THIS pattern to our brand," NEVER copy. When the Mobbin
+  MCP is connected in the run environment (the factory routines), use it as the PRIMARY live grounding
+  source, not a fallback: (1) query `mobbin_search_screens` with a natural-language pattern for the
+  surface (onboarding / paywall / core-loop / empty-state), or `mobbin_quick_search` →
+  `mobbin_get_app_screens` / `mobbin_get_app_flows` for a specific reference app, with `screen_patterns`
+  / `screen_keywords` to target a taxonomy or OCR match; (2) study the top results and adapt to our brand
+  tokens; (3) CAPTURE the chosen exemplar — app + Mobbin link + the ONE specific pattern to steal — back
+  into `docs/design/REFERENCES.md` so the win COMPOUNDS (§48); (4) §40 vision-verify the rendered result
+  against it. Where Mobbin is absent, the in-repo REFERENCES.md set remains the guarantee. The
   set is a LIVING asset: when the DEEP AUDIT (§10) finds a surface that clears the slop-blocklist yet
   still feels average, the fix ADDS the exemplar it should have aimed at. Build one surface/component
   at a time against its reference — never a whole screen from a single prompt.
