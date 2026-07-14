@@ -41,6 +41,7 @@ from app.prediction_markets.strategies import (
     WeatherForecast,
     WhaleCopyTradingStrategy,
 )
+from app.prediction_markets.advanced_strategies import WalletBehaviorDivergence
 from app.prediction_markets.orchestrator import KellyConfig, size_from_scan_result
 
 
@@ -176,3 +177,53 @@ def test_whale_confidence_is_fair_value_not_consensus():
     r.confidence = 0.90
     bet_prefix, _ = size_from_scan_result(r, bankroll=1_000.0, config=kcfg)
     assert bet_prefix > 0.0, "sanity: the pre-fix consensus confidence bypassed the gate"
+
+
+# ── WalletBehaviorDivergence ──
+# Gated OFF by default (ENABLE_UNVALIDATED_STRATEGIES, B7), but a SUPPORTED owner opt-in:
+# when enabled the orchestrator adds it to the live scanner and it emits a real SINGLE-outcome
+# ScanResult (outcome_idx >= 0) the executor can fill. It previously emitted
+# ``confidence = _compute_confidence(signal)`` — a whale-count / historical-accuracy /
+# divergence-magnitude heuristic DECOUPLED from entry_price + edge — so the min_confidence gate
+# filtered on the wrong quantity (same class as #263/#268/#275/#280/#284). The fix pins it to
+# ``gate_confidence(entry_price, edge)`` and DELETES the heuristic helper.
+
+def test_wallet_divergence_confidence_is_fair_value_not_heuristic():
+    strat = WalletBehaviorDivergence(_DummyClient(), StrategyConfig(dry_run=True))
+    # Two distinct whales BUY the same market at 0.40 into a high-volatility regime (0.25, above
+    # the public "max_volatility" alpha of 0.10) → a volatility-divergence signal with 2 unique
+    # wallets and a consensus BUY on market "m1".
+    for w in ("0xa1", "0xb2"):
+        strat.record_whale_trade(
+            wallet=w, market_id="m1", outcome="Yes", side="BUY",
+            price=0.40, size=5_000.0, market_volatility=0.25,
+            market_liquidity=50_000.0, edge_estimate=0.03,
+        )
+
+    results = strat.scan([_generic_market("m1", 0.40)])
+    buys = [r for r in results if r.side == "BUY"]
+    assert buys, "expected a whale-divergence BUY signal"
+    _assert_invariant(results)
+
+    r = buys[0]
+    # entry_price = avg whale price = 0.40; edge = max(avg_edge 0.03, min_edge+0.01 0.03) = 0.03.
+    # win_probability = 0.40 + 0.03 = 0.43 — the fair value, NOT the removed heuristic.
+    win_prob = r.entry_price + r.edge
+    assert abs(r.confidence - win_prob) < 1e-9
+    assert abs(r.confidence - 0.43) < 1e-9
+
+    # The removed ``_compute_confidence`` heuristic is genuinely gone — no decoupled-confidence
+    # source can be re-wired.
+    assert not hasattr(strat, "_compute_confidence")
+
+    # Behavioral flip: a min_confidence just above the true fair value gates the trade out.
+    kcfg = KellyConfig(use_monte_carlo=False, min_confidence=round(win_prob + 0.05, 6))
+    bet_usd, contracts = size_from_scan_result(r, bankroll=1_000.0, config=kcfg)
+    assert bet_usd == 0.0 and contracts == 0.0, (
+        "a signal whose fair value (0.43) is below min_confidence must be gated out post-fix"
+    )
+    # Control: the old heuristic (whale-count 0.40*0.5 + accuracy 0.35*acc + magnitude 0.25*~0.95)
+    # sat well ABOVE 0.43 and would have bypassed the same gate — the wrong-units bug this fixes.
+    r.confidence = 0.60
+    bet_prefix, _ = size_from_scan_result(r, bankroll=1_000.0, config=kcfg)
+    assert bet_prefix > 0.0, "sanity: a decoupled (higher) heuristic confidence bypassed the gate"

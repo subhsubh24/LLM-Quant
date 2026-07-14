@@ -1155,27 +1155,11 @@ class WalletBehaviorDivergence(BaseStrategy):
 
         return signals
 
-    def _compute_confidence(self, signal: DivergenceSignal) -> float:
-        """
-        Compute confidence score for a divergence signal.
-
-        Based on:
-        1. Number of whales diverging (more = higher confidence)
-        2. Historical accuracy of this divergence type
-        3. Magnitude of divergence (larger = higher confidence, with diminishing returns)
-        """
-        # Whale count factor: [0.3, 0.9] based on 2-10 whales
-        whale_factor = min(0.3 + 0.1 * signal.whale_count, 0.9)
-
-        # Historical accuracy factor
-        accuracy_factor = signal.historical_accuracy
-
-        # Divergence magnitude factor (diminishing returns)
-        magnitude_factor = min(0.5 + 0.5 * math.tanh(signal.divergence_pct), 0.95)
-
-        # Weighted combination
-        confidence = 0.40 * whale_factor + 0.35 * accuracy_factor + 0.25 * magnitude_factor
-        return max(0.0, min(confidence, 0.95))
+    # NOTE: the former ``_compute_confidence`` heuristic (whale-count / historical-accuracy /
+    # divergence-magnitude, DECOUPLED from ``entry_price + edge``) was REMOVED with the units-
+    # contract fix in ``scan`` — see the comment at the ``confidence = gate_confidence(...)``
+    # emission site. Keeping a decoupled-confidence helper around invites re-wiring the exact
+    # bug class (#263/#268/#275/#280/#284) it embodied, so it is deleted rather than left dead.
 
     def scan(self, markets: List[Market]) -> List[ScanResult]:
         """
@@ -1255,10 +1239,19 @@ class WalletBehaviorDivergence(BaseStrategy):
             if not relevant_signals:
                 continue
 
-            # Compute aggregate confidence from relevant signals
-            best_signal = max(relevant_signals, key=lambda s: self._compute_confidence(s))
-            confidence = self._compute_confidence(best_signal)
             edge = max(avg_edge, self.config.min_edge + 0.01)
+            # UNITS CONTRACT (#263/#268/#275/#280/#284; see polymarket_client.gate_confidence).
+            # The orchestrator's ``min_confidence`` gate reads ``ScanResult.confidence`` as the
+            # signal's OWN win-probability == ``entry_price + edge``. The previous
+            # ``_compute_confidence(...)`` — a whale-count / historical-accuracy / divergence-
+            # magnitude heuristic DECOUPLED from ``entry_price + edge`` — made the gate filter on
+            # the wrong quantity: it ADMITTED BUYs whose true fair value is below ``min_confidence``
+            # and REJECTED strong signals whose heuristic confidence happened to be low. Pin it to
+            # the reconstructed win-probability like every other executing strategy
+            # (``advanced_strategies.py`` NOPositionScanner/LogicalImplicationDetector, and the
+            # gated Weather/Whale strategies fixed in test_confidence_units_gated). ``entry_price``
+            # here is ``avg_price`` (the ScanResult below sets ``entry_price=avg_price``).
+            confidence = gate_confidence(avg_price, edge)
 
             # Find the outcome index
             outcome_idx = 0
