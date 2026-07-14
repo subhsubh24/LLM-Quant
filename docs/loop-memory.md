@@ -2,6 +2,25 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-14 (owner-directed) — filed F9.1 + a hard YAML-quoting rule for GROWTH_STATUS
+
+- **A research PR (#325, Run 21) sat blocked ~24h because the GTM gate failed** — NOT a stuck
+  auto-merge (auto WAS on); the blocking gate genuinely failed. Root cause: the `as_of:` scalar in
+  the fenced `GROWTH_STATUS:` YAML block was written as **unquoted** free-text and contained
+  `EXP-006 scoping: the …` — the `: ` (colon-space) made `yaml.safe_load` read a nested mapping and
+  throw, so `validate_gtm` reported the generic "no parseable `GROWTH_STATUS:` YAML block." Run 20
+  survived only by luck (no `: ` in its `as_of`). Fix was mechanical: single-quote the scalar.
+- **RULE for any run editing `docs/growth/GROWTH_STATUS.md`:** write free-text scalar fields
+  (`as_of`, `next_actions[]`, notes) as **QUOTED** YAML — single-quote unless the text has an
+  apostrophe (then double-quote / escape). Unquoted prose breaks the block whenever it contains
+  `: `, or starts with `[ { & * ? !`, or has an unbalanced quote. After editing, sanity-check:
+  `python3 -c "import yaml,re,pathlib; yaml.safe_load(re.search(r'\`\`\`ya?ml\s*\n(GROWTH_STATUS:.*?)\n\`\`\`', pathlib.Path('docs/growth/GROWTH_STATUS.md').read_text(), re.S).group(1))"`.
+- Filed [F9.1] to (1) make `validate_gtm` catch the `YAMLError` and print the parser line/col +
+  an "unquoted free-text scalar" hint instead of the generic message, and (2) emit quoted scalars
+  by default. The gate is CORRECT (it caught a real malformed block) — F9.1 just makes the failure
+  legible and rarer. **Meta-lesson: when a docs-only PR fails the *code* gate, read the gate log —
+  it's usually the machine-readable status block, not the prose, that broke.**
+
 ## 2026-07-13c — a LIVE-SAFETY run (4th of the day): 1 file-disjoint code PR shipped (#330 — bound the py-clob-client order path with a timeout, §6), 2/2 Sonnet reviewers first-pass APPROVE, 0 reverts, 0 abandons. Full FRESH 8-Haiku sweep across tracks A–H at the advanced HEAD (post-#329 scorecard), doubling as the ~daily DEEP AUDIT: 6/8 lenses NOTHING-GENUINE, 1 known-DROP (SELL-edge), 1 marginal-DROP (DEBUG doc), 1 GENUINE §6 live-safety item shipped. Binding constraint (business_case_strength B) STANDS.
 
 - **CONTEXT:** egress OPEN (gamma HTTP 200); CI all GREEN (preflight on the PR head `146bbeb8` = success; live-validation GREEN 2026-07-13T09:49Z, no red eval §23; real-oos + margin-eval GREEN); self-validation OK (12 caps, unmet=[], declared==read, no stub-masquerade). The sibling Quality Auditor merged its 8th grade (#329) mid-run — still **B**, ship gate NOT met, business_case the lone binding B, bucket family refuted on a 3rd real corpus (EXP-003 Politics); all other dims A/A+ → no ship-critical sub-A dim for the factory to drive. The sibling research routine's docs-only #325 (EXP-006 scoping) is open, untouched.
