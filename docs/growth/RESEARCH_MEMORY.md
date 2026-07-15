@@ -2830,3 +2830,42 @@ entry in `GROWTH_STATUS` `experiments[]` (hypothesis / min-N / OOS plan / costs 
 `proposed`), and confirmation that this run's external web sweep surfaced no new primary evidence beyond
 what prior runs already verified. RECOMMEND-only — no ROADMAP steer (no high-confidence validated edge
 exists to justify one).
+---
+
+## 2026-07-15 — Factory build (NOT a research run): the EXP-006 spike-detection + reversal-labeling primitive is now BUILT (unblocks the test; NO edge claimed)
+- Hypothesis (falsifiable): n/a — this is a FACTORY capability build, not an alpha test. It builds the exact two missing pieces Run 21 named, so a future research run can actually test EXP-006 on a real corpus. It claims NO edge and reaches NO revenue field.
+- Min sample N: n/a (no OOS run this event).
+- OOS result (or "insufficient data"): n/a — nothing was backtested; a detector + labeler is not an edge.
+- Calibration (Brier / reliability): n/a.
+- Costs modeled: n/a (no trades simulated).
+- Verdict: **edge-not-proven** (infrastructure build; the binding constraint STANDS).
+- Why / what shipped:
+  - Run 20 named EXP-006's blocker as "(a) a spike-DETECTION function over an already-fetchable
+    tick series (threshold-Δ crossing within a window) and (b) a reversal-labeling harness"; Run 21
+    confirmed the raw tick primitive already exists (`PolymarketHistoryFetcher.fetch_price_history`
+    returns the full `[{"t","p"}]` series at 1-min fidelity, live-verified). This event builds (a)+(b)
+    as a pure, deterministic, stdlib-only module: `backend/app/prediction_markets/spike_detection.py`
+    (`detect_spikes` + `label_reversal`/`label_reversals` + `clean_ticks`; frozen `SpikeEvent` /
+    `ReversalOutcome`), with 25 fixture tests registered in the blocking gate
+    (`backend/tests/test_spike_detection.py`, `preflight.sh`).
+  - LEAKAGE-SAFE BY CONSTRUCTION (the load-bearing property): detection is causal — a spike is
+    CONFIRMED at the FIRST tick whose trailing-window move crosses the threshold, so `confirm_time` is
+    the only causally-knowable decision instant; reversal labeling reads ONLY strictly-later ticks and
+    returns `None` (never fabricates) when the forward horizon has no qualifying tick. A sustained ramp
+    is ONE event (peak-extension), a genuine reverse is a SEPARATE event.
+  - Deliberately NOT built this event (honest scope): the strategy wrapper, the walk-forward closure,
+    the per-cluster concentration cap Run 20/21 flagged as load-bearing, and the actual OOS test on a
+    real Politics corpus. Those belong to a RESEARCH run (maker≠checker: the factory builds the
+    capability; the research routine runs the test + F10/F11 gates and decides edge/no-edge). Building
+    the detector does NOT move `business_case_strength`.
+  - Adversarial review (2 Sonnet + independent checks): no edge implied, no look-ahead, imported by
+    nothing but its test, no creds/network/nondeterminism; 25/25 tests non-tautological (the causal +
+    strictly-later-tick assertions FAIL if the guards are removed).
+- Self-validation: the primitive is a pure offline library (no credential, no I/O, no trading-path
+  wiring), validated entirely by in-gate deterministic unit tests — so it adds NO SELF_VALIDATION
+  capability and NO new credential (`check_self_validation.py --readiness` stays green, unmet=[]).
+- What EXP-006 still needs before a real test: a spike→reversal walk-forward harness on a real
+  intraday Politics corpus (fetchable via the existing `fetch_price_history`), the per-cluster
+  concentration cap, and spike-size/salience stratification (Run 21's N=1 caution: the LARGEST
+  spikes may persist, not fade). Logged so a future research run picks this up ready-to-wire, not
+  ready-to-claim.
