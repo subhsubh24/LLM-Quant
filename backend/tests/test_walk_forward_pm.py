@@ -10,6 +10,8 @@ These tests assert the ENGINE is honest, not that a real edge exists:
 
 from __future__ import annotations
 
+import random
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -374,3 +376,40 @@ def test_capital_tied_up_until_resolution():
     m2 = _market(2, price=0.50, model=0.90, outcome=1, decide_day=45, resolve_day=50)
     res = walk_forward_backtest([m1, m2], initial_bankroll=10_000.0, seed=1)
     assert res.final_bankroll >= 0.0
+
+
+def test_seed_hash_and_pnl_exclude_research_only():
+    """`research_only` is pure PROVENANCE metadata (A8 play-money guardrail): it must
+    NEVER enter the seed_hash or the PnL (walk_forward.py:88-94 documents this as a
+    reproducibility invariant — the flag never changes a hash or a number). Without this
+    test a refactor that folds `research_only` into the hash payload would silently break
+    bit-for-bit reproducibility while every other test stayed green.
+
+    (The real-money FLOOR lane refusing research_only records is a SEPARATE guardrail,
+    already covered by test_validate_real_oos_*; this test pins the ORTHOGONAL invariant
+    that the flag is inert to the engine's determinism.)"""
+    data = _edge_dataset(120)
+    base = walk_forward_backtest(data, seed=42)
+    flagged = [replace(m, research_only=True) for m in data]
+    with_flag = walk_forward_backtest(flagged, seed=42)
+    assert with_flag.seed_hash == base.seed_hash
+    assert with_flag.total_pnl_usd == base.total_pnl_usd
+    assert with_flag.weekly_pnl == base.weekly_pnl
+
+
+def test_seed_hash_and_pnl_invariant_to_input_order():
+    """The engine sorts markets by ``(decision_time, market_id)`` before both hashing
+    (walk_forward.py:515) and processing (:386), so the result is documented as
+    input-order-invariant (:489). This test pins that: a shuffled copy of the SAME
+    markets must produce a bit-identical seed_hash AND identical PnL. If the sort were
+    ever dropped or changed, this fails loud while the plain determinism test (same list
+    twice) would not."""
+    data = _edge_dataset(120)
+    base = walk_forward_backtest(data, seed=42)
+    shuffled = list(data)
+    random.Random(20260715).shuffle(shuffled)
+    assert [m.market_id for m in shuffled] != [m.market_id for m in data]  # really reordered
+    res = walk_forward_backtest(shuffled, seed=42)
+    assert res.seed_hash == base.seed_hash
+    assert res.total_pnl_usd == base.total_pnl_usd
+    assert res.weekly_pnl == base.weekly_pnl
