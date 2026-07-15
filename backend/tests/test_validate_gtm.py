@@ -63,3 +63,90 @@ def test_gtm_scorecard_valid_passes():
 def test_gtm_scorecard_missing_ship_gate_fails():
     sc = {"dimensions": {"messaging": "A"}}
     assert any("ship_gate_met" in e for e in g.evaluate({}, True, sc, True))
+
+
+# --- F9.1: a malformed GROWTH_STATUS block must produce a PRECISE diagnostic, not the
+# generic "no parseable block" that masked an unquoted-colon-space scalar stall for ~24h. ---
+
+# The exact recurring failure (Run 21): an unquoted `as_of` free-text scalar carrying a `: `.
+_MALFORMED_STATUS = (
+    "```yaml\n"
+    "GROWTH_STATUS:\n"
+    "  as_of: 2026-07-13 Run 21 EXP-006 scoping: the needs-intraday note\n"
+    "  weekly_pnl_paper: null\n"
+    "```\n"
+)
+
+
+def test_malformed_block_yields_precise_diagnostic(tmp_path):
+    """_yaml_block flags a malformed TARGET block with line/col + the unquoted-scalar hint."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    p.write_text(_MALFORMED_STATUS)
+    value, present, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert value is None and present is True
+    assert parse_error is not None
+    # names the field, prescribes single-quoting, and locates the failure — none of which
+    # the generic message carries.
+    assert "as_of" in parse_error
+    assert "single quotes" in parse_error
+    assert "line" in parse_error and "failed to parse" in parse_error
+
+
+def test_malformed_block_fails_closed_with_hint_end_to_end():
+    """evaluate surfaces the diagnostic (fail-closed) instead of the generic message."""
+    errs = g.evaluate(None, True, None, False,
+                      gs_parse_error="GROWTH_STATUS `GROWTH_STATUS:` block failed to parse at "
+                                     "line 2, col 42: mapping values are not allowed here. "
+                                     "HINT: `as_of` looks like an UNQUOTED free-text scalar "
+                                     "containing a `: ` — wrap the value in single quotes.")
+    assert errs, "a malformed block must still fail closed"
+    assert any("UNQUOTED" in e and "as_of" in e for e in errs)
+    # the generic masking message must NOT be what surfaces
+    assert not any(e == "GROWTH_STATUS.md has no parseable fenced `GROWTH_STATUS:` YAML block."
+                   for e in errs)
+
+
+def test_absent_block_still_gives_generic_message(tmp_path):
+    """A file with NO GROWTH_STATUS block (vs a malformed one) keeps the generic message."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    p.write_text("```yaml\nSOMETHING_ELSE:\n  x: 1\n```\n")
+    value, present, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert value is None and present is True and parse_error is None
+    errs = g.evaluate(value, present, None, False, gs_parse_error=parse_error)
+    assert any("no parseable" in e for e in errs)
+
+
+def test_unrelated_yaml_error_not_blamed_on_growth_status(tmp_path):
+    """A YAMLError in an UNRELATED fenced block must not be reported as a GROWTH_STATUS error."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    # first block is malformed but is NOT the GROWTH_STATUS block; second is a valid target block
+    p.write_text("```yaml\nOTHER:\n  k: v: bad\n```\n"
+                 "```yaml\nGROWTH_STATUS:\n  weekly_pnl_paper: null\n```\n")
+    value, present, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert present is True and parse_error is None
+    assert isinstance(value, dict) and value.get("weekly_pnl_paper") is None
+
+
+def test_diagnostic_reports_FILE_line_not_block_relative(tmp_path):
+    """The reported line must be the real FILE line (prose before the fence is counted)."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    # 5 lines of prose header, then the fence; the malformed `as_of` is at FILE line 8.
+    p.write_text("# Header line 1\nprose 2\nprose 3\nprose 4\nprose 5\n"
+                 "```yaml\nGROWTH_STATUS:\n"
+                 "  as_of: 2026-07-13 Run 21 scoping: the note\n```\n")
+    _, _, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert parse_error is not None
+    assert "line 8" in parse_error, f"expected FILE line 8, got: {parse_error}"
+
+
+def test_non_colon_space_error_omits_the_colon_space_hint(tmp_path):
+    """A stray-tab (or other non-mapping) parse error must NOT get the single-quote hint."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    # a TAB indent raises "found character '\t' ..." — unrelated to unquoted colon-space,
+    # even though the line carries a `: `. The colon-space hint would be a WRONG fix here.
+    p.write_text("```yaml\nGROWTH_STATUS:\n  metrics:\n\t weekly_pnl: 5  # note: a tab\n```\n")
+    _, _, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert parse_error is not None                      # still fails closed
+    assert "failed to parse" in parse_error             # still precise
+    assert "single quotes" not in parse_error           # but NO misleading colon-space hint
+    assert "UNQUOTED" not in parse_error

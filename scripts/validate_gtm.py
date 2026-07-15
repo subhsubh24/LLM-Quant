@@ -38,23 +38,87 @@ METRIC_SECTIONS = ["funnel", "acquisition", "pmf", "channels", "metrics"]
 CONFIG_KEY_RE = re.compile(r"(target|floor|cap|limit|threshold|goal|budget|enabled|_pct$)", re.I)
 
 
+def _yaml_parse_diagnostic(block: str, key: str, exc: Exception,
+                           block_start_line: int = 1) -> str:
+    """A precise, actionable message for a malformed fenced ``key:`` block (F9.1).
+
+    The recurring self-inflicted CI stall: the loop writes a long prose blurb into a
+    TOP-LEVEL scalar field (typically ``as_of``) as an UNQUOTED YAML scalar; if that value
+    contains a ``: `` (colon-space), ``yaml.safe_load`` reads it as a nested mapping and
+    throws ``mapping values are not allowed here``. Before F9.1 the block then reported as
+    the GENERIC "no parseable block", masking the real cause for ~24h. (A ``next_actions[]``
+    *list-item* scalar with an embedded ``: `` does NOT raise — YAML silently parses it as a
+    nested mapping — so this diagnostic targets the top-level-scalar case that actually
+    throws.)
+
+    Surfaces the parser's FILE line/column (``block_start_line`` maps the block-relative
+    ``problem_mark`` back to the real file line) + the offending source line, and — ONLY for
+    the ``mapping values are not allowed here`` signature — names the field and prescribes
+    single-quoting. Other parse errors (stray tab, unmatched bracket, bad indent) get the
+    precise location + the parser's own message WITHOUT the colon-space hint, so a fixer is
+    never sent to single-quote a value that is already fine.
+    """
+    lines = block.splitlines()
+    mark = getattr(exc, "problem_mark", None)
+    problem = getattr(exc, "problem", None) or "YAML parse error"
+    loc, src, field = "", "", None
+    if mark is not None and 0 <= mark.line < len(lines):
+        # mark.line is 0-indexed WITHIN the fenced block; block_start_line is the 1-indexed
+        # FILE line where the block body begins → report the true file line, not "line 3".
+        loc = f" at line {block_start_line + mark.line}, col {mark.column + 1}"
+        src = lines[mark.line].strip()
+        mkey = re.match(r"\s*-?\s*([A-Za-z0-9_]+)\s*:", lines[mark.line])
+        if mkey:
+            field = mkey.group(1)
+    hint = ""
+    # ONLY "mapping values are not allowed here" is the unquoted-colon-space signature (an
+    # unquoted scalar value containing a `: ` mis-parsed as a nested mapping). Gating the
+    # hint on the real error message — not a loose substring scan of the offending line —
+    # avoids emitting a WRONG "single-quote this" hint for an unrelated error (e.g. a stray
+    # tab) whose line merely happens to carry a `: ` (in a comment, say).
+    if "mapping values are not allowed here" in str(problem):
+        who = f"`{field}`" if field else "this field"
+        example = field or "as_of"
+        hint = (f" HINT: {who} looks like an UNQUOTED free-text scalar containing a `: ` "
+                f"(colon-space) — wrap the value in single quotes "
+                f"(e.g. `{example}: 'text: with a colon'`).")
+    srcpart = f" Offending line: `{src}`." if src else ""
+    return f"GROWTH_STATUS `{key}:` block failed to parse{loc}: {problem}.{srcpart}{hint}"
+
+
 def _yaml_block(path: Path, key: str):
-    """Return (value, file_present). value is the YAML under `key`, or None."""
+    """Return (value, file_present, parse_error).
+
+    ``value`` is the YAML under ``key`` (or None). ``parse_error`` is a precise diagnostic
+    string (F9.1) when a fenced block that IS the ``key:`` block fails to parse — instead of
+    silently ``continue``-ing and letting it masquerade as an absent block. None otherwise.
+    """
     try:
         import yaml
     except ImportError:
         raise RuntimeError("pyyaml not installed — REQUIRED for validate_gtm (declared in "
                            "backend/requirements-ci.txt); refusing to skip.")
     if not path.exists():
-        return None, False
-    for m in re.findall(r"```yaml\n(.*?)```", path.read_text(), re.S):
+        return None, False, None
+    text = path.read_text()
+    parse_error = None
+    # Only a fenced block whose TOP-LEVEL key is `key:` is "the target block"; a YAMLError in
+    # some unrelated yaml block must not be blamed on GROWTH_STATUS.
+    top_key_re = re.compile(rf"^{re.escape(key)}\s*:", re.M)
+    # finditer (not findall) so we know each block's byte offset → its 1-indexed FILE start
+    # line, which maps the block-relative parser mark back to a real file line in diagnostics.
+    for m in re.finditer(r"```yaml\n(.*?)```", text, re.S):
+        block = m.group(1)
         try:
-            d = yaml.safe_load(m)
-        except yaml.YAMLError:
+            d = yaml.safe_load(block)
+        except yaml.YAMLError as e:
+            if parse_error is None and top_key_re.search(block):
+                block_start_line = text.count("\n", 0, m.start(1)) + 1
+                parse_error = _yaml_parse_diagnostic(block, key, e, block_start_line)
             continue
         if isinstance(d, dict) and key in d:
-            return d[key], True
-    return None, True
+            return d[key], True, None
+    return None, True, parse_error
 
 
 def _walk_reported(value, prefix: str, leaf_key: str, out: list[str]) -> None:
@@ -96,13 +160,17 @@ def _source_declared(gs: dict) -> bool:
     return False
 
 
-def evaluate(gs, gs_present: bool, sc, sc_present: bool, readiness: bool = False) -> list[str]:
+def evaluate(gs, gs_present: bool, sc, sc_present: bool, readiness: bool = False,
+             gs_parse_error: str | None = None) -> list[str]:
     """Pure policy on already-loaded feeds (injectable for tests)."""
     errors: list[str] = []
     if not gs_present:
         errors.append("docs/growth/GROWTH_STATUS.md is missing (the dashboard growth feed).")
     elif gs is None:
-        errors.append("GROWTH_STATUS.md has no parseable fenced `GROWTH_STATUS:` YAML block.")
+        # F9.1: prefer the precise parse diagnostic (line/col + unquoted-scalar hint) over the
+        # generic "no parseable block" that used to mask a malformed-YAML stall for ~24h.
+        errors.append(gs_parse_error
+                      or "GROWTH_STATUS.md has no parseable fenced `GROWTH_STATUS:` YAML block.")
     else:
         reported: list[str] = []
         for s in METRIC_SECTIONS:
@@ -148,11 +216,11 @@ def evaluate(gs, gs_present: bool, sc, sc_present: bool, readiness: bool = False
 
 def check(readiness: bool = False) -> list[str]:
     try:
-        gs, gs_present = _yaml_block(STATUS, "GROWTH_STATUS")
-        sc, sc_present = _yaml_block(SCORECARD, "GTM_SCORECARD")
+        gs, gs_present, gs_parse_error = _yaml_block(STATUS, "GROWTH_STATUS")
+        sc, sc_present, _ = _yaml_block(SCORECARD, "GTM_SCORECARD")
     except RuntimeError as e:
         return [str(e)]
-    return evaluate(gs, gs_present, sc, sc_present, readiness)
+    return evaluate(gs, gs_present, sc, sc_present, readiness, gs_parse_error=gs_parse_error)
 
 
 def main() -> int:
