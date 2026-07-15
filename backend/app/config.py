@@ -3,10 +3,13 @@ Configuration management for QuantLab.
 Uses pydantic-settings for type-safe configuration.
 """
 
+import logging
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, Field, ValidationError, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 def find_env_file():
@@ -216,6 +219,34 @@ class Settings(BaseSettings):
                     "POLYMARKET_PRIVATE_KEY on the live host (see PENDING_OPS OA-5 / "
                     "LIVE_RUNBOOK §5)."
                 )
+            # POLYMARKET_FUNDER is a SEPARATE concern from auth, and it interacts with a
+            # SIGNATURE-TYPE gap the owner must understand before going live. This build signs
+            # orders EOA-only: get_executor()/_get_clob_client() (execution.py) construct the
+            # ClobClient WITHOUT a signature_type, so py-clob-client defaults to EOA (sig_type
+            # 0), under which the Polymarket CTF Exchange REQUIRES maker == signer. FUNDER sets
+            # `maker`; unset, py-clob-client defaults it to the signer's OWN address (derived
+            # from POLYMARKET_PRIVATE_KEY), so maker == signer and orders are valid, drawing on
+            # the signer wallet's USDC — the ONLY funding setup this build supports today.
+            # A Polymarket PROXY / Gnosis-Safe wallet (funds held at an address != the signer)
+            # is NOT supported: pointing FUNDER at a proxy address makes maker != signer under
+            # an EOA signature, so the venue REJECTS every order for an INVALID SIGNATURE (not
+            # "insufficient balance"). That needs POLY_PROXY/POLY_GNOSIS_SAFE signature_type
+            # wiring which does not exist yet (tracked in PENDING_OPS / ROADMAP D6). Surface
+            # this real funding constraint LOUD at boot — before real money is at stake —
+            # rather than as an opaque per-order failure. Live-only: never fires in paper/CI,
+            # and it does NOT refuse boot (the supported EOA config must still start).
+            funder_set = bool((os.environ.get("POLYMARKET_FUNDER") or "").strip())
+            logger.warning(
+                "LIVE_TRADING_ENABLED is on. This build signs live orders EOA-only, so live "
+                "trading works ONLY when your USDC is held in the SIGNER wallet itself (the "
+                "POLYMARKET_PRIVATE_KEY address); leave POLYMARKET_FUNDER unset (or equal to "
+                "that address) for valid EOA funding. POLYMARKET_FUNDER is currently %s. A "
+                "Polymarket PROXY / Gnosis-Safe wallet is NOT supported yet — a FUNDER address "
+                "that differs from the signer makes EVERY order fail signature verification "
+                "(needs POLY_PROXY/POLY_GNOSIS_SAFE signature_type wiring; see PENDING_OPS / "
+                "ROADMAP D6 / LIVE_RUNBOOK §5).",
+                "set" if funder_set else "unset",
+            )
         return self
 
     @property

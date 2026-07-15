@@ -6,6 +6,8 @@ NEVER coexist with LIVE_TRADING_ENABLED=true — if it does, the app refuses to 
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -74,6 +76,60 @@ def test_paper_mode_needs_no_venue_credentials(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     s = Settings(live_trading_enabled=False, backend_api_token="")
     assert s.live_trading_enabled is False
+
+
+# --- POLYMARKET_FUNDER / EOA-only live-funding advisory (fail-loud-not-late, §28) ---
+# This build signs orders EOA-only (no signature_type wired), so live trading works ONLY
+# when USDC is in the SIGNER wallet; a Polymarket proxy/Gnosis-Safe FUNDER != signer would
+# fail signature verification. FUNDER is NOT a hard boot requirement (funder=None → signer
+# address, valid EOA), so this must NOT refuse boot — it warns LOUD at every live boot so
+# the owner learns the real funding constraint before real money is at stake.
+
+def _funder_warning(caplog):
+    return [r for r in caplog.records
+            if r.levelno >= logging.WARNING and "signature" in r.message.lower()
+            and "POLYMARKET_FUNDER" in r.message]
+
+
+def test_live_without_funder_boots_and_warns_eoa_only(monkeypatch, caplog):
+    """4 creds present + FUNDER unset → boots (no refusal) AND warns loud (EOA-only, unset)."""
+    for k, v in _VENUE_CREDS.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("POLYMARKET_FUNDER", raising=False)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        s = Settings(live_trading_enabled=True, backend_api_token="a-strong-secret")
+    assert s.live_trading_enabled is True  # NOT over-blocked (EOA config is valid)
+    warns = _funder_warning(caplog)
+    assert warns, "live boot must warn loud about the EOA-only funding constraint"
+    msg = warns[0].message
+    assert "unset" in msg and "NOT supported" in msg  # accurate: proxy not supported
+
+
+def test_live_with_funder_set_still_warns_eoa_constraint(monkeypatch, caplog):
+    """FUNDER set → STILL warns: a proxy FUNDER != signer fails signature verification.
+
+    (The prior version wrongly went silent here and told proxy owners to set FUNDER — which
+    makes orders fail invalid-signature, not fund them. The honest advisory always fires.)
+    """
+    for k, v in _VENUE_CREDS.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("POLYMARKET_FUNDER", "0x" + "b" * 40)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        Settings(live_trading_enabled=True, backend_api_token="a-strong-secret")
+    warns = _funder_warning(caplog)
+    assert warns and "set" in warns[0].message
+    # must NOT claim the discredited "insufficient balance" remedy
+    assert "insufficient balance" not in warns[0].message.lower()
+
+
+def test_paper_mode_never_warns_about_funder(monkeypatch, caplog):
+    """Paper (default) must never emit the live-only funding advisory."""
+    for k in _VENUE_CREDS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("POLYMARKET_FUNDER", raising=False)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        Settings(live_trading_enabled=False, backend_api_token="")
+    assert not _funder_warning(caplog)
 
 
 def test_live_without_control_token_refuses_to_boot():
