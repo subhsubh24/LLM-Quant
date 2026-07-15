@@ -125,3 +125,28 @@ def test_unrelated_yaml_error_not_blamed_on_growth_status(tmp_path):
     value, present, parse_error = g._yaml_block(p, "GROWTH_STATUS")
     assert present is True and parse_error is None
     assert isinstance(value, dict) and value.get("weekly_pnl_paper") is None
+
+
+def test_diagnostic_reports_FILE_line_not_block_relative(tmp_path):
+    """The reported line must be the real FILE line (prose before the fence is counted)."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    # 5 lines of prose header, then the fence; the malformed `as_of` is at FILE line 8.
+    p.write_text("# Header line 1\nprose 2\nprose 3\nprose 4\nprose 5\n"
+                 "```yaml\nGROWTH_STATUS:\n"
+                 "  as_of: 2026-07-13 Run 21 scoping: the note\n```\n")
+    _, _, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert parse_error is not None
+    assert "line 8" in parse_error, f"expected FILE line 8, got: {parse_error}"
+
+
+def test_non_colon_space_error_omits_the_colon_space_hint(tmp_path):
+    """A stray-tab (or other non-mapping) parse error must NOT get the single-quote hint."""
+    p = tmp_path / "GROWTH_STATUS.md"
+    # a TAB indent raises "found character '\t' ..." — unrelated to unquoted colon-space,
+    # even though the line carries a `: `. The colon-space hint would be a WRONG fix here.
+    p.write_text("```yaml\nGROWTH_STATUS:\n  metrics:\n\t weekly_pnl: 5  # note: a tab\n```\n")
+    _, _, parse_error = g._yaml_block(p, "GROWTH_STATUS")
+    assert parse_error is not None                      # still fails closed
+    assert "failed to parse" in parse_error             # still precise
+    assert "single quotes" not in parse_error           # but NO misleading colon-space hint
+    assert "UNQUOTED" not in parse_error
