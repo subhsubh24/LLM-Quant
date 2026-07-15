@@ -55,3 +55,6 @@ htmlcov/
 .cache/
 backtest_run_output.txt
 .vercel
+
+# Claude Code local artifacts (agent worktrees, etc.) — never tracked
+.claude/

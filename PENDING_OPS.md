@@ -168,6 +168,30 @@ OWNER_ACTIONS:
         (`npm run build` green + the flows still wire). No new secret, no backend change, independent of the
         alpha tracks. Until taken, the app runs on 14.2.35 with the residual advisories DOCUMENTED here +
         ROADMAP G6, not silently ignored. No credentials needed.
+    - id: OA-19
+      title: "Polymarket signature-type wiring for proxy/Gnosis-Safe live funding (D6) — declare wallet type"
+      priority: medium
+      status: pending
+      why: >
+        Surfaced 2026-07-15 (#347, adversarial review). `execution.get_executor()`/`_get_clob_client()`
+        build the `ClobClient` WITHOUT a `signature_type`, so py-clob-client signs EOA (sig_type 0), under
+        which the Polymarket CTF Exchange REQUIRES `maker == signer`. So live trading works ONLY when the
+        USDC sits in the SIGNER wallet itself (the `POLYMARKET_PRIVATE_KEY` address; `POLYMARKET_FUNDER`
+        unset → funder defaults to the signer). A Polymarket PROXY wallet or a Gnosis-Safe (the common
+        funding setups, where funds live at an address ≠ the signer) is NOT supported: pointing
+        `POLYMARKET_FUNDER` at that address makes every order fail signature verification (invalid
+        signature), not fund it. #347 surfaces this LOUD at boot as an honest advisory (not a fake fix), but
+        the CAPABILITY (proxy/Gnosis-Safe live funding) is genuinely absent.
+      how: >
+        The WIRING is loop-buildable through the two gates (thread a `signature_type` into
+        `PolymarketExecutor`/`get_executor()`: `POLY_PROXY` (1) or `POLY_GNOSIS_SAFE` (2) when
+        `POLYMARKET_FUNDER` is a proxy/safe address distinct from the signer, `EOA` (0) otherwise), with
+        mock/gated tests. But WHICH type is correct is OWNER-wallet-architecture-dependent (email/Magic proxy
+        → POLY_PROXY; Gnosis Safe → POLY_GNOSIS_SAFE; direct EOA → leave as-is), and it cannot be
+        end-to-end validated without live keys. So the OWNER step is: decide the live funding architecture
+        and set an explicit `POLYMARKET_SIGNATURE_TYPE` (0/1/2) — then the loop wires it. Until then, live
+        trading is supported ONLY for a pure-EOA setup (USDC in the signer wallet); the boot advisory (#347)
+        makes that constraint loud. No new secret; this is D6 live-path completion, gated OFF by default.
 ```
 
 ## Quick reference
@@ -188,6 +212,7 @@ OWNER_ACTIONS:
 | OA-14 | Set `BACKEND_API_TOKEN` (+ frontend proxy) to protect control routes on a public deploy — routes are now default-CLOSED (#129); local/paper with no token needs `BACKEND_AUTH_DISABLED=1` | 🟡 medium | pending |
 | OA-15 | Kalshi price-history 404 FIXED (#170); only optional owner egress remains | ⚪ low | in progress |
 | OA-16 | Polymarket-v1 HF schema CONFIRMED + remapped + ran from the build env (#226); no owner step for the loop | 🟢 low | in progress |
+| OA-19 | Declare live funding wallet type / `POLYMARKET_SIGNATURE_TYPE` — proxy/Gnosis-Safe live funding needs signature-type wiring (D6); EOA-only supported today (#347) | 🟡 medium | pending |
 | OA-17 | Live-validation workflow APPLIED (#PR); optional Neon `DATABASE_URL` secret for durable persistence | 🟡 medium | in progress |
 | OA-18 | Next.js major bump 14→15+ (14.x EOL for security; forces React 18→19) — owner decision, then loop builds it (G5 #313 shipped the safe 14.2.35 patch) | 🟡 medium | pending |
 | OA-7 | Paper→live + raise target (owner-only) | 🟡 medium | pending |
