@@ -3,10 +3,13 @@ Configuration management for QuantLab.
 Uses pydantic-settings for type-safe configuration.
 """
 
+import logging
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, Field, ValidationError, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 def find_env_file():
@@ -215,6 +218,27 @@ class Settings(BaseSettings):
                     "of POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE, "
                     "POLYMARKET_PRIVATE_KEY on the live host (see PENDING_OPS OA-5 / "
                     "LIVE_RUNBOOK §5)."
+                )
+            # POLYMARKET_FUNDER is a SEPARATE concern from auth and — unlike the four creds
+            # above — is NOT a hard boot requirement: `execution.get_executor()` passes
+            # `funder=self.funder if self.funder else None`, and py-clob-client accepts
+            # `funder=None` by deriving it from the signer key (a valid pure-EOA setup). But
+            # the STANDARD Polymarket setup funds a PROXY wallet whose address differs from
+            # the signer; there, an unset POLYMARKET_FUNDER silently routes every order to
+            # the empty signer address and each live order fails for insufficient balance —
+            # a "boots fine, fails late with real money" gap (§28 class, the same failure
+            # shape #242/#264 close). It is listed as a live credential in LIVE_RUNBOOK §5
+            # and SELF_VALIDATION's live_trading_path.requires_env, yet the hard gate above
+            # can't see it. Warn LOUD at boot (not a refusal, so the EOA config still boots)
+            # so the owner sees it BEFORE real money is at stake.
+            if not (os.environ.get("POLYMARKET_FUNDER") or "").strip():
+                logger.warning(
+                    "LIVE_TRADING_ENABLED is true but POLYMARKET_FUNDER is unset — live "
+                    "orders will route to the SIGNER's own wallet address (funder derived "
+                    "from POLYMARKET_PRIVATE_KEY). If your USDC is held in a Polymarket "
+                    "PROXY wallet (the standard funding setup), set POLYMARKET_FUNDER to "
+                    "that proxy address or EVERY live order will fail for insufficient "
+                    "balance (see LIVE_RUNBOOK §5 / PENDING_OPS OA-5)."
                 )
         return self
 

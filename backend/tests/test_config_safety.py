@@ -6,6 +6,8 @@ NEVER coexist with LIVE_TRADING_ENABLED=true — if it does, the app refuses to 
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -74,6 +76,43 @@ def test_paper_mode_needs_no_venue_credentials(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     s = Settings(live_trading_enabled=False, backend_api_token="")
     assert s.live_trading_enabled is False
+
+
+# --- POLYMARKET_FUNDER live-boot advisory (fail-loud-not-late, §28) ---
+# FUNDER is NOT a hard boot requirement (funder=None is a valid EOA setup), so an unset
+# FUNDER must NOT refuse boot — but for the standard Polymarket proxy-wallet setup it
+# silently routes every order to the empty signer address, so warn LOUD at boot.
+
+def test_live_without_funder_boots_but_warns_loud(monkeypatch, caplog):
+    """4 creds present + FUNDER unset → boots (no refusal) AND emits a loud FUNDER warning."""
+    for k, v in _VENUE_CREDS.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("POLYMARKET_FUNDER", raising=False)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        s = Settings(live_trading_enabled=True, backend_api_token="a-strong-secret")
+    assert s.live_trading_enabled is True  # NOT over-blocked (EOA config is valid)
+    assert any("POLYMARKET_FUNDER" in r.message and r.levelno >= logging.WARNING
+               for r in caplog.records), "missing FUNDER must warn loud at live boot"
+
+
+def test_live_with_funder_set_does_not_warn(monkeypatch, caplog):
+    """FUNDER present → no FUNDER warning (the advisory is targeted, not noise)."""
+    for k, v in _VENUE_CREDS.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("POLYMARKET_FUNDER", "0x" + "b" * 40)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        Settings(live_trading_enabled=True, backend_api_token="a-strong-secret")
+    assert not any("POLYMARKET_FUNDER" in r.message for r in caplog.records)
+
+
+def test_paper_mode_never_warns_about_funder(monkeypatch, caplog):
+    """Paper (default) must never emit the live-only FUNDER advisory."""
+    for k in _VENUE_CREDS:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.delenv("POLYMARKET_FUNDER", raising=False)
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        Settings(live_trading_enabled=False, backend_api_token="")
+    assert not any("POLYMARKET_FUNDER" in r.message for r in caplog.records)
 
 
 def test_live_without_control_token_refuses_to_boot():
