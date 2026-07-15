@@ -10,6 +10,13 @@ maps: research/backtest → `pre_launch`, paper → `launching`, live → `post_
 `engine_pct` is pinned to real anchor files; `engine_built == (engine_pct == 100)`.
 All metric fields are **real numbers or 0/null — never invented.**
 
+> **YAML quoting contract (F9.1).** Free-text scalar fields — above all `as_of`, and any
+> `next_actions[]`/prose item — MUST be **single-quoted** whenever the value contains a
+> `: ` (colon-space), a leading `[`/`{`/`&`/`*`/`?`/`!`, or an apostrophe (double it as `''`
+> inside single quotes). An unquoted `: ` parses as a nested mapping and the GTM gate fails
+> closed — `scripts/validate_gtm.py` now names the exact field/line/hint, but quoting up
+> front avoids the stall entirely.
+
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
