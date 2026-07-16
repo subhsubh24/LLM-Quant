@@ -2571,3 +2571,63 @@ GENUINE items shipped, 3 adversarial DROPs-with-proof. 4/4 Sonnet reviewers firs
   `reset --hard` to the same SHA on the intended branch + restoring the merged branch + verifying the
   PR diff contained only the new feature's files. Check `git branch --show-current` before `commit`
   when juggling multiple same-session feature branches off a moving default.
+
+## 2026-07-16b (model/strategy factory) — QUIET, HONEST all-DROP sweep (8/8 lenses clean); bookkeeping-only
+
+> The intervening runs 2026-07-15 / 15b / 15c / 16 (#356) consolidated their per-run record into
+> `LOOP_HEALTH.md`'s `signal` narrative rather than a loop-memory entry (the established pattern for
+> quiet runs). This entry records the 2026-07-16b sweep + its one DROP-with-proof so a future
+> data-scout does not re-raise the `fetched_at` candidate.
+
+A FRESH full 8-Haiku sweep across tracks A–H at HEAD (0751401, post-#356), doubling as the ~daily
+DEEP AUDIT (leakage/overfitting/calibration/risk/live-safety + quality-grade-reconcile lenses). Baseline
+re-verified before selecting: required preflight **code GREEN** (exit 0, after pip-installing
+`backend/requirements-ci.txt` in the fresh container — a missing-dep local artifact, NOT a HEAD
+regression) + runtime harness PASSED (paper order FILLED, deterministic exposure `10.000000==10.000000`,
+live gate REJECTS a real order, kill switch + max-position ($900>$50) + loss-cap net-of-fees (−$41.20 vs
+−$10) all trip) + self-validation OK (13 caps, `unmet=[]`, declared==read) + scorecard parses (overall
+**B**). **8/8 lenses NOTHING-GENUINE.** Shipped 0 code PRs + this bookkeeping (LOOP_HEALTH + loop-memory
+only, file-disjoint). Binding constraint — `business_case_strength` **B**, no validated real-money OOS
+edge, an ALPHA/research problem the sibling routine owns — STANDS. `steady`, NOT churning/stuck:
+a disciplined quiet run on a heavily-mined mature engine is a SUCCESS (§2 anti-PADDING) → no harness
+proposal. 8 scouts + 0 reviewers = 8 subagents (<50).
+
+### Scout triage (anti-padding — findings verified NOT-genuine / churn / deferred, so future runs don't re-raise)
+- **Batch `fetched_at` timestamp drift (data scout A, `polymarket_client.py:746`):** DROP — **cosmetic,
+  zero behavioral effect.** Each `Market` in a Gamma batch defaults `fetched_at` to its own
+  `datetime.now(timezone.utc)` at the `_parse_market` default (`:745-746`) rather than one batch-level
+  timestamp captured at the API call. But (1) the per-market drift is only the parse time — sub-second for
+  100-row Gamma pages (the scout's hypothetical "10+ seconds" does not occur) — and immaterial against
+  `DataQualityConfig.max_age_seconds=600` (`data_quality.py:83`); and (2) the load-bearing staleness
+  signal on the **live scan path** is the `end_date`-based `max_past_end_seconds` check the `Market`
+  already carries (`data_quality.py:261-267` docstring: *"the staleness guard that actually runs on the
+  live scan path"*), NOT `now − fetched_at`, which only guards a snapshot HELD IN MEMORY past 600s —
+  where sub-second per-market drift is still immaterial. Stamping one shared batch timestamp is
+  semantically tidier but changes NO gate outcome → the #193/#276 redundant-guard / no-broken-consumer
+  class; building it is PADDING. (The scout's own runner-up finds — the volume-field fallback loop and
+  the Kalshi candlestick field-name caveat OA-15 — it correctly self-dropped as tested / owner-gated, not
+  fabrication traps.)
+- **Tracks B/C/D/E/F/G/H:** NOTHING-GENUINE with proof (all verified against LIVE code): (B) the
+  units-contract confidence fixes #263/#268/#275/#280/#284/#338 are all in place on the executing
+  single-leg paths, the standing SELL-edge / NOPositionScanner / bucket-family drops re-confirmed;
+  (C) leakage guards are STRUCTURAL (`MarketView` omits `outcome`/`resolution_time`; train strictly
+  `< w_start`), repro is bit-identical, the cost model is consistently applied; (D) every external call
+  is bounded shorter than the 120s scan interval, loss caps net fees + fail-loud, the kill-switch
+  persist fails CLOSED, the live gate is defense-in-depth, side-effect integrity holds (position only on
+  `filled_size>0`); (E) the EXP-006 spike→reversal walk-forward wrapper is the RESEARCH routine's
+  deliberately-deferred lane (2026-07-15; needs an egress-gated intraday corpus + a per-cluster
+  concentration cap) with no factory consumer NOW — building it is speculative per the DECISION
+  COROLLARY; (F) 0 false-coverage traps — the shipped fixes #314/#322/LLM-hardening are registered +
+  non-tautological, and all 14 unregistered test files cover orphaned `app.portfolio`/`app.backtest`/
+  `app.execution`/`app.monitoring` modules OFF the trading path (registering them is churn = testing dead
+  code); (G) the self-validation gate is correct (13 caps declared==read, all mocked caps exercise their
+  real critical flow — no email-verification-trap); (H) every units smell traces to a structurally-skipped
+  multi-leg `outcome_idx=-1` opportunity (skip at `orchestrator.py:~1013`, before any gating) or the dead
+  `check_exits()` path — zero behavioral effect on a fill; executing single-leg PnL/Kelly/determinism is
+  correct.
+
+### Lessons
+- **A "semantic-purity" data finding (one batch timestamp vs per-row `now()`) is only value-bar-clearing
+  if it changes a GATE OUTCOME.** Trace the field to the consumer's threshold before building: a
+  sub-second drift against a 600s staleness window (whose load-bearing signal is a *different*,
+  `end_date`-based check anyway) is the #193/#276 no-broken-consumer class. Tidier ≠ genuine.
