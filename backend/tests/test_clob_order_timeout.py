@@ -161,3 +161,51 @@ def test_raising_client_still_rejected_via_generic_path(monkeypatch):
     # Only the exception TYPE is surfaced, never the message (which carries host:port).
     assert result.error == "ConnectionResetError"
     assert "polymarket.com" not in (result.error or "")
+
+
+# --- cancel_order path (same live-safety bound; reachable from the async cancel endpoint) ---
+
+
+class _HangingCancelClient:
+    """Fake py-clob-client whose `cancel` network call stalls far longer than the bound."""
+
+    def __init__(self, sleep_sec: float):
+        self._sleep = sleep_sec
+
+    def cancel(self, order_id):
+        time.sleep(self._sleep)
+        return {"canceled": True}
+
+
+class _FastCancelClient:
+    """Fake client that confirms the cancel immediately (happy-path regression)."""
+
+    def cancel(self, order_id):
+        return {"canceled": True}
+
+
+def test_cancel_order_hang_is_bounded_and_reports_unconfirmed(monkeypatch):
+    """A stalled cancel returns within the bound as UNCONFIRMED (False) — never a hang, never a
+    fabricated success. `cancel_order` is reached from an `async def` endpoint that calls it
+    synchronously, so an unbounded hang would freeze the whole event loop (the #330 failure)."""
+    monkeypatch.setattr(execmod, "_CLOB_ORDER_TIMEOUT_SEC", 0.3)
+    ex = _executor()
+    monkeypatch.setattr(ex, "_get_clob_client", lambda: _HangingCancelClient(sleep_sec=5.0))
+
+    started = time.monotonic()
+    result = ex.cancel_order("order-should-not-hang")
+    elapsed = time.monotonic() - started
+
+    # Bounded: returned in ~timeout, NOT after the full 5s fake sleep (pre-fix behaviour).
+    assert elapsed < 2.0, f"cancel was not time-bounded (took {elapsed:.2f}s)"
+    # Honest: a timeout is an UNKNOWN venue state → UNCONFIRMED (False), never a fake success.
+    assert result is False
+
+
+def test_cancel_order_fast_path_still_confirms(monkeypatch):
+    """Regression: the timeout wrapper does not break the happy path — a fast cancel confirms."""
+    monkeypatch.setattr(execmod, "_CLOB_ORDER_TIMEOUT_SEC", 0.3)
+    ex = _executor()
+    monkeypatch.setattr(ex, "_get_clob_client", lambda: _FastCancelClient())
+
+    assert ex.cancel_order("order-123") is True

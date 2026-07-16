@@ -687,11 +687,29 @@ class PolymarketExecutor:
             )
 
     def cancel_order(self, order_id: str) -> bool:
-        """Cancel an open order."""
+        """Cancel an open order (time-bounded — §6 live-safety).
+
+        `client.cancel` is a py-clob-client network call with no timeout of its own, and this
+        method is reached from the `/prediction-markets/cancel/{order_id}` endpoint — an
+        `async def` that calls it SYNCHRONOUSLY (routes.py) — so a stalled venue socket would
+        hang the ENTIRE event loop (no scan, no kill-switch check, no other request served),
+        exactly the failure the order path was bounded against (#330). Bound it with the same
+        helper. A timeout means the cancel is UNCONFIRMED (venue state unknown — it may or may
+        not have applied), so we return False and log LOUD for reconciliation rather than
+        reporting a fabricated success.
+        """
         try:
             client = self._get_clob_client()
-            resp = client.cancel(order_id)
+            resp = _call_with_timeout(
+                lambda: client.cancel(order_id), _CLOB_ORDER_TIMEOUT_SEC, "cancel"
+            )
             return resp.get("canceled", False) or resp.get("success", False)
+        except _CLOBOrderTimeout as e:
+            logger.critical(
+                f"Polymarket cancel TIMED OUT for order {order_id}: {e} — venue state UNKNOWN; "
+                "reporting UNconfirmed (not a fabricated success) for reconciliation."
+            )
+            return False
         except Exception as e:
             logger.error(f"Polymarket cancel failed: {e}")
             return False
