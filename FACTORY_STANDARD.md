@@ -1122,3 +1122,28 @@ under-shipping ambition to feel safe is itself a failure (§2, §5).
   is the loop's job. These few items are queued as OWNER_ACTIONS (§38), kept MINIMAL, and are NON-BLOCKING: the
   loop routes around a missing secret and keeps shipping everything that doesn't need it — it never stalls
   waiting on the owner.
+
+## 51. Build order — features FIRST; deepen AFTER; design rides ALONG; grade honestly
+The owner's priority for every run: BUILD CORE PRODUCT FEATURES first, above all else. A run's top job is to
+move the real product forward — user-facing capability that clears the value bar (§5) — not to polish
+scaffolding around a product that isn't built yet. The deepening follows the feature; it never precedes it.
+- **Feature-first ordering.** Per run: (1) build / extend the core features users actually use; THEN, once a
+  feature exists and works, (2) the DEEPENING follows it — exhaustive unit / edge tests, eval expansion,
+  performance tuning, and extra hardening. Do NOT gold-plate tests, evals, or perf on a surface before the
+  surface exists. Building the product beats padding it.
+- **The floor that ships WITH every feature (what "features first" does NOT license).** Two things are never
+  deferred, because a broken or exposed feature is a liability, not progress: (a) it WORKS end-to-end — a
+  smoke-level proof (readiness §7 / prod-smoke §44), not exhaustive coverage; and (b) it does NOT expose data
+  or bypass authorization — server-side entitlement enforced, no secret / PII leak (§12). What DEFERS is
+  security DEPTH / hardening (rate-limits, abuse defenses, header polish, threat-model completeness) and
+  test / eval / perf depth. Rule of thumb: defer the HARDENING, never the "does it work + can a user see what
+  they shouldn't" floor. The rails (§50) still hold.
+- **Design rides ALONG with engineering — never after.** Product design and engineering are ONE pass. Every
+  feature is built to the §6b taste bar AS it is built; you do NOT ship a bland feature now and "make it pretty
+  later." A feature that works but looks generic-AI-bland is NOT done.
+- **Grade design HONESTLY — no self-flattery (§17).** The taste grade (§6b / §40) is adversarial: if a surface
+  is bland, generic, or half-baked, GRADE IT BLAND and fix it — never rationalize a mediocre UI as "good" to
+  make the scorecard, or the owner, feel good. Self-deceiving that it looks good is an integrity failure equal
+  to fabricating a metric. When a surface is bland, or you are STUCK on how to make it good, LEAN ON MOBBIN
+  (§6b workflow): pull real best-in-class reference screens, look at the pixels, and design against them —
+  that is exactly what it is for.
