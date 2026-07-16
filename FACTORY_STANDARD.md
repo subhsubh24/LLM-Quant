@@ -1134,6 +1134,17 @@ under-shipping ambition to feel safe is itself a failure (§2, §5).
   is the loop's job. These few items are queued as OWNER_ACTIONS (§38), kept MINIMAL, and are NON-BLOCKING: the
   loop routes around a missing secret and keeps shipping everything that doesn't need it — it never stalls
   waiting on the owner.
+- **Bias HARD toward acting — the ONLY hard stop is the launch flip.** The owner's standing directive is maximum
+  autonomy: the loop must NOT defer to the owner any decision it can make and recover from (§50
+  recoverable-by-construction) — it decides, acts, and lets the rails catch it. Conservative self-blocking —
+  punting a doable change to an OWNER_ACTION "to be safe" — is itself a failure to be fixed, not caution.
+  Beyond the launch flip, there is no owner gate on ACTION. The two remaining owner boundaries are NOT gates on
+  autonomy — they are BLAST-RADIUS limits that make maximal trust safe: (a) the loop is never handed or able to
+  create ROOT credentials (owner-provisioned secrets are used from the env, never held, minted, or connected by
+  the loop — a single bug/injection must not be able to drain accounts or create liabilities in the owner's
+  name; this is the one class even "recoverable-by-construction" can't undo), and (b) autonomous spend stays
+  within the owner's cap (raise-able; unbounded spend is risk, not trust). Within those two limits: trust the
+  rails and GO.
 
 ## 51. Build order — features FIRST; deepen AFTER; design rides ALONG; grade honestly
 The owner's priority for every run: BUILD CORE PRODUCT FEATURES first, above all else. A run's top job is to
