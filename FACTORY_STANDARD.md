@@ -993,6 +993,18 @@ applied to the DEPLOYED app, continuously. Two layers, both required:
   multimodal model (Opus 4.8) — the same see-the-pixels capability as §6b / §40. Where a browser is genuinely
   absent, Layer A still runs and this pass degrades to "not run this cycle," logged HONESTLY in LOOP_HEALTH —
   never skipped silently (§17).
+- **(B) is a BUG HUNTER, not a happy-path walk.** Sharpen the agentic pass with three disciplines: (1) **EXPLORE
+  THE LONG TAIL** — the defects that matter hide in the COMBINATIONS, not the critical happy path: vary states
+  (empty / error / loading / partial data), personas & entitlements (once test accounts exist), and edge
+  combinations (an old surface meeting a new feature). Walk aggressively, not just the golden path. (2)
+  **RERUN-TO-CONFIRM before filing** — a transient failure and a model misread both look like bugs; re-run the
+  exact sequence to confirm the symptom is REAL before it becomes an issue (§28 applied to findings, so the
+  hunter doesn't cry wolf). (3) **DEDUP WITH PREVALENCE** — one issue per ROOT cause, noting how widespread it
+  is (which surfaces / journeys hit it), and UPDATE an existing issue rather than filing a duplicate. And when a
+  fix ships, close the loop the same way: reproduce the ORIGINAL reported symptom in the browser and confirm it
+  actually DISAPPEARED (a green diff is not a verification, §40) before the fix is considered done. **AT LAUNCH**
+  (real users exist): extend the hunt to isolated REPLICAS of real accounts — never a live user — where the
+  long-tail integration / permission / data bugs actually surface.
 - **Self-healing:** every finding from A or B auto-files as a tracked issue and enters the normal maker/checker
   loop; the next run fixes the ROOT cause (§6c) and the prod-smoke assertion that would have caught it becomes a
   permanent regression guard, so the same class cannot silently ship again. Authed journeys need a dedicated
