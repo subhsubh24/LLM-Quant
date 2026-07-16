@@ -200,7 +200,12 @@ every UI surface in every factory; product-specific brand/voice/tokens live in V
   screen to study). This is genuine VISUAL grounding, the same multimodal capability §40 uses to grade
   rendered output. Adapt what you SEE to our brand tokens; (3) CAPTURE the chosen exemplar — app + Mobbin link + the ONE specific pattern to steal — back
   into `docs/design/REFERENCES.md` so the win COMPOUNDS (§48); (4) §40 vision-verify the rendered result
-  against it. Where Mobbin is absent, the in-repo REFERENCES.md set remains the guarantee. The
+  against it; (5) REPORT it in LOOP_HEALTH `this_run.grounded_against_mobbin` — TRUE only when a UI/design
+  change THIS run genuinely queried Mobbin AND left the receipt (the exemplar + a real `mobbin.com` link in
+  REFERENCES.md); FALSE when a UI/design change shipped WITHOUT grounding (an honest self-flag the Quality
+  Auditor treats as a design-taste gap, §31); null when the run did no UI work. The boolean is tied to the
+  REFERENCES.md receipt, NOT a self-assertion — a `true` with no receipt is a fabrication (§17). Where Mobbin
+  is absent, the in-repo REFERENCES.md set remains the guarantee. The
   set is a LIVING asset: when the DEEP AUDIT (§10) finds a surface that clears the slop-blocklist yet
   still feels average, the fix ADDS the exemplar it should have aimed at. Build one surface/component
   at a time against its reference — never a whole screen from a single prompt.
