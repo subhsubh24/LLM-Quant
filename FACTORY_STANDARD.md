@@ -1093,3 +1093,32 @@ and what MCPs does each have?". Close it: the orchestration is code too.
   versioned and reviewable — not just product code.
 - **Why it matters:** the fleet becomes auditable (you can review orchestration like any PR), model/MCP/cron
   changes get the same rigor as code, and self-improvement (§11/§36) extends to the factory's own wiring.
+
+## 50. Autonomy mandate — zero-touch by default; the rails ARE the approval; irreversible ≠ unrecoverable
+The owner's standing directive: the products run ZERO-TOUCH. The factory ships everything itself — including
+big rehauls, redesigns, framework upgrades, and architecture changes — with NO human in the per-PR loop. The
+owner sits back and watches; the loop does the work. This is the default posture, not an exception, and
+under-shipping ambition to feel safe is itself a failure (§2, §5).
+- **The rails ARE the approval.** There is no human sign-off gate on shipping. What replaces it: the CI gates +
+  maker≠checker (§4) + the independent auditors (quality / GTM) + the readiness gate (§7) + live-prod
+  validation (§44). A change ships when the rails pass — never because a human blessed it, and NEVER merged
+  past a red rail or by weakening a rail to go green (§6c). Keep the rails STRONG: they are now the entire
+  safety system, so a regression in a rail is a top-priority fix.
+- **Ambition is authorized.** Do NOT stay artificially small to dodge risk. Large refactors, schema redesigns,
+  multi-surface rehauls, and dependency/framework upgrades are IN SCOPE for autonomous work when they clear the
+  value bar (§5) and the rails. The rails are what make ambition safe — use them and build big.
+- **Irreversible actions are autonomous — but recoverable-by-construction (irreversible ≠ unrecoverable).**
+  The loop MAY take destructive / irreversible actions on its own — data migrations, dropping a column,
+  deleting a feature or dead code, infra changes — with no human gate. Because the rails stay, it does them the
+  way a senior engineer would, so an autonomous mistake is still recoverable WITHOUT a human: back up / snapshot
+  before a destructive data op; expand → migrate → contract, never a bare drop; feature-flag before deleting a
+  live surface; keep every change a single, clean, revert-ready PR. "Irreversible" is a fact about the
+  operation; "unrecoverable" is a choice the loop must NOT make — a destructive change shipped with no recovery
+  path is a rails FAILURE (readiness / auditor catch), not autonomy.
+- **Owner-touch is the rare, irreducible exception — and NEVER blocks the loop.** The only things that stay
+  owner-only, by security or policy (not by choice): secrets / API keys / account creation / domains / billing
+  (the loop never holds credentials); paid spend beyond the approved cap; and the public-launch flip
+  (readiness-gated, kill-switch, authorized channels — the standing marketing-autonomy model). Everything else
+  is the loop's job. These few items are queued as OWNER_ACTIONS (§38), kept MINIMAL, and are NON-BLOCKING: the
+  loop routes around a missing secret and keeps shipping everything that doesn't need it — it never stalls
+  waiting on the owner.
