@@ -20,7 +20,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: '2026-07-15 (Research Run 23 -- ran the first-ever real, self-verified PILOT of EXP-006 (political price-reversal after hype spikes): on a diverse, real 16-market sample of Polymarket Politics markets (11 distinct events/topics, not 2024-election-dominated), hourly lag-1 autocorrelation of YES-price changes in the last 14 days before resolution = -0.102, 95% bootstrap CI [-0.1515,-0.0467] EXCLUDES zero, 14/16 markets individually negative -- a real, reproducible, PRELIMINARY corroboration of the reversal/overreaction hypothesis on this project''s OWN data (not just cited literature), but N=16 is far below the 100-event pre-registered floor and this is a raw price-behavior statistic, not a cost-net tradeable backtest. Also discovered (live binary-search, revises Run 21''s cost estimate upward) that CLOB /prices-history enforces a hard ~15-day max interval per call independent of fidelity -- a full-lifetime intraday series needs chunked fetching, not the single call Run 21 spot-checked; this pilot avoided the problem via a single last-14-days call per market. EXP-006 is now formally proposed in experiments[] (status=proposed, not tested) with a full hypothesis/min-N/OOS-plan/costs/pre-mortem, including Run 22''s per-cluster-exposure-cap requirement (a per-trade cap was already proven a no-op). RECOMMEND-only, no ROADMAP steer -- no high-confidence validated edge. Binding constraint unchanged: no validated real-money OOS edge on any tested mechanism to date.)'
+  as_of: '2026-07-16 (Research Run 24 -- grew Research Run 23''s EXP-006 pilot 4x via the SAME pre-registered method + a wider candidate pool: N=16 -> N=67 survivors (Polymarket Politics, tag_id=2, order=volumeNum, first 200 candidates, unmodified fetcher, seed=42, run once). Mean hourly lag-1 price-change autocorrelation = -0.1198 (vs -0.102 at N=16 -- sign held, magnitude did not attenuate), 95% bootstrap CI [-0.1508,-0.0886] EXCLUDES zero (tighter than the N=16 CI), 54/67 markets individually negative (80.6%). NEW this run: a per-CLUSTER robustness check (22 distinct event-clusters, e.g. all Fed-rate-decision contracts = 1 cluster, all US-Iran peace-deal contracts = 1 cluster) directly answering Research Runs 20-22''s standing single-event/cluster-concentration pre-mortem -- cluster-level mean = -0.0953, 95% CI (resampling clusters) [-0.1455,-0.0495], STILL excludes zero, 18/22 clusters (81.8%) individually negative. The effect is not an artifact of the Fed/Iran clusters dominating a per-market count. STILL below the pre-registered 100-event floor and STILL a hindsight phenomenon statistic, not a cost-net tradeable backtest -- a materially stronger preliminary signal, not a passed test. External web sweep (WebSearch + direct WebFetch) found no new primary source since Run 23. RECOMMEND-only, no ROADMAP steer -- no high-confidence validated edge. Binding constraint unchanged: no validated real-money OOS edge on any tested mechanism to date.)'
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -468,6 +468,26 @@ GROWTH_STATUS:
         detector; this pilot avoided the problem entirely by using a single last-14-days
         call per market (mirroring Clinton & Huang's own "final weeks" focus), which fits
         under the cap in one call.
+        UPDATE (Research Run 24, 2026-07-16): grew the SAME pre-registered pilot from
+        N=16 (first 40 candidates) to N=67 survivors (first 200 candidates, same tag_id=2/
+        order=volumeNum/last-14-days/hourly/trim config, unmodified fetcher, seed=42, run
+        once). Mean lag-1 autocorrelation = -0.1198 (vs -0.102 at N=16 -- sign held,
+        magnitude did not attenuate), 95% market-level bootstrap CI [-0.1508,-0.0886]
+        (excludes zero, materially tighter than the N=16 CI), 54/67 markets individually
+        negative (80.6%). NEW this run: a per-CLUSTER robustness check directly answering
+        the Run 20-22 concentration pre-mortem -- the 67 survivors group into 22 distinct
+        event-clusters (Fed-rate-decision contracts across meeting dates = 1 cluster,
+        18/67 markets; US-Iran peace-deal/ceasefire contracts = 1 cluster, 12/67; 2024
+        election popular-vote/margin/closest-state contracts = 1 cluster, 10/67; the
+        remainder mostly singleton clusters). Collapsing to ONE value per cluster (equal
+        weight across the 22 clusters, not the 67 markets): cluster-level mean = -0.0953,
+        95% bootstrap CI (resampling CLUSTERS, seed=42, 2000 draws) = [-0.1455,-0.0495]
+        -- STILL excludes zero, 18/22 clusters (81.8%) individually negative. The effect is
+        NOT an artifact of the Fed/Iran clusters dominating a per-market count. STILL below
+        the 100-event pre-registered floor and STILL a hindsight phenomenon statistic, not
+        a cost-net backtest -- this is a materially stronger preliminary signal, not a
+        passed test. Full detail + adversarial pre-mortem on this run's own extension:
+        RESEARCH_MEMORY 2026-07-16 (Research Run 24).
       oos_plan: >
         NOT YET BUILT (genuine factory-build scope, not a research-agent probe): a
         spike/move-detection function over the (now cap-aware, single-call-per-market or
@@ -510,6 +530,34 @@ GROWTH_STATUS:
         sample. RECOMMEND-only (this run) -- no ROADMAP steer; the pilot is preliminary,
         not a validated edge.
   learnings:
+    - "Research Run 24 (2026-07-16): grew Research Run 23's EXP-006 pilot 4x (N=16 -> N=67) via the
+      SAME pre-registered method (Polymarket Politics, tag_id=2, order=volumeNum, unmodified
+      fetcher, seed=42, run once) applied to a wider pre-registered candidate pool (first 200 vs
+      first 40 in list order). Mean hourly lag-1 price-change autocorrelation = -0.1198 (sign held,
+      magnitude did not attenuate vs Run 23's -0.102), 95% bootstrap CI [-0.1508,-0.0886] excludes
+      zero (tighter than Run 23's), 54/67 markets individually negative (80.6%, close to Run 23's
+      87.5%). NEW this run -- a per-CLUSTER robustness check directly answering the standing Run
+      20-22 single-event/cluster-concentration pre-mortem: the 67 survivors group into 22 distinct
+      event-clusters (Fed-rate-decision contracts across meeting dates = 1 cluster, 18/67 markets;
+      US-Iran peace-deal/ceasefire contracts = 1 cluster, 12/67; 2024-election popular-vote/margin/
+      closest-state contracts = 1 cluster, 10/67; the rest mostly singletons). Collapsing to one
+      value per cluster and re-aggregating equal-weight ACROSS CLUSTERS (not markets): cluster-level
+      mean = -0.0953, 95% CI (resampling clusters, seed=42, 2000 draws) = [-0.1455,-0.0495] -- still
+      excludes zero, 18/22 clusters (81.8%) individually negative. The effect is not an artifact of
+      the Fed/Iran clusters dominating a per-market count -- the first time this pilot's own data has
+      been tested against cluster concentration, not just asserted diverse by topic count. STILL
+      below the pre-registered 100-event floor and STILL a hindsight phenomenon statistic (not a
+      causal/leakage-safe trading rule, not a cost-net backtest) -- a materially stronger preliminary
+      signal, not a passed test. All of Runs 20-23's standing cautions (the July 2024
+      assassination-attempt N=1 non-reversal; the QuantPedia cost-fragility example; no existing
+      per-cluster EXPOSURE cap in the repo) remain unchanged and unresolved by this run. External
+      web sweep this run (WebSearch + a direct WebFetch of a previously-unlogged QuantPedia
+      'Systematic Edges in Prediction Markets' summary page) found no new primary source, N, or
+      magnitude beyond what prior runs already verified -- confirmed a summary of already-cited
+      work (cross-venue arb speed-dominance, a different-asset-class football-betting
+      favorite-longshot figure), logged as no-course-correction-needed. RECOMMEND-only, no ROADMAP
+      steer -- no high-confidence validated edge. Binding constraint (no validated real-money OOS
+      edge) STANDS. Full detail: RESEARCH_MEMORY 2026-07-16 (Research Run 24)."
     - "Research Run 23 (2026-07-15): ran a pre-registered, read-only PILOT of EXP-006 (political
       price-reversal after hype spikes) -- the first time this project measured Clinton & Huang's
       own statistic (lag-1 serial correlation of price CHANGES) on its own real data instead of just
@@ -780,6 +828,29 @@ GROWTH_STATUS:
       requested --limit, so every documented --limit 250/500 OA-11/EXP command under-fetches). Full
       detail: RESEARCH_MEMORY 2026-07-04."
   next_actions:
+    - "SUPERSEDES the Run 23 item below with a stronger, not just repeated, preliminary result
+      (Research Run 24, 2026-07-16): Run 23 recommended either (a) growing the EXP-006 pilot's N
+      cheaply before recommending a build, or (b) building the detector + per-cluster cap together
+      if the factory independently prioritizes it. This run took path (a): grew N=16 -> N=67 via
+      the identical pre-registered method + a wider candidate pool (no code change), and ADDED a
+      per-cluster robustness check the pilot had never been run against before -- the effect
+      (negative lag-1 autocorrelation, CI excludes 0) survived both the 4x larger sample AND
+      collapsing to one vote per correlated event-cluster (22 clusters, 18/22 individually
+      negative). This raises confidence in the underlying PHENOMENON without claiming the
+      pre-registered 100-event floor is met (N=67 raw / 22 clusters, still short) or that this is a
+      tradeable backtest (still no cost model, no causal/leakage-safe decision rule, no per-cluster
+      EXPOSURE cap implementation). NEW, higher-value recommendation for the next run: the cheap
+      lever (widen the candidate pool further within the SAME config) is now closer to
+      diminishing returns near the 100-event floor -- the next research run should either (i) push
+      the SAME config's candidate pool wider still (e.g. first 400) to cross the 100-survivor floor
+      outright, since this run's ~36% survival rate (67/186) suggests ~280 candidates would likely
+      clear it, or (ii) diversify the sampling axis (a non-Politics category, or `order=volume24hr`)
+      to test whether the effect is Politics-specific or general, before recommending a factory
+      build. If the factory independently prioritizes EXP-006 first, it must still build the
+      spike-detector + per-CLUSTER exposure cap together from day one (a per-trade-only cap is
+      already proven a no-op, Run 22) -- do not build on a per-trade cap alone. No new EXP-00N
+      proposed this run; binding constraint (no validated real-money OOS edge) STANDS. Full detail:
+      RESEARCH_MEMORY 2026-07-16 (Research Run 24)."
     - "NEW (Research Run 23, 2026-07-15): EXP-006 is now a formally specified experiment in
       experiments[] (status=proposed) with a preliminary, real-data pilot signal (N=16 markets,
       mean hourly lag-1 price-change autocorrelation -0.102, 95% CI excludes 0) -- but it is NOT
