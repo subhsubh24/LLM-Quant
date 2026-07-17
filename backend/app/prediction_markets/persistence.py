@@ -7,7 +7,7 @@ positions, orders, and P&L survive server restarts.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlmodel import Session, select
@@ -32,6 +32,24 @@ from .execution import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORTFOLIO_ID = 1
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalize a persisted timestamp to a timezone-AWARE UTC datetime.
+
+    The whole trading path standardized on ``datetime.now(timezone.utc)`` (tz-aware),
+    but SQLModel maps a plain ``datetime`` column to a timezone-NAIVE SQL column, so a
+    value read back from the DB is naive regardless of how it was written. Rehydrating
+    such a naive timestamp into a live ``Position`` (whose fresh siblings are tz-aware)
+    left the executor holding a MIX of naive + aware datetimes — a latent
+    ``TypeError: can't compare offset-naive and offset-aware datetimes`` waiting for the
+    first age/staleness subtraction to touch a *rehydrated* (not fresh) position. Stored
+    times are UTC by construction, so stamp UTC on a naive value; pass an already-aware
+    value through unchanged. ``None`` (an unset column) stays ``None``.
+    """
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=timezone.utc)
 
 
 def _ensure_default_portfolio(session) -> None:
@@ -124,7 +142,7 @@ def save_position(pos: Position, market_question: str = "", outcome_label: str =
             existing.market_value = pos.market_value
             existing.unrealized_pnl = pos.unrealized_pnl
             existing.realized_pnl = pos.realized_pnl
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = datetime.now(timezone.utc)
             session.add(existing)
         else:
             db_pos = PredictionPosition(
@@ -244,8 +262,11 @@ def load_positions_into_executor(executor: PredictionMarketExecutor):
                     # per-category cap otherwise silently degrades to a global cap across the
                     # fresh-process paper cycle — a confirmed live freeze, 2026-07-02).
                     category=db_pos.category or "",
-                    opened_at=db_pos.opened_at,
-                    updated_at=db_pos.updated_at,
+                    # Normalize the persisted (timezone-NAIVE, see _as_utc) timestamps back
+                    # to tz-aware UTC so a rehydrated Position matches its fresh, in-process
+                    # siblings — the executor must never hold a mix of naive + aware datetimes.
+                    opened_at=_as_utc(db_pos.opened_at),
+                    updated_at=_as_utc(db_pos.updated_at),
                 )
                 # Surface a LEGACY short (side="short") anomaly loudly. Shorts cannot be
                 # opened since #215 (the executor's SELL guard rejects opening one), so a
@@ -344,7 +365,7 @@ def update_strategy_performance(
         perf = session.exec(stmt).first()
 
         if not perf:
-            perf = PredictionStrategyPerformance(strategy=strategy, first_trade_at=datetime.utcnow())
+            perf = PredictionStrategyPerformance(strategy=strategy, first_trade_at=datetime.now(timezone.utc))
 
         perf.total_trades += 1
         if is_win:
@@ -365,8 +386,8 @@ def update_strategy_performance(
         perf.avg_confidence = perf.avg_confidence * (n - 1) / n + confidence / n
 
         perf.total_notional += notional
-        perf.last_trade_at = datetime.utcnow()
-        perf.updated_at = datetime.utcnow()
+        perf.last_trade_at = datetime.now(timezone.utc)
+        perf.updated_at = datetime.now(timezone.utc)
 
         session.add(perf)
 

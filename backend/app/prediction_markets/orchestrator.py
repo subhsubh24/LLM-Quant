@@ -1241,7 +1241,7 @@ class PredictionMarketOrchestrator:
                         db_pos.current_price = pos.current_price
                         db_pos.market_value = pos.market_value
                         db_pos.unrealized_pnl = pos.unrealized_pnl
-                        db_pos.updated_at = datetime.utcnow()
+                        db_pos.updated_at = datetime.now(timezone.utc)
                         session.add(db_pos)
                     else:
                         outcome_label = ""

@@ -5,7 +5,7 @@ Persists positions, orders, P&L snapshots, and whale activity
 alongside the existing QuantLab models.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 import json
@@ -54,8 +54,8 @@ class PredictionPortfolio(SQLModel, table=True):
     win_count: int = 0
     loss_count: int = 0
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     positions: List["PredictionPosition"] = Relationship(back_populates="portfolio")
     orders: List["PredictionOrder"] = Relationship(back_populates="portfolio")
@@ -118,8 +118,8 @@ class PredictionPosition(SQLModel, table=True):
     resolution_value: Optional[float] = None  # 0.0 or 1.0 if resolved
 
     is_active: bool = True
-    opened_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    opened_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     closed_at: Optional[datetime] = None
 
     portfolio: Optional[PredictionPortfolio] = Relationship(back_populates="positions")
@@ -172,8 +172,8 @@ class PredictionOrder(SQLModel, table=True):
     is_dry_run: bool = True
     raw_response_json: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     portfolio: Optional[PredictionPortfolio] = Relationship(back_populates="orders")
 
@@ -217,7 +217,7 @@ class PredictionPnLSnapshot(SQLModel, table=True):
     # Breakdown by strategy (JSON: {strategy_name: value})
     strategy_breakdown_json: Optional[str] = None
 
-    snapshot_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    snapshot_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
     portfolio: Optional[PredictionPortfolio] = Relationship(back_populates="snapshots")
 
@@ -261,7 +261,7 @@ class PredictionPriceHistory(SQLModel, table=True):
     spread: float = 0.0
     volume_24h: float = 0.0
 
-    sampled_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    sampled_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
 
 # ============================================================
@@ -299,7 +299,7 @@ class PredictionPortfolioSnapshot(SQLModel, table=True):
 
     is_dry_run: bool = True
 
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
 
 
 # ============================================================
@@ -341,4 +341,4 @@ class PredictionStrategyPerformance(SQLModel, table=True):
     # Timestamps
     first_trade_at: Optional[datetime] = None
     last_trade_at: Optional[datetime] = None
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
