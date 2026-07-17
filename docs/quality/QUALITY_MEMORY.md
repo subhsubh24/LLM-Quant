@@ -5,6 +5,104 @@
 
 ---
 
+## 2026-07-17 — overall `B` · ship gate NOT met (9th grade — `correctness_reliability` A→A+ PROMOTED (#338 closed the last named residual); everything else held; business_case still the lone binding B; EXP-006 grew as an honest PILOT, not a validated edge)
+
+**Diff vs 2026-07-13:** overall unchanged at **B**. **Exactly one dimension crossed a threshold —
+upward:** `correctness_reliability` **A → A+**. The other nine held exactly: functional_reality A,
+backtest_integrity A, security A+, run_risk_readiness A, artifact_integrity A,
+business_case_strength B, design_taste A, tests_evals A+, performance A. The binding constraint
+(`business_case_strength`, B) is unchanged: still no validated OOS cost-net edge.
+
+**Why correctness_reliability promoted (a genuine, bounded drive-to-A+):** for several cycles the
+*sole* named residual on this dimension was `WalletBehaviorDivergence.confidence` emitting a
+decoupled `_compute_confidence(...)` heuristic instead of the shared `gate_confidence(entry, edge)`
+units contract (the #263/#268/#275/#280/#284 bug class). #338 closed it: `advanced_strategies.py:1254`
+now emits `confidence = gate_confidence(avg_price, edge)`, `_compute_confidence` is DELETED repo-wide
+(only a NOTE comment survives, `:1158`), and the regression test is non-tautological
+(`test_confidence_units_gated.py:191-229` pins `confidence == entry_price+edge`, asserts
+`not hasattr(strat, "_compute_confidence")`, includes a behavioral gate flip). A fresh adversarial
+grader hunted for a REPLACEMENT paper-path finding — swallowed errors, mutable defaults, div-by-zero,
+non-determinism — and found none (the live fill==limit approximation is a run-risk matter, not
+paper-correctness; peak-relative drawdown can't self-trip on a never-positive strategy but is
+globally backstopped by the hard loss caps — by-design, not a bug). Zero paper-path findings +
+determinism verified = A+. This is the named, value-bar-clearing improvement the rubric asks for, not
+inflation — the grade rose only because a real, verified fix removed the only thing holding it back.
+
+**The research event this cycle — EXP-006 grown as an honest PILOT (Runs 21–25, negative-lag signal, NOT a validated edge):**
+the loop scoped (Run 21: the "needs a NEW intraday fetcher" blocker was OVERSTATED — the existing CLOB
+interval-candlestick path suffices) and grew a *pre-registered pilot probe* of EXP-006 (political
+price-reversal after hype spikes). This is a **raw lag-1 autocorrelation probe, NOT a formal strategy
+backtest** — no strategy code, no cost model, no F10/F11 gate. Runs 23/24/25 measured N=16 / 67
+(volumeNum axis) / 14 (volume24hr axis, 2023–24 era), all with negative mean lag-1 autocorrelation and
+bootstrap 95% CIs EXCLUDING zero (Run 25: mean −0.1154, CI [−0.2017,−0.0308], 12/14 individually
+negative) — a 3rd directional corroboration — **but every sample is FAR below the pre-registered
+100-event floor**, and the writeups honestly flag a 35.7% single-cluster (Hamas) concentration + an
+UNVERIFIED ~81 combined N. External research (QuantPedia mean-reversion) refined the cost caution:
+the 10bps cost-collapse is TURNOVER-dependent (favor threshold-triggered trades over every hourly
+wiggle). Honest preliminary signal ONLY; reaches no revenue field. The bucket-calibration family stays
+REFUTED across 3 real corpora (EXP-002 N=510, EXP-005 N=814, EXP-003 N=1,369).
+
+**What the factory shipped since 2026-07-13 (fresh adversarial graders, verified not trusted):**
+- **#338 (correctness — the promotion) — GENUINE.** See above. Closes the last correctness A→A+ residual.
+- **#330 / #362 (run-risk / live-safety) — GENUINE.** Every unbounded venue call on the gated-off live
+  order path is now time-bounded via `_call_with_timeout` (daemon thread): `create_and_sign_order` +
+  `post_order` (`execution.py:374,379`) + `cancel_order` (`:703`). Timeout → REJECTED/False, no
+  fabricated fill (`:470-495`). A stalled py-clob-client call can't hang the event loop.
+- **#364 (run-risk / risk-correctness) — GENUINE.** Per-strategy drawdown circuit nets fees into the
+  per-strategy value (`risk_manager.py:256`, scoped to NOT double-count `_daily_pnl`) so a decayed
+  alpha's auto-disable gates on TRUE net cash PnL. Load-bearing test: gross dd 19.6% < 20% but net
+  crosses → disabled (`test_sell_reduce_drawdown.py:118-146`).
+- **#350 / #351 (backtest-integrity infra) — GENUINE + correctly advisory.** Leakage-safe intraday
+  spike-detection/reversal-labeling PRIMITIVE (`spike_detection.py`, no trading/PnL claim) + two
+  seed_hash reproducibility invariants pinned in `test_walk_forward_pm.py` (research_only-inertness +
+  input-order-invariance, non-vacuous).
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**
+  (import smoke + curated tests + safety + secret scan + runtime harness + scorecard-parse +
+  self-validation 13/13 + GTM honesty all OK).
+- `E2E_RUN_PASSED=0 python3 scripts/runtime_harness.py` → **PASSED** (live gate REJECTS, kill switch
+  blocks, max-position rejects $900>$50, loss cap trips net-of-fees −$41.20 vs −$10 + blocks subsequent,
+  deterministic exposure 10.000000==10.000000).
+- `python3 scripts/run_walk_forward.py` twice → **reproduces** (`seed 42 / hash b3a8d5e0e9579853`,
+  PnL 910,880.71; sha256-IDENTICAL outputs `c7d628ef…`; SYNTHETIC demo, labeled NOT a validated edge).
+  104 walk-forward/F10/F11/cost/drawdown/calibration gate tests pass.
+- `python3 -m pytest backend --collect-only` → **1538 collected / 0 errors WITH pandas**; 1197/13
+  (pandas-missing) in the light gate — the documented heavy-dep exclusions. Docs cite ~1140 (BELOW
+  true) — understated/honest, never inflated.
+- Secret scan clean (no sk-/AKIA; only .env.example tracked). ZERO `live_trading_enabled = True` in
+  backend/app. `next 14.2.35`.
+- `python3 scripts/check_scorecard.py gate` → **NOT-READY (business_case_strength: B)** (honest).
+
+**Grades (fresh adversarial per-dimension graders, none the maker — 4 subagents covered all 10 dims):**
+functional_reality **A**, backtest_integrity **A**, correctness_reliability **A+** (↑ from A),
+security **A+**, run_risk_readiness **A**, artifact_integrity **A**, business_case_strength **B**,
+design_taste **A**, tests_evals **A+**, performance **A**.
+
+**Anti-inflation note:** I promoted `correctness_reliability` but did NOT promote any other dimension
+despite genuine shipped work (#330/#362/#364/#350/#351). None addressed the binding constraint, and
+each remaining A-graded ship-critical dim carries a named non-blocking residual that is the textbook
+**A**, not A+: the un-committed real corpora + uncalibrated `DEFAULT_IMPACT_COEFF` (backtest_integrity),
+the DEFAULT_FEE_RATE + fill==limit live-fee estimate (run_risk), the stale/understated test count
+(artifact_integrity), the deferred multi-leg execution (functional_reality). `business_case_strength`
+stays **B** — the EXP-006 pilot is honest directional signal at N=14–67, far below the 100-event floor,
+with no strategy/cost/F10/F11 gate, so by rubric it is not, and is not presented as, a validated edge.
+No grade exceeds its evidence.
+
+**Backtest integrity (make-or-break) — reproduction + gate-exercise:** engine remains leak-free
+(structural `MarketView` guard; fetchers RAISE rather than fabricate), reproducible (two runs this
+cycle, sha256-identical). F10/F11 auto-run on every real corpus (`validate_real_oos.py:80-96`) and
+previously rejected EXP-003's +$28,815.49 + EXP-005's +$16,993.97 headlines. Held at **A** (not A+)
+only because the sole offline-reproducible number is synthetic and `DEFAULT_IMPACT_COEFF=0.5` remains
+a placeholder. No fabricated PnL, no unreproducible backtest, no fabricated edge found anywhere.
+
+**Weakest link (honest, unchanged):** there is no validated out-of-sample edge. The engine to find
+one is world-class and getting sharper (correctness now A+), but the edge itself is unproven; the
+EXP-006 pilot is a promising direction that must reach N≥100 + a full strategy/cost/F10/F11 backtest
+before it can count. Everything downstream is gated correctly and honestly.
+
+---
+
 ## 2026-07-13 — overall `B` · ship gate NOT met (8th grade — STEADY STATE: no dimension crossed a threshold; EXP-003 Politics TESTED + correctly REJECTED → bucket-calibration family now refuted on a 3rd real corpus; business_case still the lone binding B)
 
 **Diff vs 2026-07-11:** overall unchanged at **B**, and — unlike last cycle — **no dimension crossed
