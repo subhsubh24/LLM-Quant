@@ -501,7 +501,11 @@ class MarkToMarketEngine:
                     try:
                         strategy = (getattr(pos, "strategy", "") or "").strip()
                         if strategy:
-                            self.risk_manager.record_pnl(strategy, pnl)
+                            # Net the entry fee (same value fed to the executor caps at
+                            # :487) so the per-strategy drawdown circuit gates on TRUE net
+                            # cash PnL, not gross. Resolution has no exit fill → entry fee
+                            # only.
+                            self.risk_manager.record_pnl(strategy, pnl, fees=entry_fee)
                     except Exception as e:  # pragma: no cover - defensive
                         logger.warning(
                             f"[MTM] risk_manager.record_pnl failed for {token_id}: {e}"

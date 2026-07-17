@@ -216,8 +216,24 @@ class RiskManager:
         # (``_strategy_trades`` stayed 0) — which silently broke the drawdown auto-disable,
         # whose ``trades >= strategy_disable_min_trades`` gate could then never pass.
 
-    def record_pnl(self, strategy: str, pnl: float):
-        """Record realized P&L for a strategy (called when position closes)."""
+    def record_pnl(self, strategy: str, pnl: float, fees: float = 0.0):
+        """Record realized P&L for a strategy (called when position closes).
+
+        ``pnl`` is the GROSS realized PnL; ``fees`` is the round-trip transaction cost
+        attributable to THIS realization — the entry fee for a held-to-resolution
+        settlement, or entry + exit fee for a partial reduce — the same magnitude the
+        executor's hard loss caps net (``execution.record_realized_pnl``).
+        """
+        # ``_daily_pnl`` is deliberately left GROSS in this method. Its fee accounting is
+        # owned separately by ``record_execution`` (which subtracts each fill's fee from
+        # ``_daily_pnl`` for the order paths that call it — today the automated open-scan
+        # loop, ``orchestrator.py``), and is OUT OF SCOPE for this per-strategy-drawdown
+        # fix. Netting ``fees`` into ``_daily_pnl`` here too would risk DOUBLE-counting the
+        # fees ``record_execution`` already subtracts on those paths, so we scope the
+        # change strictly to ``_strategy_current_value`` below. (A separate pre-existing
+        # gap — a reduce/SELL placed via the manual ``/execute`` route never reaches
+        # ``record_execution``, so its fill fee is omitted from ``_daily_pnl`` — is
+        # untouched here and tracked as a follow-up.)
         self._daily_pnl += pnl
 
         # Count this realized (closed) trade for the strategy. The drawdown-based
@@ -228,8 +244,16 @@ class RiskManager:
         # realized-drawdown circuit.
         self._strategy_trades[strategy] += 1
 
-        # Update strategy peak/current for drawdown tracking
-        self._strategy_current_value[strategy] += pnl
+        # Update strategy peak/current for drawdown tracking. Net the fees into the
+        # per-strategy value so the drawdown circuit gates on TRUE NET cash PnL, exactly
+        # like the executor's hard loss caps. ``record_execution`` never attributes a fee
+        # to a strategy (the venue response carries no strategy tag), so this counter was
+        # purely GROSS — undercounting each trade's real cost. A near-break-even alpha
+        # whose gross edge barely covers fees SHOULD be retired; gross tracking trips the
+        # drawdown auto-disable LATER than the real net decay warrants. Netting only ever
+        # disables a decayed strategy EARLIER (the conservative direction), mirroring the
+        # caps' fee-netting rationale. ``abs(fees)`` matches ``record_realized_pnl``.
+        self._strategy_current_value[strategy] += pnl - abs(fees)
         current = self._strategy_current_value[strategy]
         peak = self._strategy_peak_value[strategy]
 
