@@ -1389,7 +1389,12 @@ class PredictionMarketExecutor:
                     strategy = (getattr(pos, "strategy", "") or "").strip()
                     if strategy:
                         try:
-                            self.risk_manager.record_pnl(strategy, pnl)
+                            # Net the round-trip fee (exit fill fee + pro-rata entry fee,
+                            # the same value fed to the executor caps at :1376) so the
+                            # per-strategy drawdown circuit gates on TRUE net cash PnL.
+                            self.risk_manager.record_pnl(
+                                strategy, pnl, fees=result.fees + entry_fee
+                            )
                         except Exception as e:  # pragma: no cover - defensive
                             logger.warning(
                                 "[EXEC] risk_manager.record_pnl failed for %s: %s", key, e
