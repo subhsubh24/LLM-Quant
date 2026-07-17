@@ -1034,6 +1034,15 @@ per task; the cost contract governs WHEN to escalate).
   to a model (never call an SDK directly, per Conventions) so a swap is a config change, not a rewrite —
   guarded by the provider-floors + determinism tests. Our "veteran" capability (evals, memory, doctrine) stays
   with us even if any one "generalist" model is removed.
+- **Build vs buy — default to building the capability IN-LOOP.** The same benchmark discipline applies to whole
+  TOOLS, not just models. When a factory would reach for a paid vertical SaaS / service (pentest, alert-triage,
+  analytics, scraping, a design or outreach tool…), first ask whether the LOOP can build that capability itself
+  and clear the bar CHEAPER. Measure it — the internal build's cost + quality vs the bought tool on OUR bar —
+  and DEFAULT to building; buy ONLY when buying genuinely wins (clears the bar AND beats building on cost /
+  quality / time). A capability the loop can build is typically a fraction of the SaaS cost and integrates
+  natively against our own code + data. This also conserves the autonomous spend cap (§50): a new paid
+  subscription is over-cap owner spend unless it wins the build-vs-buy test. Never rationalize either side —
+  measure, then decide (§17).
 
 ## 46. Delegation discipline — delegate early, brief with CONSTRAINTS, review cheap, know when not to
 The cost of an agent is dominated not by price-per-token but by how many turns the lead takes, how much context
