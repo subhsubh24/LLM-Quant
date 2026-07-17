@@ -2649,3 +2649,53 @@ proposal. 8 scouts + 0 reviewers = 8 subagents (<50).
   if it changes a GATE OUTCOME.** Trace the field to the consumer's threshold before building: a
   sub-second drift against a 600s staleness window (whose load-bearing signal is a *different*,
   `end_date`-based check anyway) is the #193/#276 no-broken-consumer class. Tidier ≠ genuine.
+
+## 2026-07-17b (model/strategy factory) — QUIET, HONEST all-DROP sweep (8/8 lenses clean); bookkeeping-only
+
+A FRESH full 8-Haiku sweep across tracks A–G + a cross-cutting deep-audit lens at HEAD (4e2e566,
+post-#365), doubling as the ~daily DEEP AUDIT (leakage/overfitting/calibration/risk/live-safety +
+quality-grade-reconcile lenses). Baseline re-verified before selecting: required preflight **code
+GREEN** (exit 0, after pip-installing `backend/requirements-ci.txt` in the fresh container — a
+missing-dep local artifact, NOT a HEAD regression) + runtime harness PASSED (paper order FILLED,
+deterministic exposure `10.000000==10.000000`, live gate REJECTS a real order, kill switch +
+max-position ($900>$50) + loss-cap net-of-fees (−$41.20 vs −$10) all trip) + self-validation OK
+(13 caps, `unmet=[]`, declared==read) + scorecard parses (overall **B**, NOT-READY:
+business_case_strength B). **8/8 lenses NOTHING-GENUINE.** Shipped 0 code PRs + this bookkeeping
+(LOOP_HEALTH + loop-memory only, file-disjoint). Binding constraint — `business_case_strength` **B**,
+no validated real-money OOS edge, an ALPHA/research problem the sibling routine owns — STANDS.
+`steady`, NOT churning/stuck: a disciplined quiet run on a heavily-mined mature engine is a SUCCESS
+(§2 anti-PADDING) → no harness proposal. 8 scouts + 0 reviewers = 8 subagents (<50).
+
+### Scout triage (anti-padding — findings verified NOT-genuine / churn / deferred, so future runs don't re-raise)
+- **Tracks A–G:** NOTHING-GENUINE with proof (all verified against LIVE code): (A) venue/data ingest
+  guarded — finite-checks, `timeout=15`, `RequestException`-caught, structural anti-leakage; DQ wired
+  at `orchestrator.py:939`, `tag_id` filters server-side. (B) every EXECUTING single-leg strategy uses
+  `gate_confidence(entry,edge)` (units-contract #263→#338 COMPLETE); the remaining hardcoded-confidence
+  strategies are either multi-leg `outcome_idx=-1` (skipped at `orchestrator.py:~1013` BEFORE gating) or
+  unwired research-only (Calibration/RecencyWeighted bucket) → INERT. (C) `walk_forward` leak guard
+  STRUCTURAL (`MarketView` omits `outcome`/`resolution_time`; train strictly `< w_start`), both RNGs
+  seeded, F10/F11 each reject a fragile/insignificant edge in test, cost model single-source no
+  double-count. (D) all venue/LLM calls bounded < 120s scan interval (#330/#362 order+cancel timeouts),
+  loss caps net fees + fail-CLOSED on persist, live gate defense-in-depth + un-flippable via body,
+  side-effect integrity intact (position only on `filled_size>0`); the no-caller
+  `get_open_orders`/`get_balances` unbounded methods LEFT ALONE (bounding dead code = padding, the
+  #193/#276 no-broken-consumer class). (E) `spike_detection` EXP-006 primitive pure/leakage-safe/28-test
+  but deliberately UNWIRED; E4/E7 DECISION-COROLLARY deferred (no promoted alpha to drive the loop); the
+  spike→reversal walk-forward harness is the RESEARCH routine's lane. (F) 0 false-coverage traps — the
+  13 unregistered test files all cover orphaned `app.portfolio`/`app.backtest`/`app.execution`/
+  `app.monitoring` modules OFF the trading path (registering them = churn testing dead code); registered
+  gate tests non-tautological. (G) security A+ — 16 mutating POSTs `_MUTATING_AUTH`-guarded, auth
+  default-CLOSED `hmac.compare_digest`, live gate env-only + fail-closed, boot fail-loud on missing live
+  credentials, no committed secrets, self-validation 13 caps `unmet=[]` declared==read.
+- **Deep-audit lens:** leakage/overfit/calibration/risk/live-safety + quality-grade-reconcile all clean.
+  The sole sub-A ship-critical dim is `business_case_strength` **B** — an ALPHA/research problem the
+  sibling routine owns, NOT buildable by this factory. No stubbed-critical-flow (email-verification-trap)
+  found — the paper/gated-live money paths are REALLY exercised by the runtime harness. No uncaught
+  throw on a critical path (every external call is inside a try + bounded by a timeout).
+
+### Lessons
+- **A second all-DROP run of the same day is still a SUCCESS when the sweep is genuinely full.** The
+  earlier 2026-07-17 run shipped a real risk-correctness fix (#364); this run re-swept the SAME mature
+  engine at the advanced HEAD and found nothing new. The anti-scarcity duty is discharged by RUNNING the
+  full A–G + deep-audit sweep, not by manufacturing a marginal PR because a prior run shipped one — the
+  value bar, not a per-run quota, is the only limiter (§2/§5).
