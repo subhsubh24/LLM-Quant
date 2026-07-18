@@ -3190,3 +3190,196 @@ only — no ROADMAP steer. The next highest-value, cheap, research-agent-scope s
 GROWTH_STATUS `factory_next_action`): formally diff the volumeNum (Run 24) and volume24hr (Run
 25) survivor sets by `market_id` to get a real combined N and re-run the cluster check on the
 union before deciding whether a 3rd sampling axis is needed to reach the 100-event floor.
+
+---
+
+## 2026-07-18 — Research Run 26: executed Research Run 25's own recommended next step — formally
+diffed the volumeNum (Run 24 shape) and volume24hr (Run 25 shape) EXP-006 pilot survivor sets by
+`market_id`, on a FRESH pull of both axes (raw survivor lists from prior runs were never
+committed, per this project's standing pattern). `volumeNum` reproduced Run 24 EXACTLY (N=67,
+byte-identical stats — a genuine determinism check). `volume24hr` did **not** reproduce Run 25
+(N=28 today vs N=14 two days earlier) — a new finding: this axis ranks by trailing-24h volume, so
+its candidate set genuinely churns day to day, unlike `volumeNum`'s stable all-time ranking. A
+direct `market_id` set diff on the fresh pull found **ZERO overlap**, confirming (not just
+corroborating) the prior runs' inferred disjointness. **Union N=95** — close to, but still short
+of, the pre-registered 100-event floor. Per-market mean lag-1 autocorrelation = -0.1193, 95% CI
+[-0.1491,-0.0901] excludes zero, 79/95 (83.2%) individually negative. Cluster check (26 clusters):
+mean -0.1104, CI [-0.1639,-0.0628] excludes zero, 22/26 (84.6%) negative, largest cluster only
+18.9% of the union — less concentrated than any prior single-axis run. RECOMMEND-only, no ROADMAP
+steer — still short of the pre-registered floor and still a hindsight statistic, not a cost-net
+backtest.
+
+- Hypothesis (falsifiable, pre-registered before fetching, written to a scratch file first,
+  unmodified repo code, no changes): if Research Runs 24 and 25's separately-measured volumeNum
+  (N=67) and volume24hr (N=14) EXP-006 pilot survivor sets are genuinely disjoint populations (as
+  inferred from question-text/era non-overlap in Run 25, never formally confirmed), then a FRESH,
+  pre-registered pull of both axes on the SAME day, with `market_id` recorded per survivor this
+  time, should find (a) the `volumeNum` axis reproduces Run 24's result closely (it draws from a
+  stable all-time-volume ranking that should not have moved materially in 2 days), (b) the
+  `volume24hr` axis may or may not reproduce Run 25's exact N (it draws from a time-varying
+  trailing-24h-volume ranking, so some drift is plausible and would itself be informative), and
+  (c) a direct `market_id` set diff between the two fresh survivor sets should show little-to-no
+  overlap, consistent with Run 25's question-text-based inference. A non-trivial overlap, or a
+  materially different `volumeNum` result, would be evidence the prior runs' inferred combined-N
+  reasoning was unsound.
+- Min sample N: EXP-006's own pre-registered floor (`min_sample_n=100` across `>=3` distinct
+  cycles) is unchanged. This run's formally-verified union (N=95) is the closest this project has
+  come to the floor, but it is NOT yet met.
+- OOS result: **the diff Run 25 called for, executed — a real, formally-verified union close to,
+  but still short of, the floor.** Method (pre-registered before fetching, unmodified
+  `PolymarketHistoryFetcher` imported directly from the repo, no code changes, `seed=42`, each
+  axis run once, not retried after seeing the number; the ONLY methodological addition vs. Runs
+  24-25 is recording `market_id` alongside each survivor's autocorrelation, so a real set diff is
+  possible): for each of `order="volumeNum"` and `order="volume24hr"`,
+  `fetch_resolved_markets(limit=100, max_pages=2, tag_id=2, order=<axis>)` (first ~200
+  candidates), same inclusion (market life >= 14 days when `start_date` known), same window
+  (hourly ticks, last 14 days before `resolution_time`, one CLOB call per market), same trims
+  (drop final 24h before resolution; drop hourly points outside [0.03, 0.97]), same statistic
+  (per-market Pearson lag-1 autocorrelation of hourly price CHANGES), same survivor floor (`>=24`
+  hourly points post-trim).
+  **`volumeNum` result: 200 raw candidates, 186 with a known `start_date` + life>=14d, 67
+  survived the point-count filter — every one of these three numbers, and the resulting mean
+  (-0.1198) and 95% bootstrap CI ([-0.1508,-0.0886], market-level, `seed=42`, 2000 resamples), and
+  the negative-market count (54/67, 80.6%), are IDENTICAL to Run 24's result two days earlier.**
+  This is a strong, previously-untested determinism/stability check on the `volumeNum` axis: the
+  set of "top ~200 resolved Politics markets by all-time volume, that also have a captured
+  `start_date` and >=14 days of life" is essentially FIXED over a 2-day window (Gamma's resolved
+  set for this slice does not churn meaningfully day to day), so re-running this exact axis is not
+  discovering new evidence — it is confirming the same evidence is stable.
+  **`volume24hr` result: 199 raw candidates (same count as Run 25 — Gamma's top-199-by-trailing-
+  24h-volume list itself is roughly stable in SIZE), but only 57 had a known `start_date` +
+  life>=14d this run (Run 25: 64) — a 7-candidate drop — and only 28 survived the point-count
+  filter (Run 25: 14 — a 2x INCREASE, not a repeat).** This is the run's most material new
+  finding: unlike `volumeNum`, this axis's *composition* is NOT stable day to day, even though its
+  raw *count* is. `order=volume24hr` ranks resolved markets by their trailing-24-hour trading
+  volume AS OF the fetch time — a resolved market's trailing-24h volume today is a different
+  quantity than its trailing-24h volume two days ago (trading in a resolved market can still occur
+  briefly around settlement, or the "top 199 by this metric among all resolved markets" simply
+  shifts as new markets resolve and old ones age out of a 24h lookback window). Practical
+  consequence: any prior or future reference to "the volume24hr survivor set" must specify WHEN it
+  was pulled — it is a snapshot, not a fixed corpus, and cannot be silently reused across runs the
+  way `volumeNum`'s can.
+  **The formal diff (the actual point of this run): a direct `market_id` set intersection between
+  the 67 fresh `volumeNum` survivors and the 28 fresh `volume24hr` survivors returned ZERO
+  overlapping ids.** This confirms — with an actual set operation, not question-text/era
+  inspection — Runs 24-25's inferred disjointness. **Union (dedup by `market_id`): N=95.**
+  Per-market: mean lag-1 autocorrelation across the 95-market union = **-0.1193**, 95% bootstrap
+  CI (market-level resampling, `seed=42`, 2000 draws) = **[-0.1491,-0.0901]** (excludes zero, and
+  is TIGHTER than either single-axis run alone — expected from the larger, still-representative
+  N), **79/95 (83.2%) markets individually negative**. Every one of these figures sits squarely
+  within the range of all three prior pilot runs (Run 23: -0.102 N=16; Run 24: -0.1198 N=67; Run
+  25: -0.1154 N=14) — no sign flip, no magnitude collapse, across four independent measurements
+  now.
+- **Cluster check on the union (same manual keyword/topic-grouping method as Runs 24-25, applied
+  fresh to all 95 markets — full list inspected, not sampled):** the 95 survivors group into **26
+  distinct event-clusters**. The largest: Fed rate-decision contracts across 9 different FOMC
+  meeting dates from Sept 2024 through Jan 2026 (18 markets, 18.9% of the union — e.g. "Fed
+  decreases interest rates by 25 bps after October 2025 meeting?" and its "No change" counterpart
+  for the same meeting are each counted as separate markets but the same cluster). Next: US/
+  Israel-Iran tension broadly construed (ceasefire/peace-deal/military-strikes/diplomatic-meeting/
+  Khamenei-succession/regime-fall contracts spanning mid-2025 through mid-2026, 16 markets, 16.8%).
+  Then 2024 US presidential election popular-vote/state-margin contracts (10 markets, 10.5%), the
+  2024 GOP primary (Trump South Carolina margin, Haley drop-out, Haley-vs-DeSantis Iowa — 7
+  markets, 7.4%), Israel-Hamas hostage/leadership/Netanyahu contracts (7 markets, 7.4%), a single
+  2026 UK Norfolk Police and Crime Commissioner by-election (6 different candidate-win markets for
+  ONE election — 6 markets, 6.3%), South Korea presidential contracts (3 markets), and 18 smaller
+  clusters of 1-2 markets each (Poland president, Canada PM, Peru president, Hungary PM, NYC mayor
+  2025, US government shutdown, Russia-Ukraine ceasefire/war-end, Venezuela/Maduro, the Epstein
+  files, and nine genuine singletons: Israel-Iraq military action, Abbas/Palestine presidency,
+  Taiwan's presidential election, a US anti-cartel operation in Mexico, QatarEnergy LNG, Sweden
+  NATO accession, a Trump Bitcoin-reserve pledge, Serbia's Vučić, Portugal's presidential election,
+  and Biden's 538 approval rating). **Cluster-level mean = -0.1104**, 95% bootstrap CI (resampling
+  the 26 CLUSTERS, `seed=42`, 2000 draws) = **[-0.1639,-0.0628]** — excludes zero, **22 of 26
+  clusters (84.6%) individually negative**. **The largest cluster (Fed, 18.9%) is materially LESS
+  dominant than in either prior single-axis cluster check** (Run 24: top cluster 27% of N=67; Run
+  25: top cluster 35.7% of N=14) — a genuine, not merely asserted, robustness improvement: the
+  effect is now spread across more, smaller clusters than when it was measured on either axis
+  alone, exactly the direction Run 22's standing concentration concern would want to see before
+  trusting a per-market or per-cluster aggregate more.
+- Calibration (Brier / reliability): n/a — unchanged from Runs 23-25, this measures raw
+  price-CHANGE serial correlation, not a probability-calibration statistic.
+- Costs modeled: **none** — still explicitly a PHENOMENON probe, not a tradeable-strategy backtest.
+  No new cost-model evidence this run (the QuantPedia turnover-dependent nuance Run 25 surfaced
+  stands unchanged).
+- Verdict: **proposed (unchanged status in `experiments[]`) — pilot_probe field updated with the
+  Run 26 formally-verified union result.** Still NOT `tested` — no strategy code, no cost model,
+  no F10/F11 gate, and N=95 is still (barely) below the pre-registered `min_sample_n=100` floor.
+  This run's contribution is methodological rigor (a real set diff replacing an inferred one) and
+  a materially improved cluster-robustness picture, not a new phenomenon or a passed test.
+- Why / adversarial pre-mortem on THIS run's own extension:
+  1. N=95 is still short of the pre-registered 100-event floor — this is not, and must not be
+     read as, a passed test. The temptation to round 95 up to "effectively 100" must be resisted;
+     the next run should actually cross the floor before any claim of a met precondition.
+  2. The cluster taxonomy remains a post-hoc, manual, keyword-based grouping (the same
+     methodological caveat every prior run's cluster check has carried) — a different clustering
+     choice (e.g. splitting the broad "US/Israel-Iran tension" cluster into narrower
+     ceasefire-specific vs. military-action-specific sub-clusters) could shift the cluster-level
+     CI's exact bounds, though 22/26 independently-negative clusters makes a sign flip from
+     re-clustering alone implausible.
+  3. The `volume24hr` axis's newly-confirmed day-to-day instability cuts both ways: it is
+     reassuring that a materially different daily sample (N=28 vs N=14) still shows the same
+     sign and a similar magnitude (independent evidence against the effect being a fluke of one
+     day's specific sample), but it also means the "N=95 union" reported here is itself only a
+     snapshot — a future run pulling volume24hr on a different day and re-diffing could land on a
+     different total (very likely still disjoint from `volumeNum`, per two independent zero-
+     overlap checks now, but not necessarily exactly 95).
+  4. All of Runs 20-25's standing cautions still apply unchanged and are not re-litigated as
+     resolved by this run: the July 2024 assassination-attempt spike (N=1) did NOT reverse; the
+     raw autocorrelation is a hindsight statistic, not a causal/leakage-safe live decision rule;
+     no per-cluster EXPOSURE cap exists in this repo for any axis's data; the QuantPedia
+     turnover-dependent friction-collapse caution stands.
+  5. This run only re-ran the SAME two axes at the SAME tag_id/window/trim/statistic
+     configuration Runs 24-25 already used — it did not test a 3rd sampling axis, a different
+     category, or a different window length. The recommended next step (widen `volumeNum`'s pool,
+     or re-pull `volume24hr` fresh) stays within this same configuration family; a genuinely new
+     axis is not yet warranted given how close N=95 already is to the floor.
+- External research this run (2 WebSearch sweeps, DATA only, no WebFetch needed since nothing
+  surfaced warranted a primary-source deep-read beyond what is already logged):
+  - "Polymarket price reversal serial correlation overreaction research 2026" — surfaced only
+    already-logged sources (Clinton & Huang via DL News secondary coverage, including the "58%"
+    figure already flagged since 2026-07-15 as an unverified secondary-source number not present
+    in the primary abstract; the QuantPedia mean-reversion backtest; several arxiv papers already
+    scanned and judged not relevant — "Ghosts of Polymarket" settlement mechanics, the perpetual-
+    futures risk-design paper — plus one new-to-search-results-but-not-new-in-substance item, an
+    NBA-market arbitrage-analysis arxiv paper (2605.00864), scanned by title/abstract only and
+    judged not relevant to a calibration/timing alpha — a market-microstructure arbitrage study,
+    not a crowd-mispricing or price-behavior finding; not fetched further).
+  - "prediction market calibration edge crowd wisdom 2026 study" — surfaced only already-logged
+    primary sources (Le 2026 Decomposing Crowd Wisdom; Gomez-Cram/Guo/Jensen/Kung) with no new
+    detail beyond what Runs 20-25 already captured directly from these papers.
+  - "Polymarket Kalshi cross-market arbitrage logical consistency mutually exclusive contracts
+    2026" (a B8-adjacent sweep, since cross-venue/cross-market coherence is a standing open
+    ROADMAP direction distinct from EXP-006): returned exclusively SEO/marketing-grade "how
+    arbitrage bots work" guide sites (laikalabs.ai, clawarbs.com, launchpoly.com, tradingvps.io,
+    botforkalshi.com, a dev.to post, a HackerNoon listicle) — no academic source, no N, no
+    magnitude, no primary data. Not fetched further, not logged as evidence for or against
+    anything; logged only so a future run does not re-spend a search budget expecting alpha
+    content from this exact query shape.
+- Self-validation (sources this run):
+  - EXP-006 pilot diff: two live-fetched, pre-registered scratch-script runs this session
+    (unmodified `backend.app.prediction_markets.polymarket_history_fetcher.PolymarketHistoryFetcher`
+    imported directly from the repo, not a reimplementation — `fetch_resolved_markets` and
+    `fetch_price_history` called exactly as the repo ships them; only the surrounding
+    correlation/bootstrap/cluster/set-diff arithmetic, pure Python stdlib only, was written for
+    this scratch analysis). `seed=42`, each axis run once, not retried after seeing the number.
+    The script + its raw per-market-id output (the actual basis for the set diff reported above)
+    live in a research-agent scratch path, not committed (per this project's established pattern).
+  - Egress: direct `curl` (200 on `gamma-api.polymarket.com`, `clob.polymarket.com`,
+    `data-api.polymarket.com`) plus the fetcher's own `requests` session for the real pulls — all
+    consistent with every run since 2026-07-04.
+  - WebSearch sweep sources: all previously-logged sources cross-checked against RESEARCH_MEMORY
+    before being marked "no new evidence"; the handful of not-previously-logged items (the NBA
+    arbitrage arxiv paper, the SEO arbitrage-guide sites) were scanned and judged not to contain
+    new primary data, not fetched further, and not logged as evidence.
+
+**Binding constraint STANDS:** no validated real-money OOS edge on any tested mechanism to date.
+This run's contribution is methodological, not phenomenological: it replaced Runs 24-25's inferred
+axis-disjointness with a formally-verified one (a real `market_id` set diff, zero overlap), pushed
+the pilot's honestly-countable N from two separate sub-floor numbers to a single formally-unioned
+N=95 (closer to the pre-registered 100-event floor than any prior run), and materially improved the
+cluster-concentration picture (largest cluster now 18.9%, down from 27%/35.7% on either axis
+alone) — while explicitly NOT claiming the floor is met or that this is a tradeable backtest.
+RECOMMEND-only — no ROADMAP steer. The next research-agent step (pre-registered before fetching):
+either widen the now-confirmed-stable `volumeNum` axis's candidate pool (e.g. `max_pages=3`) or
+re-pull the now-confirmed-unstable `volume24hr` axis fresh on a later date and re-diff — either is
+expected to cross the 100-event floor without needing a 3rd sampling axis.
