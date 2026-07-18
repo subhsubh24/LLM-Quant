@@ -1232,3 +1232,33 @@ run left behind.
   scorecards) = current snapshot + bounded rolling window, not infinite history. A decision LOG ("why did we
   change X?") lives in git / commits or a separate doc the loop does NOT read as rules — never inside the
   doctrine.
+
+## 54. Graph of loops, GROUNDED — pair every metric, anchor to reality, freeze what the optimizer would game
+The fleet is a GRAPH of loops, not one loop: fast optimizing loops (the build / GTM factories) watched by
+INDEPENDENT audit loops (the quality / GTM auditors, maker≠checker §4). That topology is necessary but NOT
+sufficient — a graph where every loop only checks another loop's REPORT (not reality) is mutual confirmation,
+and it fails WORSE than a single loop: consistent, plausible, green lights all the way down. Two rules keep the
+graph grounded.
+- **Pair every optimized metric with a COUNTER-metric (anti-Goodhart).** A metric optimized hard enough stops
+  measuring what it did — the loop finds every way to move the number, including the ones that betray its
+  purpose (the support bot that "resolves" tickets by deflecting them, while churn doubles). So NO metric
+  travels alone: every metric the loop drives UP is paired with a guard metric that catches the cheap way to
+  win, and a metric rising while its pair degrades is a Goodhart FLAG, not a win. Pairs to hold: changes-shipped
+  ↔ reverts / regression rate (padding & churn-on-main); velocity ↔ the independent quality-auditor grade
+  (speed that lowers quality is not progress); "green CI" ↔ did-the-check-actually-run (§28); readiness-attempts
+  ↔ readiness-rejected; growth / signups ↔ retention / churn (post-launch — acquisition that doesn't retain is
+  the same deflection trap). When you add a metric to LOOP_HEALTH, add its pair.
+- **Anchors must touch GROUND — never cross-check one report against another.** The audit loops earn trust ONLY
+  by verifying against reality: run the real system, drive LIVE prod (§44), reconcile against real billing / real
+  user data, execute the real test (§28 — a green that didn't run the real thing is a lie). An auditor that just
+  checks the loop's self-reported scorecard against another self-reported number IS the circular trap — it must
+  land on something that cannot be argued with. And the FROZEN anchors — held-out evals the maker never games,
+  never-weaken-a-check (§6c), never-fabricate (§17), never-merge-past-red (§50) — stay frozen PRECISELY because
+  they are what the optimizer is most tempted to weaken to make a number go green. Freezing them is not rigidity;
+  it is what keeps the graph honest.
+- **The root judgment — what "BETTER" means — comes from OUTSIDE the graph (the owner).** Loops optimize toward
+  references; the graph revises references (§10 deep audit questions the targets themselves); but WHICH things are
+  worth controlling at all, and where the frozen rules sit, is supplied by the OWNER through contact with real
+  failures (§50 VISION / taste / launch). The durable axis was never loops-vs-graphs — it is UNGROUNDED vs
+  GROUNDED: whether the machinery keeps touching the reality it claims to improve. Mark where the machine's
+  authority ends; ours does (§50).
