@@ -1168,6 +1168,17 @@ scaffolding around a product that isn't built yet. The deepening follows the fea
   feature exists and works, (2) the DEEPENING follows it — exhaustive unit / edge tests, eval expansion,
   performance tuning, and extra hardening. Do NOT gold-plate tests, evals, or perf on a surface before the
   surface exists. Building the product beats padding it.
+- **Assemble the pre-build CONTEXT BRIEF first (the Evidence layer for product work, §47).** Before building a
+  feature, do NOT start from a vague prompt — assemble the brief that makes the output FIT, pulled from where
+  each piece already lives: (1) the USER specifically — real details, what makes them give up vs. pay attention
+  (VISION); (2) the PROBLEM in the user's OWN words — direct quotes from tickets / calls / reviews once users
+  exist, demand-validation signals pre-launch (DEMAND_VALIDATION_PLAYBOOK) — their language, NOT a synthesis;
+  (3) what GOOD looks like — concrete exemplars, show-don't-describe (`docs/design/REFERENCES.md` + Mobbin, §6b);
+  (4) what's been TRIED AND KILLED, and why — fed FORWARD so the run doesn't re-walk a dead path (MEMORY §35 /
+  FLEET_LESSONS); (5) the CONSTRAINTS that actually SHAPE the solution — only the load-bearing ones (§5), not
+  every rule; (6) how you'll KNOW it worked — concrete + measurable, with its counter-metric pair (readiness §7
+  / evals §48 / §54). A feature built from a rich brief FITS; one built from a vague prompt technically works and
+  misses the point.
 - **The floor that ships WITH every feature (what "features first" does NOT license).** Two things are never
   deferred, because a broken or exposed feature is a liability, not progress: (a) it WORKS end-to-end — a
   smoke-level proof (readiness §7 / prod-smoke §44), not exhaustive coverage; and (b) it does NOT expose data
