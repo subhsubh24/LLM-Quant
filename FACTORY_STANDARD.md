@@ -218,9 +218,18 @@ every UI surface in every factory; product-specific brand/voice/tokens live in V
   (REJECT generated-looking slop even if technically correct); the periodic DEEP AUDIT design/taste
   lens (§10) hunts the LIVE UI (via the §6 screenshots) for slop; the readiness gate's visual
   review (§7) judges the captured screenshots against this bar. A generated-looking/"vibe-coded"
-  surface is a release-blocking FAIL equal to a red test. (If a "Taste Skill" / design-taste-frontend
-  Skill is available in the run environment, use it — but this in-repo standard + the gates are the
-  guarantee, independent of any skill being installed.)
+  surface is a release-blocking FAIL equal to a red test. **Use the vendored IMPECCABLE design skill
+  (`.agents/skills/impeccable/`) for EVERY UI change.** Its concrete thresholds (body contrast ≥4.5:1; display
+  headings ≤6rem, letter-spacing ≥ −0.04em; line length 65–75ch; semantic z-index scales; ease-out motion with
+  a mandatory `prefers-reduced-motion` alternative) and its ABSOLUTE-BANS (side-stripe borders, gradient text,
+  glassmorphism-by-default, the hero-metric template, identical card grids, the tiny uppercase tracked eyebrow
+  on every section, `01/02/03` numbered section markers, and the cream/sand/beige warm-neutral AI-default body
+  bg) are the concrete TEETH of this bar — read the matching `.agents/skills/impeccable/reference/<command>.md`
+  for the pass (audit / critique / craft / polish / colorize / typeset / layout / animate). Run its
+  ANTI-PATTERN DETECTOR autonomously via the run's browser (Browserbase, §44): inject it into the RENDERED page
+  and treat findings as deterministic design bugs — it pairs with the §40 multimodal vision review
+  (deterministic + perceptual). This in-repo standard + these gates are the guarantee, independent of any
+  external skill install.
 
 ## 6c. Fix the ROOT CAUSE — never bypass, never band-aid
 When something breaks, fix the underlying CAUSE, not the symptom. NOT fixes (forbidden as the
@@ -973,6 +982,10 @@ one that fits the run; applicability noted):
 - **`docs/writing/AVOID_AI_WRITING.md`** (all products) — the full ruleset for prose that doesn't read as
   generic AI. Consult whenever writing anything a human reads: UI copy, marketing, store listings, outreach,
   docs, PR / commit messages (§55).
+- **`.agents/skills/impeccable/`** (all products) — the vendored Impeccable design skill (Apache-2.0): the SKILL
+  + per-command reference docs (audit / critique / craft / polish / colorize / typeset / layout / animate) + the
+  anti-pattern detector. Consult the matching reference for any UI pass; run the detector via Browserbase
+  (§6b, §44).
 When you author a NEW reference playbook, ADD a line here so future runs discover it. A playbook that exists
 but no run reads is wasted scaffolding. (Products without a given surface — e.g. a non-store or personal-bot
 product — simply won't have that playbook; that's expected, not a gap.)
@@ -1001,6 +1014,12 @@ applied to the DEPLOYED app, continuously. Two layers, both required:
   multimodal model (Opus 4.8) — the same see-the-pixels capability as §6b / §40. Where a browser is genuinely
   absent, Layer A still runs and this pass degrades to "not run this cycle," logged HONESTLY in LOOP_HEALTH —
   never skipped silently (§17).
+- **Run the IMPECCABLE anti-pattern detector in the SAME Browserbase pass (§6b).** The `live` mode is human-only,
+  but the DETECTOR just needs a rendered page + a browser — which this pass already has. Inject the vendored
+  detector (`.agents/skills/impeccable/scripts/`) into the page and collect its structured findings (side-stripe
+  borders, gradient text, glass-by-default, the hero-metric template, contrast failures, eyebrow-on-every-section,
+  the cream/sand AI-default bg). These are DETERMINISTIC design bugs that sit alongside the multimodal vision
+  review: the model SEES the pixels, the detector COUNTS the tells. File both.
 - **(B) is a BUG HUNTER, not a happy-path walk.** Sharpen the agentic pass with three disciplines: (1) **EXPLORE
   THE LONG TAIL** — the defects that matter hide in the COMBINATIONS, not the critical happy path: vary states
   (empty / error / loading / partial data), personas & entitlements (once test accounts exist), and edge
