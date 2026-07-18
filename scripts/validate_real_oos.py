@@ -26,7 +26,7 @@ import argparse
 import json
 import statistics
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -154,6 +154,69 @@ def _top_slice_pnl_share(slices) -> "float | None":
     return round(max(shares), 4) if shares else None
 
 
+# ---------------------------------------------------------------------------
+# FROZEN CORPUS (ROADMAP F2 / backtest-integrity) — serialize a real leakage-safe
+# corpus to a committed JSON artifact so a REAL (not just synthetic) OOS result
+# reproduces OFFLINE, deterministically, from committed data — no live egress needed.
+# The bytes stored are the SAME leakage-safe HistoricalMarket fields the fetcher built
+# (the settled outcome is NEVER the decision price — the fetcher RAISES rather than
+# fabricating). Freezing changes NO number: `--from-corpus <file>` replays the exact
+# same evaluate() the live fetch would, at a pinned seed, to the SAME seed_hash.
+# ---------------------------------------------------------------------------
+def corpus_to_rows(markets) -> list:
+    """Serialize HistoricalMarket records to a deterministic, JSON-safe row list.
+
+    Every field the walk-forward + F10/F11 gates consume is captured (incl. the coarse
+    ``category`` the regime-slice CATEGORY concentration check needs — which the older
+    fetch_polymarket_history serializer dropped). Datetimes are ISO-8601 (tz preserved).
+    Rows are sorted by (market_id, decision_time) so the file is byte-stable across
+    re-serializations of the same corpus (a clean git diff, a reproducible artifact)."""
+    rows = [
+        {
+            "market_id": m.market_id,
+            "decision_time": m.decision_time.isoformat(),
+            "resolution_time": m.resolution_time.isoformat(),
+            "market_price": m.market_price,
+            "model_prob": m.model_prob,   # == crowd baseline; a real model overrides this
+            "outcome": m.outcome,
+            "liquidity": m.liquidity,
+            "category": m.category,
+            "research_only": m.research_only,
+        }
+        for m in markets
+    ]
+    rows.sort(key=lambda r: (r["market_id"], r["decision_time"]))
+    return rows
+
+
+def load_corpus_from_json(path: str, wf_mod) -> list:
+    """Load a frozen corpus back into HistoricalMarket records (offline, no egress).
+
+    Reconstructs through the HistoricalMarket constructor so its __post_init__ invariants
+    (price in [0,1], outcome in {0,1}, resolution strictly after decision) RE-VALIDATE the
+    committed data on every load — a corrupted/tampered corpus fails LOUD, never silently
+    scores garbage. datetime.fromisoformat round-trips the tz-aware isoformat above."""
+    rows = json.loads(Path(path).read_text())
+    if not isinstance(rows, list):
+        raise ValueError(f"frozen corpus {path} must be a JSON list of records, got {type(rows).__name__}")
+    hm = wf_mod.HistoricalMarket
+    out = []
+    for r in rows:
+        liq = r.get("liquidity")
+        out.append(hm(
+            market_id=str(r["market_id"]),
+            decision_time=datetime.fromisoformat(r["decision_time"]),
+            resolution_time=datetime.fromisoformat(r["resolution_time"]),
+            market_price=float(r["market_price"]),
+            model_prob=float(r["model_prob"]),
+            outcome=int(r["outcome"]),
+            liquidity=float(liq) if liq is not None else None,
+            category=r.get("category"),
+            research_only=bool(r.get("research_only", False)),
+        ))
+    return out
+
+
 def fetch_venue(venue: str, limit: int, max_pages: int, lead_days: float, tag_id=None):
     """Fetch leakage-safe HistoricalMarket records for a venue. Returns (markets, status).
     NEVER raises on egress/empty (returns []+note); only a genuine code bug returns a 'code-error'
@@ -228,11 +291,37 @@ def main() -> int:
                          "(polymarket_v1_hf = A6 HuggingFace archive, opt-in; needs `datasets` "
                          "installed on a permitted host — omitted from the default cron)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--from-corpus", default=None,
+                    help="REPLAY a FROZEN corpus (a committed JSON produced by --freeze-corpus) "
+                         "OFFLINE — no live fetch, no egress. Reproduces the exact same real OOS "
+                         "result deterministically from committed data (ROADMAP F2 / backtest "
+                         "integrity). Mutually exclusive with a live fetch.")
+    ap.add_argument("--freeze-corpus", default=None,
+                    help="After the live fetch, SERIALIZE the combined leakage-safe corpus to this "
+                         "JSON path (incl. category for the F10 regime-slice check), so the real OOS "
+                         "result can later be reproduced offline via --from-corpus. Run on a "
+                         "Polymarket-permitted host.")
     args = ap.parse_args()
 
     wf_mod = _imp("backend.app.prediction_markets.walk_forward", "app.prediction_markets.walk_forward")
     cal_mod = _imp("backend.app.prediction_markets.calibration_bucket_strategy",
                    "app.prediction_markets.calibration_bucket_strategy")
+
+    # OFFLINE REPLAY of a frozen corpus — deterministic, no venue fetch, no egress. This is
+    # the reproduce-from-committed-artifacts path: the same evaluate() the live lane runs,
+    # over pinned bytes, to the same seed_hash. NEVER trades, NEVER touches money.
+    if args.from_corpus:
+        markets = load_corpus_from_json(args.from_corpus, wf_mod)
+        result = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
+                          decision_lead_days=args.decision_lead_days)
+        out = {"frozen_corpus": args.from_corpus, "combined": result}
+        if args.json:
+            print(json.dumps(out, indent=2))
+        else:
+            c, a = result["corpus"], result["calibration_alpha_b4a"]
+            print(f"[FROZEN {args.from_corpus}] n={c['n_markets']} | B4a {a['trades']}tr "
+                  f"${a['total_pnl_usd']:,.2f} — {result['verdict']}")
+        return 0
 
     per_venue, all_markets, code_error = {}, [], False
     for venue in [v.strip() for v in args.venues.split(",") if v.strip()]:
@@ -251,6 +340,17 @@ def main() -> int:
                          decision_lead_days=args.decision_lead_days)
                 if all_markets else {"status": "no records from any venue (egress-blocked / run on a permitted host)"})
     out = {"per_venue": per_venue, "combined": combined}
+
+    # FREEZE the fetched corpus to a committed artifact so this real OOS result reproduces
+    # OFFLINE (no egress) via --from-corpus. Only write when we actually fetched records.
+    if args.freeze_corpus:
+        if all_markets:
+            p = Path(args.freeze_corpus)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(corpus_to_rows(all_markets), indent=2, sort_keys=True) + "\n")
+            out["frozen_to"] = str(p)
+        else:
+            out["frozen_to"] = "SKIPPED — 0 records fetched (nothing to freeze)"
 
     if args.json:
         print(json.dumps(out, indent=2))
