@@ -15,6 +15,12 @@ on:
     branches: ["claude/llm-stock-trading-app-fXupf"]
   workflow_dispatch:
 
+# Cancel superseded in-progress runs for the same PR — the autonomous loop pushes commits in rapid
+# succession; without this every intermediate push ran full CI to completion. Only PR runs cancel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   gate:
     name: code + safety gate (blocking)
