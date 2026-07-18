@@ -125,7 +125,8 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_confidence_units_gated.py \
            backend/tests/test_strategy_enable_disable.py \
            backend/tests/test_spike_detection.py \
-           backend/tests/test_datetime_tz_consistency.py; do
+           backend/tests/test_datetime_tz_consistency.py \
+           backend/tests/test_frozen_corpus_replay.py; do
     [ -f "$t" ] && _testfiles="$_testfiles $t"
   done
   if [ -n "$_testfiles" ]; then

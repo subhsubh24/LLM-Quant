@@ -145,11 +145,20 @@ SELF_VALIDATION:
       ci_validatable: true             # the BLOCKING-emit contract AND the safe-degrade are both validated in-gate with a fake meter; no secret needed
       real_flow_note: "PURELY ADVISORY telemetry — every emit is wrapped in try/except and bounded by the meter's 2.0s timeout, so it can NEVER affect the trading/order path or its result (`return response.text` is unchanged whether the emit succeeds, fails, or is skipped). The MARGIN_INGEST_URL/KEY credentials are read INSIDE the margin_meter PyPI package (not repo code), so the self-validation credential scanner does not force them — declared here for capability-honesty (#310/#312 added the active capability without declaring it). Absent dep OR unset URL/KEY => a safe no-op, never a fabricated emit."
       status: degrades_safely          # absent margin_meter dep or unset MARGIN_INGEST_* => no emit, never fake output
+    - id: oos_reproducibility
+      desc: "reproduce a REAL (not just synthetic) out-of-sample result OFFLINE from a committed FROZEN corpus — the leakage-safe Polymarket resolved-market corpus (data/real_oos_corpus_polymarket.json, N=187) replays the crowd-baseline + B4a-alpha walk-forward + F10/F11 gates deterministically, with NO egress (ROADMAP F2 / backtest integrity A→A+)"
+      validates_via: "test_frozen_corpus_replay.py (REGISTERED in the blocking gate): loads the committed corpus, asserts it is structurally leakage-safe + real-money-only, that offline replay is bit-for-bit DETERMINISTIC (same seed → same seed_hash + PnL), that serialization round-trips losslessly (byte-stable artifact), that the frozen result NEVER claims a validated edge (F10 fragility / F11 significance must reject it), and that the #259 play-money guardrail still fires on the frozen path. The corpus is produced by `validate_real_oos.py --freeze-corpus` on a Polymarket-permitted host and replayed anywhere via `--from-corpus`."
+      mode: committed_artifact         # pure offline replay of committed bytes — no network, no credentials
+      requires_env: []                 # NONE — replay reads a committed file; the FREEZE step uses PUBLIC Gamma/CLOB (no auth)
+      active: true
+      ci_validatable: true             # fully validated in-gate with no secret — committed data replayed deterministically
+      real_flow_note: "The frozen corpus is REAL leakage-safe resolved-market data (the fetcher RAISES rather than fabricating a decision price; the settled outcome is NEVER the decision price). It carries NO edge claim — the committed corpus's B4a alpha is F11 significant_NEGATIVE (net -$3,228 OOS, 95% CI excludes 0 on the negative side), an honest REFUTATION made reproducible, not an edge. `liquidity` is stored as null: Gamma's `liquidity` is a USD metric, NOT order-book contract-depth, so it is deliberately NOT mapped onto HistoricalMarket.liquidity — mapping it would be a units fabrication that would activate the uncalibrated market-impact path with wrong-units depth."
+      status: validated
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 13
+    capabilities_total: 14
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
