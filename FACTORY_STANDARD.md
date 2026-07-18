@@ -970,6 +970,9 @@ one that fits the run; applicability noted):
 - **`docs/growth/OUTBOUND_CONTEXT_PLAYBOOK.md`** (products doing outreach) — the four-layer context window
   (Role / Case / Evidence / Rules) + assemble→write→refine for evidence-grounded outbound that COMPOUNDS.
   Consult for outbound / messaging / cold-outreach work (§46, §47).
+- **`docs/writing/AVOID_AI_WRITING.md`** (all products) — the full ruleset for prose that doesn't read as
+  generic AI. Consult whenever writing anything a human reads: UI copy, marketing, store listings, outreach,
+  docs, PR / commit messages (§55).
 When you author a NEW reference playbook, ADD a line here so future runs discover it. A playbook that exists
 but no run reads is wasted scaffolding. (Products without a given surface — e.g. a non-store or personal-bot
 product — simply won't have that playbook; that's expected, not a gap.)
@@ -1273,3 +1276,32 @@ graph grounded.
   failures (§50 VISION / taste / launch). The durable axis was never loops-vs-graphs — it is UNGROUNDED vs
   GROUNDED: whether the machinery keeps touching the reality it claims to improve. Mark where the machine's
   authority ends; ours does (§50).
+
+## 55. Writing that doesn't read as AI — ELIMINATE the tells in everything a human reads
+Every word the factory ships to a human — product / UI microcopy, marketing & GTM copy, store listings,
+outreach, blog, docs, even PR / commit messages — must NOT read as generic AI writing. This is §6b (no
+vibe-coded UI) applied to PROSE: it must sound like a specific person with a point of view wrote it, not the
+average of the internet. Full ruleset: `docs/writing/AVOID_AI_WRITING.md` (consult it for anything
+user-facing). The load-bearing rules:
+- **No inflation / vague attribution.** Cut "marking a pivotal moment", "in the ever-evolving landscape",
+  "experts believe", "studies show". Use specific, dated, named facts — or delete.
+- **Kill the tell-words.** leverage→use, utilize→use, robust→reliable, seamless→smooth; and delve, tapestry,
+  vibrant, nestled, thriving, "a testament to". No copula-dressing ("serves as", "boasts", "features") — write
+  "is" / "has".
+- **No hollow parallelism or hooks.** No "it's not just X, it's Y", no "What if there were a better way…", no
+  "Here's the thing", no "The catch?", no rhetorical-question openers.
+- **No chatbot / sycophancy artifacts.** No "Great question", "You're absolutely right", "I hope this helps",
+  "Let's dive in", "It's worth noting", "Interestingly".
+- **Formatting.** Sentence-case headings (not Title Case); colons not periods on list labels; full-sentence
+  bullets (not bare noun phrases); no emoji headers; no bold-inline fake-heading lists; no em-dash overuse; no
+  "Here are 7 reasons" inflation.
+- **Strip AI fingerprints.** Unfilled placeholders (`[Your Name]`), citation markup (`citeturn…`,
+  `oai_citation`), `utm_source=chatgpt.com` params, hashtag stuffing.
+- **Vary rhythm; stay specific.** Mix short and long sentences; name specific things and cite specific cases;
+  don't restate the same point in new words (the treadmill tell). Voice: a real person, opinionated, on-brand
+  (VISION).
+- **Two-pass discipline (required).** After the first draft removes the obvious tells, RE-READ and catch what
+  survived — recycled transitions, lingering inflation, copula swaps. One pass is not enough.
+ENFORCED like §6b: generic-AI prose on a user-facing surface is a release-blocking FAIL — the readiness gate
+(§7) and the quality auditor treat it as a design-taste defect, and Reviewer B (§4) rejects it. Adapted from
+github.com/conorbronsdon/avoid-ai-writing.
