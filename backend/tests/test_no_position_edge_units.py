@@ -113,3 +113,58 @@ def test_kelly_fraction_still_derived_from_ev_per_dollar():
     kelly_ev = min(est.adjusted_rate * payout_ratio - (1.0 - est.adjusted_rate), 2.0)
     expected_fraction = max(0.0, min(kelly_ev / payout_ratio, 0.25)) if kelly_ev > 0 else 0.0
     assert est.kelly_fraction == expected_fraction
+
+
+# ---------------------------------------------------------------------------
+# Time-decay factor anchor (correctness): the reversal estimate must NOT be
+# inflated at the far horizon. The formula is ``1.0 + math.log(720/h)/3`` — it
+# MUST use math.log (not math.log1p) so it honors its documented anchor
+# "At 720h (30d): factor = 1.0 (use base rate as-is)" and so the ``max(1.0, …)``
+# clamp floor is live for markets > 30d out. The pre-fix ``math.log1p`` gave
+# 1.231 at 720h (a ~23% inflation feeding an inflated ``edge`` to the
+# orchestrator's cost-net gate) and never fell to 1.0, leaving the floor dead.
+# These trip on the pre-fix (log1p) code and pass on the fixed (log) code.
+# ---------------------------------------------------------------------------
+import pytest
+
+
+def test_time_decay_factor_is_one_at_the_far_horizon():
+    """At 720h the documented anchor is factor == 1.0 ("use base rate as-is").
+    Pre-fix (log1p): 1.231. Post-fix (log): log(720/720)=0 → exactly 1.0."""
+    scanner = _scanner()
+    est = scanner._estimate_reversal(no_price=0.03, category="crypto", hours_to_resolution=720.0)
+    assert est.time_decay_factor == pytest.approx(1.0, abs=1e-9)
+
+
+def test_time_decay_floor_engages_beyond_thirty_days():
+    """> 30d out, log(720/h) < 0 so the raw factor drops below 1.0 and the
+    ``max(1.0, …)`` clamp floors it at 1.0 — the floor that was DEAD code under
+    log1p (always > 1.0). Pre-fix (log1p) gives ~1.096 here; post-fix gives 1.0."""
+    scanner = _scanner()
+    est = scanner._estimate_reversal(no_price=0.03, category="crypto", hours_to_resolution=2160.0)
+    assert est.time_decay_factor == pytest.approx(1.0, abs=1e-9)
+
+
+def test_far_horizon_edge_uses_base_rate_as_is():
+    """The money-relevant consequence: at the far horizon the reversal estimate is the
+    category base rate itself (factor 1.0), so ``edge = base_rate - no_price`` — NOT the
+    ~23%-inflated value the log1p formula fed the cost-net gate. Non-tautological: pins the
+    exact base rate the scanner carries."""
+    scanner = _scanner()
+    base_rate = scanner._get_reversal_rate("crypto")  # 0.08
+    no_price = 0.03
+    est = scanner._estimate_reversal(no_price=no_price, category="crypto", hours_to_resolution=720.0)
+    assert est.adjusted_rate == pytest.approx(base_rate, abs=1e-9)
+    assert est.edge == pytest.approx(base_rate - no_price, abs=1e-9)
+
+
+def test_time_decay_amplifies_toward_resolution():
+    """Property guard: the factor still strictly increases as resolution nears (more
+    informative pricing closer in), bounded by the [1.0, 4.0] clamp."""
+    scanner = _scanner()
+    f_720 = scanner._estimate_reversal(no_price=0.03, category="crypto", hours_to_resolution=720.0).time_decay_factor
+    f_168 = scanner._estimate_reversal(no_price=0.03, category="crypto", hours_to_resolution=168.0).time_decay_factor
+    f_24 = scanner._estimate_reversal(no_price=0.03, category="crypto", hours_to_resolution=24.0).time_decay_factor
+    f_1 = scanner._estimate_reversal(no_price=0.03, category="crypto", hours_to_resolution=1.0).time_decay_factor
+    assert f_720 < f_168 < f_24 < f_1
+    assert 1.0 <= f_720 and f_1 <= 4.0

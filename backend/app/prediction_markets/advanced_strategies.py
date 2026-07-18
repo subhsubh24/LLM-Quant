@@ -132,11 +132,17 @@ class NOPositionScanner(BaseStrategy):
         # Time decay factor: closer to resolution = more informative pricing.
         # Markets far from resolution have higher uncertainty, so we trust the
         # base rate less and the market price more.
-        # At 720h (30d): factor = 1.0 (use base rate as-is)
-        # At 24h: factor = ~1.8 (amplify — if NO is still >2c, it's meaningful)
-        # At 1h: factor = ~3.0 (strongly amplify)
+        # At 720h (30d): factor = 1.0 (use base rate as-is)   [log(720/720)=0]
+        # At 24h:        factor = ~2.1 (amplify — if NO is still >2c, it's meaningful)
+        # At 1h:         factor = ~3.2 (strongly amplify)
+        # >30d out:      log(720/h) < 0 → the max(1.0, …) clamp floors it at 1.0 (as-is).
+        # NOTE: this MUST be math.log, not math.log1p. log1p(720/h) is 0.693 at h=720
+        # (never 0), so it (a) inflated the reversal estimate ~23% at the far horizon,
+        # violating the documented "use base rate as-is" anchor and feeding an inflated
+        # `edge` to the orchestrator's cost-net gate, and (b) made the max(1.0, …) floor
+        # below dead code (log1p(720/h) > 0 for all h > 0, so the factor never fell to 1.0).
         if hours_to_resolution > 0:
-            time_decay_factor = 1.0 + math.log1p(720.0 / max(hours_to_resolution, 0.5)) / 3.0
+            time_decay_factor = 1.0 + math.log(720.0 / max(hours_to_resolution, 0.5)) / 3.0
         else:
             time_decay_factor = 3.0
 
