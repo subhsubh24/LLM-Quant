@@ -658,6 +658,11 @@ class PredictionMarketOrchestrator:
         # State
         self._running = False
         self._tasks: List[asyncio.Task] = []
+        # Serializes scan_and_execute cycles. The cycle now offloads the blocking
+        # scanner to a worker thread (yielding the event loop mid-cycle), so a manual
+        # /bot/scan-now can overlap the background scan loop; the lock preserves the
+        # pre-existing "one cycle at a time" invariant on shared executor state.
+        self._scan_lock = asyncio.Lock()
         self.total_scans = 0
         self.total_executions = 0
         self.total_skipped = 0
@@ -883,6 +888,18 @@ class PredictionMarketOrchestrator:
             await asyncio.sleep(self.scan_interval_sec)
 
     async def scan_and_execute(self) -> dict:
+        """Run one scan cycle, serialized against concurrent invocations.
+
+        The heavy scanner runs in a worker thread (see ``_run_scan_cycle``), so this
+        method yields the event loop mid-cycle — a manual ``/bot/scan-now`` can now
+        overlap the background ``_scan_loop``. We hold ``_scan_lock`` for the whole
+        cycle to keep the pre-existing "one cycle at a time" invariant: no two cycles
+        interleave their sizing/execution against the shared executor state.
+        """
+        async with self._scan_lock:
+            return await self._run_scan_cycle()
+
+    async def _run_scan_cycle(self) -> dict:
         """
         Run one scan cycle: scan → filter → size → execute → persist.
 
@@ -897,7 +914,13 @@ class PredictionMarketOrchestrator:
         # 1. Scan
         logger.info(f"[ORCHESTRATOR] Scan #{self.total_scans} starting...")
         self._add_activity("scan", f"Scan #{self.total_scans} starting across all strategies...")
-        opportunities = self.scanner.scan(market_limit=200)
+        # The scanner is synchronous and makes many rate-limited Gamma/CLOB HTTP calls
+        # (each timeout-bounded, but sequential + rate-limited via blocking sleeps). Run it
+        # in a worker thread so the event loop stays live during the scan — otherwise the
+        # MTM/snapshot loops and every concurrent HTTP handler (including
+        # /kill-switch/activate) are starved for the whole scan. Mirrors the same offload
+        # already used by the /prediction-markets/scan route (routes.py).
+        opportunities = await asyncio.to_thread(self.scanner.scan, 200)
         self.last_scan_opportunities = len(opportunities)
 
         # Store raw opportunities for frontend scanner tab
