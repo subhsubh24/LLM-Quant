@@ -1184,3 +1184,30 @@ scaffolding around a product that isn't built yet. The deepening follows the fea
   to fabricating a metric. When a surface is bland, or you are STUCK on how to make it good, LEAN ON MOBBIN
   (§6b workflow): pull real best-in-class reference screens, look at the pixels, and design against them —
   that is exactly what it is for.
+
+## 52. CI compute cost governance — cancel superseded runs; gate expensive runners; keep required checks green
+CI is metered compute, and the autonomous loop's rapid-push cadence makes it easy to quietly run up the
+Actions bill — a whole class of spend that never shows in product COGS (§24/§25) yet is real owner money
+(§50 spend cap). The largest driver is redundant runs of EXPENSIVE runners (macOS is billed ~10x Linux;
+GPU / large runners worse). Treat CI minutes as a cost to actively minimize, the same way §24 treats COGS —
+without EVER weakening a rail (§6c) to do it.
+- **Cancel superseded runs.** Every PR-triggered workflow sets `concurrency` with `cancel-in-progress` for
+  pull-request events (group by workflow + head ref), so a new push cancels the in-flight run of the commit
+  it replaces. The loop pushes commits in quick succession; without this each intermediate commit runs full
+  CI to completion for nothing. Let main / release runs finish (don't cancel post-merge validation).
+- **Path-gate expensive runners behind change detection.** A costly job (macOS / native build, GPU eval,
+  heavy browser e2e) runs ONLY when a path it actually depends on changed — a cheap Linux `detect-changes`
+  job decides. A web-only PR must never spin a 10x macOS runner for a separate native codebase it cannot
+  affect. Fail SAFE: on any ambiguity the filter MATCHES (the expensive job runs), so validation is never
+  wrongly skipped (§28 — a green that didn't run the real thing is a lie).
+- **Preserve required checks with a cheap aggregator — never by dropping the gate.** When a path-gated job
+  is ALSO a required status check, keep the required check NAME on a cheap always-running Linux job that
+  passes when the expensive job SUCCEEDED OR WAS SKIPPED (its dependency was unchanged) and fails only on a
+  real failure. Branch protection stays intact while the 10x job stays gated — the cost cut must not punch a
+  hole in the rails (§50: keep the rails strong). Making an expensive required check pass by disabling or
+  weakening it is forbidden (§6c).
+- **Trim the rest of the obvious waste + cap the downside.** No duplicate runs of the same commit (don't run
+  full CI on both a branch push AND its PR); cache dependencies / build artifacts; keep any expensive matrix
+  minimal; keep paid real-service evals on a cadence + on-signal, never per-PR (§23). Report CI minutes as a
+  tracked cost the loop drives DOWN over time (§25), and set the provider's HARD budget cap as the backstop
+  (owner action, §38/§50) so a runaway workflow cannot silently overspend.
