@@ -2709,3 +2709,109 @@ no validated real-money OOS edge, an ALPHA/research problem the sibling routine 
   engine at the advanced HEAD and found nothing new. The anti-scarcity duty is discharged by RUNNING the
   full A–G + deep-audit sweep, not by manufacturing a marginal PR because a prior run shipped one — the
   value bar, not a per-run quota, is the only limiter (§2/§5).
+
+## 2026-07-18 (model/strategy factory) — QUIET, HONEST all-DROP sweep (8/8 lenses clean); bookkeeping-only; two auditor-NAMED A→A+ top_gaps adversarially DISPROVED
+
+> The intervening 2026-07-17c run (#370/#371, D8 tz-consistency + ledger) recorded its per-run detail
+> in `LOOP_HEALTH.md`'s 61st `signal` datapoint. This entry records the 2026-07-18 all-DROP sweep and,
+> most usefully, the PROOF that two auditor-named engineering A→A+ gaps are NOT safely buildable — so a
+> future run (and the independent Quality Auditor) does not re-raise them as free wins.
+
+A FRESH full 8-Haiku sweep across tracks A–G + a cross-cutting deep-audit lens at HEAD (bc6cfdd,
+post-#371), doubling as the ~daily DEEP AUDIT (leakage/overfit/calibration/risk/live-safety +
+quality-grade-reconcile lenses). Baseline re-verified GREEN before selecting: required preflight **code
+GREEN** (exit 0, after pip-installing `backend/requirements-ci.txt` in the fresh container — a
+missing-dep local artifact, NOT a HEAD regression) + runtime harness PASSED (paper order FILLED,
+deterministic exposure `10.000000==10.000000`, live gate REJECTS a real order, kill switch +
+max-position ($900>$50) + loss-cap net-of-fees (−$41.20 vs −$10) all trip) + self-validation OK (13
+caps, `unmet=[]`, declared==read via `check_self_validation.py --readiness`) + scorecard parses (overall
+**B**, NOT-READY: `business_case_strength` B). **8/8 lenses NOTHING-GENUINE.** Shipped 0 code PRs + this
+bookkeeping (LOOP_HEALTH + loop-memory only, file-disjoint). `steady`, NOT churning/stuck. 8 scouts +
+0 reviewers = 8 subagents (<50). Binding constraint — `business_case_strength` **B**, no validated
+real-money OOS edge, an ALPHA/research problem the sibling routine owns — STANDS.
+
+### The distinctive value this run: two auditor-NAMED A→A+ top_gaps, both DISPROVED against the code
+The `QUALITY_SCORECARD` (2026-07-17, overall B) names four engineering A→A+ gaps. This run took the two
+that looked most like buildable factory work and investigated each to the live code + wire format. BOTH
+are un-buildable as named — recording the proof so they are not re-raised:
+
+- **run_risk_readiness A→A+ "make the LIVE kill-switch net-of a REAL venue fee/fill field" — FABRICATION
+  TRAP (DROP).** The scorecard names `execution.py:456,467,624,644` (`filled_price = req.price or 0.50`;
+  `fees = filled_size * price * DEFAULT_FEE_RATE`). But the REAL Polymarket CLOB/REST `post_order`
+  response the code parses carries `orderID`/`status`/`matchedAmount` ONLY — there is **no**
+  `makingAmount`/`takingAmount`/`fee`/`feeRateBps`/`filledPrice` field in the code paths, the test
+  fixtures, or Polymarket's docs (re-confirmed this run; first recorded at loop-memory:2564 and in the
+  2026-07-14 55th `signal` datapoint). "Preferring the real field" would read a field that does not
+  exist = the #285 `assets_ids` / string-`tag` mock-vs-real class. And `DEFAULT_FEE_RATE=0.02` IS
+  Polymarket's actual taker fee (cost_model.py:36, the single source `_simulate_fill` also charges), so
+  the estimate is correct AND conservative (caps trip EARLIER, never later) on a gated-OFF path. Nothing
+  to build.
+
+- **functional_reality A→A+ "build per-leg execution (B1) so multi-leg/basket arbitrage reaches paper
+  fills" — would FABRICATE a midpoint-vs-ask edge (DROP).** The three multi-leg strategies
+  (`SameMarketArbitrage`, `FlashCrash`, `MarketMaking`) ARE in the default scanner and are currently
+  SKIPPED at `orchestrator.py:1017-1036` (`skip_multi_leg`, audit-logged, no phantom fill). A scout
+  argued the arb is *mechanical* (YES+NO of a MECE market → guaranteed $1) so the DECISION COROLLARY
+  (which blocks *predictive* alpha) doesn't apply, and per-leg execution is ~150 LOC. **But the arb edge
+  is priced at CLOB MIDPOINTS, not the executable ASK.** `SameMarketArb.scan` computes
+  `edge = 1.0 − Σ effective_buy_price(o.price)` where `o.price` is the enrichment midpoint and
+  `effective_buy_price` applies only a **0.5% flat slippage** — which does NOT equal the real per-leg
+  half-spread (routinely 1–3¢/leg on binary books, i.e. 2–6¢ over two legs). The strategy's OWN docstring
+  (`strategies.py:361-374`) says it outright: *"Prices are CLOB MIDPOINTS … not the ask you would
+  actually pay. … the executable ask-sum may be back above $1.00 — so a fired signal is a candidate to
+  verify against live depth, not a locked-in profit … until [per-leg execution] does [use ask-priced
+  orders], treat fired signals as a monitoring/efficiency screen, not an executed arbitrage."* And the
+  scout's OWN quoted `RESEARCH_MEMORY` lesson lists three conditions for a real arb: (a) MECE ✓ (neg_risk
+  guard), (b) **price the ASK with real book depth** ✗ UNWIRED (`cost_model` depth is `None` everywhere;
+  the `*_with_impact` path that would consult `impact_coeff`/depth is never taken — confirmed by the
+  backtest scout), (c) place+confirm each leg ✗ (the per-leg execution itself). **Building (c) while (b)
+  is unmet** makes the executor book midpoint-priced "arb" fills into the PAPER track — manufacturing a
+  positive PnL that does NOT exist at executable prices. That is precisely the "a great backtest that
+  isn't real is a FAILURE — worse than a modest honest one" trap, and if that paper PnL ever reached
+  `weekly_pnl_paper` it would be a fabricated edge in a revenue field. The DECISION COROLLARY applies
+  after all — not because the arb is *predictive*, but because the DOWNSTREAM capability (per-leg fills)
+  depends on a correctness input (real-ask/depth pricing) that does not exist yet. The current skip +
+  audit-log state is the HONEST one, and it is MORE correct than booking illusory fills. **Prerequisite
+  for ever building B1:** wire real per-leg ASK / order-book-depth pricing into the cost model first
+  (the same real-depth dependency the backtest_integrity `impact_coeff` gap needs) — an egress/data
+  build the research lane owns — THEN per-leg execution can book honest fills.
+
+### Scout triage (anti-padding — findings verified NOT-genuine / inert / deferred, so future runs don't re-raise)
+- **(A) data/venue ingest:** NOTHING-GENUINE — timeouts (`timeout=15`) present on every external call,
+  `math.isfinite` guards on all decision-path prices/timestamps, anti-leakage structural in the history
+  fetchers, pagination bounded. Defensively engineered.
+- **(B) model/alpha units:** the only units violation is in `CalibrationBucketStrategy` /
+  `RecencyWeightedBucketStrategy` (`confidence = edge/min_edge`, decoupled from `gate_confidence`) — but
+  both are gated behind `ENABLE_UNVALIDATED_STRATEGIES` (default OFF) and the bucket-calibration family is
+  REFUTED across 3 real corpora ("do NOT re-test"), so they never reach a default paper fill. INERT →
+  fixing dead-ended gated code is padding (the #193/#276 no-broken-consumer class). Every EXECUTING
+  single-leg strategy uses the units contract.
+- **(C) backtest integrity:** no defect — leak guard STRUCTURAL (`MarketView` omits
+  outcome/resolution_time; train strictly `< w_start`), both RNGs seeded, seed_hash covers all PnL
+  inputs + excludes research_only, cost model applied once (no double-count, invariant test-pinned). The
+  two named gaps (frozen-corpus cache; `impact_coeff` calibration) are research-lane/owner-gated (OA-13)
+  and/or zero-current-effect (depth=None) — not factory-buildable this run.
+- **(D) risk/execution:** all real defects already fixed (#330/#362 venue-call timeouts, #364
+  per-strategy drawdown fee-netting, #314 loss-cap-persist fail-closed); side-effect integrity intact
+  (position only on `filled_size>0`); kill switch fails CLOSED. The venue-fee-field "A→A+" is the
+  fabrication trap above.
+- **(F) self-validation / uncaught throws:** 0 false-coverage traps (all 13 caps' critical paths really
+  exercised, no email-verification-trap), no bare `os.environ[...]` on a runtime path, every venue/LLM
+  call bounded < the 120s scan budget.
+- **(G) security:** A+ justified — 14 mutating routes `_MUTATING_AUTH`-guarded, live gate env-only +
+  fail-closed + un-flippable via body, `hmac.compare_digest`, no committed secrets, no reachable SSRF.
+- **(H) deep-audit cross-cutting:** CLEAN — leakage/side-effect/calibration/determinism/stubbed-flows all
+  clear; quality-grade-reconcile finds no ship-critical dimension below its stated grade.
+
+### Lessons
+- **An auditor-NAMED A→A+ top_gap is a HYPOTHESIS to verify against the wire format and the dependency
+  graph — never a free win.** Two named gaps this run were traps: "use the real venue fee/fill field" is
+  only genuine if that field EXISTS in the real response (it doesn't); "make multi-leg reach paper fills"
+  is only genuine if the executable-price input (real ask / book depth) is WIRED (it isn't) — otherwise
+  building the downstream capability FABRICATES the very edge it claims to validate. Trace the named gap
+  to (a) the real schema and (b) the upstream dependency it silently assumes BEFORE building.
+- **A "mechanical arbitrage" is only mechanical at the ASK.** A YES+NO<$1 signal computed on MIDPOINTS
+  with a flat-slippage approximation is a monitoring screen, not a locked-in profit; the half-spread that
+  the flat term omits is exactly what turns the apparent edge negative at executable prices. Do not let a
+  "structural edge, DECISION-COROLLARY-exempt" framing skip the real-ask prerequisite — the strategy's own
+  authors already gated it as monitoring-only for this reason.
