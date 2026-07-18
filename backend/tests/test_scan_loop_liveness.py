@@ -13,9 +13,18 @@ already uses.
 Offloading introduces a yield point into a method that previously ran atomically on the
 loop, so a manual ``/bot/scan-now`` could now overlap the background ``_scan_loop``. A
 per-orchestrator ``asyncio.Lock`` restores the "one cycle at a time" invariant so two
-cycles never interleave their sizing/execution against shared executor state.
+cycles never interleave their sizing/execution against shared executor state. And because
+the SAME scanner instance is shared with the ``/prediction-markets/scan`` route (also
+``to_thread``), the scanner itself carries a ``threading.Lock`` so concurrent scans on one
+instance serialize.
 
-Both tests trip on the pre-fix code (synchronous scan, no lock) and pass on the fix.
+Failure modes (each test is non-tautological, proven against a mutant):
+  * ``test_scan_offloads_…`` fails on the pre-fix synchronous scan (the loop is starved).
+  * ``test_concurrent_cycles_…`` fails on an offload-with-NO-orchestrator-lock mutant
+    (peak concurrency 2). It passes trivially on the fully-synchronous pre-fix code (which
+    has no yield points at all) — so its job is to prove the orchestrator lock is
+    load-bearing once the offload exists, not to detect the offload.
+  * ``test_scanner_serializes_concurrent_scans`` fails on a scanner with NO ``_scan_lock``.
 """
 
 from __future__ import annotations
@@ -96,3 +105,47 @@ def test_concurrent_cycles_do_not_interleave():
     assert state["peak"] == 1, f"cycles overlapped (peak={state['peak']}) — lock not holding"
     # Both cycles still ran (serialized, not dropped).
     assert orch.total_scans == 2
+
+
+def test_scanner_serializes_concurrent_scans():
+    """A single ``PredictionMarketScanner`` is shared between the orchestrator scan loop
+    and the ``/prediction-markets/scan`` route — both run ``scan()`` in a worker thread. Its
+    internal ``threading.Lock`` must serialize concurrent ``scan()`` calls so they can't race
+    the mutable scan state. Without the lock, two threads run the scan body concurrently
+    (peak 2); with it, peak is exactly 1. Exercised directly against the scanner (the
+    orchestrator's asyncio lock does not reach the sibling route thread).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.prediction_markets.polymarket_client import PolymarketClient
+    from app.prediction_markets.strategies import PredictionMarketScanner
+
+    state = {"current": 0, "peak": 0}
+    guard = threading.Lock()
+
+    class _SlowClient(PolymarketClient):
+        """``_run_scan`` calls ``self.client.get_markets`` FIRST, inside the scanner lock —
+        instrument it to record how many scans are concurrently inside the scan body."""
+
+        def __init__(self):
+            pass
+
+        def get_markets(self, limit=100, offset=0):
+            with guard:
+                state["current"] += 1
+                state["peak"] = max(state["peak"], state["current"])
+            time.sleep(0.15)
+            with guard:
+                state["current"] -= 1
+            return []  # empty batch → scan returns quickly after this
+
+    scanner = PredictionMarketScanner(_SlowClient(), use_clob=False, clob_market_limit=0)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f1 = pool.submit(scanner.scan, 10)
+        f2 = pool.submit(scanner.scan, 10)
+        f1.result()
+        f2.result()
+
+    assert state["peak"] == 1, f"concurrent scans raced the shared scanner (peak={state['peak']})"
+    assert scanner.total_scans == 2

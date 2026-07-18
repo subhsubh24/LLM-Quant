@@ -16,6 +16,7 @@ Strategies:
 
 import logging
 import re
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -1373,6 +1374,13 @@ class PredictionMarketScanner:
         self.scan_history: List[ScanResult] = []
         self.total_scans: int = 0
         self.last_market_count: int = 0
+        # A single scanner instance is SHARED between the background orchestrator scan loop
+        # and the /prediction-markets/scan HTTP route, both of which run scan() in a worker
+        # thread (asyncio.to_thread). This lock serializes concurrent scan() calls on the
+        # same instance so they can't race the mutable scan state (_order_books, per-strategy
+        # trackers, counters). Held only inside the worker thread — never across an event-loop
+        # await — so it cannot block the loop.
+        self._scan_lock = threading.Lock()
 
         # ROADMAP B6 — per-strategy enable/disable control. A scanner-level override set
         # (NOT ``strategy.config.enabled``, which is a SHARED config instance across strategies
@@ -1503,10 +1511,19 @@ class PredictionMarketScanner:
 
     def scan(self, market_limit: int = 200) -> List[ScanResult]:
         """
-        Run all strategies against current markets.
+        Run all strategies against current markets (thread-safe).
+
+        Serialized by ``_scan_lock`` because this scanner instance is shared between the
+        background orchestrator scan loop and the ``/prediction-markets/scan`` HTTP route,
+        both of which run ``scan()`` in a worker thread; concurrent scans on the same
+        instance would race the mutable scan state.
 
         Returns list of opportunities sorted by edge (highest first).
         """
+        with self._scan_lock:
+            return self._run_scan(market_limit)
+
+    def _run_scan(self, market_limit: int = 200) -> List[ScanResult]:
         self.total_scans += 1
         logger.info(f"[SCANNER] Scan #{self.total_scans} — fetching markets...")
 

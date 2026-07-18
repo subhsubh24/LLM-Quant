@@ -892,9 +892,14 @@ class PredictionMarketOrchestrator:
 
         The heavy scanner runs in a worker thread (see ``_run_scan_cycle``), so this
         method yields the event loop mid-cycle — a manual ``/bot/scan-now`` can now
-        overlap the background ``_scan_loop``. We hold ``_scan_lock`` for the whole
-        cycle to keep the pre-existing "one cycle at a time" invariant: no two cycles
-        interleave their sizing/execution against the shared executor state.
+        overlap the background ``_scan_loop``. ``_scan_lock`` (asyncio) serializes whole
+        ORCHESTRATOR cycles so two of them never interleave their sizing/execution against
+        the shared executor state.
+
+        NOTE: this asyncio lock does NOT reach the sibling ``/prediction-markets/scan``
+        route, which calls ``scanner.scan`` in its own worker thread on the SAME shared
+        scanner instance. That cross-caller concurrency is serialized one layer down, by the
+        scanner's own ``threading.Lock`` around ``scan()`` (``strategies.py``).
         """
         async with self._scan_lock:
             return await self._run_scan_cycle()
