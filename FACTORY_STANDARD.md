@@ -1211,3 +1211,24 @@ without EVER weakening a rail (§6c) to do it.
   minimal; keep paid real-service evals on a cadence + on-signal, never per-PR (§23). Report CI minutes as a
   tracked cost the loop drives DOWN over time (§25), and set the provider's HARD budget cap as the backstop
   (owner action, §38/§50) so a runaway workflow cannot silently overspend.
+
+## 53. Doctrine currency — instruction docs hold ONLY what is currently true; git is the history
+The docs the loop FOLLOWS (this standard, the playbooks, VISION, REFERENCES, DOMAIN_MODEL) must contain ONLY
+the current canonical version — never a superseded rule sitting beside its replacement. The model follows what
+is IN the doc; a stale rule kept "for history" is a bug, not a record — it makes "which version do I follow?"
+ambiguous, and a later run may follow the dead one. Under §50 the loop edits these docs itself, so this
+hygiene is the loop's own job — keep it current by construction so no future run is confused by what a past
+run left behind.
+- **Supersede by EDITING IN PLACE, never by appending.** When a rule changes, REPLACE it — no "previously
+  we…" block, no dated old-version alongside the new, no changelog inside an instruction doc. Each instruction
+  doc reads as if written fresh today.
+- **Git IS the history.** Every change is already a commit; keeping the live doc current loses nothing. When /
+  why a rule changed → `git log` / `git blame` / the commit message, NEVER the live doc.
+- **No contradictions (§39).** A change that would clash with an existing rule EDITS that rule; it never leaves
+  both for the model to guess between. Two sections that disagree = the loop is confused about what to follow.
+- **Doc TYPE decides the rule.** INSTRUCTIONS (this standard, playbooks, VISION, REFERENCES, DOMAIN_MODEL) =
+  latest-canonical-only (above). MEMORY / lessons (MEMORY.md, FLEET_LESSONS) = accumulate but CURATE — a lesson
+  is a still-true fact; DELETE it when it stops being true, don't keep it as history (§35). STATE (LOOP_HEALTH,
+  scorecards) = current snapshot + bounded rolling window, not infinite history. A decision LOG ("why did we
+  change X?") lives in git / commits or a separate doc the loop does NOT read as rules — never inside the
+  doctrine.
