@@ -2815,3 +2815,100 @@ are un-buildable as named — recording the proof so they are not re-raised:
   the flat term omits is exactly what turns the apparent edge negative at executable prices. Do not let a
   "structural edge, DECISION-COROLLARY-exempt" framing skip the real-ask prerequisite — the strategy's own
   authors already gated it as monitoring-only for this reason.
+
+## 2026-07-18b (model/strategy factory) — SHIPPED backtest_integrity A→A+: frozen real OOS corpus + offline replay (#377) — the egress-now-works run
+
+The distinctive fact of this run: **outbound egress WORKS from the build env** (direct curl HTTP
+200 to gamma-api.polymarket.com + api.elections.kalshi.com, real data returned). The last 3 runs
+(all-DROP) assumed egress was gated and therefore treated the backtest_integrity A→A+ gap
+("cache a frozen real resolved-market corpus into the repo so a real OOS result reproduces
+offline") as un-buildable/owner-gated (OA-13). It is NOT gated this env — so this run BUILT it.
+
+FRESH full 8-Haiku sweep (tracks A–G + deep-audit lens) at HEAD (3e357c2). Baseline re-verified
+GREEN before selecting (preflight code exit 0 after `pip install backend/requirements-ci.txt`;
+runtime harness PASSED — paper FILLED, deterministic exposure 10.000000==10.000000, live gate
+REJECTS, kill switch + max-position $900>$50 + loss-cap net-of-fees −$41.20 all trip;
+self-validation OK). Selected the MAXIMAL file-disjoint value-bar-clearing set: exactly ONE
+substantive PR (#377) — the engine is mature; everything else verified DROP (below). + 1
+bookkeeping PR.
+
+### SHIPPED (#377) — backtest_integrity(F2): freeze a real leakage-safe OOS corpus + offline replay
+- `data/real_oos_corpus_polymarket.json` — 187 REAL leakage-safe Polymarket resolved-market
+  records (volumeNum, 7-day pre-registered decision lead; 400 fetched → 187 kept, 213 correctly
+  SKIPPED by the leak guard "no pre-decision tick — refusing to fabricate"). Every record
+  real-money (`research_only=false`) + carries its coarse `category` (which the old
+  fetch_polymarket_history serializer DROPPED) so the F10 CATEGORY regime-slice runs on it.
+  `liquidity=null` ON PURPOSE — Gamma's `liquidity` is a USD metric, NOT order-book
+  contract-depth; mapping it onto HistoricalMarket.liquidity would be a UNITS FABRICATION that
+  activates the uncalibrated market-impact path with wrong-units depth.
+- `scripts/validate_real_oos.py` — `corpus_to_rows()`/`load_corpus_from_json()` (the loader
+  re-validates every record through HistoricalMarket.__post_init__, so a tampered corpus fails
+  LOUD, never silently scores garbage) + `--freeze-corpus` (serialize) + `--from-corpus` (replay
+  offline, deterministically, NO egress).
+- `backend/tests/test_frozen_corpus_replay.py` — 9 tests, WIRED into the blocking gate
+  (preflight.sh whitelist): structural leakage-safety, real-money-only, BIT-FOR-BIT deterministic
+  replay (seed_hash 79a4cca4b966138f, byte-identical), lossless round-trip, the #259 play-money
+  guardrail on the frozen path, and the HONESTY guard `test_frozen_result_never_claims_a_validated_edge`
+  (F10 fragility / F11 significance MUST reject — a corpus showing a clean significant non-fragile
+  edge cannot be committed).
+- `docs/ci/SELF_VALIDATION.md` — new capability `oos_reproducibility` (committed_artifact, NO
+  credential, ci_validatable, status validated), count 13→14, unmet=[].
+
+The committed corpus's B4a calibration alpha is **F11 significant_NEGATIVE** (39 trades, net
+−$3,228 OOS, 95% CI [−4325.52, −2403.58] excludes 0 on the negative side) — an HONEST refutation
+made reproducible, NOT an edge. No revenue field touched (weekly_pnl_paper null, arr_year1 0,
+total_trades 0); business_case_strength stays **B**. This does NOT open go-live-eligibility — it
+closes the reproduce-a-real-result-offline gap only.
+
+**Gates:** preflight code exit 0 (1209 passed incl. +9); 2 Sonnet reviewers APPROVE (Reviewer B
+independently reproduced −3228.02 / seed_hash 79a4cca4b966138f); 3 fresh Opus adversarial auditors
+— Auditor 1 (leakage) CANNOT-BREAK-IT (disproved settlement leak: 14 outcome==1 markets priced
+<0.5, crowd Brier 0.0947≠0), Auditor 2 (fabrication) CANNOT-BREAK-IT (proved the honesty guard is
+load-bearing by constructing a +$392k significant_positive corpus that DOES fail the assert),
+Auditor 3 (integrity) found + I fixed one REAL break (see lesson), then CANNOT-BREAK-IT.
+
+### Scout triage (anti-padding — verified NOT-genuine so future runs don't re-raise)
+- **(A) data/venue:** NOTHING-GENUINE (timeouts + isfinite guards + structural anti-leakage present).
+- **(B) model/alpha units:** 5 hardcoded confidences (SameMarketArb 435/488, MarketMaking 886,
+  FlashCrash 1028, WhaleCopy-exit 1335) — ALL on NON-EXECUTING paths (3 multi-leg strats SKIPPED
+  at orchestrator.py:1017-1036; WhaleCopy gated behind ENABLE_UNVALIDATED_STRATEGIES). No real
+  paper fill depends on them → PADDING (#193/#276 dead/gated-consumer class). DROP.
+- **(C) backtest integrity:** the frozen-corpus build (SHIPPED). Scout's "liquidity field dropped"
+  = UNITS-FABRICATION TRAP (Gamma liquidity is USD, not contract-depth) → DROP; depth=None is the
+  correct honest state (and why the corpus stores liquidity=null).
+- **(D) risk/execution:** Scout flagged routes.py:822 "risk_manager not rewired on bot start" —
+  FALSE POSITIVE (empirically: orch.executor IS the routes _prediction_executor singleton; its
+  risk_manager is wired at orchestrator.__init__:644; the swap is a no-op — verified by running
+  routes._get_orchestrator/_get_prediction_executor). DROP.
+- **(E) research infra:** NOTHING-GENUINE (E4/E7 infra built; wiring bootstrap/significance into
+  live is the research routine's job + would fabricate an edge). Research files UNTOUCHED.
+- **(F) self-validation / uncaught throws:** NOTHING-GENUINE (11 external calls timeout-bounded;
+  no bare os.environ; no email-verification-trap).
+- **(G) security:** NOTHING-GENUINE (A+ holds; only /debug/routes-loaded public — sub-bar).
+- **(H) deep-audit cross-cutting:** AUDIT CLEAN (leakage structural, live-safety fail-closed,
+  quality grades reconcile, no stubbed critical flow).
+
+### Lessons
+- **A "believed-gated" A→A+ gap must be RE-PROBED, not assumed still gated.** Three runs skipped
+  the frozen-corpus gap as egress-gated; a one-line curl this run disproved that and unlocked a
+  real ship. When the environment can change between runs (egress policy, secrets), RE-TEST the
+  precondition of every deferred gap before declaring it un-buildable — the deferral may be stale.
+- **Declaring a capability "validated in the blocking gate" is a CLAIM that must be MECHANICALLY
+  true — both a reviewer AND an auditor independently caught it when it wasn't.** My first cut
+  wrote a test + declared the SELF_VALIDATION capability "REGISTERED in the blocking gate", but the
+  test was NOT in preflight.sh's explicit `$_testfiles` whitelist (preflight runs a hand-maintained
+  list, not glob discovery), so the required gate never ran it — a false-coverage label
+  (email-verification-trap class). `check_self_validation.py` only parses the manifest's
+  self-asserted status; it does NOT verify the named test is wired into preflight, so the gate
+  stayed green on a false claim. FIX: add the test file to the preflight whitelist (making the
+  claim true), not soften the wording. LESSON: when you add a test to back a capability, WIRE IT
+  INTO THE REQUIRED GATE in the same PR and verify the pass-count rises by exactly your test count
+  — a test that only passes when run by hand is not coverage.
+- **A frozen research corpus is safe to commit ONLY because the honesty guards travel with it:**
+  the loader re-validates invariants (tamper-evident), the #259 play-money guardrail still fires,
+  and a test STRUCTURALLY forbids committing a corpus that reads as a validated edge (an auditor
+  proved that guard fails on a real +$392k edge). Committing data is an integrity WIN only when a
+  broken/edited/edge-showing corpus fails the gate LOUD.
+- **liquidity=null is a units-honesty decision, not a missing feature.** A scout's "you fetched
+  liquidity but dropped it" is a trap when the fetched field's UNITS differ from the consumer's
+  (USD vs contract-depth). Trace units before "wiring the dropped field."
