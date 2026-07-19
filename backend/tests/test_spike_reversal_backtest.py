@@ -218,6 +218,73 @@ def test_max_trades_per_market_cap():
 
 
 # ---------------------------------------------------------------------------
+# Hit-rate gate: a positive, significant total at a SUB-50% hit-rate is NOT validated
+# ---------------------------------------------------------------------------
+def _big_revert(base_t: int, band: float, direction: str) -> list[dict]:
+    """A LARGE reversion (big fade win)."""
+    move, revert = 0.15, 0.12
+    if direction == "UP":
+        confirm = 1.0 - band
+        baseline, forward = confirm - move, confirm - revert
+    else:
+        confirm = band
+        baseline, forward = confirm + move, confirm + revert
+    return [
+        {"t": base_t, "p": round(baseline, 4)},
+        {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
+        {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
+    ]
+
+
+def _small_momentum(base_t: int, band: float, direction: str) -> list[dict]:
+    """A small continuation (small fade loss)."""
+    move, cont = 0.15, 0.02
+    if direction == "UP":
+        confirm = 1.0 - band
+        baseline, forward = confirm - move, confirm + cont
+    else:
+        confirm = band
+        baseline, forward = confirm + move, confirm - cont
+    return [
+        {"t": base_t, "p": round(baseline, 4)},
+        {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
+        {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
+    ]
+
+
+def test_sub_50pct_hit_rate_is_not_validated_even_if_significant():
+    # 50 big winners + 70 small losers: net POSITIVE and F11-significant, but hit-rate < 50%.
+    corpus: dict[str, list[dict]] = {}
+    for k in range(50):
+        corpus[f"w{k:04d}"] = _big_revert(k * _STAGGER_S, _BANDS[k % len(_BANDS)], _DIRS[k % 2])
+    for k in range(70):
+        corpus[f"l{k:04d}"] = _small_momentum((50 + k) * _STAGGER_S, _BANDS[k % len(_BANDS)], _DIRS[k % 2])
+    res = backtest_fade_the_spike(corpus)
+    assert res.n_trades == 120
+    assert res.total_pnl_usd > 0                       # positive aggregate
+    assert res.hit_rate is not None and res.hit_rate < 0.5
+    assert res.significance.verdict == "significant_positive"   # and F11-significant
+    assert res.is_validated_edge is False              # ...but the hit-rate gate blocks it
+    assert "hit-rate" in res.verdict
+
+
+# ---------------------------------------------------------------------------
+# Horizon check RE-ENGAGES when the horizon is swept above one day
+# ---------------------------------------------------------------------------
+def test_horizon_check_reengages_when_horizon_swept_above_one_day():
+    corpus = _corpus(_reverting_market, 120)
+    # Default (<=24h) horizon: horizon axis excluded -> validates.
+    assert backtest_fade_the_spike(corpus).is_validated_edge is True
+    # Sweep the horizon to 3 days: holds are now assessed on the horizon axis, and since all
+    # forward ticks are ~1.5h out they ALL fall in the <=1d band -> horizon-concentrated ->
+    # the (now-informative) horizon check fires and blocks validation.
+    cfg = FadeSpikeConfig(horizon_seconds=3 * 86400)
+    res = backtest_fade_the_spike(corpus, config=cfg)
+    assert res.is_validated_edge is False
+    assert "horizon" in res.verdict
+
+
+# ---------------------------------------------------------------------------
 # Leakage safety + determinism
 # ---------------------------------------------------------------------------
 def test_exit_strictly_after_entry_and_no_lookahead():

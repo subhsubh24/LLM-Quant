@@ -62,6 +62,8 @@ from .cost_model import DEFAULT_COST_MODEL, CostModel
 from .regime_slice import (
     CATEGORY_PNL_CONCENTRATION,
     CONFIDENCE_PNL_CONCENTRATION,
+    EXTREME_CONFIDENCE_PNL_CONCENTRATION,
+    HORIZON_PNL_CONCENTRATION,
     TIME_PNL_CONCENTRATION,
     TOP_MARKET_PNL_CONCENTRATION,
     RegimeSliceReport,
@@ -94,7 +96,18 @@ DEFAULT_BUDGET_PER_TRADE_USD: float = 100.0
 # Per-MARKET trade cap — the Run 21 N=1 concentration caution made structural. A market
 # that spikes many times cannot flood the sample with correlated bets on the same
 # underlying event; only its first ``max_trades_per_market`` spikes (in time order) trade.
+# KEEP THIS AT 1 for any edge claim: raising it feeds MULTIPLE correlated same-market trades
+# into the F11 bootstrap as if they were independent draws, over-stating significance (the
+# F10 single-market check only partially compensates). >1 is for exploratory sweeps only.
 DEFAULT_MAX_TRADES_PER_MARKET: int = 1
+# Minimum realized hit-rate for a validated edge — the 4th criterion the Quality Auditor's
+# validated-edge bar names alongside N>=floor, F11 significant, F10 non-fragile. Enforced so
+# a positive total driven by a few large asymmetric wins at a sub-50% hit-rate is NOT called
+# a validated candidate (it may be, but it must clear this too, matching the stated bar).
+MIN_HIT_RATE_FOR_EDGE: float = 0.50
+# The two near-certain confidence bands, mirroring regime_slice._EXTREME_CONFIDENCE_LABELS
+# (defined locally rather than importing a private name; the vocabulary is stable).
+_EXTREME_CONF_LABELS: tuple[str, str] = ("0-10%", "90-100%")
 
 
 @dataclass(frozen=True)
@@ -294,19 +307,27 @@ def _top_pnl_share(slices: Sequence[SlicePnL]) -> Optional[float]:
     return max(shares) if shares else None
 
 
-def _fade_f10_ok(regime: RegimeSliceReport, categories_known: bool) -> tuple[bool, List[str]]:
-    """F10 fragility for a fade-the-spike run, EXCLUDING the horizon dimension.
+def _fade_f10_ok(
+    regime: RegimeSliceReport,
+    *,
+    categories_known: bool,
+    exclude_horizon: bool,
+) -> tuple[bool, List[str]]:
+    """F10 fragility for a fade-the-spike run, optionally excluding the horizon dimension.
 
-    Fade-the-spike is by design a SINGLE short-horizon strategy — every trade exits inside
-    the reversal horizon (≤ 1 day here), so the horizon-band slice is structurally
+    Fade-the-spike at the default horizon (≤ 1 day) is a SINGLE short-horizon strategy —
+    every trade exits inside the reversal horizon, so the horizon-band slice is structurally
     single-valued and carries NO information about robustness. Judging it "fragile" for
     100%-in-one-horizon-bucket is a false positive for this strategy class — exactly the
     reasoning ``regime_slice`` itself already uses to EXCLUDE category-slicing when no
-    category labels are supplied. Every OTHER, genuinely-informative dimension is kept and
-    load-bearing: SINGLE-MARKET concentration (the Run 21 caution — the primary failure
-    mode), confidence-band, time-window, and category (when labeled). This does NOT weaken
-    the gate; it removes one non-informative axis and keeps the ones that can actually
-    reveal a propped-up edge.
+    category labels are supplied. So horizon is excluded ONLY when ``exclude_horizon`` (the
+    caller passes True only when the configured horizon keeps all holds in one bucket); if
+    the horizon is swept ABOVE one day the holds genuinely spread across buckets and the
+    horizon check RE-ENGAGES (it is informative again). Every other genuinely-informative
+    axis is always kept and load-bearing: SINGLE-MARKET concentration (the Run 21 caution —
+    the primary failure mode), confidence-band (single-bucket AND the extreme-two-bucket
+    combined check), time-window, and category (when labeled). This does NOT weaken the
+    gate; it removes one axis only while it is structurally non-informative.
 
     Returns ``(ok, reasons)`` where ``ok`` is True only when the edge is broad on every
     informative axis (and there IS a positive edge to assess).
@@ -330,9 +351,25 @@ def _fade_f10_ok(regime: RegimeSliceReport, categories_known: bool) -> tuple[boo
     conf_share = _top_pnl_share(regime.by_confidence)
     if conf_share is not None and conf_share > CONFIDENCE_PNL_CONCENTRATION:
         reasons.append(f"confidence-band: {conf_share:.0%} of net PnL in one band > {CONFIDENCE_PNL_CONCENTRATION:.0%}")
+    # Extreme-confidence: the two near-certain entry buckets COMBINED (a split across both
+    # extremes each single-bucket check can miss). Retained from regime_slice (tightening-only).
+    extreme_pnl = sum(
+        s.net_pnl_usd for s in regime.by_confidence if s.label in _EXTREME_CONF_LABELS
+    )
+    extreme_share = (extreme_pnl / regime.total_pnl_usd) if regime.total_pnl_usd > 0 else 0.0
+    if extreme_share > EXTREME_CONFIDENCE_PNL_CONCENTRATION:
+        reasons.append(
+            f"confidence-extremes: {extreme_share:.0%} of net PnL in the near-certain "
+            f"bands ({'/'.join(_EXTREME_CONF_LABELS)}) > {EXTREME_CONFIDENCE_PNL_CONCENTRATION:.0%}"
+        )
     time_share = _top_pnl_share(regime.by_time)
     if time_share is not None and time_share > TIME_PNL_CONCENTRATION:
         reasons.append(f"time-window: {time_share:.0%} of net PnL in one week > {TIME_PNL_CONCENTRATION:.0%}")
+    # Horizon — only when it is informative (holds actually spread across buckets).
+    if not exclude_horizon:
+        horizon_share = _top_pnl_share(regime.by_horizon)
+        if horizon_share is not None and horizon_share > HORIZON_PNL_CONCENTRATION:
+            reasons.append(f"horizon: {horizon_share:.0%} of net PnL in one band > {HORIZON_PNL_CONCENTRATION:.0%}")
     # Category — only when real labels were supplied (else it is the single-bucket no-info case).
     if categories_known:
         cat_share = _top_pnl_share(regime.by_category)
@@ -429,14 +466,25 @@ def backtest_fade_the_spike(
         )
         regime = analyze_regime_slices(bt, category_by_market_id=cat_by_id)
 
-    # Honest AND-of-gates verdict — never the point estimate alone.
+    # Honest AND-of-gates verdict — never the point estimate alone. The four criteria match
+    # the Quality Auditor's validated-edge bar: sufficient N, F11 significant_positive, F10
+    # non-fragile, and a hit-rate meaningfully above 50%.
     enough_n = n >= cfg.min_trades_for_edge
     f11_ok = significance.is_significant_edge
+    hit_rate_ok = hit_rate is not None and hit_rate > MIN_HIT_RATE_FOR_EDGE
     f10_ok = False
     f10_reasons: List[str] = []
     if regime is not None:
-        f10_ok, f10_reasons = _fade_f10_ok(regime, categories_known=category_by_market is not None)
-    is_validated = bool(enough_n and f11_ok and f10_ok)
+        # Exclude the horizon axis ONLY while it is structurally single-valued (holds all
+        # land in the <=1d bucket, i.e. the horizon is <= one day). A swept-up horizon
+        # re-engages the check (holds spread across buckets → it becomes informative).
+        exclude_horizon = cfg.horizon_seconds <= DEFAULT_REVERSAL_HORIZON_SECONDS
+        f10_ok, f10_reasons = _fade_f10_ok(
+            regime,
+            categories_known=category_by_market is not None,
+            exclude_horizon=exclude_horizon,
+        )
+    is_validated = bool(enough_n and f11_ok and f10_ok and hit_rate_ok)
 
     if is_validated:
         verdict = (
@@ -451,6 +499,8 @@ def backtest_fade_the_spike(
             reasons.append(f"N={n} < pre-registered floor {cfg.min_trades_for_edge}")
         if not f11_ok:
             reasons.append(f"F11 verdict={significance.verdict} (not significant_positive)")
+        if n and not hit_rate_ok:
+            reasons.append(f"hit-rate {hit_rate} <= {MIN_HIT_RATE_FOR_EDGE:.0%} floor")
         if n and not f10_ok and regime is not None:
             reasons.append("F10 fragile (horizon dim excluded — single-horizon strategy): " + "; ".join(f10_reasons))
         elif not n:
@@ -481,6 +531,7 @@ __all__ = [
     "DEFAULT_MIN_TRADES_FOR_EDGE",
     "DEFAULT_BUDGET_PER_TRADE_USD",
     "DEFAULT_MAX_TRADES_PER_MARKET",
+    "MIN_HIT_RATE_FOR_EDGE",
     "FadeSpikeConfig",
     "FadeTrade",
     "SpikeReversalResult",
