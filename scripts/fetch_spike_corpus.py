@@ -56,7 +56,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -144,6 +143,14 @@ def main() -> int:
     args = ap.parse_args()
 
     margin_s = int(args.leakage_margin_hours * 3600)
+    # Fail LOUD on a config that would DEFEAT the leakage guard: a non-positive margin
+    # pushes the truncation cutoff at/after resolution_time, so a fade exit could read a
+    # settlement pin. The default is safe; this rejects a foot-gun override.
+    if margin_s <= 0:
+        ap.error("--leakage-margin-hours must be positive (it must be >= the engine "
+                 "reversal horizon so no fade exit can read a settlement pin)")
+    if args.window_cap_days <= 0:
+        ap.error("--window-cap-days must be positive")
     fetcher = PolymarketHistoryFetcher()
 
     print(f"[1/3] fetching resolved Politics markets (tag_id={POLITICS_TAG_ID}, "

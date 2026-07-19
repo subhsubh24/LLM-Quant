@@ -50,7 +50,7 @@ per-market concentration only).
 | total PnL | **+$285.44** |
 | hit rate | 58.3% |
 | **F11 significance** | **indistinguishable_from_zero** (total 95% CI **[−527.30, +1090.61]**) |
-| **F10 fragility** | **FRAGILE** — top-market 49.7%; leave-one-out: removing the top category leaves **−$19.99 ≤ 0** |
+| **F10 fragility** | **FRAGILE** — confidence-band 168% + category 107% (both > the 70% gate); leave-one-out: removing the top category leaves **−$19.99 ≤ 0**. (Top-market share is 49.7%, *below* the 70% gate, so single-market is NOT itself a binding failure.) |
 | **is_validated_edge** | **False** |
 
 ### The magnitude strata confirm Run 21's caution on real data at scale
@@ -70,9 +70,10 @@ large-spike events.
 
 1. **Not significant.** The F11 bootstrap CI on total PnL spans zero widely
    ([−$527, +$1,091]) — the +$285 is indistinguishable from noise.
-2. **Fragile / concentrated.** F10 fails on every informative axis (single-market 49.7%,
-   confidence-band, category), and leave-one-out shows the entire positive aggregate lives in
-   ONE category — remove it and the edge is negative.
+2. **Fragile / concentrated.** F10 fails on the binding informative axes — confidence-band
+   (168%) and category (107%), both above the 70% gate — and leave-one-out shows the entire
+   positive aggregate lives in ONE category (remove it → −$19.99). (The top-market share,
+   49.7%, is below the 70% gate, so single-market concentration is not itself binding here.)
 3. **No legitimate carve-out.** The apparent small-spike profit is NOT a tradeable strategy: a
    spike's magnitude band is **not knowable at decision time** (the peak can extend past the
    entry — see `MagnitudeStratum` docstring), so "fade only small spikes" is look-ahead. The
@@ -98,7 +99,7 @@ mechanism.** EXP-006 fade-the-spike is now tested on real data and refuted at th
 config. Both real-money mechanisms tested to date (bucket-calibration, fade-the-spike) are
 refuted; the play-money Manifold crowd (A8) remains a method-validation target, not real money.
 
-### Next buildable steps (filed to ROADMAP / RESEARCH_MEMORY)
+### Next buildable steps (to be filed to ROADMAP / RESEARCH_MEMORY in the companion bookkeeping PR)
 
 1. A pre-registered threshold/window/horizon **robustness surface** on this SAME committed
    corpus (report ALL cells, select none) — does the null hold across the config family, or is
