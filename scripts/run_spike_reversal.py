@@ -111,6 +111,17 @@ def main() -> int:
             "f11_total_ci": [sig.total_ci_low, sig.total_ci_high],
             "f10_fragile_raw": (res.regime.fragile if res.regime else None),
             "f10_fragile_reasons_raw": (list(res.regime.fragile_reasons) if res.regime else []),
+            "magnitude_strata": [
+                {
+                    "band": s.label,
+                    "n_trades": s.n_trades,
+                    "total_pnl_usd": s.total_pnl_usd,
+                    "hit_rate": s.hit_rate,
+                    "mean_reversal_fraction": s.mean_reversal_fraction,
+                    "mean_magnitude": s.mean_magnitude,
+                }
+                for s in res.strata
+            ],
             "is_validated_edge": res.is_validated_edge,
             "verdict": res.verdict,
         }, indent=2))
@@ -127,6 +138,11 @@ def main() -> int:
         if res.regime is not None:
             print(f"F10 (raw) fragile : {res.regime.fragile}  "
                   f"top-market share {res.regime.top_market_pnl_share}")
+        # Salience breakdown (Run 21 caution: do the LARGEST spikes revert too, or only small ones?)
+        print("magnitude strata  : |move| band | N | net PnL | hit | mean reversion")
+        for s in res.strata:
+            print(f"                    {s.label:>10} | {s.n_trades:>3} | "
+                  f"{s.total_pnl_usd:>10,.2f} | {s.hit_rate} | {s.mean_reversal_fraction}")
         print(f"VALIDATED EDGE    : {res.is_validated_edge}")
         print(f"\n{res.verdict}")
         if not args.data:

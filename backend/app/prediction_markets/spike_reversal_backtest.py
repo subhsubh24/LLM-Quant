@@ -105,6 +105,19 @@ DEFAULT_MAX_TRADES_PER_MARKET: int = 1
 # a positive total driven by a few large asymmetric wins at a sub-50% hit-rate is NOT called
 # a validated candidate (it may be, but it must clear this too, matching the stated bar).
 MIN_HIT_RATE_FOR_EDGE: float = 0.50
+# Magnitude (salience) strata for the spike-size breakdown, in ABSOLUTE probability points of
+# the full move |peak - baseline|. These operationalize the Run 21 LOAD-BEARING N=1 caution:
+# *the biggest 2024 political spike did NOT revert — it kept trending*, so a positive AGGREGATE
+# reversion edge can be a small-spike artifact that hides a large-spike PERSIST regime. Round,
+# first-principles boundaries — a 15/25/40-point intraday move is a moderate / large / extreme
+# swing — NOT tuned on any result; callers sweep them via ``FadeSpikeConfig.magnitude_stratum_edges``.
+# The three edges yield four strata: [thr,0.15), [0.15,0.25), [0.25,0.40), [0.40, 1.0].
+DEFAULT_MAGNITUDE_STRATUM_EDGES: tuple[float, ...] = (0.15, 0.25, 0.40)
+# A magnitude stratum needs at least this many trades before a NON-POSITIVE total in it is
+# trusted as a losing REGIME rather than noise; below the floor the robustness check abstains
+# on that stratum (it never false-flags a sparse large-spike bucket). Not tuned — a modest
+# evidence floor, deliberately well under the 100-trade edge floor so it can engage per-stratum.
+MIN_STRATUM_TRADES_FOR_FRAGILITY: int = 20
 # The two near-certain confidence bands, mirroring regime_slice._EXTREME_CONFIDENCE_LABELS
 # (defined locally rather than importing a private name; the vocabulary is stable).
 _EXTREME_CONF_LABELS: tuple[str, str] = ("0-10%", "90-100%")
@@ -120,6 +133,8 @@ class FadeSpikeConfig:
     budget_per_trade_usd: float = DEFAULT_BUDGET_PER_TRADE_USD
     max_trades_per_market: int = DEFAULT_MAX_TRADES_PER_MARKET
     min_trades_for_edge: int = DEFAULT_MIN_TRADES_FOR_EDGE
+    # Salience/magnitude strata edges (absolute |peak-baseline| move), swept not tuned.
+    magnitude_stratum_edges: tuple[float, ...] = DEFAULT_MAGNITUDE_STRATUM_EDGES
     # F11 bootstrap knobs (passed straight through — seeded ⇒ deterministic).
     bootstrap_n: int = 2000
     bootstrap_seed: int = 12345
@@ -138,6 +153,14 @@ class FadeSpikeConfig:
             raise ValueError(f"max_trades_per_market must be >= 1: {self.max_trades_per_market}")
         if self.min_trades_for_edge < 1:
             raise ValueError(f"min_trades_for_edge must be >= 1: {self.min_trades_for_edge}")
+        edges = self.magnitude_stratum_edges
+        if not edges:
+            raise ValueError("magnitude_stratum_edges must be non-empty")
+        for a, b in zip(edges, edges[1:]):
+            if not (b > a):
+                raise ValueError(f"magnitude_stratum_edges must be strictly increasing: {edges}")
+        if edges[0] <= 0.0 or edges[-1] >= 1.0:
+            raise ValueError(f"magnitude_stratum_edges must lie strictly within (0, 1): {edges}")
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +192,26 @@ class FadeTrade:
     pnl_usd: float              # contracts * (exit_proceeds - entry_cost)
     is_win: bool
     reversal_fraction: float    # signed fraction of the spike move that reverted (label)
+    spike_magnitude: float      # absolute |peak - baseline| move of the faded spike (salience)
+
+
+@dataclass(frozen=True)
+class MagnitudeStratum:
+    """The fade's realized behaviour within one spike-SIZE band — the salience breakdown that
+    makes the Run 21 caution auditable. A ``mean_reversal_fraction`` near +1 means spikes in this
+    size band fully reverted; near 0 they held; NEGATIVE means they COMPOUNDED (persisted), which
+    is exactly the large-spike failure mode the caution flags. ``total_pnl_usd`` is the cost-net
+    fade PnL earned in the band. Empty bands report ``None`` for the means/hit-rate (never a
+    fabricated 0)."""
+
+    label: str
+    lo: float                              # inclusive lower |move| edge
+    hi: Optional[float]                    # exclusive upper edge (None = open-ended top band)
+    n_trades: int
+    total_pnl_usd: float
+    hit_rate: Optional[float]
+    mean_reversal_fraction: Optional[float]
+    mean_magnitude: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -192,6 +235,7 @@ class SpikeReversalResult:
     n_spikes_unlabelable: int              # spikes with no qualifying forward tick (dropped)
     significance: OOSSignificance          # F11
     regime: Optional[RegimeSliceReport]    # F10 (None only when there are zero trades)
+    strata: tuple[MagnitudeStratum, ...]   # per-spike-size reversion breakdown (Run 21 caution)
     is_validated_edge: bool
     verdict: str                           # human-readable, always honest
 
@@ -213,6 +257,7 @@ def _fade_trade(
     confirm_time: int,
     exit_time: int,
     reversal_fraction: float,
+    spike_magnitude: float,
     cfg: FadeSpikeConfig,
 ) -> Optional[FadeTrade]:
     """Build one cost-net fade trade, or None if it cannot be sized sensibly.
@@ -265,6 +310,7 @@ def _fade_trade(
         pnl_usd=pnl,
         is_win=pnl > 0.0,
         reversal_fraction=reversal_fraction,
+        spike_magnitude=spike_magnitude,
     )
 
 
@@ -307,11 +353,103 @@ def _top_pnl_share(slices: Sequence[SlicePnL]) -> Optional[float]:
     return max(shares) if shares else None
 
 
+def _stratum_bounds(
+    edges: Sequence[float],
+) -> List[tuple[str, float, Optional[float]]]:
+    """Turn ascending interior edges into (label, lo, hi) bands: [0,e0), [e0,e1), …, [e_last, ∞)."""
+    bounds: List[tuple[str, float, Optional[float]]] = []
+    lo = 0.0
+    for e in edges:
+        bounds.append((f"{lo:.2f}-{e:.2f}", lo, e))
+        lo = e
+    bounds.append((f">={lo:.2f}", lo, None))
+    return bounds
+
+
+def stratify_by_magnitude(
+    trades: Sequence[FadeTrade],
+    edges: Sequence[float] = DEFAULT_MAGNITUDE_STRATUM_EDGES,
+) -> tuple[MagnitudeStratum, ...]:
+    """Break realized fade trades into spike-SIZE bands (by ``|peak - baseline|`` magnitude).
+
+    Pure + deterministic: bands are fixed by ``edges``, membership by magnitude alone. Reports,
+    per band, the trade count, cost-net PnL, hit-rate, mean signed reversal fraction, and mean
+    magnitude — the visibility that makes the Run 21 large-spike-persistence caution auditable
+    (does the reversion hold across sizes, or only for small spikes?). Empty bands report ``None``
+    for the means (never a fabricated 0). A band assigns membership left-inclusive/right-exclusive,
+    with an open-ended top band, so every magnitude lands in exactly one band."""
+    bounds = _stratum_bounds(list(edges))
+    buckets: List[List[FadeTrade]] = [[] for _ in bounds]
+    for t in trades:
+        # Prices are tick-discrete, so a magnitude is a genuine multiple of the tick; round for
+        # BAND ASSIGNMENT ONLY (never PnL) so float subtraction noise (e.g. 0.70-0.55=0.14999997)
+        # can't scatter an exactly-on-edge cluster across two bands. Membership is
+        # left-inclusive / right-exclusive with an open-ended top band.
+        m = round(t.spike_magnitude, 6)
+        placed = False
+        for i, (_, lo, hi) in enumerate(bounds):
+            if m >= lo and (hi is None or m < hi):
+                buckets[i].append(t)
+                placed = True
+                break
+        if not placed:  # pragma: no cover - open-ended top band always catches
+            buckets[-1].append(t)
+    out: List[MagnitudeStratum] = []
+    for (label, lo, hi), bucket in zip(bounds, buckets):
+        n = len(bucket)
+        if n:
+            total = round(sum(t.pnl_usd for t in bucket), 6)
+            hit = round(sum(1 for t in bucket if t.is_win) / n, 6)
+            mean_rev = round(sum(t.reversal_fraction for t in bucket) / n, 6)
+            mean_mag = round(sum(t.spike_magnitude for t in bucket) / n, 6)
+        else:
+            total, hit, mean_rev, mean_mag = 0.0, None, None, None
+        out.append(
+            MagnitudeStratum(
+                label=label,
+                lo=lo,
+                hi=hi,
+                n_trades=n,
+                total_pnl_usd=total,
+                hit_rate=hit,
+                mean_reversal_fraction=mean_rev,
+                mean_magnitude=mean_mag,
+            )
+        )
+    return tuple(out)
+
+
+def _magnitude_fragile(strata: Sequence[MagnitudeStratum]) -> List[str]:
+    """Salience-robustness reasons operationalizing the Run 21 N=1 caution.
+
+    ENGAGES only when the corpus spans >= 2 POPULATED magnitude strata — with a single
+    populated band the fade's size-robustness is structurally unassessable (all spikes the same
+    size), exactly like the single-valued horizon axis the F10 check excludes; abstaining there is
+    honest, not a pass. When it engages, a validated reversion edge must hold in EVERY
+    sufficiently-sampled size regime: any stratum with >= ``MIN_STRATUM_TRADES_FOR_FRAGILITY``
+    trades whose cost-net fade PnL is NON-POSITIVE is flagged (the biggest-spike bucket losing
+    while the aggregate wins is precisely the small-spike-artifact failure the caution warns of).
+    Sparse bands (< the floor) are NOT flagged — a negative total there is noise, not a regime."""
+    populated = [s for s in strata if s.n_trades > 0]
+    if len(populated) < 2:
+        return []
+    reasons: List[str] = []
+    for s in populated:
+        if s.n_trades >= MIN_STRATUM_TRADES_FOR_FRAGILITY and s.total_pnl_usd <= 0.0:
+            reasons.append(
+                f"magnitude {s.label}: fade net ${s.total_pnl_usd:,.2f} <= 0 over {s.n_trades} "
+                f"trades (mean reversion {s.mean_reversal_fraction}) — the reversion does NOT "
+                f"hold in this spike-size regime"
+            )
+    return reasons
+
+
 def _fade_f10_ok(
     regime: RegimeSliceReport,
     *,
     categories_known: bool,
     exclude_horizon: bool,
+    strata: Sequence[MagnitudeStratum] = (),
 ) -> tuple[bool, List[str]]:
     """F10 fragility for a fade-the-spike run, optionally excluding the horizon dimension.
 
@@ -375,6 +513,9 @@ def _fade_f10_ok(
         cat_share = _top_pnl_share(regime.by_category)
         if cat_share is not None and cat_share > CATEGORY_PNL_CONCENTRATION:
             reasons.append(f"category: {cat_share:.0%} of net PnL in one category > {CATEGORY_PNL_CONCENTRATION:.0%}")
+    # Magnitude/salience robustness — the Run 21 caution made a load-bearing gate axis: a
+    # reversion edge that vanishes (or reverses) in the largest-spike regime is size-fragile.
+    reasons.extend(_magnitude_fragile(strata))
 
     return (not reasons), reasons
 
@@ -431,6 +572,7 @@ def backtest_fade_the_spike(
                 confirm_time=spike.confirm_time,
                 exit_time=outcome.future_time,
                 reversal_fraction=outcome.reversal_fraction,
+                spike_magnitude=spike.magnitude,
                 cfg=cfg,
             )
             if trade is None:
@@ -444,6 +586,9 @@ def backtest_fade_the_spike(
     total_pnl = round(sum(t.pnl_usd for t in trades), 6)
     hit_rate = (sum(1 for t in trades if t.is_win) / n) if n else None
     n_markets_traded = len({t.market_id for t in trades})
+
+    # Salience breakdown (Run 21 caution): how the fade behaves across spike-SIZE bands.
+    strata = stratify_by_magnitude(trades, cfg.magnitude_stratum_edges)
 
     # F11 — is the realized total distinguishable from zero? (seeded ⇒ reproducible)
     significance = bootstrap_oos_significance(
@@ -483,6 +628,7 @@ def backtest_fade_the_spike(
             regime,
             categories_known=category_by_market is not None,
             exclude_horizon=exclude_horizon,
+            strata=strata,
         )
     is_validated = bool(enough_n and f11_ok and f10_ok and hit_rate_ok)
 
@@ -522,6 +668,7 @@ def backtest_fade_the_spike(
         n_spikes_unlabelable=n_unlabelable,
         significance=significance,
         regime=regime,
+        strata=strata,
         is_validated_edge=is_validated,
         verdict=verdict,
     )
@@ -531,9 +678,13 @@ __all__ = [
     "DEFAULT_MIN_TRADES_FOR_EDGE",
     "DEFAULT_BUDGET_PER_TRADE_USD",
     "DEFAULT_MAX_TRADES_PER_MARKET",
+    "DEFAULT_MAGNITUDE_STRATUM_EDGES",
     "MIN_HIT_RATE_FOR_EDGE",
+    "MIN_STRATUM_TRADES_FOR_FRAGILITY",
     "FadeSpikeConfig",
     "FadeTrade",
+    "MagnitudeStratum",
     "SpikeReversalResult",
     "backtest_fade_the_spike",
+    "stratify_by_magnitude",
 ]
