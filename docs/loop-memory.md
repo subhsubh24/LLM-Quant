@@ -2935,3 +2935,32 @@ Auditor 3 (integrity) found + I fixed one REAL break (see lesson), then CANNOT-B
 - **THE AUDITOR-DRIVEN HARDENING (maker≠checker earned its keep).** The gate-gaming auditor found a real honest gap: `is_validated_edge` enforced N + F11 + F10 but silently DROPPED the "hit-rate meaningfully >50%" criterion the scorecard's own validated-edge bar names. Applied pre-merge (commit 2): a `hit_rate > 50%` gate (with a test proving a positive, F11-significant total at a sub-50% hit-rate is NOT validated), guarding the horizon-exclusion to only apply while ≤1d (with a re-engagement test), restoring the extreme-confidence two-bucket check, and documenting the F11-independence caveat (keep `max_trades_per_market=1` for any edge claim — >1 feeds correlated draws into the bootstrap as independent). LESSON: when you adapt a gate (F10/F11) to a new strategy class, enumerate EVERY criterion the canonical bar names and either enforce it or argue its exclusion explicitly — a silently-dropped criterion is a gate weakened by omission even when each retained check is sound.
 - **RECONCILIATION WITH THE OWNER STEER (honest, not p-hacked).** Steer priority #1 (concentration-capped bucket REDESIGN) was DEPRIORITIZED-with-proof: already TESTED and refuted in Run 22 on the real EXP-003 N=1,369 corpus, and the scorecard calls the bucket-calibration family "exhausted — NOT another parameterization." Per the steer's own rule ("an honest null STILL clears the value bar; do NOT p-hack an edge to satisfy the steer"), effort went to priority #2 (EXP-006), a structurally-different, non-exhausted mechanism BOTH the steer and the auditor endorse. Priority #3 (B8 dual-venue OOS harness) is egress-gated (needs matched Polymarket↔Kalshi resolved markets) — filed to next_actions rather than shipped as a speculative data-less skeleton (anti-padding).
 - **GATES/NET.** 2 file-disjoint PRs: #385 (code: spike_reversal_backtest + cost_model.effective_sell_price + tests + runner + preflight registration) auto-merged via `enable_pr_auto_merge` SQUASH after the required `gate` check passed; this bookkeeping PR (ROADMAP E3→[~], RESEARCH_MEMORY run entry, GROWTH_STATUS, LOOP_HEALTH, this file). Binding constraint UNCHANGED: `business_case_strength = B`, no validated real-money OOS edge — the engine now EXISTS + is audited-sound, but the honest EXP-006 verdict awaits a real point-in-time non-survivorship intraday-tick corpus (owner/egress action). An honest engine-built + edge-not-proven run, with the specific next buildable step filed, IS a value-bar-clearing success (§2) — neither padding nor artificial scarcity.
+
+## 2026-07-19b (model/strategy factory) — 2 file-disjoint code PRs (#387 EXP-006 size-robustness gate + #388 walk_forward per-CATEGORY exposure cap), both HONEST NULLs / instrument-hardening; NO edge claimed; binding constraint (business_case_strength B) unchanged
+
+- **What shipped.** #387: a per-magnitude-band `strata` report + a size-robustness SCREEN on the EXP-006
+  fade engine, operationalizing Run 21's LOAD-BEARING N=1 caution (the biggest 2024 political spike did
+  NOT revert — it kept trending). #388: `walk_forward_backtest(category_exposure_cap=...)` — Run 20-22's
+  named-but-never-built per-CATEGORY concentration fix — plus a `--category-exposure-cap` OOS variant.
+  HONEST RESULT on the frozen 187-record corpus (cap=0.20): the bucket-calibration family STAYS REFUTED
+  (calibration-capped `significant_negative` −$3,228; recency-capped `insufficient_data` −$3,444).
+- **KEY LESSON:** four successive adversarial Opus audits each broke a single-cohort size-robustness gate
+  (edges-gameable → rank-count-dilutable → range-fraction-outlier-sensitive), converging on a
+  fixed-absolute-cut SCREEN with an honestly-disclosed residual limitation — no single automated cohort
+  test is adversarially complete for "do the biggest spikes revert"; the per-band strata REPORT + manual
+  review is the honest complement. This mirrors the #385 hit-rate lesson (enumerate every criterion the
+  canonical bar names) but one level deeper: even after enumerating the criteria, a SINGLE cohort
+  definition (edges, rank-count, range-fraction) can each be gamed on its own axis — robustness needed a
+  fixed, config-independent, dilution- and outlier-insensitive cut, not a smarter single test.
+- **The maker≠checker gate worked as designed:** each of the four audits caught a real ship-critical
+  false-validation hole (a corpus that should have blocked VALIDATED-CANDIDATE would have passed) before
+  merge, not after. This is direct evidence the adversarial-audit requirement is earning its keep on
+  research-instrument PRs, not just execution-path PRs.
+- **Signal: improving** — 2 code PRs shipped, 0 reverts, 0 abandoned, both through the full gate (code +
+  adversarial audit + review) with 0 red required CI.
+- **Net:** no validated OOS edge on any mechanism (bucket family REFUTED; EXP-006 instrument now hardened
+  but untested on real data). Binding constraint (`business_case_strength = B`) STANDS. Named next steps
+  filed to ROADMAP: (1) EXP-006 real intraday-tick corpus run (egress-gated), (2) a faithful bucket
+  de-concentration test needing BOTH a cumulative per-category cap AND a net-positive-but-fragile corpus
+  (egress-gated), (3) B8 dual-venue harness (egress + owner-gated, no speculative skeleton), (4) a robust
+  multi-band/windowed size-robustness gate or a documented manual-review step.

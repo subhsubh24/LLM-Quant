@@ -3446,3 +3446,61 @@ expected to cross the 100-event floor without needing a 3rd sampling axis.
 - **Verdict:** engine BUILT + audited-sound; **edge NOT proven** (no real-data run yet — the honest state).
   Binding constraint unchanged: `business_case_strength = B`, no validated real-money OOS edge on any tested
   mechanism to date.
+
+## 2026-07-19b — Factory build (NOT a research run): EXP-006 size-robustness (spike-size / salience) gate + walk_forward per-CATEGORY exposure cap — TWO file-disjoint code PRs, both HONEST NULLs / instrument-hardening, NO edge claimed
+
+**PR #387 — EXP-006 size-robustness (spike-size / salience) gate.** RESEARCH_MEMORY's own named
+next-step for EXP-006 (Run 21's LOAD-BEARING N=1 caution: *the biggest 2024 political spike did
+NOT revert — it kept trending*). Built on top of the #385 fade engine as a per-magnitude-band
+`strata` report plus a size-robustness SCREEN operationalizing that caution: the largest-spike
+cohort is judged against the SAME F11 bootstrap the aggregate is, and flagged whenever it is
+`significant_negative`, so a positive aggregate that is only a small-spike artifact is BLOCKED from
+VALIDATED-CANDIDATE.
+- **Four successive fresh Opus adversarial audits, each breaking a version of the gate** (maker≠checker):
+  the first cut was edges-gameable (a caller-controlled report-band edge could collapse magnitudes
+  into one bin and silently disable the gate); the second was rank-count-dilutable; the third was
+  range-fraction-outlier-sensitive. The design converged on a FIXED ABSOLUTE magnitude cut
+  (large-spike set = `|move| >= 0.25`) — config-independent, not-diluted, outlier-insensitive —
+  judged by bootstrap significance (N ≥ 20 trades) or net-PnL sign when underpowered. Every
+  reproduced counterexample from all four attack rounds (losing tails sized 1-40; a mid-tier-loss
+  hiding under a winning larger tier) now blocks a green VALIDATED-CANDIDATE, verified directly
+  across the full attack surface. 24 tests pass.
+- **Honestly disclosed limitation:** this is a SCREEN, not an adversarially-complete proof — a
+  losing mid tier beneath a larger winning tier can still dilute within the pool. The per-band
+  `strata` report exists for manual review; no single automated cohort test is robust (four audits
+  confirmed this). **No real corpus has been run through the engine yet — NO edge claimed.**
+
+**PR #388 — walk_forward per-CATEGORY exposure cap (Run 20-22's named-but-never-built concentration
+fix).** Built as `walk_forward_backtest(category_exposure_cap=...)` (concurrent committed-basis cap,
+`cap=None` byte-identical to before, pinned hashes hold) + a `--category-exposure-cap` OOS variant
+on both the static-calibration and recency-weighted bucket alphas.
+- **HONEST RESULT (frozen 187-record corpus, cap=0.20): the bucket-calibration family STAYS
+  REFUTED.** calibration-capped = `significant_negative` **−$3,228**; recency-capped =
+  `insufficient_data` **−$3,444**.
+- Two findings sharpened by review, both now disclosed in code + JSON:
+  1. The cap is a CONCURRENT-exposure control; F10's `top_category_budget_share` is a CUMULATIVE
+     measure, so the cap does not bind that metric — and on this temporally-spread corpus it did
+     not bind at all (`cap_bound: false`).
+  2. The aggregate is net-NEGATIVE, so an F10 non-fragile pass would be VACUOUS anyway — **no
+     concentration control can manufacture an edge from a losing signal.**
+- 2 Opus auditors + 2 Sonnet reviewers (1 requested-changes, addressed via honest reframing +
+  machine-readable disclosure of `cap_bound` + a dust-trade guard).
+
+**Verdict: NO validated out-of-sample real-money edge on any mechanism.** Bucket-calibration family
+REFUTED (EXP-002/003/005 + this run's cap variant). EXP-006 now has the instrument (fade engine +
+size-robustness screen) but NO real intraday-tick corpus has been run through it (egress-blocked).
+Binding constraint stays `business_case_strength = B`, unchanged. `engine_pct` stays 74. Both PRs
+harden the honest test apparatus; neither reaches a revenue field.
+
+**NEXT buildable steps (filed to ROADMAP):**
+1. EXP-006 real test: a point-in-time, non-survivorship intraday-tick Politics corpus, N ≥ 100
+   spikes, run through the now-size-robustness-gated `backtest_fade_the_spike` (egress-gated,
+   public data, no credential).
+2. A faithful bucket de-concentration test needs BOTH a CUMULATIVE per-category deployment cap (the
+   concurrent cap does not bound F10's cumulative share) AND a net-positive-but-fragile corpus
+   (concentration is moot on a losing aggregate). Egress-gated.
+3. B8 dual-venue OOS harness: blocked on Kalshi orderbook wiring + a curated co-listed universe
+   (egress + owner); no speculative skeleton until real data exists (DECISION COROLLARY).
+4. (from PR #387's audits) A robust multi-band/windowed size-robustness gate, or a documented manual-
+   review step — no single automated cohort test is adversarially complete for "do the biggest
+   spikes revert."
