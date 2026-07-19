@@ -394,14 +394,14 @@ def test_magnitude_strata_reported_and_partition_all_trades():
             assert s.hit_rate is None and s.mean_reversal_fraction is None
 
 
-def test_uniform_magnitude_size_robustness_abstains_with_disclosure():
-    # No spike-size DISPERSION -> size-robustness is structurally unassessable -> ABSTAIN, but
-    # DISCLOSE it (not a silent pass). The genuinely-broad edge still validates, and the verdict
-    # explicitly says UNASSESSED so a reader knows the largest-spike regime was not cleared.
+def test_no_large_spikes_size_robustness_abstains_with_disclosure():
+    # This broad reverting corpus has only 0.15 moves — all BELOW the fixed large-spike cut (0.25),
+    # so there is no biggest-spike regime to test -> ABSTAIN-BENIGN, but DISCLOSE it (not a silent
+    # pass). The genuinely-broad edge still validates, and the verdict explicitly says UNASSESSED.
     res = backtest_fade_the_spike(_corpus(_reverting_market, 120))
     assert res.is_validated_edge is True
     assert res.size_robustness.startswith("UNASSESSED")
-    assert "no spike-size dispersion" in res.size_robustness
+    assert "no large spikes" in res.size_robustness
     assert "UNASSESSED" in res.verdict                  # disclosed in the human verdict too
 
 

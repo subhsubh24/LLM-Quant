@@ -115,27 +115,22 @@ MIN_HIT_RATE_FOR_EDGE: float = 0.50
 # below the configured spike ``threshold``, so the first band is nominally [0,..) but in practice
 # starts at ``threshold``.)
 DEFAULT_MAGNITUDE_STRATUM_EDGES: tuple[float, ...] = (0.15, 0.25, 0.40)
-# The size-robustness gate (Run 21's LOAD-BEARING N=1 caution: *the biggest 2024 political spike
-# did NOT revert — it kept trending*) tests the LARGEST spikes selected by MAGNITUDE, not by the
-# caller's report bands (so no ``magnitude_stratum_edges`` choice can turn it off) and NOT by a
-# fixed rank COUNT/FRACTION (which two successive audits proved get DILUTED: a count/fraction cohort
-# backfills with small-spike WINNERS when the losing large tail is a minority, straddles zero, and
-# passes). The large-spike SET is every trade whose |move| is in the top ``LARGE_SPIKE_RANGE_FRACTION``
-# of the observed magnitude RANGE — a PURE large-spike set (never diluted with small spikes), so its
-# result reflects only the biggest spikes. See ``_size_robustness``.
-LARGE_SPIKE_RANGE_FRACTION: float = 1.0 / 3.0
-# The large-spike set needs at least this many trades before its result is trusted enough to call it
-# a losing REGIME on significance; when it is SMALLER (too few big spikes to reach significance) the
-# gate falls back to the SIGN of the set's net PnL — a net-negative small large-tail BLOCKS validation
-# (the literal Run 21 N=1 caution: one/few huge spikes that persist), disclosed as underpowered.
+# The size-robustness SCREEN (Run 21's LOAD-BEARING N=1 caution: *the biggest 2024 political spike
+# did NOT revert — it kept trending*) tests the large-spike set defined by a FIXED ABSOLUTE magnitude
+# cut. This primitive is deliberate: four successive adversarial audits broke every RELATIVE cohort
+# selector — the caller's report bands (config-gameable), a rank COUNT/FRACTION (dilutable: a minority
+# losing tail is padded with small-spike winners), and a fraction of the min-max RANGE (outlier-
+# sensitive: winning outliers inflate the range and push a losing tier below the cut). A FIXED cut is
+# none of those: config-independent, not diluted by count, and not moved by outliers. "Large" = a
+# 25-point absolute move — a genuinely big intraday swing, first-principles, not tuned.
+LARGE_SPIKE_ABS_CUT: float = 0.25
+# The large-spike set needs at least this many trades before its result is trusted on significance;
+# when it is SMALLER (too few big spikes to reach significance) the screen falls back to the SIGN of
+# the set's net PnL — a net-negative small large-tail BLOCKS validation (the literal Run 21 N=1
+# caution: one/few huge spikes that persist), disclosed as underpowered.
 # The set is judged by the SAME bootstrap-significance test the aggregate uses (F11), not a bare
 # sign test, so a cohort that is only negative by sampling variance is NOT flagged. Not tuned.
 MIN_STRATUM_TRADES_FOR_FRAGILITY: int = 20
-# Below this span between the smallest and largest realized |move|, the corpus has effectively ONE
-# spike size, so size-robustness is structurally unassessable (like the single-valued horizon axis
-# the F10 check excludes) — the gate ABSTAINS WITH DISCLOSURE rather than pretending to assess it.
-# One cent: prediction-market prices are ~cent-discrete, so a narrower span is not real dispersion.
-MIN_MAGNITUDE_DISPERSION: float = 0.01
 # The two near-certain confidence bands, mirroring regime_slice._EXTREME_CONFIDENCE_LABELS
 # (defined locally rather than importing a private name; the vocabulary is stable).
 _EXTREME_CONF_LABELS: tuple[str, str] = ("0-10%", "90-100%")
@@ -471,42 +466,37 @@ def _size_robustness(
     Returns ``(fragile_reasons, status)``. ``fragile_reasons`` (fed into the F10 gate) is non-empty
     ONLY when the LARGEST spikes genuinely fail; ``status`` is an always-set machine-readable note.
 
-    CONFIG-INDEPENDENT BY DESIGN (closing the edges loophole audit #1 proved): the large-spike SET
-    is chosen from the realized ``spike_magnitude`` values — NOT the caller's report bands — so no
-    ``magnitude_stratum_edges`` choice can collapse the check away.
-
-    MAGNITUDE-DEFINED, NEVER DILUTED (closing the count/fraction dilution audits #2 and #3 proved):
-    the large-spike SET is every trade whose |move| is in the TOP ``LARGE_SPIKE_RANGE_FRACTION`` of
-    the observed magnitude RANGE. Because membership is by MAGNITUDE (not a rank COUNT or FRACTION),
-    the set is PURE large spikes — it can never be padded with small-spike winners, which is exactly
-    how the count/fraction designs let a losing minority huge-tail straddle zero and pass.
+    THE PRIMITIVE — a FIXED ABSOLUTE magnitude cut, chosen after four audits broke every relative
+    selector (report bands = config-gameable; rank count/fraction = dilutable by small-spike winners;
+    range-fraction = outlier-sensitive). The large-spike SET is every trade with |move| >=
+    ``LARGE_SPIKE_ABS_CUT``. A fixed cut is config-independent, not diluted by count, and not moved by
+    outliers, so the three broken failure modes cannot recur.
 
     JUDGED HONESTLY BY SAMPLE SIZE:
-    - large set >= ``MIN_STRATUM_TRADES_FOR_FRAGILITY``: judged by the SAME bootstrap-significance
-      test the aggregate is (F11); flagged ONLY on ``significant_negative`` (a set negative only by
-      sampling variance is NOT flagged — the R2 variance-false-flag guard).
-    - large set SMALLER than the floor (too few big spikes to reach significance): judged by the
-      SIGN of its net PnL — a NET-NEGATIVE small large-tail BLOCKS validation (the literal Run 21
-      N=1 caution: one/few huge spikes that persist), disclosed as UNDERPOWERED; a non-negative
-      small tail is not a demonstrated regime and passes-with-disclosure.
+    - set >= ``MIN_STRATUM_TRADES_FOR_FRAGILITY``: judged by the SAME bootstrap-significance test the
+      aggregate is (F11); flagged ONLY on ``significant_negative`` (a set negative only by sampling
+      variance is NOT flagged — the variance-false-flag guard).
+    - set SMALLER than the floor (too few big spikes to reach significance): judged by the SIGN of its
+      net PnL — a NET-NEGATIVE small large-tail BLOCKS validation (the literal Run 21 N=1 caution),
+      disclosed as UNDERPOWERED; a non-negative small tail passes-with-disclosure.
+    - NO large spikes at all (all |move| < the cut): ABSTAINS-BENIGN — there is no biggest-spike
+      regime to test.
 
-    ABSTAINS-BENIGN only when there is genuinely NO size dispersion (span < ``MIN_MAGNITUDE_DISPERSION``
-    — one spike size, no large-vs-small regime possible). Every other path sets a status a reader (or
-    the JSON) can act on; a losing large tail never ships a silent green."""
+    KNOWN, DISCLOSED LIMITATION (honesty — this is a SCREEN, not an adversarially-complete proof):
+    the set POOLS everything above the fixed cut, so a losing MID-magnitude tier that sits beneath a
+    LARGER winning tier can, in principle, be diluted within the pool and evade the screen. No single
+    automated cohort test is robust to an adversarial magnitude distribution (four audits confirmed);
+    the per-magnitude-band ``strata`` REPORT exists precisely so a human/auditor can inspect each
+    band's reversion before any live claim. The screen catches the common case + every reproduced
+    counterexample; it does not replace review of the strata."""
     if not trades:
         return [], "UNASSESSED: no trades"
-    mags = [t.spike_magnitude for t in trades]
-    span = max(mags) - min(mags)
-    if span < MIN_MAGNITUDE_DISPERSION:
+    large = [t for t in trades if t.spike_magnitude >= LARGE_SPIKE_ABS_CUT]
+    if not large:
         return [], (
-            f"UNASSESSED (benign): no spike-size dispersion (|move| span {span:.4f} < "
-            f"{MIN_MAGNITUDE_DISPERSION}) — one spike size, no large-vs-small regime to test"
+            f"UNASSESSED (benign): no large spikes (all |move| < {LARGE_SPIKE_ABS_CUT}) — "
+            f"no biggest-spike regime to test"
         )
-    # PURE large-spike set: |move| in the top LARGE_SPIKE_RANGE_FRACTION of the magnitude RANGE.
-    # (The max-magnitude trade always qualifies, so the set is non-empty.) Selection is by
-    # MAGNITUDE, so small-spike winners can NEVER pad it.
-    cut = min(mags) + (1.0 - LARGE_SPIKE_RANGE_FRACTION) * span
-    large = [t for t in trades if t.spike_magnitude >= cut]
     n_large = len(large)
     net = round(sum(t.pnl_usd for t in large), 6)
     hit = sum(1 for t in large if t.is_win) / n_large
@@ -517,33 +507,33 @@ def _size_robustness(
         )
         if sig.verdict == "significant_negative":
             reason = (
-                f"size-robustness: the large-spike set (|move| >= {cut:.3f}, N={n_large}) fade is "
-                f"SIGNIFICANTLY NEGATIVE (net ${net:,.2f}, hit {hit:.0%}, 95% CI "
+                f"size-robustness: the large-spike set (|move| >= {LARGE_SPIKE_ABS_CUT}, N={n_large}) "
+                f"fade is SIGNIFICANTLY NEGATIVE (net ${net:,.2f}, hit {hit:.0%}, 95% CI "
                 f"[{sig.total_ci_low}, {sig.total_ci_high}]) — the reversion does NOT hold for the "
                 f"biggest spikes (Run 21 caution)"
             )
             return [reason], (
-                f"FRAGILE: large-spike set (|move| >= {cut:.3f}, N={n_large}) net ${net:,.2f}, "
-                f"hit {hit:.0%} — significantly negative"
+                f"FRAGILE: large-spike set (|move| >= {LARGE_SPIKE_ABS_CUT}, N={n_large}) net "
+                f"${net:,.2f}, hit {hit:.0%} — significantly negative"
             )
         return [], (
-            f"assessed: large-spike set (|move| >= {cut:.3f}, N={n_large}, net ${net:,.2f}, "
-            f"hit {hit:.0%}) not significantly negative ({sig.verdict})"
+            f"assessed: large-spike set (|move| >= {LARGE_SPIKE_ABS_CUT}, N={n_large}, net "
+            f"${net:,.2f}, hit {hit:.0%}) not significantly negative ({sig.verdict})"
         )
-    # Too few big spikes to reach significance — judge by the SIGN of the pure large-tail's PnL.
+    # Too few big spikes to reach significance — judge by the SIGN of the large-set's PnL.
     if net < 0.0:
         reason = (
-            f"size-robustness: the large-spike set (|move| >= {cut:.3f}, N={n_large} < "
+            f"size-robustness: the large-spike set (|move| >= {LARGE_SPIKE_ABS_CUT}, N={n_large} < "
             f"{MIN_STRATUM_TRADES_FOR_FRAGILITY}) is NET NEGATIVE (net ${net:,.2f}, hit {hit:.0%}) "
             f"and too few to reach significance — size-robustness NOT demonstrated for the biggest "
             f"spikes (Run 21 N=1 caution); need more large-spike events"
         )
         return [reason], (
-            f"FRAGILE (underpowered): large-spike set (|move| >= {cut:.3f}, N={n_large}) net "
-            f"${net:,.2f}, hit {hit:.0%} — net-negative largest-spike tail, too few to clear"
+            f"FRAGILE (underpowered): large-spike set (|move| >= {LARGE_SPIKE_ABS_CUT}, N={n_large}) "
+            f"net ${net:,.2f}, hit {hit:.0%} — net-negative largest-spike tail, too few to clear"
         )
     return [], (
-        f"assessed (underpowered): large-spike set (|move| >= {cut:.3f}, N={n_large} < "
+        f"assessed (underpowered): large-spike set (|move| >= {LARGE_SPIKE_ABS_CUT}, N={n_large} < "
         f"{MIN_STRATUM_TRADES_FOR_FRAGILITY}, net ${net:,.2f}, hit {hit:.0%}) not losing; too few "
         f"to test significance"
     )
