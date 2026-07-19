@@ -40,9 +40,20 @@ def _imp(a, b):
         return __import__(b, fromlist=["x"])
 
 
-def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: float = 2.0) -> dict:
+def evaluate(
+    markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: float = 2.0,
+    category_exposure_cap: "float | None" = None,
+) -> dict:
     """Pure OOS evaluation on already-fetched leakage-safe markets (injectable for tests):
-    crowd baseline vs. the B4a calibration alpha, + corpus stats + an honest verdict."""
+    crowd baseline vs. the B4a calibration alpha, + corpus stats + an honest verdict.
+
+    When ``category_exposure_cap`` is set (a fraction in (0, 1]), an ADDITIONAL
+    ``concentration_capped_variant`` block is appended: the Run 20-22 named-but-never-built
+    per-CATEGORY exposure cap, run on BOTH the static calibration alpha AND the
+    recency-weighted alpha, each with F10/F11 — the honest test of whether bounding
+    correlated-cluster concentration rescues the REFUTED bucket family (it cannot create an
+    edge; it only removes concentration). Default None leaves the report byte-for-byte
+    unchanged, so the live/frozen lanes and their pinned outputs are untouched."""
     # STRUCTURAL RESEARCH-ONLY GUARDRAIL (ROADMAP A8): this is the REAL-MONEY OOS floor lane —
     # its verdict feeds go-live-eligibility. A PLAY-MONEY (research_only) record (e.g. Manifold)
     # validates a METHOD but a play-money edge does NOT transfer to real money, so it must NEVER
@@ -94,7 +105,7 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
         [t.pnl_usd for t in alpha.trades], [t.is_win for t in alpha.trades], seed=seed,
     )
 
-    return {
+    report = {
         "corpus": {
             "n_markets": n, "yes_base_rate": round(sum(outs) / n, 4),
             "crowd_brier": round(crowd_brier, 4), "price_pinned_pct": round(pinned, 3),
@@ -144,6 +155,93 @@ def evaluate(markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: fl
             "significant_positive) over sufficient N, >= floor."
         ),
     }
+
+    if category_exposure_cap is not None:
+        rec_mod = _imp(
+            "backend.app.prediction_markets.recency_weighted_bucket_strategy",
+            "app.prediction_markets.recency_weighted_bucket_strategy",
+        )
+
+        def _variant(strategy_fn, cap) -> dict:
+            """Run one strategy (optionally per-category-exposure-capped) through walk_forward
+            + F10 + F11 and return the honest compact result. Category labels feed F10 exactly
+            as the primary alpha's do."""
+            res = wf_mod.walk_forward_backtest(
+                markets, strategy_fn=strategy_fn, seed=seed, category_exposure_cap=cap
+            )
+            reg = rs_mod.analyze_regime_slices(
+                res.trades, category_by_market_id=category_by_market_id or None
+            )
+            sig = sig_mod.bootstrap_oos_significance(
+                [t.pnl_usd for t in res.trades], [t.is_win for t in res.trades], seed=seed,
+            )
+            return {
+                "trades": res.n_trades,
+                "total_pnl_usd": round(res.total_pnl_usd, 2),
+                "seed_hash": res.seed_hash,
+                "f10_fragile": reg.fragile,
+                "f10_fragile_reasons": list(reg.fragile_reasons),
+                # A non-fragile F10 pass is VACUOUS when the aggregate is non-positive — F10 only
+                # assesses concentration on a POSITIVE edge (there is nothing to concentrate).
+                "f10_nonfragile_is_vacuous": (not reg.fragile) and res.total_pnl_usd <= 0.0,
+                "top_category_budget_share": round(reg.top_category_budget_share, 4),
+                "f11_verdict": sig.verdict,
+                "f11_total_ci": [sig.total_ci_low, sig.total_ci_high],
+                "f11_is_significant_edge": sig.is_significant_edge,
+            }
+
+        cap = category_exposure_cap
+
+        def _bound(capped: dict, uncapped: dict) -> bool:
+            # Machine-readable disclosure: did the cap actually ENGAGE, or was it a no-op on
+            # this corpus? (A concurrent cap does not bind when turnover recycles category room.)
+            return (
+                capped["trades"] != uncapped["trades"]
+                or capped["total_pnl_usd"] != uncapped["total_pnl_usd"]
+            )
+
+        cal_uncapped = _variant(cal_mod.make_calibration_bucket_strategy(), None)
+        cal_capped = _variant(cal_mod.make_calibration_bucket_strategy(), cap)
+        rec_uncapped = _variant(rec_mod.make_recency_weighted_bucket_strategy(), None)
+        rec_capped = _variant(rec_mod.make_recency_weighted_bucket_strategy(), cap)
+        cal_capped["cap_bound"] = _bound(cal_capped, cal_uncapped)
+        rec_capped["cap_bound"] = _bound(rec_capped, rec_uncapped)
+        any_bound = cal_capped["cap_bound"] or rec_capped["cap_bound"]
+        any_validated = any(
+            v["f11_is_significant_edge"] and not v["f10_fragile"]
+            for v in (cal_capped, rec_capped, rec_uncapped)
+        )
+        report["concentration_capped_variant"] = {
+            "category_exposure_cap": cap,
+            "cap_bound_on_this_corpus": any_bound,
+            "calibration_capped": cal_capped,
+            "recency_weighted_uncapped": rec_uncapped,
+            "recency_weighted_capped": rec_capped,
+            "seed_hash_note": (
+                "seed_hash excludes strategy_fn (walk_forward contract), so different strategies "
+                "with the same data+config share a hash — compare trades/PnL, NOT hashes, across "
+                "variants."
+            ),
+            "verdict": (
+                (
+                    "A per-category exposure cap is a RISK CONTROL, not an alpha, and the "
+                    "bucket-calibration family stays REFUTED here. Two honest caveats: (1) this is "
+                    "a CONCURRENT-exposure cap; it "
+                    + ("did NOT bind on this corpus" if not any_bound else "bound on this corpus")
+                    + " and by construction it does not bound F10's CUMULATIVE per-category budget "
+                    "share (positions settle and recycle room). (2) The aggregate is net-NEGATIVE, "
+                    "so an F10 non-fragile pass is VACUOUS — no concentration control can "
+                    "manufacture an edge from a losing signal. A faithful de-concentration test "
+                    "needs a CUMULATIVE cap AND a net-positive-but-fragile corpus (egress-gated; "
+                    "filed to RESEARCH_MEMORY/ROADMAP). Honest NULL."
+                )
+                if not any_validated else
+                "A capped/recency variant cleared F11 + F10 on this corpus — record it and re-test "
+                "on a LARGER pre-registered per-category corpus before any claim (single-corpus "
+                "significance is not a validated edge)."
+            ),
+        }
+    return report
 
 
 def _top_slice_pnl_share(slices) -> "float | None":
@@ -301,6 +399,12 @@ def main() -> int:
                          "JSON path (incl. category for the F10 regime-slice check), so the real OOS "
                          "result can later be reproduced offline via --from-corpus. Run on a "
                          "Polymarket-permitted host.")
+    ap.add_argument("--category-exposure-cap", type=float, default=None,
+                    help="Fraction in (0, 1]. When set, ALSO run the per-CATEGORY exposure-cap "
+                         "variant (Run 20-22's named-but-never-built concentration fix) on both the "
+                         "static calibration and recency-weighted bucket alphas, each with F10/F11 — "
+                         "the honest test of whether bounding correlated-cluster concentration "
+                         "rescues the REFUTED bucket family. Off by default (report unchanged).")
     args = ap.parse_args()
 
     wf_mod = _imp("backend.app.prediction_markets.walk_forward", "app.prediction_markets.walk_forward")
@@ -313,7 +417,8 @@ def main() -> int:
     if args.from_corpus:
         markets = load_corpus_from_json(args.from_corpus, wf_mod)
         result = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
-                          decision_lead_days=args.decision_lead_days)
+                          decision_lead_days=args.decision_lead_days,
+                          category_exposure_cap=args.category_exposure_cap)
         out = {"frozen_corpus": args.from_corpus, "combined": result}
         if args.json:
             print(json.dumps(out, indent=2))
@@ -331,13 +436,15 @@ def main() -> int:
             code_error = True
         if markets:
             per_venue[venue] = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
-                                        decision_lead_days=args.decision_lead_days)
+                                        decision_lead_days=args.decision_lead_days,
+                                        category_exposure_cap=args.category_exposure_cap)
             all_markets.extend(markets)
         else:
             per_venue[venue] = {"status": status}
 
     combined = (evaluate(all_markets, wf_mod, cal_mod, seed=args.seed,
-                         decision_lead_days=args.decision_lead_days)
+                         decision_lead_days=args.decision_lead_days,
+                         category_exposure_cap=args.category_exposure_cap)
                 if all_markets else {"status": "no records from any venue (egress-blocked / run on a permitted host)"})
     out = {"per_venue": per_venue, "combined": combined}
 

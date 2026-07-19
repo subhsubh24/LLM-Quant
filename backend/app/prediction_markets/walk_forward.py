@@ -44,6 +44,12 @@ from typing import Callable, Optional, Sequence
 
 from .cost_model import DEFAULT_COST_MODEL, CostModel
 
+# When the per-category exposure cap sizes a trade DOWN, a position smaller than this fraction of
+# the starting bankroll is treated as "dust" and SKIPPED — so a sub-cent capped fill can't count
+# as a full unit toward the F11 minimum-trades significance floor. 1e-4 of a $10k bankroll = $1.
+# Applies ONLY on the capped path, so the cap=None reproduction contract is byte-for-byte unchanged.
+_CAP_DUST_FLOOR_FRACTION: float = 1e-4
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -315,6 +321,7 @@ def walk_forward_backtest(
     train_min_days: int = 28,
     test_window_days: int = 7,
     max_fraction_per_trade: float = 0.05,
+    category_exposure_cap: Optional[float] = None,
     cost_model: CostModel = DEFAULT_COST_MODEL,
     seed: int = 42,
 ) -> WalkForwardResult:
@@ -338,6 +345,29 @@ def walk_forward_backtest(
     (the over-deployment bug an earlier batch-settled version had). Realized PnL is
     attributed to the ISO week of ``resolution_time``.
 
+    CONCENTRATION (optional ``category_exposure_cap``): a live-style per-CATEGORY risk
+    control. Total CONCURRENTLY-committed cost basis in any one ``market.category`` may not
+    exceed ``category_exposure_cap`` × current equity at the instant a position opens; a trade
+    that would breach it is SIZED DOWN to the remaining room (skipped if room ≤ a tiny dust
+    floor). ``None`` (default) disables it — behaviour and ``seed_hash`` are then byte-identical
+    to before, so every pinned reproduction hash holds; a set cap enters the fingerprint
+    (results legitimately differ). Unlabeled markets share one ``__uncategorized__`` bucket.
+
+    SCOPE — READ THIS (what it does and does NOT address). Research Run 22 diagnosed the
+    REFUTED bucket family's F10 concentration as "many small CORRELATED trades in one category,
+    not one oversized bet — a per-TRADE notional cap is a no-op", and named a per-category
+    EXPOSURE cap as the fix. IMPORTANT: F10's ``top_category_budget_share`` is a CUMULATIVE
+    measure (Σ budget over the WHOLE backtest ÷ total), whereas THIS cap bounds CONCURRENT
+    open exposure at an instant. They are different quantities: because positions settle and
+    free room, a category can cycle unbounded CUMULATIVE volume through recycled room while a
+    concurrent cap never binds. So this cap bounds instantaneous/liquidity-style concentration;
+    it does NOT, by construction, bound the cumulative same-category budget share F10 gates on.
+    A faithful test of "does DE-CONCENTRATING rescue the family" would additionally need a cap
+    on CUMULATIVE per-category deployment AND a corpus whose alpha is net-POSITIVE-but-fragile
+    (F10 concentration is only assessable on a positive aggregate) — the committed frozen corpus
+    is net-NEGATIVE, so concentration is moot there. Both are filed as next steps. This is a
+    RISK CONTROL, not an edge — it can only REDUCE/reallocate exposure, never manufacture PnL.
+
     Determinism: events are processed in a stable ``(time, market_id, seq)`` order;
     settlement is pure arithmetic; ``market_id`` is required unique. ``seed_hash``
     fingerprints the DATA + the numeric CONFIG (seed, bankroll, cost rates, window
@@ -349,6 +379,10 @@ def walk_forward_backtest(
     function seeds BOTH from ``seed`` before running (below); the default strategy is
     deterministic, so the seeding is a no-op for it.
     """
+    if category_exposure_cap is not None and not (0.0 < category_exposure_cap <= 1.0):
+        raise ValueError(
+            f"category_exposure_cap must be in (0, 1] or None: {category_exposure_cap}"
+        )
     strategy = strategy_fn or make_net_edge_strategy(cost_model=cost_model)
     # Determinism (the seed_hash contract: same data + seed ⇒ identical PnL). The engine's
     # own accounting is pure arithmetic, but a STOCHASTIC strategy_fn may draw from the
@@ -374,7 +408,7 @@ def walk_forward_backtest(
         raise ValueError(f"duplicate market_id(s) in dataset: {dupes}")
     cfg_hash = _seed_hash(
         markets, seed, initial_bankroll, cost_model, train_min_days,
-        test_window_days, max_fraction_per_trade,
+        test_window_days, max_fraction_per_trade, category_exposure_cap,
     )
     if not markets:
         return WalkForwardResult(
@@ -410,11 +444,18 @@ def walk_forward_backtest(
     # resolutions credit payout at resolution_time. Never deploy beyond free cash.
     cash = initial_bankroll
     committed = 0.0                      # cost basis of still-open positions
+    # Committed cost basis broken out by correlation category, so the exposure cap can bound
+    # how much capital is tied up in any ONE category at once. Kept in sync with ``committed``
+    # (their values always sum) on every open/drain, whether or not the cap is enabled.
+    committed_by_cat: dict[str, float] = {}
     settled: list[BacktestTrade] = []
     # min-heap keyed (resolution_time, market_id, seq); seq is a monotonic tie-breaker so
     # the BacktestTrade payload is NEVER compared (it is not orderable).
     pending: list[tuple[datetime, str, int, BacktestTrade]] = []
     seq = 0
+
+    def _cat_key(category: Optional[str]) -> str:
+        return category if category is not None else "__uncategorized__"
 
     def _drain_until(when: datetime) -> None:
         nonlocal cash, committed
@@ -422,6 +463,7 @@ def walk_forward_backtest(
             _, _, _, tr = heapq.heappop(pending)
             cash += tr.payout_usd
             committed -= tr.budget_usd
+            committed_by_cat[_cat_key(tr.category)] -= tr.budget_usd
             settled.append(tr)
 
     for m, decision in intents:
@@ -432,6 +474,20 @@ def walk_forward_backtest(
         equity = cash + committed
         frac = min(max(decision.kelly_fraction, 0.0), max_fraction_per_trade)
         budget = min(equity * frac, cash)     # HARD free-cash cap — no over-deployment
+        if category_exposure_cap is not None:
+            # Bound total committed basis in THIS category to cap × equity. Size the trade
+            # DOWN to the remaining room rather than dropping it outright (a partial position
+            # still contributes to a broad edge; a breach is what we refuse). NOTE: which
+            # specific same-category, same-instant candidate "wins" the remaining room is an
+            # artifact of the (decision_time, market_id, seq) order, not a risk-based choice —
+            # so a capped run's realized PnL carries an order-dependent component. DUST GUARD:
+            # if the room only admits a near-zero "dust" position, SKIP it rather than let a
+            # sub-cent trade count as a full unit toward the F11 min-trades significance floor.
+            cat = _cat_key(m.category)
+            cat_room = category_exposure_cap * equity - committed_by_cat.get(cat, 0.0)
+            budget = min(budget, cat_room)
+            if budget < _CAP_DUST_FLOOR_FRACTION * initial_bankroll:
+                continue
         if budget <= 0.0:
             continue
         trade = _settle(m, decision, budget, cost_model)
@@ -439,6 +495,9 @@ def walk_forward_backtest(
             continue
         cash -= trade.budget_usd
         committed += trade.budget_usd
+        committed_by_cat[_cat_key(trade.category)] = (
+            committed_by_cat.get(_cat_key(trade.category), 0.0) + trade.budget_usd
+        )
         heapq.heappush(pending, (trade.resolution_time, trade.market_id, seq, trade))
         seq += 1
 
@@ -447,6 +506,7 @@ def walk_forward_backtest(
         _, _, _, tr = heapq.heappop(pending)
         cash += tr.payout_usd
         committed -= tr.budget_usd
+        committed_by_cat[_cat_key(tr.category)] -= tr.budget_usd
         settled.append(tr)
 
     settled.sort(key=lambda t: (t.resolution_time, t.market_id))
@@ -480,6 +540,7 @@ def _seed_hash(
     train_min_days: int,
     test_window_days: int,
     max_fraction_per_trade: float,
+    category_exposure_cap: Optional[float] = None,
 ) -> str:
     """A stable fingerprint of the DATA + numeric CONFIG that affect PnL — the markets,
     the seed, the bankroll, the cost rates, and the window sizing. It does NOT cover the
@@ -501,6 +562,7 @@ def _seed_hash(
         "test_window_days": test_window_days,
         "max_fraction_per_trade": round(max_fraction_per_trade, 12),
         "markets": [
+            # (category_exposure_cap is added below ONLY when set — see note.)
             # liquidity is included so determinism/fingerprint covers the depth signal
             # that now affects fill cost. Existing markets have liquidity=None → stored as
             # JSON null, a stable representation, so same-data runs keep consistent hashes
@@ -515,6 +577,11 @@ def _seed_hash(
             for m in sorted(markets, key=lambda x: (x.decision_time, x.market_id))
         ],
     }
+    # Added ONLY when set: an enabled cap changes PnL, so it MUST enter the fingerprint;
+    # but omitting the key entirely when None keeps the payload — and therefore the pinned
+    # reproduction hashes — byte-identical for every existing (cap-free) run.
+    if category_exposure_cap is not None:
+        payload["category_exposure_cap"] = round(category_exposure_cap, 12)
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 
