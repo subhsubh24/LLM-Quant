@@ -24,9 +24,23 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import sys
 from pathlib import Path
+
+
+def _load_json(path: str):
+    """Read a JSON file, transparently gunzipping a ``.gz`` path.
+
+    The real EXP-006 tick corpus is committed gzipped (~2 MB vs ~15 MB raw) so the
+    EDGE-NOT-PROVEN verdict is offline-reproducible without re-fetching; this lets
+    ``--data data/spike_corpus_politics.json.gz`` be fed directly."""
+    p = Path(path)
+    if p.suffix == ".gz":
+        with gzip.open(p, "rt") as fh:
+            return json.load(fh)
+    return json.loads(p.read_text())
 
 # Allow running from the repo root without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -78,12 +92,12 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.data:
-        ticks = json.loads(Path(args.data).read_text())
+        ticks = _load_json(args.data)
         source = args.data
     else:
         ticks = _synthetic()
         source = "SYNTHETIC engine demo (NOT a validated edge)"
-    categories = json.loads(Path(args.category_data).read_text()) if args.category_data else None
+    categories = _load_json(args.category_data) if args.category_data else None
 
     kwargs = {}
     if args.threshold is not None:
