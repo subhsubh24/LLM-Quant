@@ -20,7 +20,7 @@ All metric fields are **real numbers or 0/null — never invented.**
 ```yaml
 GROWTH_STATUS:
   project: llm-quant
-  as_of: '2026-07-19 (Factory build, NOT a research run: EXP-006 fade-the-spike FULL BACKTEST LAYER built -- spike_reversal_backtest.py, the cost-net / leakage-safe / F10-F11-gated fade strategy on top of the spike-detection primitive, with the Run 21 per-trade concentration cap shipped two ways (equal-weight sizing + max_trades_per_market=1, the structurally-correct answer to Run 22 finding concentration came from many small CORRELATED trades not one oversized bet) and a 4-criterion validated-edge gate (N>=100, F11 significant_positive, F10 non-fragile, hit-rate>50%). New cost_model.effective_sell_price() prices the exit leg. 3 fresh Opus auditors cleared it (leakage CANNOT-BREAK across 5 surfaces, cost ACCOUNTING-SOUND, gate GATE-SOUND); the gate-gaming auditor drove the hit-rate criterion + 3 hardenings pre-merge. NO edge is claimed: the engine recovers a known cost-net edge on synthetic and reports EDGE-NOT-PROVEN on momentum/small-N. It reaches NO revenue field -- weekly_pnl_paper null, total_trades 0, engine_pct 74 unchanged; business_case_strength stays B. Real EXP-006 test still needs a real point-in-time non-survivorship intraday-tick corpus (egress/owner-gated) reaching N>=100. #385. PRIOR 2026-07-18 Research Run 26 -- executed Research Run 25''s own recommended next step: formally diffed the volumeNum and volume24hr EXP-006 survivor sets by market_id on a FRESH pull of both (unmodified fetcher, tag_id=2 Politics, identical last-14-days-hourly/trim/statistic method, seed=42, each axis run once). volumeNum reproduced Run 24 EXACTLY (N=67, mean -0.1198, CI [-0.1508,-0.0886] -- a genuine determinism check). volume24hr did NOT reproduce Run 25 (N=28 today vs N=14 two days earlier) -- a new, material finding: this axis ranks by TRAILING 24h volume, so its candidate set genuinely churns day to day, unlike volumeNum''s stable all-time ranking; any N drawn from it is a snapshot, not a fixed count. A direct market_id set diff (not inferred from question text) found ZERO overlap between the two fresh survivor sets, CONFIRMING Runs 24-25''s inferred disjointness. Union N=95 -- close to, but still short of, the pre-registered 100-event floor. Per-market mean lag-1 autocorrelation = -0.1193, 95% bootstrap CI [-0.1491,-0.0901] EXCLUDES zero, 79/95 (83.2%) individually negative -- consistent with all 3 prior runs. Cluster check on the 95-market union (26 distinct event-clusters): cluster-level mean -0.1104, CI [-0.1639,-0.0628] excludes zero, 22/26 (84.6%) individually negative, and the largest cluster (Fed rate decisions) is only 18.9% of the union -- LESS concentrated than any prior single-axis run (Run 24 27%, Run 25 35.7%), a genuine robustness improvement from real (not inferred) axis-diversification. External research (2 WebSearch sweeps): no new primary source beyond what is already logged; a cross-venue-arbitrage sweep returned only SEO/marketing guide sites, not logged as evidence. RECOMMEND-only, no ROADMAP steer -- N=95 is close to but has not cleared the pre-registered floor, and this remains a hindsight phenomenon statistic, not a cost-net tradeable backtest. Binding constraint unchanged: no validated real-money OOS edge on any tested mechanism to date.)'
+  as_of: '2026-07-19 Research Run 27 -- the FIRST real test of the actual EXP-006 strategy engine (spike_reversal_backtest.backtest_fade_the_spike, built same-day, #385) on real data, superseding four pilot runs (23-26) of the raw-autocorrelation statistic. Egress open this session. Two pre-registered pulls, tag_id=2 Politics, DEFAULT FadeSpikeConfig (threshold=0.10, window=1h, horizon=24h, $100/trade, max_trades_per_market=1, min_trades_for_edge=100), unmodified repo code: (1) volumeNum max_pages=3 + volume24hr max_pages=2 (mirroring Run 26''s method) -> 499 union candidates -> 271 usable tick series -> 146 spikes -> 45 trades (< the 100-floor; hit_rate 42.2%, net +$24.57, F11 insufficient_data, F10''s extreme percentage-share concentration figures (927%/1656%) are a near-zero-denominator artifact, not structural). (2) SCALE-OUT (same config, ONLY max_pages widened to 15/10, pre-registered before running per Run 26''s own recommendation -- not a re-roll) -> 2,479 union candidates -> 1,106 usable tick series -> 547 spikes -> 202 trades, CROSSING the pre-registered 100-event floor for the first time on this mechanism. Result: hit_rate 51.98% (near coin-flip), net +$1,230.21 (nominal), but F11 verdict=indistinguishable_from_zero (95% CI [-417.90, 3122.7574], spans zero) and F10 fragile on confidence-band (75%) and category (72%, substantially the known Gamma-tag-vs-internal-category-deriver mismatch) -- though single-market concentration is now clean (42.4%, under the 50% threshold), confirming the N=45 figure was a small-N artifact. is_validated_edge=False -- EDGE-NOT-PROVEN, an honest null qualitatively DIFFERENT from EXP-002/003/005''s refutations (those showed far-sub-50% hit rates and 100%+ single-bucket shares; this reads as noise around zero, not a fooled point estimate). RECOMMEND-only, no ROADMAP steer -- one default config tested, not a validated edge, not an exhausted mechanism. 2 WebSearch sweeps this run surfaced no new primary source beyond what is already logged (one new-to-search arxiv dataset reference, ''Unlocking the Forecasting Economy'' 2604.20421, noted for a future run, not fetched/verified this run). Binding constraint unchanged: no validated real-money OOS edge on any tested mechanism to date. PRIOR 2026-07-19 (Factory build, NOT a research run: EXP-006 fade-the-spike FULL BACKTEST LAYER built -- spike_reversal_backtest.py, the cost-net / leakage-safe / F10-F11-gated fade strategy on top of the spike-detection primitive, with the Run 21 per-trade concentration cap shipped two ways (equal-weight sizing + max_trades_per_market=1, the structurally-correct answer to Run 22 finding concentration came from many small CORRELATED trades not one oversized bet) and a 4-criterion validated-edge gate (N>=100, F11 significant_positive, F10 non-fragile, hit-rate>50%). New cost_model.effective_sell_price() prices the exit leg. 3 fresh Opus auditors cleared it (leakage CANNOT-BREAK across 5 surfaces, cost ACCOUNTING-SOUND, gate GATE-SOUND); the gate-gaming auditor drove the hit-rate criterion + 3 hardenings pre-merge. NO edge is claimed: the engine recovers a known cost-net edge on synthetic and reports EDGE-NOT-PROVEN on momentum/small-N. It reaches NO revenue field -- weekly_pnl_paper null, total_trades 0, engine_pct 74 unchanged; business_case_strength stays B. Real EXP-006 test still needs a real point-in-time non-survivorship intraday-tick corpus (egress/owner-gated) reaching N>=100. #385. PRIOR 2026-07-18 Research Run 26 -- executed Research Run 25''s own recommended next step: formally diffed the volumeNum and volume24hr EXP-006 survivor sets by market_id on a FRESH pull of both (unmodified fetcher, tag_id=2 Politics, identical last-14-days-hourly/trim/statistic method, seed=42, each axis run once). volumeNum reproduced Run 24 EXACTLY (N=67, mean -0.1198, CI [-0.1508,-0.0886] -- a genuine determinism check). volume24hr did NOT reproduce Run 25 (N=28 today vs N=14 two days earlier) -- a new, material finding: this axis ranks by TRAILING 24h volume, so its candidate set genuinely churns day to day, unlike volumeNum''s stable all-time ranking; any N drawn from it is a snapshot, not a fixed count. A direct market_id set diff (not inferred from question text) found ZERO overlap between the two fresh survivor sets, CONFIRMING Runs 24-25''s inferred disjointness. Union N=95 -- close to, but still short of, the pre-registered 100-event floor. Per-market mean lag-1 autocorrelation = -0.1193, 95% bootstrap CI [-0.1491,-0.0901] EXCLUDES zero, 79/95 (83.2%) individually negative -- consistent with all 3 prior runs. Cluster check on the 95-market union (26 distinct event-clusters): cluster-level mean -0.1104, CI [-0.1639,-0.0628] excludes zero, 22/26 (84.6%) individually negative, and the largest cluster (Fed rate decisions) is only 18.9% of the union -- LESS concentrated than any prior single-axis run (Run 24 27%, Run 25 35.7%), a genuine robustness improvement from real (not inferred) axis-diversification. External research (2 WebSearch sweeps): no new primary source beyond what is already logged; a cross-venue-arbitrage sweep returned only SEO/marketing guide sites, not logged as evidence. RECOMMEND-only, no ROADMAP steer -- N=95 is close to but has not cleared the pre-registered floor, and this remains a hindsight phenomenon statistic, not a cost-net tradeable backtest. Binding constraint unchanged: no validated real-money OOS edge on any tested mechanism to date.)'
   phase: pre_launch
   engine_built: false
   engine_pct: 74   # unchanged (2026-07-04 2nd run, #215/#216/#217): a SAFETY + coverage + artifact run — #215 closed a REACHABLE loss-cap bypass (a bare SELL fabricated a `side="short"` position via the unconditional paper fill; a BUY 'to close' scaled it up recording $0 PnL → the D3/D4 kill switch never saw the loss; reachable via CrossMarketArbitrage's executable SELL in the default scanner); #216 gated the LIVE Monte-Carlo pricing tests (previously ungated); #217 removed the last stock-era render.yaml residue (FRED_API_KEY). Safety/correctness/coverage/artifact convergence, NOT new completeness or a validated edge, so engine_pct does not move. 2 Sonnet/PR + a fresh Opus live-safety auditor SAFE on #215 (2 non-blocking residual caveats: the 1e-9 boundary + legacy short-row remediation — filed for a dedicated follow-up). Prior (2026-07-03 2nd run, #187/#188/#189/#190): a mature-engine HARDENING sweep — WS price_change staleness-honesty guard (#187) + §12 path-param bounds (#188) + F7 api/main.py import hygiene (#189) + §10 dead-code removal (#190). Correctness/security/hygiene/tech-debt convergence, NOT new completeness or a validated edge, so engine_pct does not move. (DEFERRED with a recorded note: the loss-cap-net-of-fees safety fix — verified real at both call sites, awaiting a dedicated run + fresh Opus live-safety audit.) Prior (2026-07-03, #179/#180/#182): the B8 cross-venue coherence matcher + backtest (a CANDIDATE edge, gated off, not validated) + F10 regime-slice wiring into the real-OOS lane + a blocking-gate coverage registration. New alpha-candidate INFRA + anti-overfitting integrity + test coverage — not a validated edge, so engine_pct does not move. Prior (2026-07-01, #116/#117): an INTEGRITY fix (removed a fabricated whale seed + gated two UNVALIDATED strategies out of the default scan behind ENABLE_UNVALIDATED_STRATEGIES, default off) + an A1 stock-era DEAD-CODE removal (legacy db.models stack + yfinance strategy_tester — also kills the stock_prices dual-registration fragility). Both are correctness/honesty/tech-debt work, not new completeness, so engine_pct does not move. No new edge. Prior context (#104): settlement side-effect-integrity fix; (#99-#102): ingest-honesty + §12 hardening.
@@ -407,8 +407,51 @@ GROWTH_STATUS:
         sort-field workarounds tried in Runs 17/18.
     - id: EXP-006
       name: "Political Price-Reversal After Hype Spikes (resolution-timing / overreaction)"
-      status: proposed
+      status: tested-fragile-not-significant
       proposed_date: 2026-07-15
+      tested_date: 2026-07-19
+      real_oos_result: >
+        Research Run 27 (2026-07-19): the FIRST real test of the actual EXP-006 strategy engine
+        (`spike_reversal_backtest.backtest_fade_the_spike`, built same-day by the factory, #385)
+        on real data -- superseding four runs (23-26) of the raw-autocorrelation PILOT with a
+        real cost-net, F10/F11-gated backtest. Two pre-registered pulls, tag_id=2 Politics,
+        DEFAULT `FadeSpikeConfig` (threshold=0.10, window=1h, horizon=24h, $100/trade,
+        max_trades_per_market=1, min_trades_for_edge=100), unmodified repo code, each run once:
+        (1) FIRST pull (volumeNum max_pages=3 + volume24hr max_pages=2, mirroring Run 26's own
+        method): 499 union candidates -> 341 known-life (start_date + life>=14d) -> 271 with a
+        usable last-14-day hourly tick series (70 CLOB fetch failures, 0 too-thin) -> 146 spikes
+        detected -> **45 trades** (< the 100-event floor) -- an honest sub-floor result: hit_rate
+        42.2% (19W/26L, NOT statistically distinguishable from 50% at this N -- SD~7.5pp, only
+        ~1.1 SD below), net +$24.57 (near-zero), F11 verdict=insufficient_data (N below its own
+        min_trades gate, correctly abstaining), F10 shows EXTREME concentration (top-market 927%,
+        confidence-band 1656%, category 1018% of net PnL) -- but this is a DENOMINATOR artifact,
+        not structural: any single trade's absolute PnL is a huge percentage of a total that is
+        itself near zero. (2) SCALE-OUT pull (same config/method, ONLY `max_pages` widened --
+        volumeNum max_pages=15, volume24hr max_pages=10 -- pre-registered BEFORE running, per Run
+        26's own recommended next step; a candidate-pool scale-out, not a re-roll of pull (1)'s
+        number): 2,479 union candidates -> 1,484 known-life -> 1,106 with usable ticks (368 CLOB
+        fetch failures, 10 too-thin) -> 547 spikes detected -> **202 trades, CROSSING the
+        pre-registered 100-event floor for the first time in this project's history on this
+        mechanism.** Result: hit_rate **51.98%** (105W/97L -- essentially a coin flip, NOT the
+        far-sub-50% signature every prior bucket-calibration real-corpus result showed), net
+        **+$1,230.21** (nominally positive), but **F11 verdict=indistinguishable_from_zero** (95%
+        bootstrap CI **[-417.90, 3122.7574]**, spans zero by a wide margin) and **F10 fragile on
+        2 of 5 axes**: confidence-band 75% (>70% threshold) and category 72% (>70% threshold,
+        driven by this repo's OWN keyword-based `market_category.py` deriver bucketing 43.6% of
+        trades as 'General' rather than 'Politics' -- the SAME Gamma-tag-vs-internal-category
+        mismatch Runs 19/20 already surfaced, now confirmed a 3rd time on a real EXP-006 corpus)
+        -- but **single-market concentration is NOW CLEAN** (top market 42.4% of net PnL, under
+        the 50% threshold; the 927% figure at N=45 was indeed a small-N artifact, not a
+        persistent structural flaw). All 202 trades are on 202 DISTINCT markets
+        (`max_trades_per_market=1` held; no correlated same-market repeats inflating N).
+        `is_validated_edge=False` -- **EDGE-NOT-PROVEN**, an honest null: sufficient N, a
+        near-coin-flip hit rate, a nominally positive but statistically insignificant aggregate,
+        fragile on confidence-band/category. QUALITATIVELY DIFFERENT from EXP-002/003/005's
+        refutations (those showed far-sub-50% hit rates, 100%+ single-bucket/single-market
+        shares, and in EXP-002's case a negative aggregate) -- at this default config EXP-006
+        reads as genuinely-uninformative noise around zero, not as a mechanism actively fooling
+        the point estimate the way the bucket family did. Full detail + adversarial pre-mortem on
+        this run's own extension: RESEARCH_MEMORY 2026-07-19 (Research Run 27).
       edge_source: "resolution-timing / news-reaction overreaction (in-scope per PLAYBOOK)"
       hypothesis: >
         Polymarket political-market YES prices exhibit negative lag-1 serial correlation in
@@ -590,18 +633,14 @@ GROWTH_STATUS:
         evidence for anything. Full detail + adversarial pre-mortem on this run's own extension:
         RESEARCH_MEMORY 2026-07-18 (Research Run 26).
       oos_plan: >
-        NOT YET BUILT (genuine factory-build scope, not a research-agent probe): a
-        spike/move-detection function over the (now cap-aware, single-call-per-market or
-        chunked) fetchable tick series, a reversal-labeling pipeline, a per-cluster
-        (correlated-entity/event-group) notional exposure cap wired in from day one (per
-        Research Run 22's finding that a per-TRADE cap is a structural no-op against
-        cross-trade correlation), and a walk_forward-integrated causal/rolling backtest
-        (this run's pilot statistic is NOT causal/leakage-safe in the trading sense -- it is
-        computed with hindsight over the whole window to characterize the PHENOMENON, the
-        way an academic paper would, not to simulate a live decision rule). Once built:
-        pre-registered spike Delta-threshold + window, >=100 events across >=3 distinct
-        cycles, chronological split, F10 regime-slice + F11 bootstrap-significance gates
-        (same machinery as EXP-002/003/005), Bonferroni correction if screened jointly.
+        DONE (2026-07-19, #385 + Research Run 27): the engine was built
+        (`spike_reversal_backtest.backtest_fade_the_spike`, equal-weight sizing + per-market
+        trade cap + F10/F11 gates, same machinery as EXP-002/003/005) and run on a real,
+        pre-registered, causal/leakage-safe corpus (N=202 trades, crossing the >=100 floor;
+        see real_oos_result). The per-CLUSTER (correlated-entity/event-group) exposure cap
+        Research Run 22 named is still NOT built (only a per-MARKET cap exists) -- see
+        factory_next_action item (c). A threshold/window/horizon sweep with Bonferroni
+        correction remains the open next step, not yet run.
       cost_assumptions: >
         2% fee + 0.5% slippage baseline (cost_model.py) PLUS a per-CLUSTER (not per-trade)
         notional exposure cap -- Research Run 22 proved a per-trade cap is a no-op when
@@ -617,32 +656,36 @@ GROWTH_STATUS:
         - "A per-cluster exposure cap (the mitigation Research Run 22 said a working redesign needs) has no existing implementation in this repo to reuse -- it is a genuinely new, unbuilt risk-engine primitive, not a parameter tweak, for BOTH EXP-006 and any future bucket-calibration redesign."
         - "Research Run 25 (2026-07-17): a genuinely different sampling axis (volume24hr) corroborated the direction at N=14, but 35.7% of that small survivor set came from ONE cluster (Hamas leadership/hostages) -- at N=14 a single cluster can still swing the aggregate. RESOLVED by Run 26's fresh formal market_id diff (union N=95, top cluster now only 18.9%) -- the small-N concentration risk this item warned about does not reproduce at the larger, formally-diffed union, though the underlying caution (a thin axis can still be cluster-dominated) remains generally true for any future single-axis pull."
         - "Research Run 26 (2026-07-18): the volume24hr axis is now CONFIRMED unstable day-to-day (N=28 today vs. Run 25's N=14 two days earlier, on the same pre-registered params) -- it ranks by a moving trailing-24h-volume statistic, not a fixed all-time one. This means any future 'combined N' figure that reuses an OLD volume24hr pull instead of a fresh one is stale and must be re-diffed, not assumed carried forward. It also means the 95-event union itself is not a fixed number -- a future run re-pulling volume24hr on a different day could yield a different (likely still disjoint-from-volumeNum, per two independent zero-overlap checks now) survivor count."
+        - "CONFIRMED, not just theorized (Research Run 27, 2026-07-19): at N=45 (below the F11 min-trades gate), F10's percentage-share concentration metrics (top-market 927%, confidence-band 1656%) were WILDLY exaggerated -- a small-N artifact of a near-zero-denominator total, not evidence of the same structural concentration EXP-002/003/005 showed at their much larger N. This is a genuine, previously-untested caution for ANY future small-N F10 read on this project: a percentage-of-total concentration metric is only informative once the total itself is a meaningfully-sized number, and readers (including this project's own memory) must not over-index on an extreme F10 percentage from a tiny or near-zero-total sample."
+        - "At the pre-registered floor-crossing N=202 (Research Run 27), single-market concentration DROPPED to a clean 42.4% (below the 50% threshold) but confidence-band (75%) and category (72%) concentration remain fragile -- and the category fragility is substantially explained by this repo's OWN category-labeling mismatch (Gamma tag_id=2 Politics vs. the keyword-based `market_category.py` deriver splitting it into 'Politics'/'General'), a labeling-taxonomy artifact flagged since Run 19/20, not necessarily a real economic concentration in the underlying phenomenon. A cleaner category derivation (or slicing directly on Gamma's own tag rather than the internal deriver) could shift this specific F10 reason without changing the underlying F11 null."
+        - "Research Run 27 (2026-07-19) tested exactly ONE config (the shipped DEFAULT threshold=0.10/window=1h/horizon=24h) at ONE seed. A negative/null result here rules out THIS config, not the entire EXP-006 timing-edge family -- a threshold/window/horizon sweep is a legitimate next step but needs its own pre-registration + multiple-comparison correction (Bonferroni against however many configs are swept), not a post-hoc search for a configuration that clears F11/F10 after seeing this run's null."
       blocking_dependency: >
-        Not a data-access blocker (the pilot proves the raw primitive is usable, with the
-        newly-discovered 15-day-per-call cap now characterized). The blocker is BUILD SCOPE:
-        a spike-detector + reversal-labeler + per-cluster exposure cap + causal walk_forward
-        integration, none of which exist in the repo today -- genuine factory-build work, not
-        a research-agent re-run.
+        RESOLVED as both a data-access AND a build-scope question, CLOSED as an edge question at
+        this default config (Research Run 27, 2026-07-19): the strategy engine
+        (`spike_reversal_backtest.py`, #385) is built, and a real pre-registered pull reached
+        N=202 trades -- more than double the 100-event floor, no code change, same mechanism the
+        pilot runs (23-26) already probed. With N no longer the constraint, the fade-the-spike
+        mechanism was tested at its DEFAULT configuration and produced a statistically
+        insignificant, moderately fragile result (see real_oos_result above) -- so the remaining
+        blocker is no longer DATA or BUILD, it is that this specific config does not clear F11 (CI
+        spans zero) or F10 (confidence-band/category) on a real Politics corpus.
       factory_next_action: >
-        If prioritized: build the spike-detection + reversal-labeling pipeline against the
-        now-cap-aware fetch pattern (single call per market when the pre-registered window
-        is <=15 days, else chunked calls), wire a per-cluster exposure cap (correlated
-        event-group detection, e.g. same election/same underlying entity) from day one (not
-        added post-hoc, per Run 22's no-op finding), and integrate into walk_forward for a
-        real causal/leakage-safe OOS test against a pre-registered >=100-event, >=3-cycle
-        sample. RECOMMEND-only (this run) -- no ROADMAP steer; the pilot is preliminary,
-        not a validated edge. Next research-agent step (cheap, loop-buildable, no factory
-        build needed, DONE this run -- see pilot_probe Run 26 update): formally diffed the
-        volumeNum and volume24hr survivor sets by market_id (fresh pull, not reused from a
-        prior run's uncommitted list) -- zero overlap confirmed, union N=95, still just short
-        of the 100-event floor. NEW recommendation for the next research run (pre-register
-        BEFORE fetching -- do not chase the threshold after seeing N=95): widen the STABLE
-        volumeNum axis's candidate pool (e.g. max_pages=3, ~300 candidates; this run's ~34%
-        survival rate on that axis alone would likely add ~30+ more survivors and clear 100
-        without touching the unstable volume24hr axis) -- OR re-pull volume24hr fresh on a
-        later date (legitimate given Run 26 showed it is NOT a stable count, not p-hacking) and
-        re-diff against a fresh volumeNum pull. Either path is expected to cross the
-        pre-registered floor; a 3rd sampling axis is not yet needed.
+        No further data-access or build work needed for EXP-006 at its default config (N=202
+        already exceeds the pre-registered floor and produced a real, honest EDGE-NOT-PROVEN
+        verdict via the actual F10/F11-gated engine). RECOMMEND-only (this run) -- no ROADMAP
+        steer; the result is a null, not a validated edge, and one config does not exhaust the
+        mechanism family. Higher-value next steps for a future research run (each needs its OWN
+        pre-registration before running, to avoid p-hacking against today's null): (a) a
+        pre-registered threshold/window/horizon SWEEP (e.g. threshold in {0.05, 0.15, 0.20},
+        horizon in {6h, 48h}) with Bonferroni correction across the swept configs -- the default
+        config failing does not mean every config fails, but this must be tested as a genuine
+        sweep with correction, not a search for whichever cell clears the gates; (b) a cleaner
+        category slice (Gamma's own tag rather than the internal keyword deriver) to see whether
+        the category-concentration F10 flag is a real economic effect or purely the known
+        labeling-taxonomy artifact; (c) the still-open per-cluster (correlated-event) exposure
+        cap Research Run 22 named -- not yet built, and this run's category/confidence-band
+        fragility (not single-market) suggests a cluster-level check may be more informative than
+        a market-level one going forward.
   learnings:
     - "Research Run 26 (2026-07-18): executed Research Run 25's own recommended next step for
       EXP-006 -- formally diff the volumeNum and volume24hr survivor sets by market_id instead

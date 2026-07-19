@@ -3446,3 +3446,130 @@ expected to cross the 100-event floor without needing a 3rd sampling axis.
 - **Verdict:** engine BUILT + audited-sound; **edge NOT proven** (no real-data run yet — the honest state).
   Binding constraint unchanged: `business_case_strength = B`, no validated real-money OOS edge on any tested
   mechanism to date.
+
+## 2026-07-19 — Research Run 27: EXP-006's real strategy engine, run on real data for the first time (N=202, floor crossed) — EDGE-NOT-PROVEN, an honest null
+
+- **Why this run matters:** every prior EXP-006 run (23-26) measured a raw lag-1 autocorrelation
+  PILOT statistic — no strategy code, no cost model, no trade, no F10/F11 gate. Earlier the same
+  day (2026-07-19), the factory shipped `spike_reversal_backtest.backtest_fade_the_spike` (#385) —
+  the real cost-net, F10/F11-gated fade-the-spike engine the Quality Auditor named as the missing
+  graduation step. This run is the FIRST time that engine has ever seen real data. Egress was
+  confirmed open this session (`gamma-api`/`clob`/`data-api.polymarket.com` all HTTP 200).
+- **Pre-registration (written to a scratch file BEFORE fetching, unmodified repo code, not
+  retried after seeing a number):** `tag_id=2` (Politics), DEFAULT `FadeSpikeConfig` (no
+  parameter search — threshold=0.10, window=1h, horizon=24h, $100/trade equal-weight,
+  `max_trades_per_market=1`, `min_trades_for_edge=100`), same per-market inclusion filter Runs
+  23-26 used (start_date known + life>=14d), one CLOB call per market (last 14 days hourly,
+  fits under the ~15-day-per-call cap Run 23 found), trim the final 24h before resolution
+  (settlement noise), require >=24 post-trim points. Two sampling axes unioned by `market_id`
+  (Run 26's formally-verified method): `order=volumeNum` + `order=volume24hr`.
+- **Pull 1 (mirrors Run 26's own pool size — volumeNum max_pages=3, volume24hr max_pages=2):**
+  499 union candidates -> 341 known-life -> 271 with a usable tick series (70 CLOB fetch
+  failures, 0 too-thin — an honest, not cherry-picked, attrition) -> 146 spikes detected -> **45
+  trades**. Below the 100-event floor. `hit_rate=42.2%` (19W/26L) — at N=45 this is NOT
+  statistically distinguishable from a 50% coin flip (SD~7.5pp, ~1.1 SD below 50%, so this
+  should NOT be read as "the mechanism loses"). `total_pnl_usd=+$24.57` (near zero).
+  `significance.verdict=insufficient_data` (F11 correctly abstained — N below its own
+  `min_trades_for_edge` gate, never computed a CI it can't support). `F10` flagged EXTREME
+  percentage-share concentration: top-market 927%, confidence-band 1656%, time-window 1379%,
+  category 1018% of net PnL. **Important methodological finding, verified by the wider pull
+  below, not merely asserted:** these percentages are a DENOMINATOR ARTIFACT, not evidence of
+  the same structural concentration EXP-002/003/005 showed — when the total itself is near
+  zero, ANY single trade's absolute PnL is a huge percentage of it. A future run should not
+  over-read an extreme F10 percentage from a tiny or near-zero-total sample.
+- **Pull 2 — a pre-registered SCALE-OUT, not a re-roll (only `max_pages` widened to
+  volumeNum=15/volume24hr=10; same config, same method, decided and written down BEFORE running,
+  per Run 26's own recommended next step):** 2,479 union candidates -> 1,484 known-life -> 1,106
+  with a usable tick series (368 CLOB fetch failures, 10 too-thin) -> 547 spikes detected ->
+  **202 trades — CROSSING the pre-registered 100-event floor for the first time in this
+  project's history on this mechanism.** All 202 trades are on 202 DISTINCT markets
+  (`max_trades_per_market=1` held; no correlated same-market repeats inflating N).
+  - `hit_rate=51.98%` (105W/97L) — essentially a coin flip. This is the FIRST real EXP-family
+    corpus result that is NOT far-sub-50% (EXP-003 was 25.64%, EXP-005 was 49.25%) — a
+    qualitatively different signature from every prior refuted candidate.
+  - `total_pnl_usd=+$1,230.21` — nominally positive.
+  - `significance.verdict=indistinguishable_from_zero`, 95% bootstrap CI **[-417.8978,
+    3122.7574]** — spans zero by a wide margin. This is a REAL computed null (N above F11's own
+    floor), not an "insufficient data" abstention like Pull 1 or every prior EXP-005 early run.
+  - `F10`: `has_positive_edge=True` but fragile on **2 of 5 axes** — confidence-band 75%
+    (>70% threshold) and category 72% (>70% threshold). Category concentration breaks down as
+    General $886.66 (72.1%), Politics $414.57 (33.7%), Economics $9.09, Sports -$80.11 (108
+    Politics-tag trades but only 20 of the 202 trades are internally labeled "Politics" by
+    `market_category.py`'s keyword deriver — 88 are "General" — the SAME Gamma-tag-vs-
+    internal-deriver mismatch Runs 19/20 flagged on Sports/Politics corpora, now confirmed a
+    3rd time on a real EXP-006 corpus). **Single-market concentration is CLEAN this time**:
+    top market (id 2261347... no — id 514049, Politics, DOWN spike faded, reversal_fraction
+    0.629, +$521.95) is 42.4% of net PnL, under the 50% `TOP_MARKET_PNL_CONCENTRATION`
+    threshold — direct confirmation that Pull 1's 927% figure was indeed a small-N artifact,
+    not a persistent structural flaw of this mechanism.
+  - Direction split: 123 UP-spike-fades (bought NO), 79 DOWN-spike-fades (bought YES) — no
+    gross directional imbalance.
+  - `is_validated_edge=False`. **Verdict: EDGE-NOT-PROVEN** — "fade-the-spike net $1,230.21
+    over 202 trades — F11 verdict=indistinguishable_from_zero; F10 fragile (confidence-band
+    75%>70%; category 72%>70%). Honest null / not-yet — NOT go-live evidence." (engine's own
+    text, verbatim).
+- **How this differs from every prior EXP-002/003/005 real-corpus refutation** (a genuine,
+  not just asserted, qualitative distinction): those all showed a hit rate FAR below 50%
+  (25.64%-49.25%) with the aggregate propped up by one wildly lucky market/bucket (100%-134%
+  single-bucket shares) — the classic "large nominal PnL masking a losing mechanism" failure
+  mode. EXP-006 at N=202 shows a near-COIN-FLIP hit rate (51.98%) and moderate (not runaway)
+  concentration on 2 of 5 axes with single-market concentration CLEAN. This reads as
+  **genuinely uninformative noise around zero**, not as a mechanism that is quietly losing
+  while looking like a winner. That is still an honest null (F11 fails, F10 partially fails,
+  `is_validated_edge=False`) — it does NOT clear the bar — but it is a different FLAVOR of null
+  than the bucket-calibration family's, worth distinguishing rather than lumping together.
+- **Self-validation (sources this run):** both pulls are live-fetched, pre-registered scratch
+  script runs this session, importing UNMODIFIED
+  `backend.app.prediction_markets.polymarket_history_fetcher.PolymarketHistoryFetcher` and
+  `backend.app.prediction_markets.spike_reversal_backtest.backtest_fade_the_spike` directly from
+  the repo — no reimplementation, no code changes, no parameter search after seeing a number.
+  The scratch script + full per-trade JSON output live in a research-agent scratch path, not
+  committed (this project's established pattern for scratch analysis scripts). Egress:
+  direct `curl` 200 on `gamma-api`/`clob`/`data-api.polymarket.com` at session start, plus the
+  fetcher's own `requests` session for the real pulls (Pull 1: ~62s wall-clock for 271 CLOB
+  calls; Pull 2: ~304s wall-clock for 1,106 CLOB calls) — consistent with every run since
+  2026-07-04.
+- **Adversarial pre-mortem on THIS run's own findings (hunting my own overfitting/leakage):**
+  1. This tested exactly ONE config (the shipped DEFAULT threshold/window/horizon) at ONE seed.
+     A null here rules out THIS config, not the entire timing-edge family — a pre-registered
+     sweep (with Bonferroni correction across configs) is the legitimate next step, NOT a
+     post-hoc search for a cell that clears F11/F10 after seeing today's null.
+  2. This run did NOT run Run 26's formal event-cluster diversity check (11-26 distinct
+     topics/clusters) on the 202-trade corpus — only category labels were inspected. A market
+     dominated by very few real-world news events (even if spread across many `market_id`s)
+     could still under-count as "diverse" by this run's own check; a future run should apply
+     Run 26's cluster methodology to the 202-trade set specifically.
+  3. The category-concentration F10 flag is entangled with a KNOWN labeling-taxonomy artifact
+     (Gamma tag vs. internal deriver), not necessarily a real economic effect — but this run
+     did not re-slice by the Gamma tag directly to separate the two; that would sharpen (not
+     necessarily clear) the F10 category read.
+  4. `max_trades_per_market=1` prevents same-market correlation from inflating N, but does not
+     prevent same-CALENDAR-DATE clustering across different markets tied to one news event
+     (e.g. many Politics markets all spiking around one debate/announcement) from making trades
+     look independent when they are not — F10's time-window check (which passed, unflagged,
+     this run) is the partial guard, but a dedicated per-cluster exposure cap (Research Run 22's
+     standing, still-unbuilt recommendation) would be a stronger check.
+  5. The wider pull's 368 CLOB fetch failures (33% of 1,106 attempted markets) were not
+     individually diagnosed (rate-limit vs. genuinely-empty-history vs. transient error) — an
+     honest, not cherry-picked, attrition, but its composition is unverified.
+- **External research this run (2 WebSearch sweeps, DATA only):** "prediction market trading
+  edge strategy research 2026 Polymarket Kalshi" and "Polymarket Kalshi price spike reversal
+  overreaction backtest 2026" surfaced no new primary source beyond what is already logged
+  (the Clinton & Huang/Vanderbilt "58%" figure remains an unverified secondary-source number,
+  unchanged caveat since 2026-07-15; the QuantPedia mean-reversion caution stands unchanged).
+  One new-to-search reference: arXiv 2604.20421, "Unlocking the Forecasting Economy" — a
+  described three-layer (metadata/fills/oracle-resolution) Polymarket dataset — surfaced by
+  title/abstract only, NOT fetched or verified this run, logged only as a candidate future data
+  source for a subsequent run to evaluate (not treated as evidence for or against anything).
+- **RECOMMEND-only — no ROADMAP steer.** This is a real, floor-crossing, honest null at one
+  config — not a validated edge (bar: N>=floor AND F11 significant_positive AND F10 non-fragile
+  AND hit-rate>50%, per the engine's own 4-criterion gate; this result clears only the N and
+  (barely) the hit-rate criteria). Next steps (each needing its own pre-registration): (a) a
+  threshold/window/horizon sweep with Bonferroni correction; (b) a Gamma-tag-direct category
+  slice to isolate the labeling-taxonomy artifact from a possible real category effect; (c) the
+  still-unbuilt per-cluster exposure cap (Research Run 22).
+
+**Binding constraint STANDS:** no validated real-money OOS edge on any tested mechanism to date.
+This run adds the first REAL strategy-level (not pilot-statistic) test of EXP-006 — a genuine,
+non-fabricated null, distinguishable in character (near-coin-flip hit rate, moderate not extreme
+concentration) from every prior refuted EXP-002/003/005 candidate, but still not a passing result.
