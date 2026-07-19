@@ -3383,3 +3383,66 @@ RECOMMEND-only — no ROADMAP steer. The next research-agent step (pre-registere
 either widen the now-confirmed-stable `volumeNum` axis's candidate pool (e.g. `max_pages=3`) or
 re-pull the now-confirmed-unstable `volume24hr` axis fresh on a later date and re-diff — either is
 expected to cross the 100-event floor without needing a 3rd sampling axis.
+
+## 2026-07-19 — Factory build (NOT a research run): EXP-006 fade-the-spike FULL BACKTEST LAYER built (strategy + cost model + F10/F11 gate + per-trade concentration cap) — the pilot→strategy graduation the Quality Auditor named; NO edge claimed
+
+- **What was built (#385):** `backend/app/prediction_markets/spike_reversal_backtest.py` — the cost-net,
+  leakage-safe, F10/F11-gated PnL layer on top of the existing `spike_detection.py` primitive. It fades
+  each causally-confirmed spike (UP → buy NO, DOWN → buy YES), enters at the spike's `confirm_time` (the
+  earliest knowable instant), exits at the forward-horizon price from `label_reversal` (strictly forward),
+  and prices BOTH legs through the single-source-of-truth cost model — the new
+  `cost_model.effective_sell_price()` is the symmetric exit friction, so a round-trip at an unchanged price
+  honestly books the two-way cost as the hurdle the reversion must clear. This delivers exactly the
+  "spike→reversal walk-forward harness + per-trade concentration cap" that E3's prior note (post-#350) and
+  the QUALITY_SCORECARD's business_case_strength gap both named as the missing step to graduate EXP-006
+  from a raw-autocorrelation pilot to a testable strategy.
+- **The Run 21 concentration cap, shipped from day one — TWO ways:** EQUAL-WEIGHT sizing (a fixed dollar
+  budget per trade, so no market can dominate by BETTING BIGGER) + a hard `max_trades_per_market` cap
+  (default 1, so a market that spikes repeatedly cannot flood the sample with correlated same-market bets).
+  This is the STRUCTURALLY-CORRECT response to Run 22's key finding — that the bucket family's concentration
+  came from **many small CORRELATED trades, not one oversized bet** (a per-trade notional cap was a no-op
+  there). A per-MARKET trade cap addresses correlation; a notional cap did not.
+- **Honest 4-criterion validated-edge gate (never the point estimate alone):** `is_validated_edge` is the
+  AND of (1) N ≥ 100 (the pre-registered floor), (2) F11 `significant_positive` (bootstrap CI on total PnL
+  excludes zero), (3) F10 non-fragile, and (4) hit-rate > 50% — matching every criterion the QUALITY_SCORECARD's
+  validated-edge bar names. F10 for this SINGLE-horizon strategy excludes the (structurally single-valued)
+  horizon axis while the horizon stays ≤ 1 day — the same no-information reasoning `regime_slice` already
+  uses to exclude unlabeled category — and RE-ENGAGES the horizon check if the horizon is swept above a day.
+  The load-bearing single-market / confidence-band / extreme-confidence / time-window / category checks are
+  all retained.
+- **NO EDGE IS CLAIMED.** This is a measurement engine, exactly like `walk_forward`: it recovers a real
+  cost-net reversion edge on a mean-reverting synthetic corpus (labeled NOT a real edge) and reports
+  EDGE-NOT-PROVEN on momentum / small-N. It reaches NO revenue field: `weekly_pnl_paper` stays null,
+  `total_trades` 0, `engine_pct` 74. `business_case_strength` stays **B** — this unblocks the honest EXP-006
+  test, it is not that test.
+- **Two-gate readiness passed.** (1) `scripts/preflight.sh code` GREEN (15 new offline tests registered in
+  the gate; ruff correctness-clean; runtime harness PASSED). (2) 3 FRESH adversarial Opus auditors, each told
+  to break the engine: leakage → CANNOT-BREAK across all 5 surfaces (entry uses `confirm_price` not
+  `peak_price`, exit strictly forward and horizon-bounded, selection outcome-independent, deterministic under
+  varied `PYTHONHASHSEED`); cost/PnL → ACCOUNTING-SOUND (PnL identity `payout−budget==pnl` verified numerically,
+  no cost double-count); gate logic → GATE-SOUND (horizon-exclusion legitimate, single-market check load-bearing,
+  never claims edge from a point estimate, never reaches go-live). The gate-gaming auditor surfaced one material
+  honest gap — the missing hit-rate>50% criterion — which was ADDED before merge, plus 3 cheap hardenings
+  (horizon-guard, extreme-band check restored, F11-independence caveat documented).
+- **Reconciliation with the OWNER STEER (honest):** the steer's priority #1 (concentration-capped bucket
+  REDESIGN) was DEPRIORITIZED this run — it was already TESTED and refuted in Research Run 22 (2026-07-14,
+  on the real EXP-003 N=1,369 corpus: neither the notional cap nor the favorites-only variant rescues the
+  mechanism), and the QUALITY_SCORECARD calls the bucket-calibration family "exhausted — NOT another
+  parameterization." Per the steer's own "an honest null STILL clears the value bar; do NOT p-hack an edge
+  to satisfy the steer," effort went to priority #2 (EXP-006), which is a structurally-different, non-exhausted
+  mechanism both the steer and the auditor endorse.
+- **Residual / next_actions (the SPECIFIC buildable steps):**
+  1. **The real test needs a real corpus (owner/egress-gated, no credential — public data):** fetch a
+     point-in-time, NON-survivorship Politics intraday-tick corpus (`PolymarketHistoryFetcher.fetch_price_history`
+     per market) reaching N ≥ 100 spikes, run `backtest_fade_the_spike`, and record the honest F10/F11 verdict.
+     Survivorship discipline is critical — sample the spike universe by a decision-time criterion, not by which
+     markets happen to have long tick histories.
+  2. **Spike-size / salience stratification** (Run 21's N=1 caution — the LARGEST spikes may persist, not
+     fade): stratify the labeled events by magnitude and report per-stratum reversion, so the engine does not
+     average a fade-able small-spike regime with a persist-y large-spike regime.
+  3. **Market impact on the fade legs:** the fade currently prices the flat `effective_buy/sell_price` (no
+     depth), so it is mildly cost-OPTIMISTIC at scale — wire `depth_contracts` into the legs before any
+     capacity/live claim (needs per-market book depth, egress-gated).
+- **Verdict:** engine BUILT + audited-sound; **edge NOT proven** (no real-data run yet — the honest state).
+  Binding constraint unchanged: `business_case_strength = B`, no validated real-money OOS edge on any tested
+  mechanism to date.
