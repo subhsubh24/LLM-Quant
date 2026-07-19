@@ -111,6 +111,7 @@ def main() -> int:
             "f11_total_ci": [sig.total_ci_low, sig.total_ci_high],
             "f10_fragile_raw": (res.regime.fragile if res.regime else None),
             "f10_fragile_reasons_raw": (list(res.regime.fragile_reasons) if res.regime else []),
+            "size_robustness": res.size_robustness,
             "magnitude_strata": [
                 {
                     "band": s.label,
@@ -143,6 +144,8 @@ def main() -> int:
         for s in res.strata:
             print(f"                    {s.label:>10} | {s.n_trades:>3} | "
                   f"{s.total_pnl_usd:>10,.2f} | {s.hit_rate} | {s.mean_reversal_fraction}")
+        # Config-independent, significance-aware largest-spike gate status (Run 21 caution).
+        print(f"size-robustness   : {res.size_robustness}")
         print(f"VALIDATED EDGE    : {res.is_validated_edge}")
         print(f"\n{res.verdict}")
         if not args.data:

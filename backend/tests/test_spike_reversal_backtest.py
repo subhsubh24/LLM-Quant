@@ -330,6 +330,17 @@ def test_empty_corpus_is_honest_null():
     assert res.regime is None
     assert res.is_validated_edge is False
     assert "EDGE-NOT-PROVEN" in res.verdict
+    # Strata still partition into the four report bands, every one empty and NON-fabricated.
+    assert len(res.strata) == len(DEFAULT_MAGNITUDE_STRATUM_EDGES) + 1
+    assert all(
+        s.n_trades == 0
+        and s.total_pnl_usd == 0.0
+        and s.hit_rate is None
+        and s.mean_reversal_fraction is None
+        and s.mean_magnitude is None
+        for s in res.strata
+    )
+    assert res.size_robustness.startswith("UNASSESSED")   # no trades -> unassessable, disclosed
 
 
 def test_spike_with_no_forward_tick_is_dropped_not_fabricated():
@@ -367,38 +378,42 @@ def test_config_validation_rejects_bad_params():
 
 # ===========================================================================
 # EXP-006 magnitude / salience stratification (Run 21 N=1 caution made auditable)
+# The size-robustness GATE is config-independent (rank-based) + significance-aware.
 # ===========================================================================
 def test_magnitude_strata_reported_and_partition_all_trades():
     # The broad reverting corpus has a UNIFORM spike size (_MOVE=0.15) — every trade lands in
-    # exactly ONE magnitude band. Strata still report, partition every trade, and the sums match.
+    # exactly ONE magnitude report band. Strata still report, partition every trade, sums match.
     res = backtest_fade_the_spike(_corpus(_reverting_market, 120))
     assert res.n_trades == 120
     assert sum(s.n_trades for s in res.strata) == res.n_trades
     assert round(sum(s.total_pnl_usd for s in res.strata), 4) == round(res.total_pnl_usd, 4)
     populated = [s for s in res.strata if s.n_trades > 0]
     assert len(populated) == 1                          # uniform 0.15 magnitude -> one band
-    # Empty bands never fabricate a mean/hit-rate.
-    for s in res.strata:
+    for s in res.strata:                                # empty bands never fabricate a mean
         if s.n_trades == 0:
             assert s.hit_rate is None and s.mean_reversal_fraction is None
 
 
-def test_uniform_magnitude_does_not_trip_size_robustness():
-    # With a single populated size band, size-robustness is structurally unassessable — the
-    # check must ABSTAIN (not flag), so this genuinely-broad edge still validates.
+def test_uniform_magnitude_size_robustness_abstains_with_disclosure():
+    # No spike-size DISPERSION -> size-robustness is structurally unassessable -> ABSTAIN, but
+    # DISCLOSE it (not a silent pass). The genuinely-broad edge still validates, and the verdict
+    # explicitly says UNASSESSED so a reader knows the largest-spike regime was not cleared.
     res = backtest_fade_the_spike(_corpus(_reverting_market, 120))
     assert res.is_validated_edge is True
-    assert not any("magnitude" in r for r in (res.regime.fragile_reasons if res.regime else []))
-    assert "magnitude" not in res.verdict
+    assert res.size_robustness.startswith("UNASSESSED")
+    assert "no spike-size dispersion" in res.size_robustness
+    assert "UNASSESSED" in res.verdict                  # disclosed in the human verdict too
 
 
-def _small_revert(base_t: int, direction: str) -> list[dict]:
-    """A SMALL spike (~0.12 move) that partially reverts — the fade WINS. Band '0.00-0.15'."""
+# Band-parametrized builders so winners AND losers spread across confidence buckets (keeps the
+# STANDARD F10 axes non-fragile, isolating the size-robustness gate as the sole driver below).
+def _small_revert_b(base_t: int, band: float, direction: str) -> list[dict]:
+    """A SMALL spike (~0.12 |move|) that reverts -> fade WINS. `band` sets the faded-side price."""
     move, revert = 0.12, 0.08
     if direction == "UP":
-        confirm, baseline, forward = 0.60, 0.60 - move, 0.60 - revert
+        confirm, baseline, forward = 1.0 - band, (1.0 - band) - move, (1.0 - band) - revert
     else:
-        confirm, baseline, forward = 0.40, 0.40 + move, 0.40 + revert
+        confirm, baseline, forward = band, band + move, band + revert
     return [
         {"t": base_t, "p": round(baseline, 4)},
         {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
@@ -406,77 +421,141 @@ def _small_revert(base_t: int, direction: str) -> list[dict]:
     ]
 
 
-def _large_persist(base_t: int, direction: str) -> list[dict]:
-    """A LARGE spike (~0.35 move) that CONTINUES — the fade LOSES. Band '0.25-0.40'
-    (the peak extends past confirm as the run continues, so |peak-baseline| ~ 0.35)."""
+def _large_persist_b(base_t: int, band: float, direction: str) -> list[dict]:
+    """A LARGE spike (~0.30 |move|) that CONTINUES -> fade LOSES. `band` sets the faded-side price
+    (kept in [0.35, 0.65] so baseline stays in range for the big move)."""
     move, cont = 0.30, 0.05
     if direction == "UP":
-        confirm, baseline, forward = 0.60, 0.60 - move, 0.60 + cont
+        confirm, baseline, forward = 1.0 - band, (1.0 - band) - move, (1.0 - band) + cont
     else:
-        confirm, baseline, forward = 0.40, 0.40 + move, 0.40 - cont
+        confirm, baseline, forward = band, band + move, band - cont
     return [
         {"t": base_t, "p": round(baseline, 4)},
         {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
         {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
     ]
+
+
+_LARGE_BANDS = [0.2, 0.35, 0.5, 0.65]       # wide spread across confidence buckets; large-move safe
+
+
+def _large_flat_b(base_t: int, band: float, direction: str) -> list[dict]:
+    """A LARGE spike (~0.30 |move|) whose price HOLDS the spike level (forward == confirm) — the
+    fade loses only the round-trip COST (a small loss), same magnitude as the reverter."""
+    move = 0.30
+    if direction == "UP":
+        confirm, baseline, forward = 1.0 - band, (1.0 - band) - move, 1.0 - band
+    else:
+        confirm, baseline, forward = band, band + move, band
+    return [
+        {"t": base_t, "p": round(baseline, 4)},
+        {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
+        {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
+    ]
+
+
+def _mixed_corpus(n_small: int, n_large: int, large_builder) -> dict[str, list[dict]]:
+    corpus: dict[str, list[dict]] = {}
+    for k in range(n_small):
+        corpus[f"s{k:04d}"] = _small_revert_b(k * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
+    for k in range(n_large):
+        corpus[f"L{k:04d}"] = large_builder((n_small + k) * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
+    return corpus
 
 
 def test_large_spike_persist_regime_flags_size_fragility():
-    # 70 small spikes that REVERT (win) + 50 large spikes that PERSIST (lose): the AGGREGATE is
-    # positive, but the whole edge is a small-spike artifact — the largest spikes lose. The
-    # size-robustness check (Run 21's load-bearing caution) must catch this and BLOCK validation.
-    corpus: dict[str, list[dict]] = {}
-    for k in range(70):
-        corpus[f"s{k:04d}"] = _small_revert(k * _STAGGER_S, _DIRS[k % 2])
-    for k in range(50):
-        corpus[f"L{k:04d}"] = _large_persist((70 + k) * _STAGGER_S, _DIRS[k % 2])
-    res = backtest_fade_the_spike(corpus)
+    # 70 small revert-winners + 50 large persist-losers: positive AGGREGATE, but the whole edge is
+    # a small-spike artifact — the LARGEST-magnitude cohort loses. The config-independent,
+    # significance-aware size-robustness gate must catch it and BLOCK validation.
+    res = backtest_fade_the_spike(_mixed_corpus(70, 50, _large_persist_b))
     assert res.n_trades == 120
-    assert res.total_pnl_usd > 0                        # positive aggregate...
-    small = next(s for s in res.strata if s.label == "0.00-0.15")
-    large = next(s for s in res.strata if s.label == "0.25-0.40")
-    assert small.n_trades == 70 and small.total_pnl_usd > 0     # small spikes carry the edge
-    assert large.n_trades == 50 and large.total_pnl_usd < 0     # large spikes LOSE (persist)
-    assert large.mean_reversal_fraction is not None and large.mean_reversal_fraction < 0
-    assert res.is_validated_edge is False              # ...size-fragile -> NOT validated
-    assert "magnitude" in res.verdict
+    assert res.total_pnl_usd > 0                            # positive aggregate...
+    assert res.size_robustness.startswith("FRAGILE")       # ...largest spikes significantly negative
+    assert res.is_validated_edge is False
+    assert "SIGNIFICANTLY NEGATIVE" in res.verdict
 
 
-def test_sparse_large_band_is_not_flagged_noise_not_regime():
-    # Same small-revert winners, but only a FEW (< the evidence floor) large persisters: the
-    # sparse losing band is NOT flagged (a negative total on tiny N is noise, not a regime), so
-    # size-robustness does not fire on it. (Other gates may still apply; we assert ONLY that the
-    # magnitude reason is absent.)
+def test_size_robustness_is_config_independent_no_edges_loophole():
+    # THE loophole an auditor proved: the OLD edges-driven check could be disabled by choosing
+    # report edges that collapse all magnitudes into one bin. The gate is now RANK-based, so the
+    # SAME size-fragile corpus is flagged under default edges AND under collapse-everything edges.
+    corpus = _mixed_corpus(70, 50, _large_persist_b)
+    default_res = backtest_fade_the_spike(corpus)
+    collapse_cfg = FadeSpikeConfig(magnitude_stratum_edges=(0.90, 0.95, 0.99))  # bins nothing apart
+    collapse_res = backtest_fade_the_spike(corpus, config=collapse_cfg)
+    # Report bands differ, but the GATE verdict is identical — edges cannot turn it off.
+    assert default_res.is_validated_edge is False
+    assert collapse_res.is_validated_edge is False
+    assert default_res.size_robustness.startswith("FRAGILE")
+    assert collapse_res.size_robustness.startswith("FRAGILE")
+
+
+def test_size_robustness_is_the_sole_validation_blocker():
+    # N>=floor, F11 significant_positive, hit-rate>50%, and every STANDARD F10 axis broad (bands +
+    # times + distinct markets spread; horizon is structurally excluded) — the ONLY thing that flips
+    # is_validated to False is the size-robustness gate. This isolates the verdict-flipping path (an
+    # over-determined test could pass even if the magnitude reason never reached is_validated).
+    res = backtest_fade_the_spike(_mixed_corpus(90, 45, _large_persist_b))
+    assert res.significance.verdict == "significant_positive"   # F11 passes
+    assert res.hit_rate is not None and res.hit_rate > 0.5      # hit-rate passes
+    assert res.size_robustness.startswith("FRAGILE")           # size-robustness is the blocker
+    assert res.is_validated_edge is False
+    assert "SIGNIFICANTLY NEGATIVE" in res.verdict
+    # Sole driver: NONE of the standard F10 fragility axes appears in the verdict — only size.
+    for other in ("confidence:", "time-window:", "single-market:", "category:", "confidence-extremes:"):
+        assert other not in res.verdict
+
+
+def _large_revert_b(base_t: int, band: float, direction: str) -> list[dict]:
+    """A LARGE spike (~0.30 |move|) that REVERTS -> fade WINS (same magnitude as the flat loser)."""
+    move, revert = 0.30, 0.12
+    if direction == "UP":
+        confirm, baseline, forward = 1.0 - band, (1.0 - band) - move, (1.0 - band) - revert
+    else:
+        confirm, baseline, forward = band, band + move, band - revert
+    return [
+        {"t": base_t, "p": round(baseline, 4)},
+        {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
+        {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
+    ]
+
+
+def test_well_sampled_but_insignificant_large_cohort_not_flagged():
+    # The largest-spike cohort is well-sampled (>= floor) but its fade is NOT significantly negative
+    # (same-magnitude large spikes split between reverters (win) and flat holders (small cost loss),
+    # so the cohort straddles zero). A bare sign test would fire on the negative names; the
+    # significance-aware gate must NOT flag it. Demonstrates the R2 variance-false-flag fix.
     corpus: dict[str, list[dict]] = {}
-    for k in range(110):
-        corpus[f"s{k:04d}"] = _small_revert(k * _STAGGER_S, _DIRS[k % 2])
-    for k in range(3):                                  # 3 < MIN_STRATUM_TRADES_FOR_FRAGILITY
-        corpus[f"L{k:04d}"] = _large_persist((110 + k) * _STAGGER_S, _DIRS[k % 2])
+    for k in range(60):
+        corpus[f"s{k:04d}"] = _small_revert_b(k * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
+    for k in range(30):
+        corpus[f"Lw{k:04d}"] = _large_revert_b((60 + k) * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
+    for k in range(30):
+        corpus[f"Ll{k:04d}"] = _large_flat_b((90 + k) * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
     res = backtest_fade_the_spike(corpus)
-    large = next(s for s in res.strata if s.label == "0.25-0.40")
-    assert large.n_trades == 3 and large.total_pnl_usd < 0
-    assert "magnitude" not in res.verdict               # sparse band not flagged as a regime
+    assert not res.size_robustness.startswith("FRAGILE")   # mixed large cohort not flagged
+    assert "not significantly negative" in res.size_robustness
+    assert "SIGNIFICANTLY NEGATIVE" not in res.verdict
 
 
-def test_stratify_by_magnitude_is_pure_and_boundary_correct():
-    corpus: dict[str, list[dict]] = {}
-    for k in range(40):
-        corpus[f"s{k:04d}"] = _small_revert(k * _STAGGER_S, _DIRS[k % 2])
-    for k in range(40):
-        corpus[f"L{k:04d}"] = _large_persist((40 + k) * _STAGGER_S, _DIRS[k % 2])
-    res = backtest_fade_the_spike(corpus)
+def test_stratify_by_magnitude_is_pure_boundary_correct_and_validates_edges():
+    import pytest
+
+    res = backtest_fade_the_spike(_mixed_corpus(40, 40, _large_persist_b))
     a = stratify_by_magnitude(res.trades)
     b = stratify_by_magnitude(res.trades)
     assert a == b                                       # pure / deterministic
     assert all(isinstance(s, MagnitudeStratum) for s in a)
-    # Default edges (0.15, 0.25, 0.40) -> four bands; every trade counted exactly once.
     assert len(a) == len(DEFAULT_MAGNITUDE_STRATUM_EDGES) + 1
     assert sum(s.n_trades for s in a) == res.n_trades
-    # Each trade's magnitude sits inside its band's [lo, hi) (open-ended top).
     for s in a:
         assert s.lo >= 0.0
         if s.hi is not None:
             assert s.hi > s.lo
+    # The public helper validates its own edges (never silent dead/overlapping bands).
+    for bad in [(), (0.25, 0.15), (0.0, 0.3), (0.3, 1.0)]:
+        with pytest.raises(ValueError):
+            stratify_by_magnitude(res.trades, edges=bad)
 
 
 def test_spike_magnitude_recorded_on_every_trade():
