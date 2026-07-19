@@ -87,6 +87,30 @@ class CostModel:
         """
         return win_probability - self.effective_buy_price(market_price)
 
+    def effective_sell_price(self, market_price: float) -> float:
+        """All-in PROCEEDS per contract when SELLING (closing a position) at ``market_price``.
+
+        The exit analogue of ``effective_buy_price``. Selling a market order also pays the
+        cost of crossing the spread — slippage moves the fill AGAINST us (down, on a sale) —
+        and the venue fee is taken out of the notional we receive. So a contract sold at
+        quoted price ``p`` returns ``p * (1 - slippage) * (1 - fee)``, NOT ``p``. This is the
+        symmetric friction to the buy leg: ``effective_buy_price`` charges ``+slippage``/
+        ``+fee`` on entry; this charges ``-slippage``/``-fee`` on exit. A round-trip
+        (buy then sell at an UNCHANGED price) therefore books a LOSS equal to the two-way
+        cost — the honest hurdle any short-horizon mark-to-market strategy must clear before
+        it can be called an edge (fade-the-spike, spread capture, any exit-before-resolution).
+
+        Floored at 0.0 (proceeds cannot be negative) and capped at 1.0 (a contract is worth
+        at most $1 at resolution, so it can never be sold for more than par). At ``p = 0`` the
+        proceeds are 0; the result is continuous and monotone non-decreasing in ``p``.
+        """
+        deslipped = market_price * (1.0 - self.slippage_rate)
+        proceeds = deslipped * (1.0 - self.fee_rate)
+        # Clamp into [0, 1]: proceeds are never negative and never exceed par ($1). Unlike the
+        # BUY cap (which pins the near-certain cost at exactly breakeven 1.0 to avoid optimism),
+        # the SELL floor at 0.0 is the conservative direction — it never overstates proceeds.
+        return min(max(proceeds, 0.0), 1.0)
+
     def contracts_for_budget(self, budget_usd: float, market_price: float) -> float:
         """How many contracts ``budget_usd`` actually buys, costs included.
 
