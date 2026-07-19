@@ -522,16 +522,19 @@ def _large_revert_b(base_t: int, band: float, direction: str) -> list[dict]:
 
 
 def test_size_robustness_flags_minority_persist_tail():
-    # THE second-audit counterexample: a LOSING huge-spike tail SMALLER than a third of the sample
-    # must still be caught (a fixed-fraction cohort would dilute it with small-spike winners until
-    # it read insignificant and PASSED). The tightest-tail (top-MIN_STRATUM) cohort catches it.
-    # 90 small revert-winners + 15 huge persist-losers: every huge spike loses, aggregate positive.
-    for n_small, n_huge in [(90, 15), (95, 20), (100, 25)]:
+    # THE audit counterexamples: a LOSING huge-spike tail — at ANY size, including a small MINORITY
+    # (5-13 events) that a fixed-count/fraction cohort diluted with small-spike winners until it read
+    # insignificant and PASSED — must NEVER ship a green VALIDATED-CANDIDATE. The magnitude-defined
+    # PURE large-spike set catches it at every tail size: >= floor via significance, < floor via the
+    # net-negative sign (underpowered but disclosed + blocking). Every huge spike here persists/loses;
+    # the aggregate is positive (a small-spike artifact).
+    for n_small, n_huge in [(100, 5), (100, 8), (100, 10), (100, 13),
+                            (90, 15), (95, 20), (100, 25), (110, 30)]:
         res = backtest_fade_the_spike(_mixed_corpus(n_small, n_huge, _large_persist_b))
         assert res.total_pnl_usd > 0                       # positive aggregate (small-spike artifact)
         assert res.significance.verdict == "significant_positive"
         assert res.size_robustness.startswith("FRAGILE"), (n_small, n_huge, res.size_robustness)
-        assert res.is_validated_edge is False              # the losing minority tail blocks it
+        assert res.is_validated_edge is False              # the losing tail blocks it — no dilution
 
 
 def test_well_sampled_but_insignificant_large_cohort_not_flagged():
