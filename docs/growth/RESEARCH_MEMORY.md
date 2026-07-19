@@ -3504,3 +3504,77 @@ harden the honest test apparatus; neither reaches a revenue field.
 4. (from PR #387's audits) A robust multi-band/windowed size-robustness gate, or a documented manual-
    review step — no single automated cohort test is adversarially complete for "do the biggest
    spikes revert."
+
+## 2026-07-19c — FIRST real-data EXP-006 fade-the-spike OOS run: EDGE-NOT-PROVEN (N=108) — the egress-gated next-step the last three runs filed, now RUN. Plus a live-safety ingest fix. Binding constraint unchanged.
+
+**This is the run that closes the "EXP-006 instrument built but untested on real data" gap.**
+The fade engine (`spike_reversal_backtest.py`, #385/#387) had never touched a real corpus; every
+prior run filed "needs a real point-in-time non-survivorship intraday-tick corpus" as
+egress-gated. Egress was open this run, so it was RUN — and the honest verdict is EDGE-NOT-PROVEN.
+
+- **What ran (#390):** new `scripts/fetch_spike_corpus.py` builds a leakage-safe intraday-tick
+  corpus REUSING the audited `PolymarketHistoryFetcher` verbatim (only-new logic: chunk the hourly
+  CLOB fetch into <=15-day windows — the CLOB caps `fidelity=60` at ~360 ticks/15d, verified live;
+  truncate each series strictly before `resolution_time - 24h` so no fade exit can read a
+  settlement pin). Pre-registered universe: resolved binary Politics (Gamma `tag_id=2`, verified
+  live), `order=volumeNum`, `max_pages=3` → 300 fetched, 255 kept (496,056 hourly ticks). Committed
+  gzipped (`data/spike_corpus_politics.json.gz`, ~2 MB) for offline reproducibility;
+  `run_spike_reversal.py` gained transparent `.gz` support. Result in
+  `docs/autonomous-loop/EXP006_REAL_DATA_VALIDATION.md`.
+- **Result (pre-registered DEFAULT config, run ONCE, deterministic — reproduces bit-for-bit):**
+  N=108 trades (above the 100 floor), net **+$285.44**, hit 58.3% — but **F11
+  indistinguishable_from_zero** (total 95% CI **[−527.30, +1090.61]**) and **F10 FRAGILE**
+  (confidence-band 168% + category 107%, both > the 70% gate; leave-one-out removes the top
+  category → −$19.99; top-market share 49.7% is BELOW the gate so single-market is not itself
+  binding). `is_validated_edge=False`. No revenue field reached.
+- **The magnitude strata confirm Run 21's N=1 caution on real data AT SCALE:** small spikes
+  partially revert (0–0.15: +$443, 83% hit; 0.15–0.25: +$500, 69%) but the **largest spikes
+  (>=0.25, N=43) LOSE −$657 (33% hit) and COMPOUND** (mean reversion −0.09). The apparent
+  small-spike profit is NOT a tradeable carve-out: the magnitude band is unknowable at decision
+  time (the peak can extend past entry — `MagnitudeStratum` docstring), so conditioning on it is
+  look-ahead. The pre-registered strategy fades ALL confirmed spikes, and that aggregate is the null.
+- **Two-gate readiness PASSED.** (1) preflight code stages GREEN (config import, curated tests incl.
+  the new `test_fetch_spike_corpus.py` leakage-truncation test, lint, E2E runtime harness);
+  deterministic re-run + offline `.gz` reproduce identically. (2) **3 FRESH adversarial Opus
+  auditors, each told to break it:** leakage → **CANNOT-BREAK-LEAKAGE** (the 18 near-pin exits
+  LOSE −$802, ruling out pin-inflation; deterministic under shuffled input; truncation +
+  CLOB-only tick sourcing structurally airtight); p-hacking → **SOUND-NULL** (defaults untouched,
+  run once, the discarded small-spike edge is genuinely look-ahead); survivorship/cost/stats →
+  **SOUND-NULL** (re-ran at zero costs → +$853 but STILL indistinguishable_from_zero, so not a
+  cost artifact; every disclosed bias makes the null conservative; event-correlation only widens
+  the CI). 2 Sonnet reviewers/PR APPROVE. Auditors caught 2 honesty imprecisions in the writeup
+  (the 49.7% single-market framing; "filed to" vs "to be filed") + 2 reviewer nits (dead import,
+  a fail-loud guard on a non-positive leakage margin) — all fixed before merge.
+- **Live-safety ingest fix (#391, file-disjoint):** the Gamma `outcomePrices` parser did a bare
+  `float(p)` that raised an UNCAUGHT `ValueError` on a malformed price at the single-market fetch
+  sites (`get_market_by_id` — on the live resolution/MTM path), BYPASSING the existing honesty
+  guard and dropping the whole market instead of marking it untradeable. Fixed with a tolerant
+  `_coerce_outcome_price()` (→ None, never raises) routing into the existing guard. Both reviewers
+  reproduced the pre-fix crash; regression tests pin it.
+- **B8 data-engineering finding (live-probed, sharpens the ROADMAP; no code shipped — DECISION
+  COROLLARY):** egress to BOTH venues is open, but the Kalshi `status=settled` feed is **100%
+  high-frequency sports** (1200 markets scanned, 0 political). Political markets ARE reachable via
+  `/events?status=settled` (carries category — 14/40 Politics/Elections in a probe) and
+  `/series?category=Politics` (2089 series). So the B8 co-listed universe blocker is now specific:
+  `KalshiHistoryFetcher` needs an events-by-category → markets-by-event query path (the settled
+  feed alone never reaches political markets), plus a COMMON-INSTANT leakage-safe dual-venue
+  snapshot (both legs priced at the same real pre-resolution instant — else the "disagreement" is
+  temporal, not arbitrage). Building the backtest now would find ~0 matches = a shaky skeleton, so
+  it stays a filed next-step, not a speculative build.
+
+**Binding constraint STANDS: `business_case_strength = B`, no validated real-money OOS edge on any
+tested mechanism.** BOTH real-money mechanisms tested to date are now refuted on real data:
+bucket-calibration (EXP-002/003/005 + the #388 cap variant) AND EXP-006 fade-the-spike (this run,
+default config). `engine_pct` stays 74. An honest null with the specific next step filed IS a
+value-bar-clearing success (steer + §2), not a failure.
+
+**NEXT buildable steps (filed):**
+1. A pre-registered threshold/window/horizon **robustness surface** on the SAME committed corpus
+   (report ALL cells, select none) — is the null default-specific or config-family-wide? Offline,
+   no new data.
+2. A **momentum / ride-the-spike EXP-007 candidate** (the inverse of the refuted fade — the ≥0.40
+   spikes COMPOUND, hit 21%) — but N=19 is far below the floor and the same not-knowable-at-decision
+   caveat applies; file, do NOT claim.
+3. B8: add the events-by-category → markets-by-event Kalshi query path + the common-instant
+   leakage-safe snapshot, THEN the coherence backtest (egress open; the consumer + fetcher path
+   should ship together as one focused unit).
