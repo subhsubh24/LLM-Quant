@@ -33,6 +33,30 @@ MAX_REQUESTS_PER_MINUTE = 80  # Conservative (limit is ~100)
 REQUEST_INTERVAL = 60.0 / MAX_REQUESTS_PER_MINUTE
 
 
+def _coerce_outcome_price(value: object) -> Optional[float]:
+    """Coerce ONE raw ``outcomePrices`` entry to a float, or ``None`` when it cannot be —
+    NEVER raising.
+
+    Gamma's ``outcomePrices`` is normally a JSON array of numeric strings, but a malformed
+    row (a non-numeric token, a null) must NOT crash ``_parse_market``. A bare
+    ``float(p)`` raises ``ValueError`` on such a token and BYPASSES the downstream honesty
+    guard (which marks a market UNTRADEABLE on a missing / non-finite / out-of-range price)
+    — turning a gracefully-handled bad row into a parser crash. That crash is UNCAUGHT at the
+    single-market fetch sites (``get_market_by_id`` / ``get_market_by_slug`` — the former is on
+    the live resolution/mark-to-market path), so one bad row drops the whole market there; the
+    batch ``get_markets`` already wraps each parse in its own try/except. Mapping the bad entry
+    to ``None`` instead
+    routes it into that existing guard, so the market is marked ``active=False`` and logged
+    LOUDLY rather than fabricated or crashed. Mirrors ``_coerce_clob_price`` /
+    ``websocket_feeds._coerce_prob`` (the #101/#193 ingest-honesty rule). Length is
+    preserved (one output per input) so the parallel-array completeness check stays valid.
+    """
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 class MarketStatus(Enum):
     ACTIVE = "active"
     CLOSED = "closed"
@@ -778,13 +802,13 @@ class PolymarketClient:
             try:
                 parsed = _json.loads(outcome_prices)
                 if isinstance(parsed, list):
-                    outcome_prices = [float(p) for p in parsed]
+                    outcome_prices = [_coerce_outcome_price(p) for p in parsed]
                 else:
-                    outcome_prices = [float(p) for p in outcome_prices.split(",") if p]
+                    outcome_prices = [_coerce_outcome_price(p) for p in outcome_prices.split(",") if p]
             except (ValueError, TypeError):
-                outcome_prices = [float(p) for p in outcome_prices.split(",") if p]
+                outcome_prices = [_coerce_outcome_price(p) for p in outcome_prices.split(",") if p]
         elif isinstance(outcome_prices, list):
-            outcome_prices = [float(p) for p in outcome_prices]
+            outcome_prices = [_coerce_outcome_price(p) for p in outcome_prices]
 
         token_ids = raw.get("clobTokenIds", [])
         if isinstance(token_ids, str):
