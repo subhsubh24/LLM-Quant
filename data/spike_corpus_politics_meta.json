@@ -1,0 +1,29 @@
+{
+  "fetched_utc": "2026-07-19",
+  "source": "Polymarket Gamma + CLOB (public, no credentials)",
+  "universe": {
+    "tag_id": 2,
+    "tag": "Politics",
+    "order": "volumeNum",
+    "max_pages": 3,
+    "resolved_binary_only": true
+  },
+  "ticks": {
+    "fidelity_min": 60,
+    "chunk_days": 15,
+    "window_cap_days": 120,
+    "leakage_margin_hours": 24,
+    "min_ticks": 24
+  },
+  "markets_fetched": 300,
+  "markets_kept": 255,
+  "markets_dropped_thin": 45,
+  "total_ticks": 496056,
+  "disclosures": [
+    "liquidity-selection bias (volumeNum)",
+    "settled-only survivorship bias",
+    "final-window sampling bias (window_cap_days)",
+    "cross-market same-event correlation NOT removed",
+    "ticks truncated strictly before resolution - leakage_margin (no settlement pin)"
+  ]
+}
