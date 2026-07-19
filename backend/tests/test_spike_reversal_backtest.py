@@ -507,12 +507,13 @@ def test_size_robustness_is_the_sole_validation_blocker():
 
 
 def _large_revert_b(base_t: int, band: float, direction: str) -> list[dict]:
-    """A LARGE spike (~0.30 |move|) that REVERTS -> fade WINS (same magnitude as the flat loser)."""
+    """A LARGE spike (~0.30 |move|) that REVERTS -> fade WINS (same magnitude as the flat loser).
+    For a DOWN spike, reverting means the price moves back UP toward baseline (forward > confirm)."""
     move, revert = 0.30, 0.12
     if direction == "UP":
         confirm, baseline, forward = 1.0 - band, (1.0 - band) - move, (1.0 - band) - revert
     else:
-        confirm, baseline, forward = band, band + move, band - revert
+        confirm, baseline, forward = band, band + move, band + revert
     return [
         {"t": base_t, "p": round(baseline, 4)},
         {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
@@ -520,18 +521,30 @@ def _large_revert_b(base_t: int, band: float, direction: str) -> list[dict]:
     ]
 
 
+def test_size_robustness_flags_minority_persist_tail():
+    # THE second-audit counterexample: a LOSING huge-spike tail SMALLER than a third of the sample
+    # must still be caught (a fixed-fraction cohort would dilute it with small-spike winners until
+    # it read insignificant and PASSED). The tightest-tail (top-MIN_STRATUM) cohort catches it.
+    # 90 small revert-winners + 15 huge persist-losers: every huge spike loses, aggregate positive.
+    for n_small, n_huge in [(90, 15), (95, 20), (100, 25)]:
+        res = backtest_fade_the_spike(_mixed_corpus(n_small, n_huge, _large_persist_b))
+        assert res.total_pnl_usd > 0                       # positive aggregate (small-spike artifact)
+        assert res.significance.verdict == "significant_positive"
+        assert res.size_robustness.startswith("FRAGILE"), (n_small, n_huge, res.size_robustness)
+        assert res.is_validated_edge is False              # the losing minority tail blocks it
+
+
 def test_well_sampled_but_insignificant_large_cohort_not_flagged():
-    # The largest-spike cohort is well-sampled (>= floor) but its fade is NOT significantly negative
-    # (same-magnitude large spikes split between reverters (win) and flat holders (small cost loss),
-    # so the cohort straddles zero). A bare sign test would fire on the negative names; the
-    # significance-aware gate must NOT flag it. Demonstrates the R2 variance-false-flag fix.
+    # The largest-spike cohort is well-sampled but its fade is NOT significantly negative:
+    # same-magnitude large spikes ALTERNATE reverter (win) / flat holder (small cost loss), so the
+    # top-MIN_STRATUM cohort is a ~50/50 mix straddling zero. A bare sign test would fire on the
+    # losing names; the significance-aware gate must NOT flag it (the R2 variance-false-flag fix).
     corpus: dict[str, list[dict]] = {}
     for k in range(60):
         corpus[f"s{k:04d}"] = _small_revert_b(k * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
-    for k in range(30):
-        corpus[f"Lw{k:04d}"] = _large_revert_b((60 + k) * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
-    for k in range(30):
-        corpus[f"Ll{k:04d}"] = _large_flat_b((90 + k) * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
+    for k in range(40):        # same magnitude (0.30); even -> revert/win, odd -> flat/cost-loss
+        builder = _large_revert_b if k % 2 == 0 else _large_flat_b
+        corpus[f"L{k:04d}"] = builder((60 + k) * _STAGGER_S, _LARGE_BANDS[k % 4], _DIRS[k % 2])
     res = backtest_fade_the_spike(corpus)
     assert not res.size_robustness.startswith("FRAGILE")   # mixed large cohort not flagged
     assert "not significantly negative" in res.size_robustness

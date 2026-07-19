@@ -118,9 +118,14 @@ DEFAULT_MAGNITUDE_STRATUM_EDGES: tuple[float, ...] = (0.15, 0.25, 0.40)
 # The size-robustness gate (Run 21's LOAD-BEARING N=1 caution: *the biggest 2024 political spike
 # did NOT revert — it kept trending*) tests the LARGEST spikes by RANK, not by the caller's report
 # bands — so no ``magnitude_stratum_edges`` choice can turn it off. The "largest-spike cohort" is
-# the top this-fraction of realized trades by |move|; rank-based means the cohort always holds a
-# real share of the sample (it never goes sparse in the tail, and it cannot be binned away).
-LARGE_SPIKE_COHORT_FRACTION: float = 1.0 / 3.0
+# the TIGHTEST assessable tail: the top ``MIN_STRATUM_TRADES_FOR_FRAGILITY`` realized trades by
+# |move|. Using the FIXED minimum-sample count (not a fraction of N) is deliberate — a fixed
+# FRACTION (e.g. N/3) would DILUTE a real minority persist-tail: a heavy-tailed magnitude corpus
+# (many small, a losing few huge) backfills the top third with small-spike WINNERS until the
+# cohort straddles zero and passes. The top-``MIN_STRATUM`` tail is the smallest cohort we can
+# still judge for significance, so a losing tail of ~15-25 huge spikes cannot be diluted below
+# significance. (An adversarial auditor reproduced the dilution on the fraction design; this is
+# the fix — regression-tested in test_size_robustness_flags_minority_persist_tail.)
 # The largest-spike cohort needs at least this many trades before its result is trusted enough to
 # call it a losing REGIME; below it the gate ABSTAINS (and says so) rather than judging on noise.
 # The cohort is judged by the SAME bootstrap-significance test the aggregate uses (F11), not a bare
@@ -467,21 +472,26 @@ def _size_robustness(
     ONLY when the LARGEST spikes genuinely fail; ``status`` is an always-set machine-readable note.
 
     CONFIG-INDEPENDENT BY DESIGN (closing the edges loophole an auditor proved): the cohort of
-    "largest spikes" is chosen by RANK on the realized ``spike_magnitude`` — the top
-    ``LARGE_SPIKE_COHORT_FRACTION`` of trades by |move| — NOT by the caller's report bands, so no
-    ``magnitude_stratum_edges`` choice can collapse the check away. Rank-based also means the cohort
-    always holds ~a third of the sample, so it never goes sparse in the tail (it has real power at
-    the N>=100 edge floor).
+    "largest spikes" is chosen by RANK on the realized ``spike_magnitude`` — NOT by the caller's
+    report bands — so no ``magnitude_stratum_edges`` choice can collapse the check away.
 
-    SIGNIFICANCE-AWARE, not a bare sign test: the largest-spike cohort is judged by the SAME
-    bootstrap-significance test the aggregate is (F11). It is flagged ONLY when its cost-net PnL is
-    ``significant_negative`` (CI excludes 0 on the negative side) — a cohort that is negative only by
-    sampling variance is NOT flagged.
+    TIGHTEST ASSESSABLE TAIL, not a fixed fraction (closing the dilution a second auditor proved):
+    the cohort is the top ``MIN_STRATUM_TRADES_FOR_FRAGILITY`` trades by |move| — the SMALLEST tail
+    we can still test for significance. A fixed FRACTION (e.g. N/3) diluted a real minority
+    persist-tail: on a heavy-tailed corpus (many small, a losing few huge) the top third backfills
+    with small-spike WINNERS until the cohort straddles zero and PASSES. The fixed-count tail keeps
+    a losing ~15-25 huge-spike regime undiluted.
+
+    SIGNIFICANCE-AWARE, not a bare sign test: the cohort is judged by the SAME bootstrap-
+    significance test the aggregate is (F11); flagged ONLY when its cost-net PnL is
+    ``significant_negative`` — a cohort negative only by sampling variance is NOT flagged. ``status``
+    always reports the cohort's magnitude floor + net + hit-rate, so a borderline (underpowered) tail
+    is shown honestly rather than affirmed as clear.
 
     ABSTAINS WITH DISCLOSURE (never a silent pass) when size-robustness is structurally
     unassessable: (a) no real magnitude dispersion (span < ``MIN_MAGNITUDE_DISPERSION`` — one spike
-    size), or (b) the largest-spike cohort has < ``MIN_STRATUM_TRADES_FOR_FRAGILITY`` trades. In both
-    cases ``status`` says ``UNASSESSED`` so a reader knows the largest-spike regime was NOT cleared."""
+    size), or (b) fewer than ``MIN_STRATUM_TRADES_FOR_FRAGILITY`` trades total. In both cases
+    ``status`` says ``UNASSESSED`` so a reader knows the largest-spike regime was NOT cleared."""
     if not trades:
         return [], "UNASSESSED: no trades"
     mags = [t.spike_magnitude for t in trades]
@@ -490,16 +500,19 @@ def _size_robustness(
             f"UNASSESSED: no spike-size dispersion (|move| span "
             f"{max(mags) - min(mags):.4f} < {MIN_MAGNITUDE_DISPERSION}) — one spike size only"
         )
-    # Largest-spike cohort by RANK (ties broken by market_id for determinism).
-    ordered = sorted(trades, key=lambda t: (t.spike_magnitude, t.market_id))
-    k = max(1, round(len(ordered) * LARGE_SPIKE_COHORT_FRACTION))
-    cohort = ordered[-k:]
-    if len(cohort) < MIN_STRATUM_TRADES_FOR_FRAGILITY:
+    if len(trades) < MIN_STRATUM_TRADES_FOR_FRAGILITY:
         return [], (
-            f"UNASSESSED: largest-spike cohort N={len(cohort)} < "
-            f"{MIN_STRATUM_TRADES_FOR_FRAGILITY} (too few big spikes to judge)"
+            f"UNASSESSED: only {len(trades)} trades (< {MIN_STRATUM_TRADES_FOR_FRAGILITY}) — "
+            f"too few to assess a largest-spike cohort"
         )
+    # TIGHTEST assessable tail by RANK: the top MIN_STRATUM biggest spikes (ties broken by
+    # market_id for determinism). Fixed COUNT, not a fraction, so a minority persist-tail is not
+    # diluted by small-spike winners (see docstring).
+    ordered = sorted(trades, key=lambda t: (t.spike_magnitude, t.market_id))
+    k = MIN_STRATUM_TRADES_FOR_FRAGILITY
+    cohort = ordered[-k:]
     cohort_lo = min(t.spike_magnitude for t in cohort)
+    cohort_hit = sum(1 for t in cohort if t.is_win) / len(cohort)
     sig = bootstrap_oos_significance(
         [t.pnl_usd for t in cohort],
         [t.is_win for t in cohort],
@@ -510,13 +523,18 @@ def _size_robustness(
     if sig.verdict == "significant_negative":
         reason = (
             f"size-robustness: the LARGEST-spike cohort (top {k} by |move|, magnitude "
-            f">= {cohort_lo:.3f}, N={len(cohort)}) fade is SIGNIFICANTLY NEGATIVE "
-            f"(net ${sig.total_pnl_usd:,.2f}, 95% CI [{sig.total_ci_low}, {sig.total_ci_high}]) — "
-            f"the reversion does NOT hold for the biggest spikes (Run 21 caution)"
+            f">= {cohort_lo:.3f}) fade is SIGNIFICANTLY NEGATIVE "
+            f"(net ${sig.total_pnl_usd:,.2f}, hit {cohort_hit:.0%}, 95% CI "
+            f"[{sig.total_ci_low}, {sig.total_ci_high}]) — the reversion does NOT hold for the "
+            f"biggest spikes (Run 21 caution)"
         )
-        return [reason], "FRAGILE: largest-spike cohort fade is significantly negative"
+        return [reason], (
+            f"FRAGILE: largest-spike cohort (top {k}, |move| >= {cohort_lo:.3f}) fade net "
+            f"${sig.total_pnl_usd:,.2f}, hit {cohort_hit:.0%} — significantly negative"
+        )
     return [], (
-        f"assessed: largest-spike cohort (N={len(cohort)}, magnitude >= {cohort_lo:.3f}) "
+        f"assessed: largest-spike cohort (top {k}, magnitude >= {cohort_lo:.3f}, net "
+        f"${sig.total_pnl_usd:,.2f}, hit {cohort_hit:.0%}) "
         f"not significantly negative ({sig.verdict})"
     )
 
