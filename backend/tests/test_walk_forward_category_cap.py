@@ -131,6 +131,18 @@ def test_tiny_cap_sizes_single_trade_down_to_room():
     assert sum(1 for t in capped.trades if t.category == CATEGORY_CRYPTO) == 1
 
 
+def test_dust_floor_skips_sub_cent_capped_positions():
+    # A cap so tiny that the per-category room is a sub-dollar "dust" position: the dust guard
+    # SKIPS it rather than admit a near-zero trade that would still count toward the F11
+    # min-trades floor. Here room = 1e-5 x 10_000 = $0.10 < the $1 dust floor -> no crypto trades.
+    markets = _concentrated_corpus(n_crypto=12)
+    capped = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, category_exposure_cap=1e-5
+    )
+    assert sum(1 for t in capped.trades if t.category == CATEGORY_CRYPTO) == 0  # all dust-skipped
+    assert capped.final_bankroll >= 0.0
+
+
 # --------------------------------------------------------------------------- #
 # 5. It is a RISK CONTROL: only reduces exposure; accounting stays sound.      #
 # --------------------------------------------------------------------------- #

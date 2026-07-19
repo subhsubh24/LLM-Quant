@@ -44,6 +44,12 @@ from typing import Callable, Optional, Sequence
 
 from .cost_model import DEFAULT_COST_MODEL, CostModel
 
+# When the per-category exposure cap sizes a trade DOWN, a position smaller than this fraction of
+# the starting bankroll is treated as "dust" and SKIPPED — so a sub-cent capped fill can't count
+# as a full unit toward the F11 minimum-trades significance floor. 1e-4 of a $10k bankroll = $1.
+# Applies ONLY on the capped path, so the cap=None reproduction contract is byte-for-byte unchanged.
+_CAP_DUST_FLOOR_FRACTION: float = 1e-4
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -339,20 +345,28 @@ def walk_forward_backtest(
     (the over-deployment bug an earlier batch-settled version had). Realized PnL is
     attributed to the ISO week of ``resolution_time``.
 
-    CONCENTRATION (optional ``category_exposure_cap``): the bucket-calibration family
-    (EXP-002/003/005) was REFUTED with a diagnosed failure mode — F10 found the OOS PnL
-    propped up by a handful of trades all in ONE correlated category (Research Run 22:
-    "concentration comes from many small correlated trades, not one oversized bet — a
-    per-TRADE notional cap is a no-op"). The named-but-never-built fix (Run 20 option a /
-    Run 21) is a per-CATEGORY EXPOSURE cap: total committed cost basis in any one
-    ``market.category`` may not exceed ``category_exposure_cap`` × current equity at the
-    instant a position opens; a trade that would breach it is SIZED DOWN to the remaining
-    room (skipped if the room is ≤ 0). ``None`` (default) disables it — behaviour and the
-    ``seed_hash`` are then byte-identical to before, so every pinned reproduction hash
-    holds; a set cap enters the fingerprint (results legitimately differ). Markets with no
-    label share one ``__uncategorized__`` bucket. This is a RISK CONTROL, not an edge — it
-    cannot manufacture a positive edge where none exists; it only bounds correlated
-    concentration so an honest OOS test isn't dominated by one cluster.
+    CONCENTRATION (optional ``category_exposure_cap``): a live-style per-CATEGORY risk
+    control. Total CONCURRENTLY-committed cost basis in any one ``market.category`` may not
+    exceed ``category_exposure_cap`` × current equity at the instant a position opens; a trade
+    that would breach it is SIZED DOWN to the remaining room (skipped if room ≤ a tiny dust
+    floor). ``None`` (default) disables it — behaviour and ``seed_hash`` are then byte-identical
+    to before, so every pinned reproduction hash holds; a set cap enters the fingerprint
+    (results legitimately differ). Unlabeled markets share one ``__uncategorized__`` bucket.
+
+    SCOPE — READ THIS (what it does and does NOT address). Research Run 22 diagnosed the
+    REFUTED bucket family's F10 concentration as "many small CORRELATED trades in one category,
+    not one oversized bet — a per-TRADE notional cap is a no-op", and named a per-category
+    EXPOSURE cap as the fix. IMPORTANT: F10's ``top_category_budget_share`` is a CUMULATIVE
+    measure (Σ budget over the WHOLE backtest ÷ total), whereas THIS cap bounds CONCURRENT
+    open exposure at an instant. They are different quantities: because positions settle and
+    free room, a category can cycle unbounded CUMULATIVE volume through recycled room while a
+    concurrent cap never binds. So this cap bounds instantaneous/liquidity-style concentration;
+    it does NOT, by construction, bound the cumulative same-category budget share F10 gates on.
+    A faithful test of "does DE-CONCENTRATING rescue the family" would additionally need a cap
+    on CUMULATIVE per-category deployment AND a corpus whose alpha is net-POSITIVE-but-fragile
+    (F10 concentration is only assessable on a positive aggregate) — the committed frozen corpus
+    is net-NEGATIVE, so concentration is moot there. Both are filed as next steps. This is a
+    RISK CONTROL, not an edge — it can only REDUCE/reallocate exposure, never manufacture PnL.
 
     Determinism: events are processed in a stable ``(time, market_id, seq)`` order;
     settlement is pure arithmetic; ``market_id`` is required unique. ``seed_hash``
@@ -463,11 +477,17 @@ def walk_forward_backtest(
         if category_exposure_cap is not None:
             # Bound total committed basis in THIS category to cap × equity. Size the trade
             # DOWN to the remaining room rather than dropping it outright (a partial position
-            # still contributes to a broad edge; a breach is what we refuse), and skip only
-            # when the category is already full.
+            # still contributes to a broad edge; a breach is what we refuse). NOTE: which
+            # specific same-category, same-instant candidate "wins" the remaining room is an
+            # artifact of the (decision_time, market_id, seq) order, not a risk-based choice —
+            # so a capped run's realized PnL carries an order-dependent component. DUST GUARD:
+            # if the room only admits a near-zero "dust" position, SKIP it rather than let a
+            # sub-cent trade count as a full unit toward the F11 min-trades significance floor.
             cat = _cat_key(m.category)
             cat_room = category_exposure_cap * equity - committed_by_cat.get(cat, 0.0)
             budget = min(budget, cat_room)
+            if budget < _CAP_DUST_FLOOR_FRACTION * initial_bankroll:
+                continue
         if budget <= 0.0:
             continue
         trade = _settle(m, decision, budget, cost_model)
