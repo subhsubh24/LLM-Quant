@@ -337,3 +337,37 @@ def test_finite_volume_and_liquidity_still_parsed():
     m = _client()._parse_market(_base_raw(volume="12345.6", liquidity="789.0"))
     assert m.total_volume == 12345.6
     assert m.liquidity == 789.0
+
+
+# ---------------------------------------------------------------------------
+# Malformed price VALUE must not CRASH the parser (it must route into the honesty
+# guard). Previously `float(p)` raised uncaught on a non-numeric entry — a JSON-list
+# `outcomePrices` with a bad token, or a bare list from Gamma — dropping the whole
+# market (or the whole page at a batch call site) instead of marking it untradeable.
+# ---------------------------------------------------------------------------
+def test_nonnumeric_price_in_json_string_marks_untradeable_not_crash():
+    # A JSON array string with a non-numeric price must not raise.
+    raw = _base_raw(outcomePrices='["0.62","not-a-number"]')
+    m = _client()._parse_market(raw)  # must NOT raise
+    assert m.active is False
+
+
+def test_nonnumeric_price_in_bare_list_marks_untradeable_not_crash():
+    # Gamma occasionally returns outcomePrices as a real list (not a JSON string);
+    # a bad element there hit the unguarded `elif isinstance(list)` branch and crashed.
+    raw = _base_raw(outcomePrices=["0.62", "oops"])
+    m = _client()._parse_market(raw)  # must NOT raise
+    assert m.active is False
+
+
+def test_null_price_in_list_marks_untradeable():
+    raw = _base_raw(outcomePrices=["0.62", None])
+    m = _client()._parse_market(raw)
+    assert m.active is False
+
+
+def test_well_formed_bare_list_prices_still_preserved():
+    # The tolerant coercion must not regress the happy path for a real list input.
+    m = _client()._parse_market(_base_raw(outcomePrices=[0.62, 0.38]))
+    assert m.active is True
+    assert [round(o.price, 6) for o in m.outcomes] == [0.62, 0.38]
