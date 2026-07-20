@@ -126,6 +126,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_strategy_enable_disable.py \
            backend/tests/test_spike_detection.py \
            backend/tests/test_spike_reversal_backtest.py \
+           backend/tests/test_spike_robustness_surface.py \
            backend/tests/test_datetime_tz_consistency.py \
            backend/tests/test_scan_loop_liveness.py \
            backend/tests/test_frozen_corpus_replay.py \
