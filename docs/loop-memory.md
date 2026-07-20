@@ -2974,3 +2974,36 @@ Auditor 3 (integrity) found + I fixed one REAL break (see lesson), then CANNOT-B
   de-concentration test needing BOTH a cumulative per-category cap AND a net-positive-but-fragile corpus
   (egress-gated), (3) B8 dual-venue harness (egress + owner-gated, no speculative skeleton), (4) a robust
   multi-band/windowed size-robustness gate or a documented manual-review step.
+
+## 2026-07-20 — EXP-006 config robustness surface (FAMILY-NULL-STRONG) + B8 live-probe finding
+
+**Shipped:** PR — EXP-006 pre-registered config robustness surface (`spike_robustness_surface.py`
++ CLI + 14 in-gate tests + `exp006_robustness_surface` SELF_VALIDATION cap + result doc). Swept
+the fade engine over a fixed 5×4×3=60-cell grid on the committed corpus (report-all/select-none):
+**0/60 validate — FAMILY-NULL-STRONG.** 0 F11 significant_positive, 18 significant_negative; all
+14 positive-PnL cells also F10-gate-fragile (0 broad). The #390 default null is config-family-wide,
+not a default artifact — EXP-006 fade-the-spike REFUTED on real data. In-sample by construction;
+no edge claimed, no revenue field, `business_case_strength` stays B. Companion bookkeeping PR:
+ROADMAP E3/B8 + RESEARCH_MEMORY + this entry.
+
+**Two-gate:** preflight code GREEN; 3 fresh Opus auditors + 2 Sonnet reviewers + 1 Opus
+confirmation auditor. Real defects caught + FIXED before merge (maker≠checker working):
+(1) the surface's displayed F10 column copied the RAW horizon-inclusive `regime.fragile`, not the
+horizon-EXCLUDED GATE F10 that `is_validated_edge` uses (could print fragile=True next to
+valid=True) → engine now exposes `f10_gate_ok`/`f10_gate_reasons`, surface tabulates that
+(tri-stated, never contradicts validity); (2) doc summary counts wrong (12/30 → 15/27) + a false
+"Filed to ROADMAP" past-tense claim → regenerated/reworded. Confirmation auditor: FIX-SOUND.
+
+**B8 live-probe finding (no code, DECISION COROLLARY):** `/events?status=settled` reaches political
+markets (135/200 events) but per-event settled-market retrieval is thin/concentrated (11/40 events,
+87 markets, one contributing 52). Binding unknown = the co-listed Polymarket⟷Kalshi MATCH count.
+Sharpened next step: a cross-venue match probe via the existing `cross_venue_matcher` before any
+fetcher/backtest build.
+
+**Gotcha recorded:** do NOT `git checkout` a different branch in the MAIN worktree while audit
+subagents are reading files on disk — it reverts branch-specific files out from under them. Use a
+separate `git worktree` (as this run's bookkeeping PR did) for parallel branch work.
+
+**Next:** EXP-006b (FRESH pre-registered OOS of the high-threshold fade on NEW data); EXP-007
+momentum (N=19, file only); B8 cross-venue match probe. Binding constraint unchanged: no validated
+real-money OOS edge on any mechanism. Signal: honest null, value-bar-clearing.

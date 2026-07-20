@@ -3578,3 +3578,73 @@ value-bar-clearing success (steer + §2), not a failure.
 3. B8: add the events-by-category → markets-by-event Kalshi query path + the common-instant
    leakage-safe snapshot, THEN the coherence backtest (egress open; the consumer + fetcher path
    should ship together as one focused unit).
+
+## 2026-07-20 — EXP-006 pre-registered CONFIG ROBUSTNESS SURFACE: FAMILY-NULL-STRONG (0/60) + B8 cross-venue live-probe finding. NO edge. Binding constraint unchanged.
+
+**The run that answers #390's open question.** The first real-data EXP-006 fade-the-spike run
+(#390) reported EDGE-NOT-PROVEN at the DEFAULT config (N=108, +$285.44, F11 indistinguishable,
+F10 fragile) and filed as its #1 next step: *is that null a fluke of the default knobs, or
+config-family-wide?* This run built + ran the pre-registered robustness surface that answers it.
+
+**PR — EXP-006 config robustness surface** (new pure/deterministic `spike_robustness_surface.py`
++ CLI `run_spike_robustness_surface.py` + 14 offline tests registered in the gate +
+`exp006_robustness_surface` SELF_VALIDATION capability + result doc
+`EXP006_ROBUSTNESS_SURFACE.md`). A sweep of the leakage-safe, cost-net, F10/F11-gated fade
+engine over a FIXED 5×4×3 = 60-cell grid (threshold ∈ {0.05,0.08,0.10,0.15,0.20} × window ∈
+{30m,1h,2h,6h} × horizon ∈ {6h,12h,24h}, bracketing the default) on the SAME committed corpus.
+Report-all-cells, select-none.
+
+- **RESULT: `FAMILY-NULL-STRONG` — 0 of 60 cells validate.** 0 F11 significant_positive; **18
+  significant_NEGATIVE**; 15 indistinguishable; 27 insufficient_data (N<100). Net-PnL range
+  −$2,257 … +$1,198, median −$64. **Every powered cell (N≥100) is indistinguishable-from-zero or
+  significantly negative; and every one of the 14 positive-PnL cells is ALSO F10-gate-fragile (0
+  broad)** — the positive region (high-threshold / 1h corner, N=56–96) is doubly disqualified
+  (underpowered/indistinguishable AND concentrated). **The default's EDGE-NOT-PROVEN is
+  config-family-wide, not a default artifact** — a strictly stronger refutation than #390's
+  single cell. EXP-006 fade-the-spike now joins the bucket-calibration family as REFUTED on real
+  data.
+- **HONEST BY CONSTRUCTION.** In-sample (one committed corpus) ⇒ no cell can be a validated edge,
+  however green; selection is refused as p-hacking in code (family verdict never sets a
+  validated-edge flag, never reaches a revenue field; conservative chance-green expectation
+  ≈K·α/2 = 1.5, moot at 0 green). Horizons ≤24h so the engine's horizon-axis F10 exclusion is
+  fair per cell; categories passed through so the F10 category axis engages (stricter than #390).
+  Default cell reproduces #390 bit-for-bit.
+- **Two-gate readiness PASSED.** (1) `scripts/preflight.sh code` GREEN (14 surface tests +
+  engine tests in the curated gate; ruff correctness-clean; runtime harness PASSED;
+  self-validation 15 caps, unmet=[]); deterministic re-run reproduces identically. (2) 3 FRESH
+  adversarial Opus auditors + 2 Sonnet reviewers. The honesty/p-hacking auditor + a Sonnet
+  reviewer independently caught a real defect — the displayed F10 column copied the RAW
+  horizon-INCLUSIVE `regime.fragile`, not the horizon-EXCLUDED GATE F10 that `is_validated_edge`
+  uses (a false "copied verbatim" self-description; conservative bias, could not manufacture an
+  edge). FIXED before merge: the engine now exposes `f10_gate_ok`/`f10_gate_reasons` and the
+  surface tabulates that (tri-stated; a validated cell can never read fragile). A correctness
+  auditor + a Sonnet reviewer caught wrong doc summary counts (12/30 → 15/27) and a false "Filed
+  to ROADMAP" claim — both FIXED. A 4th FRESH Opus confirmation auditor verified the fixes are
+  sound with no new inconsistency. The scorecard/safety-reconcile auditor returned SOUND (no
+  ship-critical gap; maker≠checker preserved; no revenue field; no go-live tick).
+
+**B8 cross-venue live-probe finding (egress open; NO code shipped — DECISION COROLLARY).** The
+`/markets?status=settled` feed is 100% sports; `/events?status=settled` DOES carry `category`
+and reaches political markets (135/200 settled events on page 1 are Politics/Elections). BUT
+per-event settled-MARKET retrieval is thin + concentrated: of 40 sampled settled political
+events, only 11 yielded ≥1 reachable market via `/markets?event_ticker=…` (87 markets total, one
+event `KXTRUMPPARDONS` contributing 52). So the events-by-category discovery path is necessary
+but NOT sufficient; the binding unknown for B8 is the co-listed Polymarket↔Kalshi MATCH count
+(differing ticker/strike semantics), not the raw Kalshi count. Building the fetcher + coherence
+backtest now would reach a tiny, mostly-unmatched universe = the speculative skeleton the ROADMAP
++ DECISION COROLLARY forbid. **Sharpened next step:** a cross-venue MATCH probe — pull the
+reachable settled political Kalshi markets (full pagination+dedup) + resolved Polymarket
+political markets, run the EXISTING `cross_venue_matcher.match_markets`, and COUNT true co-listed
+pairs; only a usable N unblocks the common-instant snapshot + coherence backtest.
+
+**Binding constraint STANDS: `business_case_strength = B`, no validated real-money OOS edge on
+any tested mechanism.** engine_pct unchanged. An honest config-family-wide null with the specific
+next step filed IS a value-bar-clearing result (steer + §2), not a failure.
+
+**NEXT buildable steps (filed):**
+1. EXP-006b: a FRESH pre-registered OOS of the high-threshold (0.15–0.20) fade variant on
+   new/larger political data — the only underpowered-positive corner (the threshold is a
+   decision-time knob, so it is legitimately pre-registrable, unlike the post-hoc magnitude
+   carve-out). Pre-register threshold+N before fetching; do NOT reuse the committed corpus.
+2. EXP-007 momentum (ride-the-spike): still N=19 on #390's ≥0.40 band — below floor; file, don't build.
+3. B8 cross-venue MATCH probe (above) — the co-listed match count gates any further B8 build.
