@@ -154,11 +154,20 @@ SELF_VALIDATION:
       ci_validatable: true             # fully validated in-gate with no secret — committed data replayed deterministically
       real_flow_note: "The frozen corpus is REAL leakage-safe resolved-market data (the fetcher RAISES rather than fabricating a decision price; the settled outcome is NEVER the decision price). It carries NO edge claim — the committed corpus's B4a alpha is F11 significant_NEGATIVE (net -$3,228 OOS, 95% CI excludes 0 on the negative side), an honest REFUTATION made reproducible, not an edge. `liquidity` is stored as null: Gamma's `liquidity` is a USD metric, NOT order-book contract-depth, so it is deliberately NOT mapped onto HistoricalMarket.liquidity — mapping it would be a units fabrication that would activate the uncalibrated market-impact path with wrong-units depth."
       status: validated
+    - id: exp006_robustness_surface
+      desc: "EXP-006 pre-registered (threshold × window × horizon) config robustness surface over the committed spike corpus — answers whether the default's EDGE-NOT-PROVEN is config-fragile or config-family-wide, WITHOUT ever claiming an edge (in-sample; report-all-cells, select-none)"
+      validates_via: "test_spike_robustness_surface.py (REGISTERED in the blocking gate): asserts the 5×4×3=60-cell pre-registered grid, deterministic re-run, that the default cell TABULATES the standalone fade engine verbatim (never re-derives the gate), that a momentum corpus yields FAMILY-NULL-STRONG, and that the surface NEVER exposes a revenue / validated-edge field at the family level (selection is refused)."
+      mode: committed_artifact         # pure offline sweep of the committed corpus via the already-validated fade engine — no network, no credentials
+      requires_env: []                 # NONE — reuses data/spike_corpus_politics.json.gz + the deterministic engine
+      active: true
+      ci_validatable: true             # fully validated in-gate with no secret — committed corpus + seeded engine reproduce identically
+      real_flow_note: "This capability carries NO edge claim and reaches NO revenue field. It reuses the SINGLE committed corpus, so it is a WITHIN-SAMPLE config-sensitivity map by construction — no cell can be a validated edge, however green, and selecting the greenest cell is refused as p-hacking. Its only outputs are a family verdict (FAMILY-NULL-* / HYPOTHESES-FLAGGED-NOT-AN-EDGE) and, at most, hypotheses for a FRESH pre-registered OOS on NEW data. The critical honesty path (that a green cell is never promoted to an edge) is exercised directly by the test."
+      status: validated
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 14
+    capabilities_total: 15
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
