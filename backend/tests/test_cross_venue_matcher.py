@@ -511,13 +511,23 @@ def test_structured_strike_missing_defining_bound_is_none():
     assert extract_threshold_from_structured_strike(m) is None
 
 
-def test_structured_strike_non_price_stays_plain():
-    """Without a currency/percent cue in its own text, a structured strike is 'plain' and
-    can never spuriously match a currency market (honesty: tightening-only)."""
+def test_structured_strike_non_price_is_refused():
+    """Without a currency/percent cue in its own text, a structured strike has no confident
+    unit and is REFUSED (None) — a bare-number 'plain' threshold could license a
+    magnitude-only false pairing (the cardinal sin), so we never emit one."""
     m = _kalshi_struct_mkt("k", "High temperature in NYC on Jul 20?", 0.4,
                            floor_strike=95.0, strike_type="greater", category="Climate")
-    t = extract_threshold_from_structured_strike(m)
-    assert t is not None and t.unit == "plain"
+    assert extract_threshold_from_structured_strike(m) is None
+
+
+def test_structured_strike_plain_vs_plain_collision_refused():
+    """A magnitude-only coincidence between two UNRELATED 'bitcoin' markets (a Kalshi
+    structured 'hashrate 95000' vs a Polymarket 'forum members > 95000') must NOT produce a
+    match — refusing 'plain' structured strikes closes this fabricated-disagreement hole."""
+    kalshi = _kalshi_struct_mkt("k", "Bitcoin network hashrate settlement", 0.5,
+                                floor_strike=95000.0, strike_type="greater", category="Crypto")
+    poly = _mkt("poly", "Will Bitcoin forum membership exceed 95000 by Dec 2026?", 0.4)
+    assert match_markets(poly, kalshi) is None
 
 
 def test_no_structured_fields_returns_none():

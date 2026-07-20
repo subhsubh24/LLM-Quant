@@ -326,6 +326,15 @@ def _infer_structured_unit(market: "Market") -> str:
     return "plain"
 
 
+def _is_finite_number(x) -> bool:
+    """True iff ``x`` is a real, finite int/float. Type-safe: a non-numeric value (e.g. a
+    raw string that skipped ``_to_float``) returns False rather than raising, so the
+    docstring's 'a non-finite value yields None' holds even if ``Market`` is constructed
+    from unsanitized structured fields somewhere other than ``kalshi_client._parse_market``.
+    """
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
 def extract_threshold_from_structured_strike(market: "Market") -> Optional[Threshold]:
     """Extract a :class:`Threshold` from a venue's STRUCTURED strike fields
     (``floor_strike`` / ``cap_strike`` / ``strike_type``), or ``None``.
@@ -333,11 +342,26 @@ def extract_threshold_from_structured_strike(market: "Market") -> Optional[Thres
     Kalshi crypto/scalar markets carry a GENERIC title ("Bitcoin price on Jul 20, 2026?")
     so :func:`extract_threshold` (title-text) returns None, while the real strike lives
     ONLY in the structured fields. This reads that structured strike so such a market can
-    pair against a Polymarket market whose strike IS in its title. It NEVER fabricates: a
-    range strike ("between", both bounds present), a missing/unknown/functional
+    pair against a Polymarket market whose strike IS in its title. It NEVER fabricates a
+    pairing: a range strike ("between", both bounds present), a missing/unknown/functional
     ``strike_type``, a bound-less directional type, or a non-finite value all yield
-    ``None`` (refuse to guess). The unit is inferred conservatively from the market's own
-    text (:func:`_infer_structured_unit`).
+    ``None`` (refuse to guess).
+
+    CRITICAL — refuses a ``"plain"`` (unit-less) strike. The structured fields carry only a
+    NUMBER, so a strike whose market text gives no currency/percent cue has no confident
+    unit. A bare-number "plain" threshold would let a magnitude-only coincidence license a
+    match (e.g. a Kalshi "hashrate ≥ 95000" pairing a Polymarket "forum members > 95000"
+    on the shared token "bitcoin") — a FABRICATED cross-venue disagreement, the cardinal
+    sin. B8's target markets (crypto/price) always carry a ``$``/``price`` cue →
+    ``"currency"``, so refusing ``"plain"`` loses no target coverage and closes the hole
+    (tightening-only). Only a ``currency`` or ``percent`` structured strike yields a
+    threshold.
+
+    NOTE (semantic scope, ROADMAP B8 step iii — NOT yet done): a returned threshold is a
+    same-STRIKE candidate only. It does NOT classify the resolution MECHANIC (Kalshi
+    KXBTCMAXY barrier / KXBTCD daily-terminal vs. Polymarket touch), so a pair that clears
+    the matcher is a SEMANTICALLY-UNCLASSIFIED candidate — the touch/barrier/terminal
+    classifier must still gate any pair before it is used for an OOS/edge claim.
     """
     strike_type = getattr(market, "strike_type", None)
     if not strike_type:
@@ -346,9 +370,12 @@ def extract_threshold_from_structured_strike(market: "Market") -> Optional[Thres
     floor = getattr(market, "floor_strike", None)
     cap = getattr(market, "cap_strike", None)
     unit = _infer_structured_unit(market)
-    if st in _GREATER_STRIKE_TYPES and floor is not None and math.isfinite(floor):
+    if unit == "plain":
+        # No confident unit signal → refuse (do not license a magnitude-only match).
+        return None
+    if st in _GREATER_STRIKE_TYPES and _is_finite_number(floor):
         return Threshold(value=float(floor), unit=unit, direction="up")
-    if st in _LESS_STRIKE_TYPES and cap is not None and math.isfinite(cap):
+    if st in _LESS_STRIKE_TYPES and _is_finite_number(cap):
         return Threshold(value=float(cap), unit=unit, direction="down")
     # "between"/range, "functional"/"custom"/"structured"/"unknown", or a directional
     # type with its defining bound absent → no confident single strike.
