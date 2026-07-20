@@ -138,9 +138,22 @@ def _orchestrator():
     # scanner=None → no deployed strategies seeded; executor dry-run paper.
     from app.prediction_markets.orchestrator import PredictionMarketOrchestrator
     from app.prediction_markets.execution import get_executor
-    return PredictionMarketOrchestrator(
+    from app.prediction_markets.strategy_registry import StrategyRegistry
+    from app.prediction_markets.strategy_registry_store import _NoOpStrategyRegistryStore
+
+    orch = PredictionMarketOrchestrator(
         scanner=None, executor=get_executor(dry_run=True)
     )
+    # TEST ISOLATION (was a flaky-required-gate bug): the orchestrator's default
+    # StrategyRegistryStore() persists to the SHARED app DB, so an alpha proposed in one
+    # test (`exp_alpha`) leaked into the next orchestrator instance via .load() —
+    # producing order/DB-state-dependent "already exists" failures that made the preflight
+    # gate nondeterministic (green on one run, red on the next). Rebind each test's
+    # orchestrator to a fresh in-memory registry + a no-op (never-persist) store so the 3
+    # orchestrator tests below are hermetic. Production keeps the durable store untouched.
+    orch._strategy_registry = StrategyRegistry()
+    orch._registry_store = _NoOpStrategyRegistryStore()
+    return orch
 
 
 def test_orchestrator_propose_then_legal_transition():
