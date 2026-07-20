@@ -3007,3 +3007,17 @@ separate `git worktree` (as this run's bookkeeping PR did) for parallel branch w
 **Next:** EXP-006b (FRESH pre-registered OOS of the high-threshold fade on NEW data); EXP-007
 momentum (N=19, file only); B8 cross-venue match probe. Binding constraint unchanged: no validated
 real-money OOS edge on any mechanism. Signal: honest null, value-bar-clearing.
+
+---
+
+## 2026-07-20b — B8 quote path unblocked (Kalshi schema drift) + a flaky required gate fixed; 3 code PRs
+
+**What shipped:** #395 (register `test_walk_forward_category_cap.py` — false-coverage close on the ACTIVE per-category exposure cap), #397 (kalshi_client dual quote-schema fix + `series_ticker` filter + MATCH probe), #398 (test-isolation fix for the nondeterministic preflight gate).
+
+**Incident 1 — Kalshi ingest was 100% dead against the live API (schema drift).** The client read integer-cents quote fields (`yes_bid`/`yes_ask`/`last_price`/`volume`) that the live elections API now returns as `null`; the real quote moved to `*_dollars` list-feed fields (`yes_bid_dollars`/… , each already a YES prob in [0,1]) + `volume_fp`. Every live Kalshi market parsed `has_quote=False → active=False`, silently killing the B8 quote path (the matcher gates on `active`). This CORRECTS five prior B8 probes that concluded "quotes live only in `/markets/{ticker}/orderbook`" — they don't; the list feed carries them, just under new field names. LESSON: an ingest adapter validated OFFLINE against a documented contract can silently rot when the venue changes field names — a live smoke that asserts `>0 tradeable markets` would have caught it. Fix reads cents-then-dollars, honesty-preserving; live-verified KXBTCMAXY 0→7 tradeable, 415 tradeable crypto markets.
+
+**Incident 2 — a NONDETERMINISTIC blocking gate.** `test_learning_loop_wiring.py`'s orchestrator tests build an orchestrator whose default `StrategyRegistryStore()` persists to `sqlite:///./quantlab.db` (shared, on-disk), so `exp_alpha` leaked across tests → order/DB-state-dependent `IllegalTransition` failures. `preflight.sh code` (the required check) was green one run, red the next, with no code change. Rebind each test orchestrator to a fresh in-memory registry + no-op store (test-only). LESSON: a required gate that touches a shared durable store is a latent flake; hermetic per-test isolation is mandatory.
+
+**Follow-up filed (both #398 reviewers, non-blocking):** `test_orchestrator_seeds_deployed_strategies_as_proposed` (a 4th orchestrator test in the same file) still uses the real durable store — leak-safe TODAY (it seeds with `if name not in registry` and only asserts `state=="proposed"`) but non-hermetic. A module-scoped autouse fixture patching the store construction for every orchestrator instantiation would isolate the whole file DRY-ly. A future run can convert the per-helper rebind to that fixture.
+
+**B8 status:** quote blocker GONE; the ONE remaining blocker is now precisely the structured-strike parser (`floor_strike`→`Threshold`) + a targeted Polymarket crypto universe + touch/barrier/terminal classifier — evidenced by the MATCH probe (0 pairs because Kalshi crypto titles are generic so `extract_threshold` yields None). Signal: honest B8 advance + a real ingest/gate repair, value-bar-clearing. Binding constraint unchanged: business_case_strength B, no validated OOS edge.
