@@ -9,12 +9,21 @@ CAPABILITY: kalshi_market_data (no credential required — public data only).
 API shape (Kalshi elections base):
   GET /markets
     -> { "markets": [ { ticker, title, subtitle,
-                        yes_bid, yes_ask, no_bid, no_ask,
-                        volume, open_time, close_time,
+                        yes_bid, yes_ask, last_price,               # LEGACY cents [0,100]
+                        yes_bid_dollars, yes_ask_dollars,           # CURRENT $ [0,1] = prob
+                        last_price_dollars, volume, volume_fp,
+                        open_time, close_time,
                         status, result, category, ... } ] }
 
-Kalshi prices are integer cents in [0, 100]; we divide by 100 to get [0, 1].
-Binary markets have YES and NO outcomes; neg_risk is always False (N/A for binary).
+QUOTE SCHEMA (dual — see _yes_probability_from_quotes): Kalshi exposes BOTH a legacy
+integer-cents quote (``yes_bid``/``yes_ask``/``last_price`` in [0,100], ÷100 -> prob) and a
+current dollar-string quote (``yes_bid_dollars``/``yes_ask_dollars``/``last_price_dollars``,
+each already an implied YES probability in [0,1]). As of 2026-07 the LIVE elections API
+returns the cents fields as ``null`` and carries the real quote ONLY in ``*_dollars`` — so a
+cents-only read marked every live market untradeable. The parser prefers whichever schema
+yields a usable, strictly-positive quote (cents first for back-compat, then dollars) and
+never fabricates a midpoint from a one-sided/zero book. Binary markets have YES and NO
+outcomes; neg_risk is always False (N/A for binary).
 
 INJECTABLE SESSION — accept a ``requests.Session``-like so tests pass a FakeSession.
 EVERY outbound call uses ``timeout=15`` (a hard rule — never omit).
@@ -42,13 +51,12 @@ KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 REQUEST_TIMEOUT = 15
 
 # Kalshi market lifecycle `status` values, per the documented trade-API contract.
-# IMPORTANT (honesty caveat): the loop's environment blocks Kalshi egress, so this
-# mapping is validated OFFLINE against the DOCUMENTED contract only — it is NOT yet
-# confirmed against a live Kalshi response. The OWNER must verify the exact status
-# strings on the first real run (an unrecognized status is logged LOUDLY below so a
-# contract mismatch surfaces immediately rather than silently dropping every market).
-# A response market is tradeable with `status: "active"` (NOT "open" — "open" is the
-# request-side FILTER value); resolved markets are "settled"/"finalized"/"determined".
+# LIVE-CONFIRMED (2026-07): a real /markets?status=open response returns items with
+# `status: "active"` (NOT "open" — "open" is the request-side FILTER value). The
+# remaining strings (settled/finalized/closed/…) are still validated OFFLINE against the
+# DOCUMENTED contract and not each exercised live; an unrecognized status is logged
+# LOUDLY below so a contract mismatch surfaces immediately rather than silently dropping
+# (or mis-trading) markets. Resolved markets are "settled"/"finalized"/"determined".
 _ACTIVE_STATUSES = frozenset({"active", "open"})            # tradeable now
 _RESOLVED_STATUSES = frozenset({"settled", "finalized", "determined"})  # winner decided
 _CLOSED_STATUSES = frozenset({"closed"})                    # trading ended, not yet determined
@@ -109,6 +117,7 @@ class KalshiClient:
         cursor: Optional[str] = None,
         status: Optional[str] = None,
         category: Optional[str] = None,
+        series_ticker: Optional[str] = None,
     ) -> List[Market]:
         """Fetch markets from Kalshi's public /markets endpoint.
 
@@ -117,6 +126,10 @@ class KalshiClient:
             cursor: Pagination cursor returned by a previous call (None = first page).
             status: Filter by market status (e.g. "open", "closed", "settled").
             category: Filter by category slug.
+            series_ticker: Restrict to one series (e.g. ``"KXBTCMAXY"``). The B8 co-listed
+                numeric universe (BTC/ETH/Fed strikes) is reachable ONLY per-series — the
+                unfiltered list is dominated by multi-leg cross-category combos — so this is
+                the per-series discovery step of the pinned dual-venue quote path.
 
         Returns:
             List of ``Market`` objects (same shape as PolymarketClient output).
@@ -128,6 +141,8 @@ class KalshiClient:
             params["status"] = status
         if category:
             params["category"] = category
+        if series_ticker:
+            params["series_ticker"] = series_ticker
 
         data = self._get(f"{self.base_url}/markets", params=params)
         if not data:
@@ -207,44 +222,26 @@ class KalshiClient:
         subtitle: str = str(raw.get("subtitle", ""))
         category: str = str(raw.get("category", ""))
 
-        # ---- Price conversion (cents -> probability) --------------------
-        # Kalshi prices are integer cents [0, 100]. Derive the YES price from the best
-        # available signal WITHOUT fabricating a midpoint from a one-sided book:
-        #   - both bid & ask quoted -> midpoint
-        #   - only one side quoted   -> that side (best available; never average with 0)
-        #   - neither, but last_price-> last trade price
-        #   - no usable price at all -> NOT tradeable (see has_quote below); never
-        #     manufacture a fake 50/50 market (a deep-audit finding: a 0/0 book used to
-        #     fall through to 0.5 and pass DataQualityValidator as a tradeable market).
-        yes_bid = _to_float(raw.get("yes_bid"))
-        yes_ask = _to_float(raw.get("yes_ask"))
-        last_price = _to_float(raw.get("last_price"))
-        # Bound bid/ask to the documented cent range (0, 100] — the SAME bound the
-        # last_price branch already applies below. Without the upper bound an
-        # out-of-range/garbage quote (e.g. yes_bid=150, an API glitch or contract
-        # change) would pass a bare `> 0`, feed yes_mid_cents, and CLAMP to a
-        # fabricated certain-outcome price (150/100 -> min(1.0) = 1.0 YES) — a
-        # tradeable market invented from garbage (the data analog of a fake fill /
-        # the #101 "a missing quote is not a 50/50 market" honesty rule). A rejected
-        # side falls through to has_quote=False -> untradeable, never a fabricated 1.0.
-        bid_ok = yes_bid is not None and 0 < yes_bid <= 100
-        ask_ok = yes_ask is not None and 0 < yes_ask <= 100
-        has_quote = True
-        if bid_ok and ask_ok:
-            yes_mid_cents = (yes_bid + yes_ask) / 2.0
-        elif bid_ok:
-            yes_mid_cents = yes_bid
-        elif ask_ok:
-            yes_mid_cents = yes_ask
-        elif last_price is not None and 0.0 < last_price <= 100.0:
-            yes_mid_cents = last_price
-        else:
-            yes_mid_cents = 50.0   # neutral placeholder ONLY — forced untradeable below
-            has_quote = False
-        yes_price = max(0.0, min(1.0, yes_mid_cents / 100.0))
+        # ---- Price conversion (best available quote -> probability) ------
+        # Kalshi ships TWO quote schemas in the wild and we support BOTH (see
+        # _yes_probability_from_quotes): the LEGACY integer-cents fields
+        # (yes_bid/yes_ask/last_price in [0,100]) and the CURRENT dollar-string fields
+        # (yes_bid_dollars/yes_ask_dollars/last_price_dollars, each an implied YES
+        # probability in [0,1] on a $1-settling contract). As of 2026-07 the live
+        # elections API returns the cents fields as null and carries the real quote ONLY
+        # in the *_dollars fields, so reading cents alone marked EVERY live market
+        # untradeable. The derivation NEVER fabricates a midpoint from a one-sided or
+        # zero/out-of-range book — a market with no usable quote on either schema is
+        # forced untradeable rather than presenting a fake 50/50 (#101 honesty rule).
+        yes_price, has_quote = _yes_probability_from_quotes(raw)
         no_price = 1.0 - yes_price
 
-        volume = _to_float(raw.get("volume")) or 0.0
+        # Volume: legacy `volume` (a plain number) else current `volume_fp` (a fixed-point
+        # string); either is coerced to a finite float, defaulting to 0.0.
+        volume = _to_float(raw.get("volume"))
+        if volume is None:
+            volume = _to_float(raw.get("volume_fp"))
+        volume = volume or 0.0
 
         # ---- Status mapping --------------------------------------------
         # See the module-level _*_STATUSES sets + the honesty caveat there. An
@@ -324,6 +321,57 @@ class KalshiClient:
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
+def _yes_probability_from_quotes(raw: dict) -> tuple[float, bool]:
+    """Derive the YES probability in [0, 1] + a ``has_quote`` flag from either Kalshi
+    quote schema, WITHOUT fabricating a midpoint from a one-sided or zero/garbage book.
+
+    Kalshi exposes two schemas: the LEGACY integer-cents fields
+    (``yes_bid``/``yes_ask``/``last_price`` in (0, 100]) and the CURRENT dollar-string
+    fields (``yes_bid_dollars``/``yes_ask_dollars``/``last_price_dollars``, each already an
+    implied YES probability in (0, 1] on a $1-settling contract). As of 2026-07 the live
+    elections API returns the cents fields as ``null`` and quotes ONLY in ``*_dollars``, so
+    a cents-only read marked every live market untradeable. Preference order (cents first
+    for back-compat, then dollars), each branch requiring a STRICTLY-POSITIVE in-range
+    quote so a 0 / missing / out-of-range side can never invent a tradeable price:
+
+        both bid & ask -> midpoint;  one side -> that side;  else -> last trade price.
+
+    Returns ``(0.5, False)`` when NEITHER schema yields a usable quote — a neutral
+    placeholder the caller forces untradeable, never a fabricated 50/50 (#101 honesty rule).
+    """
+    # Legacy integer cents in (0, 100] -> /100. The upper bound rejects a garbage quote
+    # (e.g. yes_bid=150) that a bare `> 0` would clamp to a fabricated certain outcome.
+    yb, ya = _to_float(raw.get("yes_bid")), _to_float(raw.get("yes_ask"))
+    lp = _to_float(raw.get("last_price"))
+    bid_ok = yb is not None and 0 < yb <= 100
+    ask_ok = ya is not None and 0 < ya <= 100
+    if bid_ok and ask_ok:
+        return max(0.0, min(1.0, (yb + ya) / 200.0)), True
+    if bid_ok:
+        return max(0.0, min(1.0, yb / 100.0)), True
+    if ask_ok:
+        return max(0.0, min(1.0, ya / 100.0)), True
+    if lp is not None and 0 < lp <= 100:
+        return max(0.0, min(1.0, lp / 100.0)), True
+
+    # Current dollar strings — already a probability in (0, 1]; the same (0, 1] bound
+    # rejects a "0.0000" placeholder (untradeable) and any out-of-range garbage.
+    dyb, dya = _to_float(raw.get("yes_bid_dollars")), _to_float(raw.get("yes_ask_dollars"))
+    dlp = _to_float(raw.get("last_price_dollars"))
+    dbid_ok = dyb is not None and 0 < dyb <= 1
+    dask_ok = dya is not None and 0 < dya <= 1
+    if dbid_ok and dask_ok:
+        return max(0.0, min(1.0, (dyb + dya) / 2.0)), True
+    if dbid_ok:
+        return dyb, True
+    if dask_ok:
+        return dya, True
+    if dlp is not None and 0 < dlp <= 1:
+        return dlp, True
+
+    return 0.5, False
+
+
 def _to_float(value: Any) -> Optional[float]:
     """Coerce a value to a FINITE float, returning None on failure.
 

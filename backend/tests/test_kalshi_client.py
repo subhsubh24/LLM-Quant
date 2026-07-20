@@ -311,6 +311,132 @@ def test_out_of_range_bid_falls_back_to_valid_ask():
 
 
 # ---------------------------------------------------------------------------
+# CURRENT dollar-string quote schema (yes_bid_dollars / yes_ask_dollars / ...).
+# As of 2026-07 the live elections API returns the legacy cents fields as null and
+# carries the real quote ONLY in the *_dollars fields (each already a probability in
+# [0,1]). A cents-only read marked EVERY live market untradeable — these lock in the
+# dual-schema behaviour + the honesty rule (a 0/missing dollar quote is not a 50/50).
+# ---------------------------------------------------------------------------
+def _dollar_raw_market(
+    ticker="KXBTCMAXY-26DEC31-99999.99",
+    title="Will BTC reach $100k?",
+    status="active",
+    yes_bid_dollars="0.1400",
+    yes_ask_dollars="0.1500",
+    last_price_dollars=None,
+    volume_fp="1185441.10",
+    close_time="2026-12-31T12:00:00Z",
+):
+    """A raw Kalshi market in the CURRENT schema: cents fields null, quotes in *_dollars."""
+    raw = {
+        "ticker": ticker,
+        "title": title,
+        "subtitle": "",
+        "yes_bid": None,
+        "yes_ask": None,
+        "last_price": None,
+        "volume": None,
+        "status": status,
+        "result": "",
+        "category": "Crypto",
+        "close_time": close_time,
+        "yes_bid_dollars": yes_bid_dollars,
+        "yes_ask_dollars": yes_ask_dollars,
+        "volume_fp": volume_fp,
+    }
+    if last_price_dollars is not None:
+        raw["last_price_dollars"] = last_price_dollars
+    return raw
+
+
+def test_dollar_schema_midpoint_prices_the_market():
+    """cents null, yes_bid_dollars=0.14 / yes_ask_dollars=0.15 -> YES mid = 0.145."""
+    raw = _dollar_raw_market()
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is True  # a real dollar quote keeps it tradeable
+    assert abs(m.outcomes[0].price - 0.145) < 1e-9
+    assert abs((m.outcomes[0].price + m.outcomes[1].price) - 1.0) < 1e-9
+
+
+def test_dollar_schema_is_the_regression_guard_for_the_live_api():
+    """The exact live-API shape (cents all null) must NOT mark the market untradeable —
+    this is the bug the fix closes: a cents-only read returned has_quote=False here."""
+    raw = _dollar_raw_market(yes_bid_dollars="0.1000", yes_ask_dollars="0.1100")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is True
+    assert abs(m.outcomes[0].price - 0.105) < 1e-9
+
+
+def test_dollar_schema_one_sided_uses_quoted_side():
+    """Only yes_bid_dollars quoted -> use it (never average with a missing side)."""
+    raw = _dollar_raw_market(yes_bid_dollars="0.9500", yes_ask_dollars=None)
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is True
+    assert abs(m.outcomes[0].price - 0.95) < 1e-9
+
+
+def test_dollar_schema_last_price_fallback():
+    """No dollar book but a last_price_dollars -> use it (0.80)."""
+    raw = _dollar_raw_market(yes_bid_dollars=None, yes_ask_dollars=None,
+                             last_price_dollars="0.8000")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is True
+    assert abs(m.outcomes[0].price - 0.80) < 1e-9
+
+
+def test_zero_dollar_quote_is_forced_untradeable_not_fabricated_5050():
+    """A '0.0000' dollar quote is a no-book placeholder, NOT a tradeable 0% market —
+    it must fall through to untradeable, mirroring the 0-cent honesty rule."""
+    raw = _dollar_raw_market(yes_bid_dollars="0.0000", yes_ask_dollars="0.0000")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is False  # forced untradeable despite 'active' status
+    assert abs((m.outcomes[0].price + m.outcomes[1].price) - 1.0) < 1e-9
+
+
+def test_out_of_range_dollar_quote_rejected_not_clamped():
+    """A garbage dollar quote (>1, e.g. a schema glitch) must be REJECTED, never clamped
+    to a fabricated certainty."""
+    raw = _dollar_raw_market(yes_bid_dollars="1.5000", yes_ask_dollars="1.6000")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is False
+    assert m.outcomes[0].price != 1.0
+
+
+def test_legacy_cents_take_precedence_over_dollars_when_both_present():
+    """Back-compat: if BOTH schemas carry a usable quote, the legacy cents win (existing
+    callers/fixtures are unchanged). cents mid 0.50 beats dollars 0.145."""
+    raw = _dollar_raw_market()
+    raw["yes_bid"], raw["yes_ask"] = 48, 52  # legacy cents present
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert abs(m.outcomes[0].price - 0.50) < 1e-9
+
+
+def test_volume_fp_fallback_when_legacy_volume_null():
+    """Volume falls back to the fixed-point string field when legacy `volume` is null."""
+    raw = _dollar_raw_market(volume_fp="1234.50")
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert abs(m.total_volume - 1234.50) < 1e-9
+
+
+def test_no_quote_on_either_schema_is_untradeable():
+    """Neither cents nor dollars quoted -> untradeable, never a fabricated 50/50."""
+    raw = _dollar_raw_market(yes_bid_dollars=None, yes_ask_dollars=None)
+    m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
+    assert m.active is False
+
+
+def test_series_ticker_is_forwarded_as_a_query_param():
+    """Per-series discovery (the B8 co-listed numeric universe is reachable only
+    per-series) forwards series_ticker to the /markets query."""
+    session = FakeSession(_markets_response(_dollar_raw_market()))
+    KalshiClient(session=session).get_markets(series_ticker="KXBTCMAXY", status="open")
+    assert session.calls, "expected at least one HTTP call"
+    params = session.calls[0]["params"]
+    assert params.get("series_ticker") == "KXBTCMAXY"
+    assert session.calls[0]["timeout"] == 15  # the hard per-request deadline still holds
+
+
+# ---------------------------------------------------------------------------
 # fetched_at is timezone-aware UTC
 # ---------------------------------------------------------------------------
 def test_fetched_at_is_timezone_aware_utc():
