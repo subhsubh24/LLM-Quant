@@ -260,7 +260,8 @@ class KalshiClient:
         else:
             logger.warning(
                 "Kalshi market %s: unrecognized status %r — treating as untradeable. "
-                "Verify the live Kalshi status contract (egress-blocked offline).",
+                "A live response carries 'active'; the settled/closed strings are still "
+                "documented-only, so verify this string against the live contract.",
                 ticker, status_str,
             )
             active, closed, resolved = False, False, False
