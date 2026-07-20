@@ -271,6 +271,19 @@ class KalshiClient:
         if not has_quote:
             active = False
 
+        # ---- Structured strike (ROADMAP B8 cross-venue matching) -------
+        # Kalshi crypto/scalar markets carry a GENERIC title so the title-text strike
+        # parser finds nothing; the real strike lives ONLY in these structured fields.
+        # Capture them (finite-coerced) so cross_venue_matcher can pair such a market
+        # against a Polymarket market whose strike is in its title. Absent/garbage
+        # fields stay None — never fabricated (the caller refuses to guess a strike).
+        floor_strike = _to_float(raw.get("floor_strike"))
+        cap_strike = _to_float(raw.get("cap_strike"))
+        strike_type_raw = raw.get("strike_type")
+        strike_type = (
+            str(strike_type_raw).lower().strip() if strike_type_raw else None
+        ) or None
+
         # ---- End date --------------------------------------------------
         end_date: Optional[datetime] = None
         for date_field in ("close_time", "expiration_time", "open_time"):
@@ -316,6 +329,9 @@ class KalshiClient:
             tags=[category] if category else [],
             neg_risk=False,  # Kalshi binary markets: neg_risk is N/A
             fetched_at=fetched_at,
+            floor_strike=floor_strike,
+            cap_strike=cap_strike,
+            strike_type=strike_type,
         )
 
 

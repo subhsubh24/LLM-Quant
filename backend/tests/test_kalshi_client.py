@@ -545,3 +545,60 @@ def test_finite_volume_still_parsed():
     raw = _make_raw_market(volume="4200.5")
     m = KalshiClient(session=FakeSession(_markets_response(raw))).get_markets()[0]
     assert m.total_volume == 4200.5
+
+
+# ---------------------------------------------------------------------------
+# Structured strike parsing (ROADMAP B8) — floor_strike/cap_strike/strike_type
+# ---------------------------------------------------------------------------
+def test_parse_market_structured_strike_greater():
+    """A real-shaped Kalshi crypto market carries its strike ONLY in the structured
+    floor_strike/strike_type fields (generic title). The parser must capture them."""
+    raw = _make_raw_market(
+        ticker="KXBTCD-26JUL06-T72249.99",
+        title="Bitcoin price on Jul 6, 2026?",  # generic title, no strike in text
+        category="Financials",
+        yes_bid=3,
+        yes_ask=5,
+    )
+    raw["floor_strike"] = 72249.99
+    raw["strike_type"] = "greater"
+    client = KalshiClient(session=FakeSession(_markets_response(raw)))
+    m = client.get_markets(limit=10)[0]
+    assert m.floor_strike == 72249.99
+    assert m.cap_strike is None
+    assert m.strike_type == "greater"
+
+
+def test_parse_market_structured_strike_less():
+    """A cap-defined (<=) market captures cap_strike + strike_type."""
+    raw = _make_raw_market(ticker="KXETHD-26JUL06-C4000", title="Ethereum price?")
+    raw["cap_strike"] = 4000.0
+    raw["strike_type"] = "less"
+    client = KalshiClient(session=FakeSession(_markets_response(raw)))
+    m = client.get_markets(limit=10)[0]
+    assert m.cap_strike == 4000.0
+    assert m.floor_strike is None
+    assert m.strike_type == "less"
+
+
+def test_parse_market_no_strike_fields_defaults_none():
+    """A market with NO structured strike fields (e.g. a plain political market) leaves
+    all three fields None — backward-compatible with every pre-B8 payload."""
+    raw = _make_raw_market()  # no strike fields
+    client = KalshiClient(session=FakeSession(_markets_response(raw)))
+    m = client.get_markets(limit=10)[0]
+    assert m.floor_strike is None
+    assert m.cap_strike is None
+    assert m.strike_type is None
+
+
+def test_parse_market_strike_type_normalized_and_garbage_floor_is_none():
+    """strike_type is lower/stripped; a non-finite/garbage floor_strike coerces to None
+    (never fabricated) while a valid strike_type is still preserved."""
+    raw = _make_raw_market(ticker="KXBTCMAXY-26DEC31-T110000", title="Bitcoin max this year?")
+    raw["floor_strike"] = "not-a-number"
+    raw["strike_type"] = "  Greater  "
+    client = KalshiClient(session=FakeSession(_markets_response(raw)))
+    m = client.get_markets(limit=10)[0]
+    assert m.floor_strike is None  # garbage coerced away, not fabricated
+    assert m.strike_type == "greater"  # normalized

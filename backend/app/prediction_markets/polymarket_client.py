@@ -110,6 +110,18 @@ class Market:
     # backtest seed_hash (the walk-forward uses a separate HistoricalMarket type).
     volume_unavailable: bool = False
     liquidity_unavailable: bool = False
+    # Structured STRIKE fields (ROADMAP B8 cross-venue matching). Kalshi crypto/scalar
+    # markets carry a GENERIC title ("Bitcoin price on Jul 20, 2026?") so the title-text
+    # strike parser (``cross_venue_matcher.extract_threshold``) finds no strike, while the
+    # real strike lives ONLY in these structured fields. ``KalshiClient._parse_market``
+    # populates them from the venue's ``floor_strike``/``cap_strike``/``strike_type``;
+    # ``cross_venue_matcher`` reads them as a fallback so a structured-strike Kalshi market
+    # can pair against a Polymarket market whose strike IS in its title. Polymarket markets
+    # leave these ``None`` (their strike is title-borne). Defaulted so every existing
+    # constructor is unaffected; never enters a backtest seed_hash.
+    floor_strike: Optional[float] = None
+    cap_strike: Optional[float] = None
+    strike_type: Optional[str] = None
 
     def volume_below(self, floor: float) -> bool:
         """True iff this market's volume is KNOWN and strictly below ``floor``.
