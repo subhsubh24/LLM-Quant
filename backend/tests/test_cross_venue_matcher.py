@@ -19,6 +19,7 @@ from app.prediction_markets.cross_venue_matcher import (
     coherence_edge,
     evaluate_cross_venue_pairs,
     extract_threshold,
+    extract_threshold_from_structured_strike,
     find_cross_venue_matches,
     match_markets,
 )
@@ -441,3 +442,124 @@ def test_resolved_market_not_matched():
         total_volume=100.0, liquidity=100.0, active=False, closed=True, resolved=True,
     )
     assert find_cross_venue_matches([poly], [kal_resolved]) == []
+
+
+# --------------------------------------------------------------------------- #
+# Structured strike (ROADMAP B8) — extract_threshold_from_structured_strike +  #
+# the match-probe unblock: a generic-title Kalshi market pairs with a          #
+# title-strike Polymarket market via its floor_strike/strike_type.             #
+# --------------------------------------------------------------------------- #
+
+
+def _kalshi_struct_mkt(
+    mid: str,
+    question: str,
+    yes_price: float,
+    *,
+    floor_strike=None,
+    cap_strike=None,
+    strike_type=None,
+    category: str = "Financials",
+    end_date=_BASE,
+) -> Market:
+    """A Kalshi-shaped Market whose strike lives ONLY in the structured fields."""
+    return Market(
+        id=mid, condition_id=mid, question=question, slug=mid.lower(),
+        description="", category=category, end_date=end_date,
+        outcomes=[
+            Outcome(token_id=f"{mid}-YES", label="Yes", price=yes_price, midpoint=yes_price, volume=1000.0),
+            Outcome(token_id=f"{mid}-NO", label="No", price=1.0 - yes_price, midpoint=1.0 - yes_price, volume=1000.0),
+        ],
+        total_volume=1000.0, liquidity=0.0, active=True, closed=False, resolved=False,
+        resolution_source="kalshi",
+        floor_strike=floor_strike, cap_strike=cap_strike, strike_type=strike_type,
+    )
+
+
+def test_structured_strike_greater_maps_to_up_currency():
+    m = _kalshi_struct_mkt("k", "Bitcoin price on Jul 20, 2026?", 0.14,
+                           floor_strike=110000.0, strike_type="greater")
+    t = extract_threshold_from_structured_strike(m)
+    assert t is not None
+    assert t.value == 110000.0 and t.direction == "up" and t.unit == "currency"
+
+
+def test_structured_strike_less_maps_to_down():
+    m = _kalshi_struct_mkt("k", "Ethereum price at close?", 0.30,
+                           cap_strike=4000.0, strike_type="less")
+    t = extract_threshold_from_structured_strike(m)
+    assert t is not None
+    assert t.value == 4000.0 and t.direction == "down" and t.unit == "currency"
+
+
+def test_structured_strike_between_is_no_confident_strike():
+    """A range ("between", both bounds) is NOT a single strike — refuse to guess."""
+    m = _kalshi_struct_mkt("k", "Bitcoin price range?", 0.5,
+                           floor_strike=60000.0, cap_strike=70000.0, strike_type="between")
+    assert extract_threshold_from_structured_strike(m) is None
+
+
+def test_structured_strike_unknown_type_is_none():
+    m = _kalshi_struct_mkt("k", "Some functional market", 0.5,
+                           floor_strike=5.0, strike_type="functional")
+    assert extract_threshold_from_structured_strike(m) is None
+
+
+def test_structured_strike_missing_defining_bound_is_none():
+    """A 'greater' strike with no floor_strike has no defining bound → None."""
+    m = _kalshi_struct_mkt("k", "Bitcoin?", 0.5, cap_strike=100.0, strike_type="greater")
+    assert extract_threshold_from_structured_strike(m) is None
+
+
+def test_structured_strike_non_price_stays_plain():
+    """Without a currency/percent cue in its own text, a structured strike is 'plain' and
+    can never spuriously match a currency market (honesty: tightening-only)."""
+    m = _kalshi_struct_mkt("k", "High temperature in NYC on Jul 20?", 0.4,
+                           floor_strike=95.0, strike_type="greater", category="Climate")
+    t = extract_threshold_from_structured_strike(m)
+    assert t is not None and t.unit == "plain"
+
+
+def test_no_structured_fields_returns_none():
+    """A plain Polymarket-style market (no structured fields) → None (backward compat)."""
+    m = _mkt("poly", "Will Bitcoin be above $100k?", 0.2)
+    assert extract_threshold_from_structured_strike(m) is None
+
+
+def test_match_probe_unblock_generic_kalshi_pairs_with_title_strike_polymarket():
+    """THE B8 unblock, reproduced offline: a generic-title Kalshi crypto market (strike in
+    floor_strike only) now MATCHES a Polymarket market whose strike is in its title. Before
+    this change the Kalshi side yielded no threshold, so the specificity gate REJECTED the
+    pair (exactly one side strike-defined) — the measured root cause of the 0-match probe."""
+    poly = _mkt("poly1", "Will Bitcoin be above $110,000 by Dec 31, 2026?", 0.20,
+                end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    kalshi = _kalshi_struct_mkt("KXBTCMAXY-26DEC31-T110000",
+                                "Bitcoin price on Dec 31, 2026?", 0.14,
+                                floor_strike=110000.0, strike_type="greater",
+                                end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    match = match_markets(poly, kalshi)
+    assert match is not None
+    assert match.threshold is not None
+    assert match.threshold.value == 110000.0 and match.threshold.direction == "up"
+
+
+def test_match_probe_still_rejects_kalshi_with_no_structured_strike():
+    """Regression: a generic-title Kalshi market with NO structured strike still fails the
+    specificity gate against a title-strike Polymarket market — the fallback does not
+    weaken the gate; it only supplies a strike that genuinely exists."""
+    poly = _mkt("poly1", "Will Bitcoin be above $110,000 by Dec 31, 2026?", 0.20,
+                end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    kalshi_nostrike = _kalshi_struct_mkt("k", "Bitcoin price on Dec 31, 2026?", 0.14,
+                                         end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    assert match_markets(poly, kalshi_nostrike) is None
+
+
+def test_match_probe_rejects_mismatched_structured_strike():
+    """Two crypto markets whose strikes DISAGREE ($110k up vs $90k up) are still refused —
+    the structured strike is matched on magnitude, not merely presence."""
+    poly = _mkt("poly1", "Will Bitcoin be above $90,000 by Dec 31, 2026?", 0.40,
+                end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    kalshi = _kalshi_struct_mkt("k", "Bitcoin price on Dec 31, 2026?", 0.14,
+                                floor_strike=110000.0, strike_type="greater",
+                                end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    assert match_markets(poly, kalshi) is None
