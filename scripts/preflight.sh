@@ -109,6 +109,7 @@ if "$PY" -c "import pytest" 2>/dev/null; then
            backend/tests/test_llm_safety.py \
            backend/tests/test_persistence_rehydration_guard.py \
            backend/tests/test_walk_forward_category.py \
+           backend/tests/test_walk_forward_category_cap.py \
            backend/tests/test_bootstrap_oos_significance.py \
            backend/tests/test_per_category_diagnostics.py \
            backend/tests/test_manifold_history_fetcher.py \
