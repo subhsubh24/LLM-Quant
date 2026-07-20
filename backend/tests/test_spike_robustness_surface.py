@@ -56,6 +56,37 @@ def _corpus(n_markets: int, *, move: float, revert: float, direction: str = "UP"
     return out
 
 
+def _broad_reverting_corpus(n_markets: int = 140):
+    """A broad, deterministic corpus whose spikes PARTIALLY REVERT beyond round-trip cost — a
+    known injected edge the engine recovers as VALIDATED at the default cell. Bands + directions
+    are varied so the edge is broad (spread across confidence bands, weeks, both directions) and
+    the moderate 0.15 magnitude (< the 0.25 large-spike cut) keeps the size-robustness screen from
+    flagging it. Mirrors run_spike_reversal's synthetic demo."""
+    bands = [0.2, 0.3, 0.45, 0.6, 0.7, 0.8]
+    dirs = ["UP", "DOWN"]
+    move, revert = 0.15, 0.075
+    stagger, confirm_dt, forward_dt = 3 * 86400, 1800, 5400
+    out = {}
+    for i in range(n_markets):
+        band = bands[i % len(bands)]
+        direction = dirs[i % len(dirs)]
+        base = i * stagger
+        if direction == "UP":
+            confirm = 1.0 - band
+            baseline = confirm - move
+            forward = confirm - revert
+        else:
+            confirm = band
+            baseline = confirm + move
+            forward = confirm + revert
+        out[f"syn{i:04d}"] = [
+            {"t": base, "p": round(baseline, 4)},
+            {"t": base + confirm_dt, "p": round(confirm, 4)},
+            {"t": base + forward_dt, "p": round(forward, 4)},
+        ]
+    return out
+
+
 def test_default_grid_size_and_membership():
     surface = run_robustness_surface(_corpus(5, move=0.15, revert=0.075))
     assert surface.k_cells == (
@@ -135,11 +166,34 @@ def test_never_claims_edge_at_family_level():
 
 
 def test_within_chance_when_validated_not_beyond_chance():
-    # If some cells validate but not more than the chance ceiling, verdict is WITHIN-CHANCE.
-    surface = run_robustness_surface(_corpus(6, move=0.15, revert=0.075))
-    ceiling = math.ceil(surface.chance_green_expectation)
-    if 0 < surface.n_validated <= ceiling:
-        assert surface.family_verdict == "FAMILY-NULL-WITHIN-CHANCE"
+    # Land the WITHIN-CHANCE branch deterministically: a 1-cell grid over a broad reverting
+    # corpus validates its single cell (N>=100, F11 significant_positive, F10 non-fragile,
+    # hit>50%), so n_validated=1, chance_ceiling=ceil(1*alpha/2)=1, 1<=1 => WITHIN-CHANCE.
+    surface = run_robustness_surface(
+        _broad_reverting_corpus(140),
+        thresholds=[0.10],
+        windows_seconds=[3600],
+        horizons_seconds=[86400],
+    )
+    assert surface.k_cells == 1
+    assert surface.n_validated == 1, surface.cells[0]
+    assert math.ceil(surface.chance_green_expectation) == 1
+    assert surface.family_verdict == "FAMILY-NULL-WITHIN-CHANCE"
+    # And the validated cell is a HYPOTHESIS only — the summary flags it, never claims an edge.
+    assert "NOT an edge" in summarize(surface)
+
+
+def test_validated_cell_is_never_gate_fragile():
+    # The gate F10 column can never contradict validity: a validated cell is F10 non-fragile.
+    surface = run_robustness_surface(
+        _broad_reverting_corpus(140),
+        thresholds=[0.10],
+        windows_seconds=[3600],
+        horizons_seconds=[86400],
+    )
+    for c in surface.cells:
+        if c.is_validated_edge:
+            assert c.f10_gate_fragile is False
 
 
 def test_chance_expectation_is_k_times_half_alpha():
@@ -151,17 +205,19 @@ def test_chance_expectation_is_k_times_half_alpha():
     assert surface.chance_green_expectation == expected
 
 
-def test_categories_engage_f10_category_axis():
-    corpus = _corpus(10, move=0.2, revert=0.1)
-    cats = {mid: ("A" if i % 2 == 0 else "B") for i, mid in enumerate(sorted(corpus))}
+def test_categories_engage_f10_gate_category_axis():
+    # The GATE F10 engages the category axis only when labels are supplied. Put ALL markets in
+    # ONE category over a broad reverting corpus: with categories, a positive cell picks up a
+    # "category:" gate-fragility reason (100% in one category > 70%); without, the category axis
+    # is silently skipped so no such reason appears.
+    corpus = _broad_reverting_corpus(120)
+    cats = {mid: "OnlyCat" for mid in corpus}
     with_cats = run_robustness_surface(corpus, category_by_market=cats)
     without = run_robustness_surface(corpus)
-    # With categories supplied, at least one cell's F10 reasons reference the category axis
-    # (or the absence of the "no category labels" disclaimer that the no-cat run emits).
-    with_reasons = " ".join(r for c in with_cats.cells for r in c.f10_fragile_reasons)
-    without_reasons = " ".join(r for c in without.cells for r in c.f10_fragile_reasons)
-    assert "no category labels supplied" in without_reasons
-    assert "no category labels supplied" not in with_reasons
+    with_reasons = " ".join(r for c in with_cats.cells for r in c.f10_gate_reasons)
+    without_reasons = " ".join(r for c in without.cells for r in c.f10_gate_reasons)
+    assert "category:" in with_reasons
+    assert "category:" not in without_reasons
 
 
 def test_custom_small_grid():

@@ -67,7 +67,7 @@ def main() -> int:
             "n_positive_pnl": surface.n_positive_pnl,
             "n_f11_significant_positive": surface.n_f11_significant_positive,
             "n_f11_significant_negative": surface.n_f11_significant_negative,
-            "n_f10_fragile": surface.n_f10_fragile,
+            "n_f10_gate_fragile": surface.n_f10_gate_fragile,
             "default_cell": (
                 {
                     "threshold": surface.default_cell.threshold,
@@ -77,7 +77,7 @@ def main() -> int:
                     "total_pnl_usd": surface.default_cell.total_pnl_usd,
                     "hit_rate": surface.default_cell.hit_rate,
                     "f11_verdict": surface.default_cell.f11_verdict,
-                    "f10_fragile": surface.default_cell.f10_fragile,
+                    "f10_gate_fragile": surface.default_cell.f10_gate_fragile,
                     "is_validated_edge": surface.default_cell.is_validated_edge,
                 }
                 if surface.default_cell is not None else None
@@ -94,7 +94,8 @@ def main() -> int:
                     "hit_rate": c.hit_rate,
                     "f11_verdict": c.f11_verdict,
                     "f11_ci": [c.f11_ci_low, c.f11_ci_high],
-                    "f10_fragile": c.f10_fragile,
+                    "f10_gate_fragile": c.f10_gate_fragile,
+                    "f10_gate_reasons": list(c.f10_gate_reasons),
                     "size_robustness": c.size_robustness,
                     "is_validated_edge": c.is_validated_edge,
                 }
@@ -114,15 +115,16 @@ def main() -> int:
         }, indent=2))
     else:
         # Compact per-cell table then the honest family block.
-        print("threshold | window |  horizon |   N |   net PnL |   hit | F11                     | F10frag | VALID")
+        print("threshold | window |  horizon |   N |   net PnL |   hit | F11                     | F10gate | VALID")
         print("-" * 104)
         for c in surface.cells:
             mark = " *" if c.is_default else "  "
             hit = f"{c.hit_rate:.3f}" if c.hit_rate is not None else "  -  "
+            f10 = "n/a" if c.f10_gate_fragile is None else str(c.f10_gate_fragile)
             print(
                 f"{c.threshold:>8.2f}{mark}| {c.window_seconds:>5}s | {c.horizon_seconds:>7}s | "
                 f"{c.n_trades:>3} | {c.total_pnl_usd:>9,.2f} | {hit:>5} | "
-                f"{c.f11_verdict:<23} | {str(c.f10_fragile):>5}   | {c.is_validated_edge}"
+                f"{c.f11_verdict:<23} | {f10:>5}   | {c.is_validated_edge}"
             )
         print("-" * 104)
         print("(* = pre-registered DEFAULT cell)\n")

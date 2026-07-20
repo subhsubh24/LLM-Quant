@@ -269,6 +269,14 @@ class SpikeReversalResult:
                                            # "assessed…" / "UNASSESSED…" / "FRAGILE…" — so a reader
                                            # (or the JSON) can tell whether the largest-spike check
                                            # actually ran, without diffing runs.
+    # The GATE's F10 verdict (the one ``is_validated_edge`` actually uses): horizon-axis EXCLUDED
+    # while single-valued + size-robustness folded in — NOT the raw ``regime.fragile`` (which is
+    # horizon-INCLUSIVE and computed even on a non-positive aggregate). ``f10_gate_ok`` is None when
+    # there are no trades (regime is None); False with reason "aggregate net PnL <= 0" when there is
+    # no positive edge to assess; True/False otherwise. Exposed so a consumer (e.g. the robustness
+    # surface) can tabulate the SAME F10 the gate used instead of re-deriving or mis-showing it.
+    f10_gate_ok: Optional[bool]
+    f10_gate_reasons: tuple[str, ...]
     is_validated_edge: bool
     verdict: str                           # human-readable, always honest
 
@@ -774,6 +782,8 @@ def backtest_fade_the_spike(
         regime=regime,
         strata=strata,
         size_robustness=size_status,
+        f10_gate_ok=(f10_ok if regime is not None else None),
+        f10_gate_reasons=tuple(f10_reasons),
         is_validated_edge=is_validated,
         verdict=verdict,
     )

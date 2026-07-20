@@ -37,8 +37,12 @@ DESIGN — HONEST BY CONSTRUCTION
   default (0.10 / 1h / 24h), NOT tuned on any result. Every cell is reported; none is dropped.
 - Horizons are held at or below the 24h default so the fade engine's horizon-axis F10
   exclusion (legitimate only while the horizon is structurally single-valued, ≤ 1 day) applies
-  uniformly — every cell gets the SAME fair F10 treatment rather than some cells carrying a
-  structural always-fragile horizon flag.
+  uniformly — every cell's `is_validated_edge` gets the SAME fair, horizon-excluded F10 rather
+  than some cells carrying a structural always-fragile horizon flag. The `f10_gate_fragile`
+  column tabulated below is that GATE F10 (the one `is_validated_edge` uses — horizon-excluded,
+  size-robustness folded in), read from the engine's own `f10_gate_ok`, NOT the raw
+  horizon-inclusive `regime.fragile`; so a cell is never shown fragile while also valid, and
+  F10 is shown only where it is meaningfully assessed (a positive aggregate).
 - ``max_trades_per_market`` stays at the honest **1** for every cell (raising it feeds
   correlated same-market trades into F11 as if independent — see ``spike_reversal_backtest``).
 - Category labels are passed through when supplied, engaging the F10 category-slice axis, which
@@ -83,10 +87,17 @@ PRE_REGISTERED_HORIZONS_SECONDS: Tuple[int, ...] = (21600, 43200, 86400)
 class SurfaceCell:
     """One (threshold, window, horizon) config's honest fade-the-spike verdict on the corpus.
 
-    Every field is copied verbatim from the fade engine's ``SpikeReversalResult`` — this module
+    Every field is copied from the fade engine's ``SpikeReversalResult`` — this module
     tabulates, it never re-implements or overrides the gate. ``is_validated_edge`` is the
     engine's own AND-of-gates (N≥floor ∧ F11 significant_positive ∧ F10 non-fragile ∧
-    hit>50%); at the FAMILY level it is still NOT an edge (in-sample — see module docstring)."""
+    hit>50%); at the FAMILY level it is still NOT an edge (in-sample — see module docstring).
+
+    ``f10_gate_fragile`` is the SAME F10 the gate used (`res.f10_gate_ok`, horizon-excluded +
+    size-robustness folded in), tri-stated for display: ``None`` when F10 is not meaningfully
+    assessed (no trades, or a non-positive aggregate — F11 already rejects those), ``True`` when
+    the positive edge is concentrated/size-fragile, ``False`` when it is broad. It therefore
+    never disagrees with ``is_validated_edge`` (a fragile cell can never be valid), unlike the
+    raw horizon-inclusive ``regime.fragile``."""
 
     threshold: float
     window_seconds: int
@@ -99,8 +110,8 @@ class SurfaceCell:
     f11_verdict: str
     f11_ci_low: Optional[float]
     f11_ci_high: Optional[float]
-    f10_fragile: Optional[bool]
-    f10_fragile_reasons: Tuple[str, ...]
+    f10_gate_fragile: Optional[bool]
+    f10_gate_reasons: Tuple[str, ...]
     size_robustness: str
     is_validated_edge: bool
 
@@ -127,7 +138,7 @@ class RobustnessSurface:
     n_positive_pnl: int
     n_f11_significant_positive: int
     n_f11_significant_negative: int
-    n_f10_fragile: int
+    n_f10_gate_fragile: int          # positive-aggregate cells the GATE F10 flags fragile
     default_cell: Optional[SurfaceCell]
     # Conservative expected count of chance-green cells under the global null (≈ K·alpha/2);
     # a descriptor, not a formal test (cells are correlated). See module docstring.
@@ -182,6 +193,8 @@ def run_robustness_surface(
             ticks_by_market, config=cfg, category_by_market=category_by_market
         )
         sig = res.significance
+        # alpha is a fixed F11 knob (no FadeSpikeConfig field varies it across cells), so
+        # capturing it once from the first cell is sufficient for chance_green_expectation.
         if alpha_seen is None:
             alpha_seen = sig.alpha
         is_default = (
@@ -189,6 +202,17 @@ def run_robustness_surface(
             and window == DEFAULT_WINDOW_SECONDS
             and horizon == DEFAULT_REVERSAL_HORIZON_SECONDS
         )
+        # Tabulate the SAME F10 the gate used. It is meaningfully assessed only when there is a
+        # positive aggregate to judge (the engine's has_positive_edge early-return); otherwise
+        # F11/aggregate already reject the cell, so F10 is None (not-assessed) — never shown
+        # "fragile" for a losing cell, and never "fragile" while valid.
+        reg = res.regime
+        if reg is None or not reg.has_positive_edge:
+            f10_gate_fragile: Optional[bool] = None
+            f10_gate_reasons: Tuple[str, ...] = ()
+        else:
+            f10_gate_fragile = res.f10_gate_ok is False
+            f10_gate_reasons = res.f10_gate_reasons
         cells.append(
             SurfaceCell(
                 threshold=threshold,
@@ -202,10 +226,8 @@ def run_robustness_surface(
                 f11_verdict=sig.verdict,
                 f11_ci_low=sig.total_ci_low,
                 f11_ci_high=sig.total_ci_high,
-                f10_fragile=(res.regime.fragile if res.regime is not None else None),
-                f10_fragile_reasons=(
-                    tuple(res.regime.fragile_reasons) if res.regime is not None else ()
-                ),
+                f10_gate_fragile=f10_gate_fragile,
+                f10_gate_reasons=f10_gate_reasons,
                 size_robustness=res.size_robustness,
                 is_validated_edge=res.is_validated_edge,
             )
@@ -242,7 +264,7 @@ def run_robustness_surface(
         n_f11_significant_negative=sum(
             1 for c in cells if c.f11_verdict == "significant_negative"
         ),
-        n_f10_fragile=sum(1 for c in cells if c.f10_fragile is True),
+        n_f10_gate_fragile=sum(1 for c in cells if c.f10_gate_fragile is True),
         default_cell=default_cell,
         chance_green_expectation=round(chance, 4),
         validated_cells=validated,
@@ -262,14 +284,14 @@ def summarize(surface: RobustnessSurface) -> str:
     if dc is not None:
         lines.append(
             f"default cell (0.10/1h/24h): N={dc.n_trades} net ${dc.total_pnl_usd:,.2f} "
-            f"hit {dc.hit_rate} F11={dc.f11_verdict} F10_fragile={dc.f10_fragile} "
+            f"hit {dc.hit_rate} F11={dc.f11_verdict} F10_gate_fragile={dc.f10_gate_fragile} "
             f"validated={dc.is_validated_edge}"
         )
     lines.append(
         f"cells positive-PnL: {surface.n_positive_pnl}/{surface.k_cells} | "
         f"F11 significant_positive: {surface.n_f11_significant_positive} | "
         f"significant_negative: {surface.n_f11_significant_negative} | "
-        f"F10 fragile: {surface.n_f10_fragile}/{surface.k_cells}"
+        f"F10 gate-fragile (positive cells): {surface.n_f10_gate_fragile}"
     )
     lines.append(
         f"validated cells (engine AND-gate): {surface.n_validated} "
