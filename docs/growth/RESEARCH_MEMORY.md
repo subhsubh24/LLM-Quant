@@ -3648,3 +3648,127 @@ next step filed IS a value-bar-clearing result (steer + §2), not a failure.
    carve-out). Pre-register threshold+N before fetching; do NOT reuse the committed corpus.
 2. EXP-007 momentum (ride-the-spike): still N=19 on #390's ≥0.40 band — below floor; file, don't build.
 3. B8 cross-venue MATCH probe (above) — the co-listed match count gates any further B8 build.
+
+## 2026-07-20 — Research Run 27: external-research synthesis surfaces a genuinely new, untested in-scope mechanism (EXP-008). RECOMMEND-only, no code/backtest run. EXP-006 status corrected in GROWTH_STATUS.
+
+**Orientation.** Read RESEARCH_PLAYBOOK.md, this file (tail), ROADMAP.md, VISION.md,
+`docs/BUSINESS_CASE.md`, GROWTH_STATUS.md. Confirmed via `git log` that the factory's own
+2026-07-20 run (#393/#394, same calendar day, ahead of this research run) landed the EXP-006
+config robustness surface: **FAMILY-NULL-STRONG, 0/60 cells validate** — EXP-006 fade-the-spike
+now joins the bucket-calibration family (EXP-002/003/005) as REFUTED on real data. **Both
+real-money mechanisms this project has fully tested to date are now refuted.** This is the
+binding constraint this run reasons from: re-parameterizing either refuted family (a 4th
+category-only bucket-calibration re-run, or another EXP-006 threshold/window cell) is now
+established in this project's own memory as low expected value — the mechanism is the suspect,
+not the knobs. The higher-EV move is to find a mechanism this project has NOT yet tested.
+
+**A staleness catch (dashboard-honesty, not a research finding, but load-bearing for §7 —
+REPORT = the dashboard):** GROWTH_STATUS.md's `experiments[].EXP-006.status` was still
+`proposed` despite the mechanism being refuted twice over (07-19c and 07-20) — the
+`real_oos_result` narrative lived only in `as_of`/this file, never synced back into the
+experiment's own status field. Also, `as_of` itself had regressed: HEAD (`git show HEAD`)
+is commit `d614135` (PR #393, the robustness-surface CODE), which merged 16 seconds AFTER the
+bookkeeping commit `3124704` (PR #394) that should have prepended the 07-20 summary to `as_of`
+— but #393's tree did not carry #394's `as_of` edit, so the working file's `as_of` head was
+still the 07-19c text, silently dropping the 07-20 factory summary from the dashboard's most-
+recent-first log. Fixed both this run: `EXP-006.status` → `refuted` with a `real_oos_result`
+covering both real tests; `as_of` restored the dropped 07-20 factory summary (condensed from
+this file's own 2026-07-20 entry above, which was NOT affected by the merge-ordering issue) as
+a `PRIOR` segment, ahead of this run's own summary. This is a docs-only integrity fix, not a
+new backtest — no metric was touched, no status other than EXP-006's was changed.
+
+**External research (2 WebSearch sweeps, 2 direct WebFetch passes on primary sources — not
+snippet-only per this project's standing discipline).**
+
+1. `"Polymarket multi-outcome market arbitrage mispricing sum probabilities 2026 research"` —
+   surfaced arXiv:2508.03474 ("Unravelling the Probabilistic Forest: Arbitrage in Prediction
+   Markets") and arXiv:2605.00864 ("Arbitrage Analysis in Polymarket NBA Markets"). The FIRST is
+   not new to this project's search history in substance (a broad Polymarket-wide arbitrage
+   census, "Market Rebalancing" (single-market) vs. "Combinatorial" (cross-market) arbitrage,
+   ~$40M realized profit extracted across BOTH types combined per its abstract — WebFetched
+   the abstract directly; it does not break the $40M down by type, does not state the sample
+   period precisely, and does not state whether fees/slippage are netted from that figure, so
+   it is logged as a directional magnitude only, not a number this project relies on for any
+   claim). The SECOND is the one with new, concrete, decision-relevant numbers (below) — Research
+   Run 26 (2026-07-18) had already surfaced this exact paper by title/abstract in a DIFFERENT
+   search (an EXP-006-focused sweep) and explicitly judged it "not relevant to a
+   calibration/timing alpha — a market-microstructure arbitrage study, not fetched further."
+   That judgment was correct FOR EXP-006 (timing/reversal) but this run's WebFetch of the actual
+   abstract text found it measures the exact mechanism behind this repo's own **untested**
+   `SameMarketArbitrageStrategy` (`backend/app/prediction_markets/strategies.py`, ROADMAP B1) —
+   a connection Run 26 had no reason to make since it was not looking for a same-market-arb
+   angle. Read directly (WebFetch, targeted extraction prompt, not a generic summarize):
+   - Methodology: 75 million limit-order-book snapshots across 173 Polymarket NBA game markets
+     (continuous order-book reconstruction, not just trade prints).
+   - Single-market ("rebalancing") arbitrage: **only 7 executable in-game episodes** found in
+     the entire sample. **Median persistence: 3.6 seconds** before the mispricing closed.
+   - Combinatorial (cross-market) arbitrage: **290 active episodes** — more numerous, but
+     **76.9% were constrained to an average executable size of only ~14.8 shares** (severe
+     liquidity/depth limits — a real position could not be sized meaningfully even where the
+     signal was genuine).
+   - The abstract did not state whether fees were netted into the "executable" classification,
+     nor give a persistence duration for the combinatorial type specifically — logged as an
+     open gap, not assumed favorably or unfavorably.
+2. `"prediction market calibration crowd wisdom research paper 2026"` — re-surfaced only
+   already-logged primary sources (Le 2026 "Decomposing Crowd Wisdom"; Gomez-Cram/Guo/Jensen/Kung
+   "Prediction Market Accuracy: Crowd Wisdom or Informed Minority?", SSRN 6617059) with no new
+   detail beyond what prior runs already extracted directly from these papers. No course
+   correction.
+3. `"Kalshi Polymarket arbitrage same event different venue price discrepancy 2026"` (B8-adjacent)
+   — same result as Runs 18/26's identical-shape query: exclusively SEO/marketing-grade "how
+   arbitrage bots work" guide sites (polyburg.com, clawarbs.com, launchpoly.com, newspoly.net,
+   tradoxvps.com, laikalabs.ai, dropstab.com, tokenmetrics.com, eventarb.com, fightmatrix.com) —
+   no academic source, no verifiable N, no primary data. One recurring unverified claim across
+   several of these sites ("World Cup 2026 outright winners traded 1.3pp apart on France between
+   Kalshi/Polymarket as of 2026-05-04, sustained 5–8 cent gaps on individual team contracts") is
+   logged here ONLY as a reason a future B8 run might look at that specific market/date range —
+   NOT as evidence of anything, per this project's standing rule against treating SEO-site
+   numbers as data (same treatment Runs 18/26 gave this exact query shape).
+
+**Cross-referencing external finding (1) against this repo's OWN code (not just the paper):**
+`SameMarketArbitrageStrategy`'s own docstring already discloses, honestly, that it fires on CLOB
+**midpoints** (not the ask a real fill would pay) and that the orchestrator does not yet do
+confirmed per-leg execution — so a fired signal is explicitly described in-repo as "a candidate
+to verify against live depth, not a locked-in profit." The NBA paper's numbers put a concrete,
+sobering magnitude on exactly that gap: if same-market mispricings on Polymarket generally behave
+like the NBA sample (rare, and gone in a median of 3.6 seconds), then `orchestrator.py`'s
+`scan_interval_sec` default of **120 seconds** — confirmed by reading the code, not assumed —
+is roughly **two orders of magnitude slower** than the measured opportunity lifespan. A backtest
+that fired this strategy against END-OF-SCAN snapshot prices without accounting for this gap
+would systematically overstate capturable edge (the classic "the opportunity existed in the data
+but was gone before a polling bot could act" failure mode) — exactly the kind of self-inflicted
+overfitting this project's own hunt-your-own-leakage discipline exists to catch, applied here
+BEFORE any backtest is built rather than after one produces a too-good number.
+
+**Recommendation — EXP-008 (new, written to GROWTH_STATUS.md `experiments[]`, full spec
+there):** a same-market logical-consistency arbitrage poll-latency executability PILOT. Not a
+backtest — a bounded, read-only, pre-registered LIVE measurement using the EXISTING
+`PolymarketClient` + `SameMarketArbitrageStrategy` UNMODIFIED: poll the live neg_risk universe at
+the real 120s cadence, log every cost-net-positive fired signal, and measure what fraction
+survive to the NEXT poll at EXECUTABLE order-book depth (not just midpoint — the 76.9%-at-~14.8-
+shares finding means midpoint survival alone would overstate the real number). This is the
+CHEAPEST experiment currently on the table by data-access cost (no new fetcher, no new corpus,
+no egress dependency beyond what already works for live scanning) — but it is a genuinely NEW,
+untested mechanism (logical-consistency arb, not price-level calibration or price-timing), so a
+null result here would be a THIRD independently-diagnosed binding constraint (this time
+INFRASTRUCTURE/latency, not forecasting skill), and a non-null result would open a real new
+avenue. Falsifiable, pre-registered, minimum N, cost assumptions, and a 5-item
+how-it-could-be-wrong pre-mortem (incl. that the NBA-specific numbers may not transfer to
+slower-moving political/economics categories — the whole reason to MEASURE on this repo's own
+universe rather than assume the NBA number applies) are all in the GROWTH_STATUS.md entry.
+
+**RECOMMEND-only. No ROADMAP steer** — EXP-008 is a proposal grounded in external literature +
+this repo's own code, not a reproduced OOS result; it does not clear the high bar §6 sets for
+touching ROADMAP.md/BUSINESS_CASE.md. **Binding constraint unchanged:** no validated real-money
+OOS edge on any tested mechanism to date. `engine_pct` unchanged (74); `business_case_strength`
+stays B; no revenue field touched; no code changed this run (docs-only: GROWTH_STATUS.md +
+this file).
+
+**NEXT buildable steps (filed, priority order):**
+1. EXP-008: build the small time-boxed live-polling harness (factory-build scope, not a
+   research-agent turn — it requires real wall-clock time to run) and report the raw survival
+   rate with no selection.
+2. EXP-006b: the sole still-open high-threshold fade corner, fresh data, if a future research
+   run wants one more pre-registered look before fully closing the EXP-006 family.
+3. EXP-007 momentum: still N=19, below floor — file, don't build.
+4. B8 cross-venue MATCH probe — gates any further B8 build.
