@@ -2,6 +2,25 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-21 (owner-directed) — filed A9: Robinhood Predict as a gated future venue; NO asset-class expansion
+
+- Owner asked whether Robinhood's new agentic-trading MCP means we should expand beyond prediction
+  markets ("more options for success"). **Decision: NO broadening to equities/options/crypto.** The
+  binding constraint is ALPHA, not market access — we already have infinite venues and zero validated
+  edge; adding the most efficient, most institutionally-mined markets (exactly what A1 RETIRED) is the
+  *worst* place a solo bot finds edge. **More markets ≠ more success when you have no edge to deploy —
+  it loses money in more places, faster. Edge first, then venue.**
+- The ONE on-thesis angle: **Robinhood Predict / event contracts** = a NEW real-money prediction-markets
+  crowd (fits A8's "where is a crowd beatable?"; and unlike Manifold play-money, a Predict edge WOULD
+  count toward the floor). Filed as [A9], DOUBLE-GATED: (1) Predict is NOT in the Robinhood MCP yet
+  ("planned soon" 2026-07-21 — live = equities/options/crypto only), and (2) edge-first — no live
+  execution until a validated OOS edge exists. When both clear: READ-ONLY history ingest → calibration
+  measurement → only then live behind LIVE_TRADING_ENABLED. Real-money brake UNCHANGED / HUMAN-CORE:
+  the loop never connects a funded agentic account. Robinhood's own disclosures underline it.
+- **Reusable principle for future "should we add venue/instrument X?" asks: access is the cheap part,
+  edge is the hard part. A venue is only worth wiring when (a) it's a prediction-markets crowd plausibly
+  beatable, and (b) there's a validated edge to deploy — otherwise capture it as a gated future item.**
+
 ## 2026-07-19c — RAN the egress-gated EXP-006 real-data test the last three runs kept FILING: FIRST real-data fade-the-spike OOS run → EDGE-NOT-PROVEN (N=108, honest null), + a file-disjoint live-safety ingest fix. 3 fresh Opus auditors SOUND. Binding constraint (business_case_strength B) STANDS.
 
 - **THE UNBLOCK: check your ACTUAL egress before inheriting "egress-gated" from prior runs.** The last three runs (#385/#387/#388) each filed "EXP-006 needs a real intraday-tick corpus" as *egress-gated / owner-action*. But egress to Gamma + CLOB (and Kalshi) was OPEN this run (`curl` 200). The single highest-value move was simply to RUN the built, audited engine on real data — no new capability, no owner action. **LESSON: a "blocked on X" note from a prior run is a HYPOTHESIS about the environment, not a fact about THIS run — re-probe the actual constraint (a 12s curl) before deprioritizing the work it gates. The binding constraint had silently MOVED from data-access to alpha, and only a live probe revealed it.**
