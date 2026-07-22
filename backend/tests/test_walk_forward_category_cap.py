@@ -18,9 +18,11 @@ All offline + deterministic (no egress, no credentials).
 
 from datetime import datetime, timedelta, timezone
 
+from app.prediction_markets import regime_slice as _rs
 from app.prediction_markets import walk_forward as wf
 from app.prediction_markets.market_category import (
     CATEGORY_CRYPTO,
+    CATEGORY_ECONOMICS,
     CATEGORY_POLITICS,
 )
 
@@ -169,3 +171,184 @@ def test_cap_validation_rejects_out_of_range():
             wf.walk_forward_backtest(
                 markets, initial_bankroll=_BANKROLL, seed=42, category_exposure_cap=bad
             )
+
+
+# =========================================================================== #
+# CUMULATIVE per-category budget-SHARE cap (ROADMAP B4a-family / Research Run  #
+# 21 — the FAITHFUL de-concentration control the concurrent cap could not      #
+# provide). The concurrent cap bounds INSTANTANEOUS open exposure; because     #
+# positions settle and free room, a category can cycle unbounded CUMULATIVE    #
+# volume, so the concurrent cap does NOT bound F10's top_category_budget_share  #
+# (Σ per-cat budget ÷ Σ total budget). THIS cap does — it is the exact control  #
+# Runs 20-22 named-but-never-built. Same honesty properties as the concurrent  #
+# cap: None is byte-identical; a set cap enters seed_hash; it only REDUCES     #
+# concentration and can never manufacture PnL.                                 #
+# =========================================================================== #
+def _recycling_multi_cat_corpus(n_pol: int = 24, n_eco: int = 12):
+    """A dominant POLITICS category + a minority ECONOMICS category, every market SHORT-LIVED
+    (resolves 2 days after it opens) so cost basis RECYCLES through the bankroll — the shape
+    where CONCURRENT exposure is ~one position at a time but CUMULATIVE per-category volume is
+    large (a category cycles unbounded budget through recycled room). The non-trading day-0
+    anchor sets the window origin without deploying capital. Categories are interleaved across
+    the timeline so both are represented throughout, and POLITICS dominates the trade COUNT so
+    its cumulative budget SHARE is high (~n_pol/(n_pol+n_eco)) before any de-concentration."""
+    markets = [_mkt("anchor", 0.50, 0.50, 0, 0, category=CATEGORY_POLITICS, res_day=2)]
+    day = 30
+    pol = eco = 0
+    i = 0
+    # Interleave pattern [POL, POL, ECO] so POLITICS is 2/3 of the count; each opens on its own
+    # day and resolves 2 days later (short-lived → recycles before the next opens).
+    while pol < n_pol or eco < n_eco:
+        want_eco = (i % 3 == 2)
+        if want_eco and eco < n_eco:
+            markets.append(_mkt(f"e{eco:03d}", 0.50, 0.92, eco % 2, day, category=CATEGORY_ECONOMICS, res_day=day + 2))
+            eco += 1
+        elif pol < n_pol:
+            markets.append(_mkt(f"p{pol:03d}", 0.50, 0.92, pol % 2, day, category=CATEGORY_POLITICS, res_day=day + 2))
+            pol += 1
+        elif eco < n_eco:
+            markets.append(_mkt(f"e{eco:03d}", 0.50, 0.92, eco % 2, day, category=CATEGORY_ECONOMICS, res_day=day + 2))
+            eco += 1
+        day += 3
+        i += 1
+    return markets
+
+
+def _top_cat_budget_share(res):
+    """F10's exposure-concentration metric computed straight from the settled trades:
+    max over categories of (Σ category budget) ÷ (Σ total budget). Matches
+    regime_slice.top_category_budget_share when the category map mirrors trade.category."""
+    by_cat: dict = {}
+    for t in res.trades:
+        by_cat[t.category] = by_cat.get(t.category, 0.0) + t.budget_usd
+    total = sum(by_cat.values())
+    return (max(by_cat.values()) / total) if total > 0 else 0.0
+
+
+def test_cumulative_cap_none_is_byte_identical():
+    markets = _recycling_multi_cat_corpus()
+    a = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    b = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=None
+    )
+    assert a.seed_hash == b.seed_hash
+    assert a.total_pnl_usd == b.total_pnl_usd
+    assert [t.budget_usd for t in a.trades] == [t.budget_usd for t in b.trades]
+
+
+def test_cumulative_cap_enters_hash_and_is_deterministic():
+    markets = _recycling_multi_cat_corpus()
+    base = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    capped = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    again = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    assert capped.seed_hash != base.seed_hash          # a set cap changed PnL → must change hash
+    assert capped.seed_hash == again.seed_hash          # deterministic
+    assert [t.budget_usd for t in capped.trades] == [t.budget_usd for t in again.trades]
+
+
+def test_cumulative_cap_bounds_F10_share_where_concurrent_cap_cannot():
+    """THE load-bearing test: on a RECYCLING corpus the CONCURRENT cap is a no-op on cumulative
+    concentration, but the CUMULATIVE cap bounds F10's own top_category_budget_share to the cap
+    (plus a disclosed one-trade bootstrap slack)."""
+    CAP = 0.4
+    markets = _recycling_multi_cat_corpus(n_pol=24, n_eco=12)
+    uncapped = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    concurrent = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, category_exposure_cap=0.2
+    )
+    cumulative = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=CAP
+    )
+
+    share_uncapped = _top_cat_budget_share(uncapped)
+    share_concurrent = _top_cat_budget_share(concurrent)
+    share_cumulative = _top_cat_budget_share(cumulative)
+
+    # Precondition: POLITICS genuinely dominates cumulative budget when unbounded.
+    assert share_uncapped > CAP + 0.1
+
+    # The CONCURRENT cap does NOT bound cumulative concentration (recycling defeats it): the
+    # dominant category's cumulative SHARE is essentially unchanged from uncapped.
+    assert share_concurrent > CAP + 0.1
+
+    # The CUMULATIVE cap DOES bound it — top share at/under the cap + a one-trade bootstrap slack
+    # (the exempt first deployed trade, diluted by later turnover). Slack is DISCLOSED, not magic.
+    max_trade_budget = max((t.budget_usd for t in cumulative.trades), default=0.0)
+    total_budget_cum = sum(t.budget_usd for t in cumulative.trades)
+    slack = (max_trade_budget / total_budget_cum) if total_budget_cum > 0 else 0.0
+    assert share_cumulative <= CAP + slack + 1e-6
+    assert share_cumulative < share_uncapped              # it genuinely de-concentrated
+
+    # It matches F10's OWN metric (regime_slice), i.e. this is the quantity the gate reads.
+    cat_map = {m.market_id: m.category for m in markets if m.category}
+    reg = _rs.analyze_regime_slices(cumulative.trades, category_by_market_id=cat_map)
+    assert reg.top_category_budget_share <= CAP + slack + 1e-6
+
+
+def test_cumulative_cap_is_risk_control_never_manufactures_pnl():
+    markets = _recycling_multi_cat_corpus()
+    uncapped = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    cumulative = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    # A de-concentration cap only ever REDUCES deployed capital — it can never deploy MORE, so it
+    # cannot manufacture an edge from a signal (the honest claim in the docstring).
+    assert sum(t.budget_usd for t in cumulative.trades) <= sum(t.budget_usd for t in uncapped.trades)
+    assert cumulative.final_bankroll >= 0.0               # cash accounting stays sound
+
+
+def test_cumulative_cap_validation_rejects_out_of_range():
+    import pytest
+
+    markets = _recycling_multi_cat_corpus(n_pol=2, n_eco=1)
+    for bad in (0.0, -0.1, 1.0001, 2.0):
+        with pytest.raises(ValueError):
+            wf.walk_forward_backtest(
+                markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=bad
+            )
+
+
+def test_cumulative_cap_is_noop_on_single_category_book():
+    """AUDITOR FIX: a per-category budget-SHARE cap has nowhere to reallocate on a
+    single-category book (incl. the common all-``None`` / all-``__uncategorized__`` corpus a
+    frozen file without labels produces), so it must be a NO-OP — never collapse the whole book
+    to the one bootstrap trade. Byte-identical to no cap, including seed_hash."""
+    # All markets uncategorized (category=None) — the frozen-corpus-without-labels shape.
+    markets = [_mkt("anchor", 0.50, 0.50, 0, 0, res_day=2)]
+    for i in range(12):
+        markets.append(_mkt(f"u{i:03d}", 0.50, 0.92, i % 2, 30 + 3 * i, res_day=30 + 3 * i + 2))
+    base = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    capped = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    assert capped.n_trades == base.n_trades          # NOT collapsed to 1
+    assert capped.n_trades > 1
+    assert capped.seed_hash == base.seed_hash          # no-op ⇒ byte-identical fingerprint
+    assert capped.total_pnl_usd == base.total_pnl_usd
+
+    # Same for a single KNOWN category.
+    mono = [_mkt("anchor", 0.50, 0.50, 0, 0, category=CATEGORY_POLITICS, res_day=2)]
+    for i in range(12):
+        mono.append(_mkt(f"p{i:03d}", 0.50, 0.92, i % 2, 30 + 3 * i, category=CATEGORY_POLITICS, res_day=30 + 3 * i + 2))
+    base2 = wf.walk_forward_backtest(mono, initial_bankroll=_BANKROLL, seed=42)
+    capped2 = wf.walk_forward_backtest(
+        mono, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    assert capped2.n_trades == base2.n_trades and capped2.seed_hash == base2.seed_hash
+
+
+def test_cumulative_cap_one_point_zero_is_noop_and_hash_stable():
+    """cap==1.0 (100% share = no constraint) is a no-op AND hashes identically to no cap — no
+    phantom fingerprint change for a cap that cannot bind (auditor/​reviewer consistency fix)."""
+    markets = _recycling_multi_cat_corpus()
+    base = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    capped = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=1.0
+    )
+    assert capped.seed_hash == base.seed_hash
+    assert capped.total_pnl_usd == base.total_pnl_usd
+    assert [t.budget_usd for t in capped.trades] == [t.budget_usd for t in base.trades]
