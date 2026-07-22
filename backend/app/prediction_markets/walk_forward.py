@@ -377,7 +377,10 @@ def walk_forward_backtest(
     net-NEGATIVE, so on it BOTH caps are moot (no concentration control can manufacture an edge
     from a losing signal), and that corpus stays the filed next step. Like the concurrent cap
     this is a RISK CONTROL, not an edge — it can only REDUCE/reallocate exposure, never
-    manufacture PnL. ``None`` (default) leaves ``seed_hash`` byte-identical to before.
+    manufacture PnL. It is a NO-OP when the book has <2 distinct categories (a share cap has
+    nowhere to reallocate on a single-category / all-uncategorized book — mirroring F10's own
+    categories-known exclusion) or when the cap is >=1.0 (no constraint); a no-op hashes
+    identically to no cap. ``None`` (default) leaves ``seed_hash`` byte-identical to before.
 
     Determinism: events are processed in a stable ``(time, market_id, seq)`` order;
     settlement is pure arithmetic; ``market_id`` is required unique. ``seed_hash``
@@ -424,10 +427,30 @@ def walk_forward_backtest(
     if len(ids) != len(set(ids)):
         dupes = sorted({i for i in ids if ids.count(i) > 1})
         raise ValueError(f"duplicate market_id(s) in dataset: {dupes}")
+    # EFFECTIVE cumulative cap. A per-category budget-SHARE cap is only meaningful when there
+    # are >=2 distinct categories to reallocate BETWEEN — on a single-category book (including
+    # the common all-``None`` / all-``__uncategorized__`` corpus a frozen file without category
+    # labels produces) a share cap has nowhere to move budget, so demanding share<=cap<1 would
+    # choke the whole book to the one bootstrap trade (and then falsely read its 100% share as a
+    # cap breach). So it is a NO-OP below 2 categories — mirroring F10's own ``categories_known``
+    # exclusion (regime_slice refuses to gate category concentration when labels are absent).
+    # ``cap==1.0`` (100% share = no constraint) is likewise a no-op. Using the EFFECTIVE cap for
+    # BOTH the sizing AND the fingerprint keeps the contract clean: a no-op cap hashes identically
+    # to no cap (no phantom hash change), and a binding cap enters the fingerprint. The decision
+    # is a pure function of the DATA (category set), never of strategy_fn, so the hash stays
+    # data+config-only.
+    _distinct_cats = {(m.category if m.category is not None else "__uncategorized__") for m in markets}
+    effective_cumulative_cap: Optional[float] = (
+        cumulative_category_budget_cap
+        if (cumulative_category_budget_cap is not None
+            and cumulative_category_budget_cap < 1.0
+            and len(_distinct_cats) >= 2)
+        else None
+    )
     cfg_hash = _seed_hash(
         markets, seed, initial_bankroll, cost_model, train_min_days,
         test_window_days, max_fraction_per_trade, category_exposure_cap,
-        cumulative_category_budget_cap,
+        effective_cumulative_cap,
     )
     if not markets:
         return WalkForwardResult(
@@ -514,7 +537,7 @@ def walk_forward_backtest(
             budget = min(budget, cat_room)
             if budget < _CAP_DUST_FLOOR_FRACTION * initial_bankroll:
                 continue
-        if cumulative_category_budget_cap is not None and cumulative_category_budget_cap < 1.0:
+        if effective_cumulative_cap is not None:
             # CUMULATIVE (lifetime) per-category budget-SHARE cap — the faithful
             # de-concentration control Research Runs 20-22 named but never built. The concurrent
             # ``category_exposure_cap`` above bounds INSTANTANEOUS open exposure; because
@@ -532,7 +555,7 @@ def walk_forward_backtest(
             # grows (residual slack ≤ first_trade_budget ÷ total_budget — asserted in the tests,
             # not hidden). This is a RISK CONTROL: it can only REDUCE a category's cumulative
             # share, never manufacture PnL — on a net-NEGATIVE corpus it cannot create an edge.
-            capc = cumulative_category_budget_cap
+            capc = effective_cumulative_cap
             ccat = _cat_key(m.category)
             if cum_deployed_total > 0.0:
                 cum_room = (

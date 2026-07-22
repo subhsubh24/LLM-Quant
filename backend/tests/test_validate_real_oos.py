@@ -196,14 +196,19 @@ def test_concentration_variant_shape_and_cumulative_cap_binds_F10_share():
     for fam in ("calibration", "recency_weighted"):
         assert {"uncapped", "concurrent_capped", "cumulative_capped"} <= set(b[fam])
         cum = b[fam]["cumulative_capped"]
-        # The cumulative cap bounds F10's OWN metric to <= the cap (bootstrap slack included in
-        # the flag), where the concurrent cap does not (recycling defeats it).
-        assert cum["top_category_budget_share"] <= 0.4 + 1e-6
+        # The cumulative cap bounds F10's OWN metric to <= cap + the DISCLOSED bootstrap slack,
+        # where the concurrent cap does not (recycling defeats it).
+        assert cum["top_category_budget_share"] <= 0.4 + cum["max_trade_budget_share"] + 1e-6
         assert cum["cumulative_share_bounded"] is True
         assert b[fam]["uncapped"]["top_category_budget_share"] > 0.4  # genuinely de-concentrated
     assert b["cumulative_cap_bound_on_this_corpus"] is True
-    assert b["cumulative_share_bounded_below_cap"] is True
-    assert "REFUTED" in b["verdict"] and "Honest NULL" in b["verdict"]
+    assert b["cumulative_share_bounded_where_engaged"] is True
+    # HONESTY (the auditor finding): this corpus is net-POSITIVE and F11-significant but merely
+    # F10-FRAGILE, so the verdict must NOT hard-code "net-NEGATIVE"/"Honest NULL" — it must name
+    # the REAL blocker (fragility a category cap can't fix) and still deny a validated edge.
+    verdict = b["verdict"]
+    assert "net-NEGATIVE" not in verdict          # PnL is +ve here — no false negativity claim
+    assert "FRAGILE" in verdict and "NOT a validated edge" in verdict
 
 
 def test_variant_accepts_cumulative_cap_alone():
@@ -229,3 +234,59 @@ def test_variant_never_manufactures_edge_on_losing_signal():
         cum = b[fam]["cumulative_capped"]
         if cum["total_pnl_usd"] <= 0.0 and not cum["f10_fragile"]:
             assert cum["f10_nonfragile_is_vacuous"] is True
+
+
+# --------------------------------------------------------------------------- #
+# _concentration_verdict — honest, evidence-derived, NEVER narrates a cap that  #
+# wasn't requested and NEVER hard-codes a PnL sign (the auditor + reviewer      #
+# findings). Unit-tested directly with crafted view dicts for precision.        #
+# --------------------------------------------------------------------------- #
+def _view(pnl, *, sig=False, fragile_reasons=()):
+    return {"total_pnl_usd": pnl, "f11_is_significant_edge": sig,
+            "f10_fragile_reasons": list(fragile_reasons), "f10_fragile": bool(fragile_reasons)}
+
+
+def test_verdict_only_narrates_requested_caps():
+    # concurrent-only: must mention the concurrent cap, must NOT claim anything about a
+    # cumulative cap that was never requested.
+    vd = v._concentration_verdict(
+        conc=0.2, cum=None, any_conc_bound=False, any_cum_bound=False,
+        engaged_share_bounded=True, all_views=[_view(-100.0)], any_validated=False)
+    assert "Concurrent cap" in vd
+    assert "Cumulative" not in vd
+    # cumulative-only: symmetric.
+    vd2 = v._concentration_verdict(
+        conc=None, cum=0.4, any_conc_bound=False, any_cum_bound=True,
+        engaged_share_bounded=True, all_views=[_view(-100.0)], any_validated=False)
+    assert "Cumulative budget-share cap" in vd2
+    assert "Concurrent cap" not in vd2
+
+
+def test_verdict_reports_true_reason_net_negative_vs_positive_fragile():
+    # Net-negative signal → the honest "net-NEGATIVE / Honest NULL" statement.
+    neg = v._concentration_verdict(
+        conc=0.2, cum=0.4, any_conc_bound=True, any_cum_bound=True, engaged_share_bounded=True,
+        all_views=[_view(-500.0), _view(-200.0)], any_validated=False)
+    assert "net-NEGATIVE" in neg and "Honest NULL" in neg
+
+    # Positive + F11-significant but F10-FRAGILE on a non-category dimension → must NOT claim
+    # net-negative; must name fragility and still deny a validated edge (the auditor-1 finding).
+    posf = v._concentration_verdict(
+        conc=0.2, cum=0.4, any_conc_bound=True, any_cum_bound=True, engaged_share_bounded=True,
+        all_views=[_view(93000.0, sig=True, fragile_reasons=["single-horizon: 100% of PnL in one bucket"])],
+        any_validated=False)
+    assert "net-NEGATIVE" not in posf
+    assert "FRAGILE" in posf and "NOT a validated edge" in posf
+
+    # Positive but NOT significant → noise, not a validated edge, and not falsely negative.
+    posn = v._concentration_verdict(
+        conc=None, cum=0.4, any_conc_bound=False, any_cum_bound=False, engaged_share_bounded=True,
+        all_views=[_view(50.0, sig=False)], any_validated=False)
+    assert "not F11-distinguishable" in posn and "net-NEGATIVE" not in posn
+
+
+def test_verdict_validated_branch():
+    vd = v._concentration_verdict(
+        conc=0.2, cum=0.4, any_conc_bound=True, any_cum_bound=True, engaged_share_bounded=True,
+        all_views=[_view(5000.0, sig=True)], any_validated=True)
+    assert "record it and re-test" in vd and "not a validated edge" in vd

@@ -182,6 +182,13 @@ def evaluate(
             sig = sig_mod.bootstrap_oos_significance(
                 [t.pnl_usd for t in res.trades], [t.is_win for t in res.trades], seed=seed,
             )
+            # The cumulative cap admits a DISCLOSED bootstrap slack: the exempt first deployed
+            # trade can push its category above the cap by up to (its budget ÷ total budget),
+            # which shrinks as turnover grows. Report that bound so the faithful-share check
+            # allows exactly it — never more (see walk_forward's cap docstring).
+            budgets = [t.budget_usd for t in res.trades]
+            total_b = sum(budgets)
+            max_trade_budget_share = (max(budgets) / total_b) if total_b > 0 else 0.0
             return {
                 "trades": res.n_trades,
                 "total_pnl_usd": round(res.total_pnl_usd, 2),
@@ -192,6 +199,7 @@ def evaluate(
                 # assesses concentration on a POSITIVE edge (there is nothing to concentrate).
                 "f10_nonfragile_is_vacuous": (not reg.fragile) and res.total_pnl_usd <= 0.0,
                 "top_category_budget_share": round(reg.top_category_budget_share, 4),
+                "max_trade_budget_share": round(max_trade_budget_share, 4),
                 "f11_verdict": sig.verdict,
                 "f11_total_ci": [sig.total_ci_low, sig.total_ci_high],
                 "f11_is_significant_edge": sig.is_significant_edge,
@@ -220,10 +228,13 @@ def evaluate(
                 mc = _variant(make(), concurrent=None, cumulative=cum)
                 mc["cap_bound"] = _bound(mc, uncapped)
                 # The FAITHFUL check: the cumulative cap's job is to bound F10's own
-                # top_category_budget_share to <= cum. A tiny bootstrap slack (the exempt first
-                # trade) is disclosed, never hidden — see walk_forward's cap docstring.
+                # top_category_budget_share to <= cum + the DISCLOSED bootstrap slack (the exempt
+                # first trade). Include that slack term — under-allowing it would falsely flag a
+                # correctly-operating cap. Meaningful only where the cap actually ENGAGED (a
+                # single-category / no-op corpus legitimately keeps share=1.0 and does not bind).
                 mc["cumulative_share_bounded"] = (
-                    mc["trades"] == 0 or mc["top_category_budget_share"] <= cum + 1e-6
+                    mc["trades"] == 0
+                    or mc["top_category_budget_share"] <= cum + mc["max_trade_budget_share"] + 1e-6
                 )
                 out["cumulative_capped"] = mc
             return out
@@ -238,7 +249,12 @@ def evaluate(
 
         any_conc_bound = any(v["cap_bound"] for v in conc_views)
         any_cum_bound = any(v["cap_bound"] for v in cum_views)
-        cum_share_all_bounded = (cum is None) or all(v["cumulative_share_bounded"] for v in cum_views)
+        # The faithful-share check is only meaningful where the cap ENGAGED — a no-op corpus
+        # (single-category / cap>=1) legitimately keeps a 100% share and is NOT a breach.
+        engaged_cum_views = [v for v in cum_views if v["cap_bound"]]
+        cum_share_bounded_where_engaged = all(
+            v["cumulative_share_bounded"] for v in engaged_cum_views
+        )
         any_validated = any(
             v["f11_is_significant_edge"] and not v["f10_fragile"] for v in all_views
         )
@@ -247,7 +263,7 @@ def evaluate(
             "cumulative_category_budget_cap": cum,
             "concurrent_cap_bound_on_this_corpus": any_conc_bound,
             "cumulative_cap_bound_on_this_corpus": any_cum_bound,
-            "cumulative_share_bounded_below_cap": cum_share_all_bounded,
+            "cumulative_share_bounded_where_engaged": cum_share_bounded_where_engaged,
             "calibration": calibration,
             "recency_weighted": recency_weighted,
             "seed_hash_note": (
@@ -255,28 +271,77 @@ def evaluate(
                 "with the same data+config share a hash — compare trades/PnL, NOT hashes, across "
                 "variants."
             ),
-            "verdict": (
-                (
-                    "A per-category de-concentration cap is a RISK CONTROL, not an alpha, and the "
-                    "bucket-calibration family stays REFUTED here. The CONCURRENT cap "
-                    + ("bound" if any_conc_bound else "did NOT bind")
-                    + " on this corpus; the CUMULATIVE budget-share cap (the F10-faithful control) "
-                    + ("bound" if any_cum_bound else "did NOT bind")
-                    + " and held every capped family's top_category_budget_share at/under the cap "
-                    + ("(faithful de-concentration confirmed). " if cum_share_all_bounded else "— SLACK EXCEEDED, investigate. ")
-                    + "But the aggregate is net-NEGATIVE, so an F10 non-fragile pass is VACUOUS — no "
-                    "concentration control can manufacture an edge from a losing signal. The "
-                    "cumulative cap the family test needed now EXISTS; the remaining ingredient is a "
-                    "net-positive-but-fragile per-category corpus (egress-gated; filed to "
-                    "RESEARCH_MEMORY/ROADMAP). Honest NULL."
-                )
-                if not any_validated else
-                "A capped/recency variant cleared F11 + F10 on this corpus — record it and re-test "
-                "on a LARGER pre-registered per-category corpus before any claim (single-corpus "
-                "significance is not a validated edge)."
+            "verdict": _concentration_verdict(
+                conc=conc, cum=cum, any_conc_bound=any_conc_bound, any_cum_bound=any_cum_bound,
+                engaged_share_bounded=cum_share_bounded_where_engaged,
+                all_views=all_views, any_validated=any_validated,
             ),
         }
     return report
+
+
+def _concentration_verdict(*, conc, cum, any_conc_bound, any_cum_bound,
+                           engaged_share_bounded, all_views, any_validated) -> str:
+    """Honest, evidence-derived verdict for the de-concentration variant. It NEVER hard-codes a
+    PnL sign or narrates a cap that was not requested — it reads the ACTUAL realized state:
+      * mentions the concurrent / cumulative cap ONLY when that cap was requested, and reports
+        whether it bound;
+      * names the REAL reason no validated de-concentrated edge exists — net-negative signal,
+        F11-insignificant positive noise, or an F11-significant-positive result that is still
+        F10-FRAGILE on a non-category dimension (which a CATEGORY cap cannot fix) — rather than
+        assuming negativity.
+    """
+    if any_validated:
+        return (
+            "A variant is BOTH F11-significant-positive AND F10-non-fragile on this corpus — "
+            "record it and re-test on a LARGER pre-registered per-category corpus before any "
+            "claim (single-corpus significance is not a validated edge)."
+        )
+    parts = [
+        "A per-category de-concentration cap is a RISK CONTROL, not an alpha: it can only "
+        "reduce/reallocate exposure, never manufacture PnL."
+    ]
+    if conc is not None:
+        parts.append("Concurrent cap: " + ("BOUND" if any_conc_bound else "did not bind") + " here.")
+    if cum is not None:
+        if any_cum_bound:
+            parts.append(
+                "Cumulative budget-share cap: BOUND, "
+                + ("holding every engaged family's top_category_budget_share at/under the cap "
+                   "(+ disclosed bootstrap slack)."
+                   if engaged_share_bounded else
+                   "but a realized top share EXCEEDED cap + disclosed slack — investigate.")
+            )
+        else:
+            parts.append("Cumulative budget-share cap: did not bind here (no-op or nothing to reallocate).")
+    positive_sig = [v for v in all_views if v["total_pnl_usd"] > 0 and v["f11_is_significant_edge"]]
+    positive_any = [v for v in all_views if v["total_pnl_usd"] > 0]
+    if positive_sig:
+        reasons = sorted({r for v in positive_sig for r in v["f10_fragile_reasons"]})
+        joined = ("; ".join(reasons))[:240]
+        parts.append(
+            "No variant is BOTH F11-significant-positive AND F10-non-fragile: the "
+            "F11-significant positive variant(s) remain F10-FRAGILE"
+            + (f" ({joined})" if joined else "")
+            + " — and a CATEGORY de-concentration cap does not address horizon / confidence / "
+            "single-market concentration. NOT a validated edge."
+        )
+    elif positive_any:
+        parts.append(
+            "No variant clears the bar: the positive PnL is not F11-distinguishable from zero "
+            "(noise). NOT a validated edge."
+        )
+    else:
+        parts.append(
+            "The signal is net-NEGATIVE on this corpus — no concentration control can manufacture "
+            "an edge from a losing signal. Honest NULL."
+        )
+    parts.append(
+        "The cumulative cap the family test needed now EXISTS; the remaining ingredient is a "
+        "net-positive-but-fragile per-category corpus (egress-gated; filed to "
+        "RESEARCH_MEMORY/ROADMAP)."
+    )
+    return " ".join(parts)
 
 
 def _top_slice_pnl_share(slices) -> "float | None":

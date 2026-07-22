@@ -310,3 +310,45 @@ def test_cumulative_cap_validation_rejects_out_of_range():
             wf.walk_forward_backtest(
                 markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=bad
             )
+
+
+def test_cumulative_cap_is_noop_on_single_category_book():
+    """AUDITOR FIX: a per-category budget-SHARE cap has nowhere to reallocate on a
+    single-category book (incl. the common all-``None`` / all-``__uncategorized__`` corpus a
+    frozen file without labels produces), so it must be a NO-OP — never collapse the whole book
+    to the one bootstrap trade. Byte-identical to no cap, including seed_hash."""
+    # All markets uncategorized (category=None) — the frozen-corpus-without-labels shape.
+    markets = [_mkt("anchor", 0.50, 0.50, 0, 0, res_day=2)]
+    for i in range(12):
+        markets.append(_mkt(f"u{i:03d}", 0.50, 0.92, i % 2, 30 + 3 * i, res_day=30 + 3 * i + 2))
+    base = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    capped = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    assert capped.n_trades == base.n_trades          # NOT collapsed to 1
+    assert capped.n_trades > 1
+    assert capped.seed_hash == base.seed_hash          # no-op ⇒ byte-identical fingerprint
+    assert capped.total_pnl_usd == base.total_pnl_usd
+
+    # Same for a single KNOWN category.
+    mono = [_mkt("anchor", 0.50, 0.50, 0, 0, category=CATEGORY_POLITICS, res_day=2)]
+    for i in range(12):
+        mono.append(_mkt(f"p{i:03d}", 0.50, 0.92, i % 2, 30 + 3 * i, category=CATEGORY_POLITICS, res_day=30 + 3 * i + 2))
+    base2 = wf.walk_forward_backtest(mono, initial_bankroll=_BANKROLL, seed=42)
+    capped2 = wf.walk_forward_backtest(
+        mono, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=0.4
+    )
+    assert capped2.n_trades == base2.n_trades and capped2.seed_hash == base2.seed_hash
+
+
+def test_cumulative_cap_one_point_zero_is_noop_and_hash_stable():
+    """cap==1.0 (100% share = no constraint) is a no-op AND hashes identically to no cap — no
+    phantom fingerprint change for a cap that cannot bind (auditor/​reviewer consistency fix)."""
+    markets = _recycling_multi_cat_corpus()
+    base = wf.walk_forward_backtest(markets, initial_bankroll=_BANKROLL, seed=42)
+    capped = wf.walk_forward_backtest(
+        markets, initial_bankroll=_BANKROLL, seed=42, cumulative_category_budget_cap=1.0
+    )
+    assert capped.seed_hash == base.seed_hash
+    assert capped.total_pnl_usd == base.total_pnl_usd
+    assert [t.budget_usd for t in capped.trades] == [t.budget_usd for t in base.trades]
