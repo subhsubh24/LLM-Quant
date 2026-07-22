@@ -638,3 +638,91 @@ def test_unrecognized_result_is_logged_loudly_empty_is_quiet(caplog):
     # an empty (unresolved) result must NOT warn — only a quiet debug skip
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert any(r.levelno == logging.DEBUG and "unresolved" in r.getMessage() for r in caplog.records)
+
+
+# --------------------------------------------------------------------------- #
+# STRUCTURED STRIKE capture on the RESOLVED record (ROADMAP B8 — the historical #
+# co-listed corpus needs resolved Kalshi crypto/scalar markets to carry the     #
+# structured strike, exactly like the LIVE client #400, because their titles are #
+# generic and the title-text parser finds nothing). Offline + deterministic.    #
+# --------------------------------------------------------------------------- #
+from app.prediction_markets.kalshi_history_fetcher import _finite_float  # noqa: E402
+from app.prediction_markets.cross_venue_matcher import (  # noqa: E402
+    extract_threshold,
+    extract_threshold_from_structured_strike,
+)
+
+
+def _kalshi_crypto_raw(**over):
+    """A real-shaped Kalshi crypto RESOLVED market: GENERIC title, strike only in the
+    structured fields (the exact shape #400 documented for the live feed)."""
+    raw = {
+        "ticker": "KXBTCD-26JUL20-T73000",
+        "title": "Bitcoin price on Jul 20, 2026?",   # generic — no strike in the text
+        "category": "Crypto",
+        "status": "finalized",
+        "result": "yes",
+        "volume": "5000",
+        "close_time": RESOLUTION.isoformat().replace("+00:00", "Z"),
+        "floor_strike": 73000,
+        "strike_type": "greater",
+    }
+    raw.update(over)
+    return raw
+
+
+def test_finite_float_rejects_nan_inf_and_garbage():
+    assert _finite_float("73000.5") == 73000.5
+    assert _finite_float(73000) == 73000.0
+    for bad in ("nan", "inf", "-inf", float("nan"), float("inf"), None, "abc", {}):
+        assert _finite_float(bad) is None
+
+
+def test_parse_resolved_captures_structured_strike():
+    f = KalshiHistoryFetcher()
+    rm = f._parse_resolved(_kalshi_crypto_raw())
+    assert rm is not None
+    assert rm.floor_strike == 73000.0
+    assert rm.cap_strike is None
+    assert rm.strike_type == "greater"
+
+
+def test_parse_resolved_never_fabricates_a_garbage_strike():
+    f = KalshiHistoryFetcher()
+    # Non-finite / non-numeric / absent structured fields must degrade to None, never a guess.
+    rm = f._parse_resolved(_kalshi_crypto_raw(floor_strike="not-a-number", strike_type=""))
+    assert rm.floor_strike is None and rm.strike_type is None
+    rm2 = f._parse_resolved(_kalshi_crypto_raw(floor_strike="inf"))
+    assert rm2.floor_strike is None
+    # A market with NO structured fields at all stays fully None (back-compat, byte-unchanged).
+    plain = {k: v for k, v in _kalshi_crypto_raw().items() if k not in ("floor_strike", "strike_type")}
+    rm3 = f._parse_resolved(plain)
+    assert rm3.floor_strike is None and rm3.cap_strike is None and rm3.strike_type is None
+
+
+def test_resolved_structured_strike_is_matcher_usable_where_title_is_not():
+    """The blocker-moving property: the generic title yields NO title-text threshold, but the
+    captured structured strike DOES yield the matcher's Threshold — so a resolved Kalshi crypto
+    market can now pair on strike against a resolved Polymarket market whose strike is in its
+    title. Without this capture the resolved record was strike-BLIND."""
+    f = KalshiHistoryFetcher()
+    rm = f._parse_resolved(_kalshi_crypto_raw())
+
+    # Title-text parse finds nothing (generic title) — this is why the capture is needed.
+    assert extract_threshold(rm.title) is None
+
+    # The captured structured strike feeds the SAME matcher function the live path uses
+    # (duck-typed over .title), yielding the confident directional strike.
+    thr = extract_threshold_from_structured_strike(rm)
+    assert thr is not None
+    assert thr.value == 73000.0 and thr.direction == "up"
+    assert thr.unit in ("currency", "percent")   # a real unit cue, never a "plain" guess
+
+
+def test_resolved_between_strike_refuses_to_guess():
+    """A range ("between", both bounds) is NOT a single confident strike — the matcher must
+    return None rather than fabricate a one-sided pairing (honesty, mirrors the live path)."""
+    f = KalshiHistoryFetcher()
+    rm = f._parse_resolved(_kalshi_crypto_raw(floor_strike=70000, cap_strike=75000, strike_type="between"))
+    assert rm.floor_strike == 70000.0 and rm.cap_strike == 75000.0 and rm.strike_type == "between"
+    assert extract_threshold_from_structured_strike(rm) is None
