@@ -232,9 +232,19 @@ def evaluate(
                 # first trade). Include that slack term — under-allowing it would falsely flag a
                 # correctly-operating cap. Meaningful only where the cap actually ENGAGED (a
                 # single-category / no-op corpus legitimately keeps share=1.0 and does not bind).
+                # RESIDUAL GUARD: if a strategy trades a SINGLE category even though the corpus
+                # carries >=2 (so walk_forward's <2-category no-op did NOT trigger and the cap
+                # engaged), the book collapses to the bootstrap trade at share==1.0 with
+                # max_trade_budget_share==1.0 — which would pass the slack check VACUOUSLY. A
+                # realized 100% share is definitionally NOT de-concentrated below the cap, so we
+                # require share strictly < 1.0 to call it bounded (this is unreachable in the
+                # shipped evaluate() flow — the bucket alphas trade across categories — but keeps
+                # the "BOUND, holding at/under the cap" verdict honest if a future single-category
+                # strategy ever engages the cap).
                 mc["cumulative_share_bounded"] = (
                     mc["trades"] == 0
-                    or mc["top_category_budget_share"] <= cum + mc["max_trade_budget_share"] + 1e-6
+                    or (mc["top_category_budget_share"] < 1.0 - 1e-9
+                        and mc["top_category_budget_share"] <= cum + mc["max_trade_budget_share"] + 1e-6)
                 )
                 out["cumulative_capped"] = mc
             return out
