@@ -317,8 +317,14 @@ def _infer_structured_unit(market: "Market") -> str:
     cue in the market's own text, so a non-price strike (temperature, index level, vote
     count) stays ``"plain"`` and can NEVER spuriously match a ``"currency"`` market. This
     is tightening-only: a conservative "plain" only removes a match, never fabricates one.
+
+    Reads ``question`` when present (a live ``Market``) else ``title`` (a
+    ``KalshiResolvedMarket`` from the history fetcher), so the SAME structured-strike unit
+    inference works on both the LIVE and the RESOLVED-history paths — the B8 historical
+    co-listed corpus needs the resolved records to yield the same threshold the live ones do.
     """
-    text = f"{market.question} {market.category}".lower()
+    market_text = getattr(market, "question", None) or getattr(market, "title", "")
+    text = f"{market_text} {getattr(market, 'category', '')}".lower()
     if "%" in text or "percent" in text:
         return "percent"
     if _CURRENCY_CUE_RE.search(text):

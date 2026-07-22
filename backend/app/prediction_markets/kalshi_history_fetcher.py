@@ -84,6 +84,17 @@ class KalshiResolvedMarket:
     resolution_time: datetime
     outcome: int           # 1 = YES, 0 = NO
     volume: float
+    # STRUCTURED strike (ROADMAP B8 cross-venue matching), mirroring the LIVE client (#400).
+    # Kalshi crypto/scalar RESOLVED markets carry a GENERIC title ("Bitcoin price on Jul 20,
+    # 2026?") so the title-text strike parser finds nothing; the real strike lives ONLY here.
+    # Capturing them on the RESOLVED record (previously strike-BLIND) is what lets a future
+    # HISTORICAL co-listed corpus match a resolved Kalshi market on strike+window against a
+    # resolved Polymarket market whose strike is in its title — the pinned B8 next step.
+    # Absent/garbage/non-finite fields stay None: NEVER fabricated (the matcher refuses to
+    # guess a strike). Defaulted to None so every existing construction is byte-unchanged.
+    floor_strike: Optional[float] = None
+    cap_strike: Optional[float] = None
+    strike_type: Optional[str] = None
 
 
 class KalshiHistoryFetcher:
@@ -230,6 +241,15 @@ class KalshiHistoryFetcher:
             logger.debug("skip Kalshi market ticker=%s: missing close_time", ticker)
             return None
 
+        # STRUCTURED strike capture (finite-coerced, garbage/absent → None, never fabricated),
+        # normalized exactly as the live kalshi_client (#400) does so the two paths agree.
+        floor_strike = _finite_float(raw.get("floor_strike"))
+        cap_strike = _finite_float(raw.get("cap_strike"))
+        strike_type_raw = raw.get("strike_type")
+        strike_type = (
+            str(strike_type_raw).lower().strip() if strike_type_raw else None
+        ) or None
+
         return KalshiResolvedMarket(
             ticker=str(ticker),
             title=str(raw.get("title", "")),
@@ -242,6 +262,9 @@ class KalshiHistoryFetcher:
             resolution_time=resolution_time,
             outcome=outcome,
             volume=_to_float(raw.get("volume")) or 0.0,
+            floor_strike=floor_strike,
+            cap_strike=cap_strike,
+            strike_type=strike_type,
         )
 
     # ------------------------------------------------------------------
@@ -481,6 +504,26 @@ def _to_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _finite_float(value: Any) -> Optional[float]:
+    """``_to_float`` but ALSO rejects non-finite (NaN/±inf), booleans, and overflow — so a
+    garbage structured strike can never license a cross-venue pairing. A strike is a value the
+    matcher will compare numerically; anything that is not a genuine finite number must degrade
+    to None (refuse to guess), never propagate. Explicitly:
+      * ``bool`` → None (``float(True)==1.0`` would otherwise smuggle a fake 1.0/0.0 strike past
+        the matcher's own bool guard, which only sees the already-coerced float);
+      * a huge-integer strike whose ``float()`` OVERFLOWS → None (keep the market, drop the
+        un-representable strike) rather than raising."""
+    if isinstance(value, bool):
+        return None
+    try:
+        f = _to_float(value)
+    except OverflowError:  # float(an arbitrarily large int) — a JSON payload may carry one
+        return None
+    if f is None or not math.isfinite(f):
+        return None
+    return f
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
