@@ -3794,3 +3794,187 @@ this file).
 - Why: the structured parser works on 408 real markets (verified) but produces no NEW live matches because the co-listed LIVE universe barely overlaps at any instant. The binding B8 blocker has MOVED from the strike parser (DONE) to co-listed-universe availability. A LIVE snapshot is the wrong instrument; the right instrument is a HISTORICAL co-listed corpus.
 - NEXT (pre-registered, do NOT p-hack): (1) a HISTORICAL co-listed BTC/ETH corpus — fetch RESOLVED past Kalshi crypto markets (structured strikes, this run's parser) + resolved Polymarket crypto markets over the SAME dates, match on strike+window, count true co-listed pairs over time; only a usable historical N unblocks the common-instant snapshot + `evaluate_cross_venue_pairs` OOS harness. (2) touch/barrier/terminal semantic classifier so only same-mechanic pairs match (Kalshi KXBTCMAXY barrier vs KXBTCD terminal vs Polymarket touch). Per DECISION COROLLARY, (1)–(2) ship as one unit once (1) confirms a non-trivial historical co-listed N.
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge; engine_pct unchanged.
+
+---
+
+## 2026-07-22 — Research Run 28: external-literature sweep + a live Kalshi data-access probe surfaces a real historical-data unblock (feeds B8) + a genuinely new venue/category calibration candidate (EXP-009). RECOMMEND-only, no code/backtest run, no ROADMAP steer.
+
+**Orientation.** Read RESEARCH_PLAYBOOK.md, RESEARCH_MEMORY.md (tail), ROADMAP.md, VISION.md,
+`docs/BUSINESS_CASE.md`, GROWTH_STATUS.md first. Confirmed via `git log` that HEAD (`fd5b93a`,
+#402) is an owner-raised ROADMAP edit (A9, Robinhood Predict — double-gated, not active work),
+not new alpha work — so the binding constraint is unchanged since the last research/factory
+entry (2026-07-20c): both real-money mechanisms fully tested to date (bucket-calibration family
+EXP-002/003/005 across 4 corpora; EXP-006 fade-the-spike, FAMILY-NULL-STRONG 0/60 cells) stay
+REFUTED; B8 cross-venue coherence stays blocked on co-listed-universe availability (structured-
+strike parser DONE, #400); EXP-008 (same-market poll-latency pilot) stays proposed/unbuilt
+(factory-build scope, needs real wall-clock time). This run reasons from that constraint: do
+NOT re-parameterize a refuted family; look for a genuinely new mechanism, venue, or category, or
+a data-access unblock that changes what's testable.
+
+**External research (3 WebSearch sweeps + 5 WebFetch/live-probe passes, not snippet-only).**
+
+1. `"prediction market calibration mispricing research paper 2026 favorite longshot bias"` —
+   re-surfaced Le 2026 ("Decomposing Crowd Wisdom") with a sharper quote than previously logged:
+   "a 70% Polymarket price in a political market at a 1-week horizon reflects approximately 83%
+   true probability" — a favorite-underpricing / calibration-slope-above-1 claim. This is the
+   SAME mechanism this project has already tested 4 times on real Polymarket data (static bucket
+   EXP-002, N=510/621/799; recency-weighted bucket, N=799; HuggingFace-archive independent
+   corpus, N=375) — every test refuted (sign-flips across corpora, or fragile/concentrated).
+   Logged as reconfirmation ONLY — explicitly not a re-build trigger; re-testing an already-
+   refuted family on a fifth Polymarket pull would be low-EV pattern-matching against noise, not
+   new evidence.
+2. `"Polymarket Kalshi order book imbalance microstructure edge research 2026"` — surfaced
+   arXiv:2604.24366 ("The Anatomy of a Decentralized Prediction Market: Microstructure Evidence
+   from the Polymarket Order Book", Dubach — 30B order-book events over 52 days, a
+   stratified 600-market panel; WebFetched the abstract directly). Reports a "longshot spread
+   premium" (effective spreads widen near 0/1, no exact magnitude given in the abstract) and,
+   separately, that trade direction inferred from Polymarket's PUBLIC order-book feed agrees with
+   the ON-CHAIN ground truth on only **~59%** of buckets (vs. ~80% typical CLOB accuracy) — a
+   data-quality caution logged for any FUTURE Polymarket microstructure work this project might
+   do (nothing in the current codebase infers trade direction from the WS feed today, so this is
+   not acted on, just filed). Also surfaced (WebSearch synthesis only, not independently
+   verified): "~86% of Polymarket 5-minute-window crypto taker volume is from bot-like wallets" —
+   consistent with, and reinforcing, EXP-008's own concern that a 120s poll cadence cannot
+   compete in the fastest-moving market segments; not a new mechanism, corroborating context only.
+3. `"2026 US midterm election prediction market mispricing Polymarket Kalshi"` — mostly
+   marketing/news-aggregator content ($197M midterm volume, current odds levels). One item is a
+   genuine IN-SCOPE-BOUNDARY reminder rather than an alpha lead: reporting that Kalshi fined/
+   suspended congressional candidates and staffers for trading their own races on non-public
+   information — logged as a reinforcement of this project's standing OUT-OF-SCOPE rule (never
+   chase non-public-information edges), not as a lead to follow.
+
+**The one new, decision-relevant primary source (WebSearch + 2 WebFetch attempts, partially
+fail-closed).** NBER working paper **w34702, "Kalshi and the Rise of Macro Markets"** (Diercks,
+Katz, Wright — Federal Reserve Board researchers; also posted as a Fed FEDS working paper and on
+SSRN). Uses 2,668 settled Kalshi macro contracts, July 2021–June 2026, across three categories
+(Fed/rate decisions, inflation, employment/labor), evaluated via Brier scores, calibration
+curves, and favorite-longshot-bias tests at a 7-day-pre-settlement horizon. Per the WebSearch
+synthesis of the abstract/summary: **Fed/rate markets are near-perfectly calibrated with no
+significant favorite-longshot bias; inflation markets show moderate calibration; EMPLOYMENT/
+labor markets show the WEAKEST forecasting performance and "significant systematic mispricing,"
+with unemployment-rate contracts carrying the LARGEST calibration errors** of any category
+tested. **Attempted to verify the exact numbers against the primary source directly** — WebFetch
+of the Fed FEDS PDF (`federalreserve.gov/econres/feds/files/2026010pap.pdf`) returned only
+encoded/compressed PDF binary streams, not extractable text; the NBER abstract page
+(`nber.org/papers/w34702`) carries only the top-level abstract, no category-level breakdown. Per
+this project's FAIL-CLOSED discipline: **no exact Brier score, calibration-error magnitude, or
+favorite-longshot-bias coefficient is reported here as a number this project relies on** — only
+the directional claim, sourced to a named, Fed-affiliated, non-SEO working paper (materially more
+credible than the marketing-site "arbitrage" leads this project has repeatedly logged-but-not-
+used in prior runs), logged as a MOTIVATION for a new candidate, not as a measured result.
+
+**Why this is a genuinely new candidate, not a re-parameterization.** Every bucket-calibration
+test this project has run to date (EXP-002/003/005, 4 corpora) was on **Polymarket** data only.
+This project has never run ANY alpha mechanism against Kalshi's OWN economics/employment-category
+markets — the Kalshi work to date is either data-adapter infra (A3) or the B8 cross-venue
+matcher (a structurally different, disagreement-based mechanism). A different venue (CFTC-
+regulated Kalshi vs. Polymarket) with a different crowd composition, on a category an independent
+academic source specifically flags as the WEAKEST-calibrated segment of that venue, is a
+legitimately distinct hypothesis — not the same mechanism restated with new knobs.
+
+**Live feasibility probe (read-only, public Kalshi REST API, no auth, no orders — squarely
+research-agent scope). Egress open, HTTP 200 throughout.** Two findings:
+
+1. **Kalshi's economics/employment universe is real and large.** `GET /series?category=Economics`
+   (limit=200) returned **599** Economics-category series (of 621 total series on that page).
+   Filtering for employment/labor keywords surfaced ~30 relevant series, including `KXU3`/
+   `KXECONSTATU3` (monthly unemployment rate), `KXPAYROLLS`/`KXUSNFP` (nonfarm payrolls),
+   `KXJOBLESS` (weekly initial jobless claims), `KXECONSTATCPICORE`/`CPIYOY` (inflation), and
+   `KXFEDHIKE` (Fed decisions) — confirming the NBER paper's three named categories all have a
+   live, public, structured-strike Kalshi market universe today.
+2. **DECISIVE: Kalshi's live REST API only serves a rolling ~3-month window, and a separate,
+   documented, public `/historical/*` endpoint tier exists that this project's
+   `KalshiHistoryFetcher` does NOT yet query.** `GET /historical/cutoff` (live-verified, HTTP 200)
+   returned `{"market_settled_ts": "2026-05-23T00:00:00Z", ...}` — the live `/markets?status=
+   settled` feed's effective floor. Confirmed against the official docs
+   (`docs.kalshi.com/getting_started/historical_data`, WebFetched): Kalshi partitions markets/
+   candlesticks/trades/orders into a live tier (recent only) and a historical tier (`GET
+   /historical/markets`, `GET /historical/markets/{ticker}`, `GET /historical/markets/{ticker}/
+   candlesticks`, etc.), same cursor-pagination contract as the live endpoints, **no
+   authentication documented or required** (verified: public 200 responses with no credentials
+   supplied). **Live-verified this run:** `GET /historical/markets?series_ticker=KXECONSTATU3`
+   returned a genuine finalized April-2026 unemployment-rate market
+   (`KXECONSTATU3-26APR-T5.5`, `status: "finalized"`, `result: "no"`) that the live
+   `/markets?status=settled` endpoint no longer serves (it predates the May-23 cutoff). This is
+   the reason the prior 07-19c/07-20/07-20c B8 probes kept finding the LIVE settled feed thin —
+   they were never wrong about what the live feed returns, but there is a whole second, public,
+   deeper tier the fetcher has never queried. **Depth-probed 4 employment/economics series via
+   `/historical/markets` (single unauthenticated GET each, `limit=200`, no pagination beyond one
+   page attempted for the shallower series):** `KXECONSTATU3` → 115 markets / **5** distinct
+   monthly release-events, back to **Dec 2025**; `KXPAYROLLS` → 200 markets (page-capped, likely
+   more available uncounted) / **22** distinct monthly events, back to **Nov 2024**;
+   `KXECONSTATCPICORE` → 55 markets / **5** events, back to Dec 2025; and — the deepest —
+   `KXJOBLESS` (weekly initial jobless claims, one clean market per release, NOT a correlated
+   multi-strike ladder like the monthly series) → 74 markets / **69** distinct WEEKLY release-
+   events, back to **Aug 2021** (`JOBLESS-21AUG07`). Real, live-verified, multi-year depth on at
+   least one employment-category series.
+
+**Two disclosed, evidenced caveats (not glossed over).**
+- The monthly-report series (`KXECONSTATU3`/`KXPAYROLLS`/`KXECONSTATCPICORE`) are
+  **strike-ladder markets**: one macro release generates ~10–20 simultaneously-settling threshold
+  markets that are NOT independent observations of crowd calibration — they are highly
+  correlated draws on the same underlying number, structurally identical to the Fed-rate-decision
+  clustering problem this project's memory has already flagged (a prior run found Fed-decision
+  contracts were 18.9%–27% of a Politics-corpus union by themselves). A future EXP-009 build must
+  count **independent release-events**, not raw market rows, when assessing N — by that count,
+  the deepest single series (`KXJOBLESS`) gives **69** independent weekly observations, comfortably
+  above this project's standing 100-min-N-ish bar only once combined across a couple of series/
+  years; the monthly series individually (5–22 events) do not clear it alone.
+- This is a **feasibility + literature finding, not a backtest.** No PnL, no Brier score, no
+  calibration curve, and no cost model were computed against this data this run — the probe
+  counted reachable market rows and distinct events only, exactly the same discipline as every
+  prior B8 feasibility probe in this file. **No edge is claimed.**
+
+**Bonus finding (incidental to the probe, not chased further this run): a second, uncovered
+Kalshi structured-strike schema.** Several of these economics/employment markets carry
+`"custom_strike": {"Value": "5.5"}` + `"strike_type": "custom"` (a single-point "exactly X%"
+market) — distinct from the `floor_strike`/`cap_strike`/`strike_type ∈ {greater, less, between}`
+scheme the just-shipped (#400) B8 structured-strike parser handles. `extract_threshold_from_
+structured_strike` correctly returns `None` on a `strike_type == "custom"` market today (the
+existing refuse-to-guess default, verified by reading the code — not a bug, no false-pairing
+risk), so this is filed as a scope gap for a future extension, not a defect.
+
+**Why the `/historical/markets` finding matters beyond EXP-009.** B8's own 2026-07-20c entry
+(above) pinned its NEXT step as "a HISTORICAL co-listed BTC/ETH corpus — fetch RESOLVED past
+Kalshi crypto markets." The same `/historical/*` tier applies to Kalshi's crypto series
+(`KXBTCD`/`KXBTCMAXY`/etc.), not just economics — this run's finding is a general Kalshi
+data-access unblock that directly serves BOTH the already-filed B8 next step AND the new EXP-009
+candidate, from one underlying fetcher change (`KalshiHistoryFetcher.fetch_resolved_markets`
+extending its query to fall back to `/historical/markets` once the live tier's cutoff is passed).
+
+### Recommendation — EXP-009 (new, written to GROWTH_STATUS.md `experiments[]`, full spec there)
+
+A Kalshi employment/labor-category calibration-bucket test: reuse the EXISTING, already-built
+`CalibrationBucketStrategy`/`RecencyWeightedBucketModel` mechanisms (never rebuilt — the refuted
+Polymarket tests already proved the MECHANISM code works and abstains/raises honestly) against a
+NEW corpus — Kalshi employment/labor-category markets pulled via `KalshiHistoryFetcher` EXTENDED
+to also query `/historical/markets` — falsifiable hypothesis, minimum N (counted in independent
+release-events, not raw market rows, given the ladder-correlation caveat above), OOS plan,
+significance threshold, cost assumptions, and a 5-item how-it-could-be-wrong pre-mortem are all
+in the GROWTH_STATUS.md entry. **RECOMMEND-only — no ROADMAP steer.** This is a feasibility
+probe + an external directional literature claim, not a reproduced OOS result with a causal
+mechanism at sufficient N; it does not clear the high bar §6 sets for touching ROADMAP.md/
+BUSINESS_CASE.md. Binding constraint unchanged: no validated real-money OOS edge on any tested
+mechanism to date. `engine_pct` unchanged (74); `business_case_strength` stays B; no revenue
+field touched; no code changed this run (docs-only: GROWTH_STATUS.md + this file; all data
+fetched this run was read-only public market data via existing/no new endpoints, no capital, no
+orders, no live-trading surface touched).
+
+**NEXT buildable steps (filed, priority order):**
+1. Extend `KalshiHistoryFetcher.fetch_resolved_markets` to fall back to `GET /historical/markets`
+   (same schema family, cursor-paginated, no new credential) once the live tier's `/historical/
+   cutoff` is passed — a general capability, not EXP-009-specific. Offline-fixture-testable
+   against the field shapes this run observed live (incl. the `custom_strike` variant).
+2. Once (1) ships: run the EXP-009 pilot (Kalshi employment/labor calibration-bucket, pre-
+   registered per the GROWTH_STATUS.md spec) AND re-attempt the B8 historical co-listed BTC/ETH
+   corpus (2026-07-20c's own pinned next step) — both consumers of the same fetcher extension,
+   per this project's DECISION COROLLARY (ship the capability once, use it for both filed needs).
+3. Extend `extract_threshold_from_structured_strike` to handle `strike_type == "custom"`
+   (single-point strikes) if/when a same-event cross-venue match against a custom-strike market
+   is ever needed — not urgent, no current consumer blocked on it.
+4. EXP-008 same-market poll-latency pilot — still the filed, cheapest, build-first next step from
+   Research Run 27 (2026-07-20b), unchanged priority.
+5. EXP-006b / EXP-007 — both still filed, both still below-floor or fully refuted; no change.
+
+Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
+tested mechanism; engine_pct unchanged.
