@@ -507,10 +507,20 @@ def _to_float(value: Any) -> Optional[float]:
 
 
 def _finite_float(value: Any) -> Optional[float]:
-    """``_to_float`` but ALSO rejects non-finite (NaN/±inf) — so a garbage structured strike
-    can never license a cross-venue pairing. A strike is a value the matcher will compare
-    numerically; NaN/inf must degrade to None (refuse to guess), never propagate."""
-    f = _to_float(value)
+    """``_to_float`` but ALSO rejects non-finite (NaN/±inf), booleans, and overflow — so a
+    garbage structured strike can never license a cross-venue pairing. A strike is a value the
+    matcher will compare numerically; anything that is not a genuine finite number must degrade
+    to None (refuse to guess), never propagate. Explicitly:
+      * ``bool`` → None (``float(True)==1.0`` would otherwise smuggle a fake 1.0/0.0 strike past
+        the matcher's own bool guard, which only sees the already-coerced float);
+      * a huge-integer strike whose ``float()`` OVERFLOWS → None (keep the market, drop the
+        un-representable strike) rather than raising."""
+    if isinstance(value, bool):
+        return None
+    try:
+        f = _to_float(value)
+    except OverflowError:  # float(an arbitrarily large int) — a JSON payload may carry one
+        return None
     if f is None or not math.isfinite(f):
         return None
     return f

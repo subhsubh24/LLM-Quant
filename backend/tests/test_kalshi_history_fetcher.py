@@ -676,6 +676,11 @@ def test_finite_float_rejects_nan_inf_and_garbage():
     assert _finite_float(73000) == 73000.0
     for bad in ("nan", "inf", "-inf", float("nan"), float("inf"), None, "abc", {}):
         assert _finite_float(bad) is None
+    # A JSON boolean must NOT coerce to a 1.0/0.0 strike (float(True)==1.0 would smuggle a fake
+    # strike past the matcher's own bool guard); an overflowing huge-int strike degrades to None
+    # (keep the market, drop the un-representable strike) rather than raising.
+    assert _finite_float(True) is None and _finite_float(False) is None
+    assert _finite_float(10 ** 400) is None
 
 
 def test_parse_resolved_captures_structured_strike():
