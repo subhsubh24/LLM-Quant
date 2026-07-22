@@ -3040,3 +3040,38 @@ real-money OOS edge on any mechanism. Signal: honest null, value-bar-clearing.
 **Follow-up filed (both #398 reviewers, non-blocking):** `test_orchestrator_seeds_deployed_strategies_as_proposed` (a 4th orchestrator test in the same file) still uses the real durable store — leak-safe TODAY (it seeds with `if name not in registry` and only asserts `state=="proposed"`) but non-hermetic. A module-scoped autouse fixture patching the store construction for every orchestrator instantiation would isolate the whole file DRY-ly. A future run can convert the per-helper rebind to that fixture.
 
 **B8 status:** quote blocker GONE; the ONE remaining blocker is now precisely the structured-strike parser (`floor_strike`→`Threshold`) + a targeted Polymarket crypto universe + touch/barrier/terminal classifier — evidenced by the MATCH probe (0 pairs because Kalshi crypto titles are generic so `extract_threshold` yields None). Signal: honest B8 advance + a real ingest/gate repair, value-bar-clearing. Binding constraint unchanged: business_case_strength B, no validated OOS edge.
+
+## 2026-07-22 — CUMULATIVE per-category budget-share cap (#404) + B8 resolved-Kalshi structured strikes (#405); honest NULL, no edge
+
+**Owner steer #1 (cumulative cap):** shipped `walk_forward.cumulative_category_budget_cap` — the F10-faithful de-concentration
+control the concurrent cap (#388) could not provide. Bounds the LIFETIME Σ-budget per-category SHARE F10's
+`top_category_budget_share` gates on (concurrent cap bounds only instantaneous exposure; recycling defeats it on the cumulative
+metric). Sizes each trade down to `room=(cap·ΣT−Σcat)/(1−cap)`; first deployed trade bootstrap-exempt (disclosed slack);
+NO-OP below 2 categories / at cap≥1 (a share cap has nowhere to reallocate on a single-category book — mirrors F10's
+categories-known exclusion); EFFECTIVE cap drives sizing + seed_hash so a no-op/None hashes byte-identically. On the committed
+N=187 corpus it BINDS (recency 0.554→0.40, calibration 0.382→0.31) where concurrent does not — but both alphas net-NEGATIVE, so
+the bucket family stays REFUTED. Honest NULL.
+
+**Owner steer #3 (B8):** captured Kalshi structured strikes (`floor_strike`/`cap_strike`/`strike_type`) on the RESOLVED-history
+record (previously strike-blind — the live client had them since #400, the resolved path did not), finite-coerced/never
+fabricated; matcher `_infer_structured_unit` duck-types over `.question`/`.title` so a resolved strike is directly matcher-usable.
+Moves the historical-corpus blocker off strike-blindness; resolved→Market bridge + egress-gated corpus fetch remain filed.
+
+**The maker≠checker gate CAUGHT 3 REAL DEFECTS on #404 before merge (research-instrument PR, not execution-path):**
+1. (Opus) the concentration-variant verdict HARD-CODED "the aggregate is net-NEGATIVE … Honest NULL" whenever no variant
+   validated — but that condition trips on F10 FRAGILITY (horizon/confidence) regardless of PnL sign, so a net-POSITIVE,
+   F11-significant, merely-fragile corpus was falsely reported as a net-negative null (and a NEW test locked the lie). Rewrote
+   the verdict as a pure `_concentration_verdict` reading the ACTUAL state; added direct unit tests for each reason branch.
+2. (both Sonnet) the verdict narrated BOTH caps even when only one was requested → gated per requested cap.
+3. (Opus) a mono-category / all-`__uncategorized__` book collapsed to 1 trade then falsely flagged its 100% share as a breach
+   → the <2-category no-op fixes it. Also: the faithful-share check now carries the disclosed bootstrap-slack term and is
+   asserted only where the cap ENGAGED (no false "SLACK EXCEEDED").
+   PR2 (#405) drew 2 Opus COULD-NOT-BREAK + Sonnet APPROVE; two minor `_finite_float` hardenings (reject bool, catch
+   OverflowError) folded in — no fabrication/leakage/live-Market regression.
+
+**Signal: improving** — 2 file-disjoint code PRs + 1 bookkeeping, 0 reverts, 0 abandoned; PR1 needed 1 fix cycle (honesty
+defects caught + fixed through the gate), PR2 clean. **Net:** no validated OOS edge on any mechanism (bucket family REFUTED;
+the cumulative-cap tooling the family test needed now EXISTS but is null on the committed net-negative corpus). Binding
+constraint (`business_case_strength = B`) STANDS. Named next steps filed to ROADMAP/RESEARCH_MEMORY: (1) a net-positive-but-
+fragile per-category corpus to make the cumulative-cap de-concentration test non-vacuous (egress-gated); (2) the B8
+resolved→Market price bridge + historical co-listed corpus fetch (egress-gated); (3) the B8 touch/barrier/terminal classifier.
