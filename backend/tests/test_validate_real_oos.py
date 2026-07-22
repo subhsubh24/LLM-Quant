@@ -139,3 +139,93 @@ def test_floor_lane_refuses_research_only_play_money_records():
 
     # A pure real-money corpus (default research_only=False) is unaffected.
     assert v.evaluate(_synthetic(), wf, cal, seed=42)["corpus"]["n_markets"] == 300
+
+
+# --------------------------------------------------------------------------- #
+# concentration_capped_variant — the per-category de-concentration block was   #
+# reachable via the CLI (--category-exposure-cap / --cumulative-category-      #
+# budget-cap) but had ZERO regression coverage. These lock its shape + the     #
+# faithful CUMULATIVE-cap claim (it bounds F10's top_category_budget_share,    #
+# which the CONCURRENT cap cannot on a recycling corpus) + backward-compat.    #
+# --------------------------------------------------------------------------- #
+from app.prediction_markets.market_category import (  # noqa: E402
+    CATEGORY_CRYPTO,
+    CATEGORY_ECONOMICS,
+    CATEGORY_POLITICS,
+)
+
+
+def _categorized_synthetic(n: int = 180):
+    """The learnable-edge corpus (0.5 crowd price, 70% YES) but LABELED across categories, with
+    POLITICS deliberately dominant (2 of every 4 markets) so its cumulative budget SHARE is high
+    — the shape a de-concentration cap must bound. Short-lived (resolve next day) so cost basis
+    RECYCLES: the concurrent cap becomes a no-op on cumulative concentration, the cumulative cap
+    does not."""
+    base = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    cats = [CATEGORY_POLITICS, CATEGORY_POLITICS, CATEGORY_ECONOMICS, CATEGORY_CRYPTO]
+    out = []
+    for i in range(n):
+        outcome = 1 if (i % 10) < 7 else 0
+        out.append(wf.HistoricalMarket(
+            market_id=f"cat{i}",
+            decision_time=base + dt.timedelta(days=i),
+            resolution_time=base + dt.timedelta(days=i + 1),
+            market_price=0.5, model_prob=0.5, outcome=outcome,
+            category=cats[i % len(cats)],
+        ))
+    return out
+
+
+def test_no_cap_leaves_report_free_of_variant_block():
+    # Backward-compat: with neither cap set the report is byte-for-byte the old shape — the
+    # variant block is ABSENT (the live/frozen lanes and their pinned outputs stay untouched).
+    r = v.evaluate(_categorized_synthetic(), wf, cal, seed=42)
+    assert "concentration_capped_variant" not in r
+
+
+def test_concentration_variant_shape_and_cumulative_cap_binds_F10_share():
+    r = v.evaluate(
+        _categorized_synthetic(), wf, cal, seed=42,
+        category_exposure_cap=0.2, cumulative_category_budget_cap=0.4,
+    )
+    assert "concentration_capped_variant" in r
+    b = r["concentration_capped_variant"]
+    assert b["category_exposure_cap"] == 0.2
+    assert b["cumulative_category_budget_cap"] == 0.4
+    # Both strategy families run, each with uncapped + concurrent + cumulative variants.
+    for fam in ("calibration", "recency_weighted"):
+        assert {"uncapped", "concurrent_capped", "cumulative_capped"} <= set(b[fam])
+        cum = b[fam]["cumulative_capped"]
+        # The cumulative cap bounds F10's OWN metric to <= the cap (bootstrap slack included in
+        # the flag), where the concurrent cap does not (recycling defeats it).
+        assert cum["top_category_budget_share"] <= 0.4 + 1e-6
+        assert cum["cumulative_share_bounded"] is True
+        assert b[fam]["uncapped"]["top_category_budget_share"] > 0.4  # genuinely de-concentrated
+    assert b["cumulative_cap_bound_on_this_corpus"] is True
+    assert b["cumulative_share_bounded_below_cap"] is True
+    assert "REFUTED" in b["verdict"] and "Honest NULL" in b["verdict"]
+
+
+def test_variant_accepts_cumulative_cap_alone():
+    # The cumulative cap is usable on its own (no concurrent cap) — the concurrent variant is
+    # then omitted from each family, the cumulative one present.
+    r = v.evaluate(_categorized_synthetic(), wf, cal, seed=42, cumulative_category_budget_cap=0.4)
+    b = r["concentration_capped_variant"]
+    assert b["category_exposure_cap"] is None
+    for fam in ("calibration", "recency_weighted"):
+        assert "cumulative_capped" in b[fam]
+        assert "concurrent_capped" not in b[fam]
+
+
+def test_variant_never_manufactures_edge_on_losing_signal():
+    # HONESTY: a de-concentration cap can only REDUCE deployed capital. On any family whose
+    # uncapped aggregate is non-positive, an F10 non-fragile pass is explicitly VACUOUS and the
+    # verdict must NOT claim a validated edge.
+    r = v.evaluate(
+        _categorized_synthetic(), wf, cal, seed=42, cumulative_category_budget_cap=0.4
+    )
+    b = r["concentration_capped_variant"]
+    for fam in ("calibration", "recency_weighted"):
+        cum = b[fam]["cumulative_capped"]
+        if cum["total_pnl_usd"] <= 0.0 and not cum["f10_fragile"]:
+            assert cum["f10_nonfragile_is_vacuous"] is True

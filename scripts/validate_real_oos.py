@@ -43,17 +43,21 @@ def _imp(a, b):
 def evaluate(
     markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: float = 2.0,
     category_exposure_cap: "float | None" = None,
+    cumulative_category_budget_cap: "float | None" = None,
 ) -> dict:
     """Pure OOS evaluation on already-fetched leakage-safe markets (injectable for tests):
     crowd baseline vs. the B4a calibration alpha, + corpus stats + an honest verdict.
 
-    When ``category_exposure_cap`` is set (a fraction in (0, 1]), an ADDITIONAL
-    ``concentration_capped_variant`` block is appended: the Run 20-22 named-but-never-built
-    per-CATEGORY exposure cap, run on BOTH the static calibration alpha AND the
-    recency-weighted alpha, each with F10/F11 — the honest test of whether bounding
-    correlated-cluster concentration rescues the REFUTED bucket family (it cannot create an
-    edge; it only removes concentration). Default None leaves the report byte-for-byte
-    unchanged, so the live/frozen lanes and their pinned outputs are untouched."""
+    When ``category_exposure_cap`` and/or ``cumulative_category_budget_cap`` is set (each a
+    fraction in (0, 1]), an ADDITIONAL ``concentration_capped_variant`` block is appended: the
+    Run 20-22 named per-CATEGORY de-concentration controls, run on BOTH the static calibration
+    alpha AND the recency-weighted alpha, each with F10/F11 — the honest test of whether
+    bounding correlated-cluster concentration rescues the REFUTED bucket family (it cannot
+    create an edge; it only removes concentration). ``category_exposure_cap`` bounds CONCURRENT
+    open exposure; ``cumulative_category_budget_cap`` bounds the LIFETIME per-category budget
+    SHARE F10 actually gates on (the faithful control, Run 21). Default None/None leaves the
+    report byte-for-byte unchanged, so the live/frozen lanes and their pinned outputs are
+    untouched."""
     # STRUCTURAL RESEARCH-ONLY GUARDRAIL (ROADMAP A8): this is the REAL-MONEY OOS floor lane —
     # its verdict feeds go-live-eligibility. A PLAY-MONEY (research_only) record (e.g. Manifold)
     # validates a METHOD but a play-money edge does NOT transfer to real money, so it must NEVER
@@ -156,18 +160,21 @@ def evaluate(
         ),
     }
 
-    if category_exposure_cap is not None:
+    if category_exposure_cap is not None or cumulative_category_budget_cap is not None:
         rec_mod = _imp(
             "backend.app.prediction_markets.recency_weighted_bucket_strategy",
             "app.prediction_markets.recency_weighted_bucket_strategy",
         )
 
-        def _variant(strategy_fn, cap) -> dict:
-            """Run one strategy (optionally per-category-exposure-capped) through walk_forward
-            + F10 + F11 and return the honest compact result. Category labels feed F10 exactly
-            as the primary alpha's do."""
+        def _variant(strategy_fn, *, concurrent=None, cumulative=None) -> dict:
+            """Run one strategy (optionally de-concentrated) through walk_forward + F10 + F11 and
+            return the honest compact result. Category labels feed F10 exactly as the primary
+            alpha's do. ``concurrent`` = per-category CONCURRENT exposure cap;
+            ``cumulative`` = per-category CUMULATIVE budget-SHARE cap (the F10-faithful one)."""
             res = wf_mod.walk_forward_backtest(
-                markets, strategy_fn=strategy_fn, seed=seed, category_exposure_cap=cap
+                markets, strategy_fn=strategy_fn, seed=seed,
+                category_exposure_cap=concurrent,
+                cumulative_category_budget_cap=cumulative,
             )
             reg = rs_mod.analyze_regime_slices(
                 res.trades, category_by_market_id=category_by_market_id or None
@@ -190,7 +197,8 @@ def evaluate(
                 "f11_is_significant_edge": sig.is_significant_edge,
             }
 
-        cap = category_exposure_cap
+        conc = category_exposure_cap
+        cum = cumulative_category_budget_cap
 
         def _bound(capped: dict, uncapped: dict) -> bool:
             # Machine-readable disclosure: did the cap actually ENGAGE, or was it a no-op on
@@ -200,23 +208,48 @@ def evaluate(
                 or capped["total_pnl_usd"] != uncapped["total_pnl_usd"]
             )
 
-        cal_uncapped = _variant(cal_mod.make_calibration_bucket_strategy(), None)
-        cal_capped = _variant(cal_mod.make_calibration_bucket_strategy(), cap)
-        rec_uncapped = _variant(rec_mod.make_recency_weighted_bucket_strategy(), None)
-        rec_capped = _variant(rec_mod.make_recency_weighted_bucket_strategy(), cap)
-        cal_capped["cap_bound"] = _bound(cal_capped, cal_uncapped)
-        rec_capped["cap_bound"] = _bound(rec_capped, rec_uncapped)
-        any_bound = cal_capped["cap_bound"] or rec_capped["cap_bound"]
+        def _family(make) -> dict:
+            """Build the uncapped + (present) capped variants for one strategy family."""
+            uncapped = _variant(make(), concurrent=None, cumulative=None)
+            out = {"uncapped": uncapped}
+            if conc is not None:
+                cc = _variant(make(), concurrent=conc, cumulative=None)
+                cc["cap_bound"] = _bound(cc, uncapped)
+                out["concurrent_capped"] = cc
+            if cum is not None:
+                mc = _variant(make(), concurrent=None, cumulative=cum)
+                mc["cap_bound"] = _bound(mc, uncapped)
+                # The FAITHFUL check: the cumulative cap's job is to bound F10's own
+                # top_category_budget_share to <= cum. A tiny bootstrap slack (the exempt first
+                # trade) is disclosed, never hidden — see walk_forward's cap docstring.
+                mc["cumulative_share_bounded"] = (
+                    mc["trades"] == 0 or mc["top_category_budget_share"] <= cum + 1e-6
+                )
+                out["cumulative_capped"] = mc
+            return out
+
+        calibration = _family(cal_mod.make_calibration_bucket_strategy)
+        recency_weighted = _family(rec_mod.make_recency_weighted_bucket_strategy)
+        families = (calibration, recency_weighted)
+
+        conc_views = [f["concurrent_capped"] for f in families if "concurrent_capped" in f]
+        cum_views = [f["cumulative_capped"] for f in families if "cumulative_capped" in f]
+        all_views = [f["uncapped"] for f in families] + conc_views + cum_views
+
+        any_conc_bound = any(v["cap_bound"] for v in conc_views)
+        any_cum_bound = any(v["cap_bound"] for v in cum_views)
+        cum_share_all_bounded = (cum is None) or all(v["cumulative_share_bounded"] for v in cum_views)
         any_validated = any(
-            v["f11_is_significant_edge"] and not v["f10_fragile"]
-            for v in (cal_capped, rec_capped, rec_uncapped)
+            v["f11_is_significant_edge"] and not v["f10_fragile"] for v in all_views
         )
         report["concentration_capped_variant"] = {
-            "category_exposure_cap": cap,
-            "cap_bound_on_this_corpus": any_bound,
-            "calibration_capped": cal_capped,
-            "recency_weighted_uncapped": rec_uncapped,
-            "recency_weighted_capped": rec_capped,
+            "category_exposure_cap": conc,
+            "cumulative_category_budget_cap": cum,
+            "concurrent_cap_bound_on_this_corpus": any_conc_bound,
+            "cumulative_cap_bound_on_this_corpus": any_cum_bound,
+            "cumulative_share_bounded_below_cap": cum_share_all_bounded,
+            "calibration": calibration,
+            "recency_weighted": recency_weighted,
             "seed_hash_note": (
                 "seed_hash excludes strategy_fn (walk_forward contract), so different strategies "
                 "with the same data+config share a hash — compare trades/PnL, NOT hashes, across "
@@ -224,16 +257,18 @@ def evaluate(
             ),
             "verdict": (
                 (
-                    "A per-category exposure cap is a RISK CONTROL, not an alpha, and the "
-                    "bucket-calibration family stays REFUTED here. Two honest caveats: (1) this is "
-                    "a CONCURRENT-exposure cap; it "
-                    + ("did NOT bind on this corpus" if not any_bound else "bound on this corpus")
-                    + " and by construction it does not bound F10's CUMULATIVE per-category budget "
-                    "share (positions settle and recycle room). (2) The aggregate is net-NEGATIVE, "
-                    "so an F10 non-fragile pass is VACUOUS — no concentration control can "
-                    "manufacture an edge from a losing signal. A faithful de-concentration test "
-                    "needs a CUMULATIVE cap AND a net-positive-but-fragile corpus (egress-gated; "
-                    "filed to RESEARCH_MEMORY/ROADMAP). Honest NULL."
+                    "A per-category de-concentration cap is a RISK CONTROL, not an alpha, and the "
+                    "bucket-calibration family stays REFUTED here. The CONCURRENT cap "
+                    + ("bound" if any_conc_bound else "did NOT bind")
+                    + " on this corpus; the CUMULATIVE budget-share cap (the F10-faithful control) "
+                    + ("bound" if any_cum_bound else "did NOT bind")
+                    + " and held every capped family's top_category_budget_share at/under the cap "
+                    + ("(faithful de-concentration confirmed). " if cum_share_all_bounded else "— SLACK EXCEEDED, investigate. ")
+                    + "But the aggregate is net-NEGATIVE, so an F10 non-fragile pass is VACUOUS — no "
+                    "concentration control can manufacture an edge from a losing signal. The "
+                    "cumulative cap the family test needed now EXISTS; the remaining ingredient is a "
+                    "net-positive-but-fragile per-category corpus (egress-gated; filed to "
+                    "RESEARCH_MEMORY/ROADMAP). Honest NULL."
                 )
                 if not any_validated else
                 "A capped/recency variant cleared F11 + F10 on this corpus — record it and re-test "
@@ -400,11 +435,16 @@ def main() -> int:
                          "result can later be reproduced offline via --from-corpus. Run on a "
                          "Polymarket-permitted host.")
     ap.add_argument("--category-exposure-cap", type=float, default=None,
-                    help="Fraction in (0, 1]. When set, ALSO run the per-CATEGORY exposure-cap "
-                         "variant (Run 20-22's named-but-never-built concentration fix) on both the "
+                    help="Fraction in (0, 1]. When set, ALSO run the per-CATEGORY CONCURRENT "
+                         "exposure-cap variant (Run 20-22's named concentration fix) on both the "
                          "static calibration and recency-weighted bucket alphas, each with F10/F11 — "
                          "the honest test of whether bounding correlated-cluster concentration "
                          "rescues the REFUTED bucket family. Off by default (report unchanged).")
+    ap.add_argument("--cumulative-category-budget-cap", type=float, default=None,
+                    help="Fraction in (0, 1]. When set, ALSO run the per-CATEGORY CUMULATIVE "
+                         "budget-SHARE cap variant — the F10-FAITHFUL de-concentration control "
+                         "(Run 21) the concurrent cap could not provide: it bounds the LIFETIME "
+                         "Σ-budget share F10's top_category_budget_share measures. Off by default.")
     args = ap.parse_args()
 
     wf_mod = _imp("backend.app.prediction_markets.walk_forward", "app.prediction_markets.walk_forward")
@@ -418,7 +458,8 @@ def main() -> int:
         markets = load_corpus_from_json(args.from_corpus, wf_mod)
         result = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
                           decision_lead_days=args.decision_lead_days,
-                          category_exposure_cap=args.category_exposure_cap)
+                          category_exposure_cap=args.category_exposure_cap,
+                          cumulative_category_budget_cap=args.cumulative_category_budget_cap)
         out = {"frozen_corpus": args.from_corpus, "combined": result}
         if args.json:
             print(json.dumps(out, indent=2))
@@ -437,14 +478,16 @@ def main() -> int:
         if markets:
             per_venue[venue] = evaluate(markets, wf_mod, cal_mod, seed=args.seed,
                                         decision_lead_days=args.decision_lead_days,
-                                        category_exposure_cap=args.category_exposure_cap)
+                                        category_exposure_cap=args.category_exposure_cap,
+                                        cumulative_category_budget_cap=args.cumulative_category_budget_cap)
             all_markets.extend(markets)
         else:
             per_venue[venue] = {"status": status}
 
     combined = (evaluate(all_markets, wf_mod, cal_mod, seed=args.seed,
                          decision_lead_days=args.decision_lead_days,
-                         category_exposure_cap=args.category_exposure_cap)
+                         category_exposure_cap=args.category_exposure_cap,
+                         cumulative_category_budget_cap=args.cumulative_category_budget_cap)
                 if all_markets else {"status": "no records from any venue (egress-blocked / run on a permitted host)"})
     out = {"per_venue": per_venue, "combined": combined}
 

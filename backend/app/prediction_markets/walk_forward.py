@@ -322,6 +322,7 @@ def walk_forward_backtest(
     test_window_days: int = 7,
     max_fraction_per_trade: float = 0.05,
     category_exposure_cap: Optional[float] = None,
+    cumulative_category_budget_cap: Optional[float] = None,
     cost_model: CostModel = DEFAULT_COST_MODEL,
     seed: int = 42,
 ) -> WalkForwardResult:
@@ -362,11 +363,21 @@ def walk_forward_backtest(
     free room, a category can cycle unbounded CUMULATIVE volume through recycled room while a
     concurrent cap never binds. So this cap bounds instantaneous/liquidity-style concentration;
     it does NOT, by construction, bound the cumulative same-category budget share F10 gates on.
-    A faithful test of "does DE-CONCENTRATING rescue the family" would additionally need a cap
-    on CUMULATIVE per-category deployment AND a corpus whose alpha is net-POSITIVE-but-fragile
-    (F10 concentration is only assessable on a positive aggregate) — the committed frozen corpus
-    is net-NEGATIVE, so concentration is moot there. Both are filed as next steps. This is a
-    RISK CONTROL, not an edge — it can only REDUCE/reallocate exposure, never manufacture PnL.
+
+    CUMULATIVE de-concentration (optional ``cumulative_category_budget_cap``): the faithful
+    control the concurrent cap could not provide. It bounds each category's LIFETIME budget
+    SHARE — Σ per-category budget ÷ Σ total budget, the EXACT quantity F10's
+    ``top_category_budget_share`` measures — by sizing every trade DOWN so the running
+    post-trade share never exceeds the cap (the first deployed trade in the whole book is
+    bootstrap-exempt because its share is 1.0 by definition; its fixed budget is diluted away as
+    turnover grows, so the realized top share converges to the cap). This finally enables the
+    honest test Research Runs 20-22 named: "does DE-CONCENTRATING rescue the REFUTED family?"
+    The remaining ingredient is a corpus whose alpha is net-POSITIVE-but-fragile (F10
+    concentration is only assessable on a positive aggregate) — the committed frozen corpus is
+    net-NEGATIVE, so on it BOTH caps are moot (no concentration control can manufacture an edge
+    from a losing signal), and that corpus stays the filed next step. Like the concurrent cap
+    this is a RISK CONTROL, not an edge — it can only REDUCE/reallocate exposure, never
+    manufacture PnL. ``None`` (default) leaves ``seed_hash`` byte-identical to before.
 
     Determinism: events are processed in a stable ``(time, market_id, seq)`` order;
     settlement is pure arithmetic; ``market_id`` is required unique. ``seed_hash``
@@ -382,6 +393,13 @@ def walk_forward_backtest(
     if category_exposure_cap is not None and not (0.0 < category_exposure_cap <= 1.0):
         raise ValueError(
             f"category_exposure_cap must be in (0, 1] or None: {category_exposure_cap}"
+        )
+    if cumulative_category_budget_cap is not None and not (
+        0.0 < cumulative_category_budget_cap <= 1.0
+    ):
+        raise ValueError(
+            "cumulative_category_budget_cap must be in (0, 1] or None: "
+            f"{cumulative_category_budget_cap}"
         )
     strategy = strategy_fn or make_net_edge_strategy(cost_model=cost_model)
     # Determinism (the seed_hash contract: same data + seed ⇒ identical PnL). The engine's
@@ -409,6 +427,7 @@ def walk_forward_backtest(
     cfg_hash = _seed_hash(
         markets, seed, initial_bankroll, cost_model, train_min_days,
         test_window_days, max_fraction_per_trade, category_exposure_cap,
+        cumulative_category_budget_cap,
     )
     if not markets:
         return WalkForwardResult(
@@ -448,6 +467,13 @@ def walk_forward_backtest(
     # how much capital is tied up in any ONE category at once. Kept in sync with ``committed``
     # (their values always sum) on every open/drain, whether or not the cap is enabled.
     committed_by_cat: dict[str, float] = {}
+    # CUMULATIVE (lifetime) deployment trackers for the optional
+    # ``cumulative_category_budget_cap``. Unlike ``committed_by_cat`` these are NEVER
+    # decremented on settlement — they accrue the total budget EVER deployed, per category and
+    # in aggregate, so the cap can bound the SAME cumulative per-category budget share F10
+    # (regime_slice.top_category_budget_share = Σ per-cat budget ÷ Σ total budget) gates on.
+    cum_deployed_total = 0.0
+    cum_deployed_by_cat: dict[str, float] = {}
     settled: list[BacktestTrade] = []
     # min-heap keyed (resolution_time, market_id, seq); seq is a monotonic tie-breaker so
     # the BacktestTrade payload is NEVER compared (it is not orderable).
@@ -488,6 +514,33 @@ def walk_forward_backtest(
             budget = min(budget, cat_room)
             if budget < _CAP_DUST_FLOOR_FRACTION * initial_bankroll:
                 continue
+        if cumulative_category_budget_cap is not None and cumulative_category_budget_cap < 1.0:
+            # CUMULATIVE (lifetime) per-category budget-SHARE cap — the faithful
+            # de-concentration control Research Runs 20-22 named but never built. The concurrent
+            # ``category_exposure_cap`` above bounds INSTANTANEOUS open exposure; because
+            # positions settle and free room, a category can still cycle unbounded CUMULATIVE
+            # volume, so the concurrent cap does NOT bound F10's
+            # ``top_category_budget_share`` = Σ per-cat budget ÷ Σ total budget. THIS cap does:
+            # it sizes each trade DOWN so the running post-trade share
+            # (cum_cat + b) / (cum_total + b) never exceeds the cap. Solving that equality for
+            # the admissible budget b gives room = (cap·cum_total − cum_cat) / (1 − cap); a trade
+            # sized to exactly that room lands the category's cumulative share ON the cap line.
+            # BOOTSTRAP: the share of the FIRST deployed trade in the whole book is 1.0 by
+            # definition (it is the entire book), so no share cap < 1.0 can admit it — the first
+            # trade (``cum_deployed_total == 0``) is therefore exempt. Its fixed budget is diluted
+            # by later turnover, so the realized top share converges to the cap as total turnover
+            # grows (residual slack ≤ first_trade_budget ÷ total_budget — asserted in the tests,
+            # not hidden). This is a RISK CONTROL: it can only REDUCE a category's cumulative
+            # share, never manufacture PnL — on a net-NEGATIVE corpus it cannot create an edge.
+            capc = cumulative_category_budget_cap
+            ccat = _cat_key(m.category)
+            if cum_deployed_total > 0.0:
+                cum_room = (
+                    capc * cum_deployed_total - cum_deployed_by_cat.get(ccat, 0.0)
+                ) / (1.0 - capc)
+                budget = min(budget, cum_room)
+                if budget < _CAP_DUST_FLOOR_FRACTION * initial_bankroll:
+                    continue
         if budget <= 0.0:
             continue
         trade = _settle(m, decision, budget, cost_model)
@@ -497,6 +550,12 @@ def walk_forward_backtest(
         committed += trade.budget_usd
         committed_by_cat[_cat_key(trade.category)] = (
             committed_by_cat.get(_cat_key(trade.category), 0.0) + trade.budget_usd
+        )
+        # Accrue LIFETIME deployment (never decremented on settlement) so the cumulative cap
+        # bounds the same Σ-budget share F10 gates on.
+        cum_deployed_total += trade.budget_usd
+        cum_deployed_by_cat[_cat_key(trade.category)] = (
+            cum_deployed_by_cat.get(_cat_key(trade.category), 0.0) + trade.budget_usd
         )
         heapq.heappush(pending, (trade.resolution_time, trade.market_id, seq, trade))
         seq += 1
@@ -541,6 +600,7 @@ def _seed_hash(
     test_window_days: int,
     max_fraction_per_trade: float,
     category_exposure_cap: Optional[float] = None,
+    cumulative_category_budget_cap: Optional[float] = None,
 ) -> str:
     """A stable fingerprint of the DATA + numeric CONFIG that affect PnL — the markets,
     the seed, the bankroll, the cost rates, and the window sizing. It does NOT cover the
@@ -582,6 +642,11 @@ def _seed_hash(
     # reproduction hashes — byte-identical for every existing (cap-free) run.
     if category_exposure_cap is not None:
         payload["category_exposure_cap"] = round(category_exposure_cap, 12)
+    # Same byte-identical-when-None discipline: an enabled cumulative cap changes PnL so it
+    # MUST enter the fingerprint, but omitting the key when None keeps every pinned cap-free
+    # reproduction hash unchanged.
+    if cumulative_category_budget_cap is not None:
+        payload["cumulative_category_budget_cap"] = round(cumulative_category_budget_cap, 12)
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 
