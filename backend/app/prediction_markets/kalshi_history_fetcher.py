@@ -326,13 +326,17 @@ class KalshiHistoryFetcher:
         sampled ~a day or more before resolution.
 
         Returns a list of ticks ``[{"t": <unix_seconds>, "p": <price 0..1>}, ...]`` or
-        ``[]`` on failure. Prices are normalised to [0, 1] (Kalshi cents 0-100 -> /100).
+        ``[]`` on failure. Prices are normalised to [0, 1] by ``_candle_price`` — which
+        reads the current Kalshi DOLLAR candlestick schema (nested ``price``/``yes_ask``/
+        ``yes_bid`` objects carry dollars in [0,1], LIVE-CONFIRMED this run) as well as the
+        legacy integer-cents form (see ``_candle_price`` for the exact disambiguation).
 
-        HONESTY CAVEAT: the exact candlestick field names are per Kalshi's documented API
-        but were probed on a market that returned an EMPTY candlestick list, so the price
-        extraction accepts BOTH a flat tick (``p``/``yes_price``/``close``) AND the
-        documented nested ``price`` / ``yes_ask`` / ``yes_bid`` candle objects (in cents);
-        the OWNER/loop verifies the field names on the first market that HAS candlesticks.
+        FIDELITY CAVEAT (an auditor break, disclosed not silently changed): for an ILLIQUID
+        candle whose traded-``price`` object is all-null, ``_candle_price`` falls back to
+        ``yes_ask`` — so on a ONE-SIDED book (``yes_bid`` = 0, common on thin markets like
+        the economics/employment series this feeds) the recorded "crowd price" is the ASK,
+        biased HIGH vs the true mid. Any calibration read built on this data must treat that
+        bias as a known upper-lean on crowd confidence, NOT a clean midpoint.
 
         Args:
             ticker: Kalshi market ticker (e.g. "KXBTC-25DEC-T50000").
@@ -373,9 +377,11 @@ class KalshiHistoryFetcher:
             # p==0 is falsy and would be silently dropped by an `or`-chain (a deep-audit
             # finding). p==0 (YES≈0¢) is a valid extreme price that must survive.
             t = _to_float(_first_present(item, ("t", "ts", "end_period_ts")))
-            # _candle_price returns a UNIT-AWARE price already normalised to [0,1]
-            # (nested cents objects /100 unconditionally; flat ticks by magnitude), so a
-            # 1¢ longshot is 0.01, never a fabricated 1.0 (the cents-boundary fix).
+            # _candle_price returns a UNIT-AWARE price already normalised to [0,1] across
+            # the dollar (live + historical) and legacy-cents candle schemas, so a real
+            # $0.67 is 0.67 (never a fabricated 0.0067) and a 1¢ longshot is 0.01 (never a
+            # fabricated 1.0). The final [0,1] range check below drops anything still out
+            # of range rather than fabricating.
             p = _candle_price(item)
             if t is None or p is None:
                 continue
@@ -544,10 +550,11 @@ def _candle_price(item: dict) -> Optional[float]:
 
     Disambiguation (per matched sub-field, in this order): an explicit ``*_dollars`` key is
     unconditionally dollars; a bare value ``> 1.0`` is cents (only cents exceed 1); a bare
-    value ``<= 1.0`` is dollars when it arrived as a STRING (Kalshi formats dollars as
-    ``"0.6700"``) and cents when it arrived as a NUMBER (the legacy fixture form). This is
-    the ONE signal that separates a 1¢ legacy cents tick (number ``1`` → 0.01) from a
-    genuine $1.00 dollar tick (string ``"1.0000"`` → 1.0). The final [0, 1] range check in
+    NON-whole value is dollars (a real legacy cents value is ALWAYS a whole number in
+    [0,100], so a fractional bare value can only be dollars — this closes a bare-dollar-FLOAT
+    misread that a pure type check would divide by 100); only a bare WHOLE ``0``/``1`` stays
+    genuinely ambiguous and is resolved by wire type — a STRING is dollars (``"1.0000"`` →
+    1.0), a NUMBER is legacy cents (``1`` → 0.01). The final [0, 1] range check in
     ``fetch_price_history`` drops anything still out of range rather than fabricating.
 
     A FLAT tick (``p``/``yes_price``/``close`` — the offline fixtures + any simplified
@@ -572,8 +579,18 @@ def _price_from_candle_obj(obj: dict) -> Optional[float]:
     ``_candle_price``). Returns None if no usable value is present.
 
     Field preference mean > close > open; for each, an explicit ``*_dollars`` key wins over
-    the bare key. Value normalisation: ``*_dollars`` → dollars as-is; bare ``> 1.0`` →
-    cents/100; bare ``<= 1.0`` → dollars if a STRING, cents/100 if a NUMBER."""
+    the bare key. Value normalisation for a bare (non-``*_dollars``) key:
+      * ``> 1.0``            → cents/100 (only cents exceed 1);
+      * a NON-whole number  → dollars as-is (a real legacy cents value is ALWAYS a whole
+                              number in [0,100], so a fractional bare value like ``0.44`` or
+                              ``0.6700`` can only be dollars — this closes the auditor-flagged
+                              bare-dollar-FLOAT path that a pure type check would misread as
+                              ``0.0044``, a silent 100x fabrication that passes the [0,1]
+                              range gate);
+      * a whole ``0``/``1`` → genuinely ambiguous (0¢/1¢ cents vs $0.00/$1.00 dollars): a
+                              decimal STRING is dollars (``"1.0000"`` → 1.0), a NUMBER is
+                              legacy cents (``1`` → 0.01). This is the only residual reliance
+                              on wire type, and only at the two integer boundaries."""
     for base in ("mean", "close", "open"):
         for key, is_dollars in ((base + "_dollars", True), (base, False)):
             if key not in obj:
@@ -588,7 +605,9 @@ def _price_from_candle_obj(obj: dict) -> Optional[float]:
                 return v  # explicit dollar field — already a [0,1] probability
             if v > 1.0:
                 return v / 100.0  # only cents exceed 1
-            # v in [0,1]: a decimal STRING is dollars ("0.6700"); a NUMBER is legacy cents.
+            if not float(v).is_integer():
+                return v  # a fractional bare value can only be dollars (cents are whole)
+            # whole 0/1: a decimal STRING is dollars ("1.0000"); a NUMBER is legacy cents.
             return v if isinstance(raw, str) else v / 100.0
     return None
 

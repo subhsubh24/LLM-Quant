@@ -579,7 +579,6 @@ def test_one_cent_nested_price_not_fabricated_as_certainty():
     -certain crowd price that passes the [0,1] DQV gate silently)."""
     assert _candle_price({"price": {"mean": 1}}) == 0.01
     assert _candle_price({"yes_bid": {"close": 1}}) == 0.01
-    assert _candle_price({"price": {"mean": 0.5}}) == 0.005   # sub-cent mean, still cents
     session = FakeSession(lambda url, params: {"candlesticks": [
         {"end_period_ts": 500, "price": {"mean": 1}},        # 1¢ → 0.01, NOT 1.0
     ]})
@@ -810,16 +809,29 @@ def test_candle_dollar_schema_live_and_historical_not_divided_by_100():
     assert _candle_price({"yes_bid": {"close": "0.0000"}}) == 0.0
 
 
-def test_candle_legacy_cents_numbers_still_divided_by_100():
-    """REGRESSION GUARD: the legacy integer/float CENTS schema (numeric values) is unchanged —
-    a NUMBER is cents (/100), a decimal STRING is dollars. This is the one signal that keeps a
-    1¢ legacy tick (number 1 → 0.01) distinct from a $1.00 dollar tick (string "1.0000" → 1.0)."""
-    assert _candle_price({"price": {"mean": 62}}) == 0.62        # number → cents
+def test_candle_legacy_cents_whole_numbers_still_divided_by_100():
+    """REGRESSION GUARD: the legacy integer CENTS schema (WHOLE numeric values) is unchanged —
+    a whole NUMBER is cents (/100). The 1¢ legacy tick (number 1 → 0.01) stays distinct from a
+    $1.00 dollar tick (string "1.0000" → 1.0) via wire type at the integer boundary."""
+    assert _candle_price({"price": {"mean": 62}}) == 0.62        # whole number → cents
     assert _candle_price({"price": {"mean": 1}}) == 0.01         # 1¢ number, NOT 1.0
     assert _candle_price({"yes_ask": {"close": 40}}) == 0.40
-    assert _candle_price({"price": {"mean": 0.5}}) == 0.005      # sub-cent number, still cents
     # An explicit *_dollars key wins over a bare key on the same object.
     assert _candle_price({"price": {"close_dollars": "0.4000", "close": 40}}) == 0.40
+
+
+def test_bare_fractional_number_is_dollars_not_fabricated_cents():
+    """HARDENING (adversarial-review break, all 5 gate agents flagged it): a bare NON-whole
+    numeric value can only be DOLLARS — a real Kalshi legacy cents value is always a whole
+    number in [0,100]. So if Kalshi ever serves a mid-range dollar as an unquoted JSON float
+    (`{"close": 0.44}`, plausible API drift), it must read as 0.44, NOT 0.0044 (a silent 100x
+    fabrication that would pass the [0,1] range gate). Pre-hardening the pure type check
+    divided any bare number by 100."""
+    assert _candle_price({"yes_ask": {"close": 0.44}}) == 0.44   # bare dollar float → as-is
+    assert _candle_price({"price": {"mean": 0.6700}}) == 0.67    # bare dollar float → as-is
+    # whole-number boundaries keep the legacy-cents reading (a NUMBER 0/1 is cents)
+    assert _candle_price({"price": {"mean": 0}}) == 0.0
+    assert _candle_price({"price": {"mean": 1}}) == 0.01
 
 
 def test_historical_dollar_candle_feeds_leakage_safe_record():
