@@ -3987,3 +3987,107 @@ tested mechanism; engine_pct unchanged.
 - **Owner steer priority #3 — B8 resolved-Kalshi structured-strike capture (#405).** The live client captured Kalshi structured strikes (#400) but the RESOLVED-history fetcher — the one a HISTORICAL co-listed corpus (B8 step ii) is assembled from — did not, so every resolved Kalshi crypto record was strike-BLIND (generic title → no title-text strike). `KalshiResolvedMarket` now carries `floor_strike`/`cap_strike`/`strike_type` (finite-coerced via `_finite_float`, garbage/absent→None, never fabricated); `cross_venue_matcher._infer_structured_unit` duck-types over `.question`(live)/`.title`(resolved) so `extract_threshold_from_structured_strike` yields the SAME `Threshold` on both paths — a captured resolved strike is directly matcher-usable where the generic title is not (proven by test; a "between" range still refuses to guess). Both Opus auditors COULD-NOT-BREAK (no fabrication, no leakage, no live-`Market` regression). The B8 historical-corpus blocker moves OFF strike-blindness; the resolved→`Market` price bridge + the egress-gated corpus fetch remain the filed next unit (DECISION COROLLARY — no speculative skeleton).
 - Verdict: **edge-not-proven** on both — a real, tested tooling/data-eng advance on each owner-steer priority, each with an honest measured null / no-edge-claimed, and the SPECIFIC next buildable step filed. Per the value bar (and the active owner steer), an honest null reported AS a null WITH the next step filed clears the bar and IS success.
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any tested mechanism; engine_pct unchanged. Real-money brake untouched (no order, no gate flip, no cap change).
+
+## 2026-07-23 — Research Run 29: external-literature re-sweep (mostly reconfirmation) + one genuinely new primary source (NBA/Kalshi underreaction, corroborates EXP-008) + a verified Polymarket/Kalshi official-fee-formula finding. NEW EXP-010 filed. RECOMMEND-only, no code/backtest run, no ROADMAP steer.
+
+**Orientation.** Read RESEARCH_PLAYBOOK.md, RESEARCH_MEMORY.md (tail), ROADMAP.md, VISION.md,
+`docs/BUSINESS_CASE.md`, GROWTH_STATUS.md first. Confirmed via `git log` that HEAD (`8e91eac`) is
+the 2026-07-22 factory bookkeeping commit for #404/#405/#406 (CUMULATIVE per-category cap + B8
+resolved-Kalshi structured-strike capture) — no commits landed since Research Run 28 (yesterday),
+so neither of Run 28's two filed factory-build items (the `KalshiHistoryFetcher` `/historical/
+markets` extension feeding B8+EXP-009, and EXP-008's live-polling harness) has shipped yet.
+Binding constraint unchanged: both real-money mechanisms fully tested to date (bucket-calibration
+EXP-002/003/005 across 4 corpora; EXP-006 fade-the-spike, FAMILY-NULL-STRONG 0/60 cells) stay
+REFUTED; EXP-008/EXP-009 stay proposed/unbuilt.
+
+**Reconfirmation only (WebSearch, no new evidence, not re-logged as findings).** Le 2026
+(favorite-underpricing/calibration-slope), NBER w34702 (Kalshi macro-market calibration by
+category), Prediction Arena (arxiv 2604.07355, 6 frontier LLMs autonomously trading Kalshi/
+Polymarket, all lost money), and PolyBench all resurfaced with no new numbers beyond what this
+file already logs — not re-reported as evidence, per the standing "don't re-parameterize/re-cite
+an already-logged finding" discipline. Robinhood MCP re-checked directly (`techcrunch.com`,
+`robinhood.com/us/en/support/articles/agentic-trading-overview/`, 2 more sources): the agentic-
+trading beta is confirmed STILL stocks-only; "options, crypto, event contracts, futures, and
+prediction markets" are explicitly named as planned-not-shipped. A9's gate 1 (availability)
+stays unmet — reconfirms, does not change, the existing double-gated ROADMAP entry.
+
+**One genuinely new primary source: arXiv:2606.07811, "When Do Markets Fully Process Public
+Information? Evidence from Real-Time Prediction Markets" (Angelini & De Angelis, University of
+Bologna).** Verified directly (WebFetch of the arxiv abs page returned the full verbatim
+abstract, not a snippet). Studies **1,438 NBA games, 2,876 team-level Kalshi contracts, 409,512
+contract-minute observations**, April 2025–May 2026, benchmarked against an out-of-sample logit
+win-probability model (score margin/time-remaining/recent-scoring, 5-fold cross-fitted at the
+game level). Finding: a 10-percentage-point one-minute move in the benchmark probability produces
+only **~6.4pp of contemporaneous Kalshi price movement**; the missing ~3.6pp predicts **several
+more minutes of same-direction price DRIFT** (a genuine underreaction/momentum effect — the
+OPPOSITE mechanism from the mean-reversion this project's own EXP-006 tested and refuted, so it
+is not a re-parameterization of that refuted family). Underreaction is worse in low-liquidity
+markets. **Decisive caveat, stated by the paper's own authors, not inferred by us: "executable
+returns accounting for bid-ask spreads remain negative even for large gaps."** So this is a real,
+academically-documented statistical anomaly that the source paper itself shows does NOT survive
+realistic execution costs. This is logged as **corroboration, not a new alpha to build** — it is
+a second independent academic primary source (after arXiv:2605.00864's 3.6-second NBA same-market
+arbitrage-persistence finding, which already informs EXP-008) reaching the same
+execution-infeasibility conclusion on a different Kalshi/NBA dataset via a different mechanism
+(underreaction/momentum vs. dutch-book arbitrage). It reinforces EXP-008's standing hypothesis
+that this project's 120-second poll cadence structurally cannot compete in fast-moving,
+thin-liquidity same-market segments — one more reason EXP-008's pilot (once built) should treat a
+low survival rate as the expected, not surprising, result.
+
+**Substantive new finding this run — verified official fee-schedule mismatch (motivates EXP-010).**
+`docs/BUSINESS_CASE.md`/VISION.md both name "realistic fees/slippage" as non-negotiable, and
+`cost_model.py` documents `DEFAULT_FEE_RATE = 0.02` (a flat 2% of price, applied multiplicatively:
+`c_eff = price*(1+slippage)*(1+fee_rate)`) as "Polymarket-style." Directly WebFetched
+`docs.polymarket.com`'s fee page (readable text returned, not a PDF/binary failure) — Polymarket's
+ACTUAL documented taker-fee formula is **price-dependent and per-category**: `fee = contracts x
+feeRate x p x (1-p)` in USDC, with `feeRate` = Politics 0.04, Sports/Economics 0.05, Crypto 0.07,
+Geopolitical/world-events 0 (makers pay nothing). This is a fundamentally different SHAPE than
+this project's flat multiplicative assumption: it is an ADDITIVE per-contract dollar fee that
+peaks at p=0.5 (where, for Sports/Economics/Crypto, it is HIGHER than the flat 2% assumption) and
+shrinks toward the price extremes (where it is materially LOWER than 2%) — and the price extremes
+are exactly where this project's refuted bucket-calibration family concentrated its signal (the
+near-0/1 and extreme-confidence buckets repeatedly named as the concentration risk in EXP-002/003/
+005's F10 fragility reports). Kalshi's own fee formula was independently cross-checked (NOT
+self-verified against the primary CFTC filing — that PDF failed text extraction, the same
+fail-closed issue Run 28 hit on the NBER FEDS PDF) via 3 mutually-consistent secondary sources,
+all quoting `fee = round_up(0.07 x contracts x p x (1-p))` — the identical functional shape, a
+single flat 0.07 `feeRate` across categories (no per-category variation like Polymarket's).
+
+**Why this could matter, and why it is NOT re-parameterizing a refuted family.** Every prior
+refutation (EXP-002/003/005/006) was run under the SAME flat 2%-of-price cost assumption. If that
+assumption is, in the specific price region where these strategies traded, more punitive than
+Polymarket's real fee, some already-collected, already-refuted results could in principle look
+different under the real formula (or could not — the diagnosed problem was signal quality/
+concentration, not cost, so a null result here is the more likely honest expectation). This is a
+COST-MODEL-REALISM question, not an alpha-mechanism question — VISION's own bar requires realistic
+costs, and cost_model.py's docstring explicitly invites updating the rates "when the real venue
+fee schedule... is wired." Testing it requires NO new data fetch (the already-committed corpora
+from EXP-002/003/005/the concentration-cap runs can be re-scored under a corrected cost model) and
+NO egress dependency — the cheapest, most immediately buildable experiment currently on the table
+(cheaper than EXP-008's live-wall-clock polling harness or EXP-009's new-fetcher-plus-fresh-corpus
+need). Filed as **EXP-010** in GROWTH_STATUS.md `experiments[]` (full spec there).
+
+### Self-validation (data sources this run)
+- Le 2026 / NBER w34702 / Prediction Arena / PolyBench: already-logged preprints, re-surfaced via
+  WebSearch with no new numbers — not re-cited as new evidence.
+- Robinhood agentic-trading status: confirmed directly via `techcrunch.com` (2026-05-27),
+  `robinhood.com/us/en/support/articles/agentic-trading-overview/`, and 2 corroborating sources —
+  consistent, non-SEO, credible.
+- arXiv:2606.07811 (Angelini & De Angelis): WebFetched the arxiv abs page directly — full verbatim
+  abstract retrieved, not a summarized snippet. Preprint, not yet peer-reviewed; cannot reproduce
+  on our own data (Kalshi in-game NBA tick data is not currently ingested by this project).
+- Polymarket fee schedule: WebFetched `docs.polymarket.com` directly — official first-party
+  documentation, readable text, formula + a worked numeric example extracted verbatim. High
+  confidence.
+- Kalshi fee schedule: NOT self-verified against the primary CFTC filing (PDF text-extraction
+  failed, fail-closed — no number from that source is relied on). The `0.07 x p x (1-p)` formula
+  is reported here only because 3 independent secondary sources converge on the identical formula;
+  flagged as secondary-sourced, not primary-verified, and excluded from EXP-010's initial scope
+  (EXP-010 targets Polymarket, where the source is primary-verified; a Kalshi analog is a
+  follow-on, gated on independently confirming the CFTC filing once it can be read).
+- No metric, PnL, or edge is reported from any of the above as a result this project relies on —
+  all are DATA motivating a proposed experiment, not a validated outcome.
+
+Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
+tested mechanism; engine_pct unchanged (74). Real-money brake untouched (no order, no gate flip,
+no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS.md).
