@@ -142,8 +142,11 @@ class KalshiHistoryFetcher:
         limit: int = 200,
         max_pages: int = 10,
         categories: Optional[Sequence[str]] = None,
+        *,
+        series_ticker: Optional[str] = None,
+        historical: bool = False,
     ) -> List[KalshiResolvedMarket]:
-        """Page Kalshi /markets for settled/finalized binary markets.
+        """Page Kalshi for settled/finalized binary markets.
 
         ``max_pages`` BOUNDS the loop — it must never run unbounded. Markets whose
         ``result`` is not unambiguously "yes" or "no" are SKIPPED, never guessed.
@@ -151,10 +154,24 @@ class KalshiHistoryFetcher:
         SELECTION BIAS: only finalized/settled markets are kept (see module docstring).
         ``categories`` must be PRE-REGISTERED, not tuned after seeing eval results.
 
+        ``historical`` selects Kalshi's SEPARATE public ``/historical/markets`` tier. The
+        LIVE ``/markets?status=settled`` feed only serves a rolling window (its floor is
+        ``GET /historical/cutoff``'s ``market_settled_ts``, live-probed at ~3 months) — so
+        every prior B8/Kalshi probe that paged the live feed saw only recent, sports-heavy
+        markets and MISSED the multi-year resolved history that funds a real OOS corpus.
+        The historical tier is the SAME cursor-paginated contract, needs NO auth, does NOT
+        take a ``status`` filter (it serves only resolved markets — the per-market YES/NO
+        is still derived from ``result`` below), and is where the deep economics/employment
+        (EXP-009) and crypto (B8 co-listed) series actually live. ``series_ticker`` narrows
+        the query to one Kalshi series (e.g. ``KXJOBLESS``) — required in practice for the
+        historical tier to reach a target category rather than the platform-wide firehose.
+
         Args:
             limit: Markets per page.
             max_pages: Hard upper bound on page requests (safety: never unbounded).
             categories: Optional allowlist of category strings (case-insensitive).
+            series_ticker: Optional Kalshi series filter (forwarded to the API).
+            historical: Query the deep ``/historical/markets`` tier instead of the live feed.
 
         Returns:
             List of ``KalshiResolvedMarket`` objects.
@@ -162,18 +179,28 @@ class KalshiHistoryFetcher:
         cats = {c.lower() for c in categories} if categories else None
         out: List[KalshiResolvedMarket] = []
         cursor: Optional[str] = None
+        endpoint = (
+            f"{self.base_url}/historical/markets"
+            if historical
+            else f"{self.base_url}/markets"
+        )
 
         for page in range(max_pages):
-            # "settled" is the documented Kalshi GetMarkets `status` FILTER value for
-            # resolved markets (valid filter values: unopened/open/closed/settled).
-            # "finalized" is NOT a valid filter value — using it returned nothing. The
-            # per-market YES/NO outcome is still derived from the `result` field below,
-            # never from this filter. (Offline-validated; verify on first live run.)
-            params: dict = {"limit": limit, "status": "settled"}
+            params: dict = {"limit": limit}
+            if not historical:
+                # "settled" is the documented Kalshi GetMarkets `status` FILTER value for
+                # resolved markets (valid filter values: unopened/open/closed/settled).
+                # "finalized" is NOT a valid filter value — using it returned nothing. The
+                # historical tier serves ONLY resolved markets, so it takes no status filter
+                # (passing one returned 0). The per-market YES/NO outcome is derived from
+                # the `result` field below, never from this filter.
+                params["status"] = "settled"
+            if series_ticker:
+                params["series_ticker"] = series_ticker
             if cursor:
                 params["cursor"] = cursor
 
-            data = self._get(f"{self.base_url}/markets", params=params)
+            data = self._get(endpoint, params=params)
             if not isinstance(data, dict):
                 break
 
@@ -261,7 +288,12 @@ class KalshiHistoryFetcher:
             ),
             resolution_time=resolution_time,
             outcome=outcome,
-            volume=_to_float(raw.get("volume")) or 0.0,
+            # The historical tier serves `volume` as null and puts the count in `volume_fp`
+            # (Kalshi's fixed-point field, mirroring the `*_dollars`/`*_fp` migration #397);
+            # fall back to it so a historical record still carries a real volume.
+            volume=_to_float(raw.get("volume"))
+            or _to_float(raw.get("volume_fp"))
+            or 0.0,
             floor_strike=floor_strike,
             cap_strike=cap_strike,
             strike_type=strike_type,
@@ -277,18 +309,21 @@ class KalshiHistoryFetcher:
         end_ts: int,
         *,
         period_interval: int = 60,
+        historical: bool = False,
     ) -> List[dict]:
         """Fetch price-history ticks for ``ticker`` over [start_ts, end_ts].
 
-        Uses the Kalshi **candlesticks** endpoint
-        ``/series/{series_ticker}/markets/{ticker}/candlesticks`` — the correct one
-        (VERIFIED HTTP 200 live via the real-oos lane, OA-15). The previously-used
-        ``/markets/{ticker}/history`` path **404s** (it does not exist), so the fetcher
-        returned 0 records and every Kalshi OOS run reported N/A. ``series_ticker`` is the
-        prefix of the market ticker before the first ``-`` (e.g. ``KXBTC`` from
-        ``KXBTC-25DEC-T50000``). ``period_interval`` is the candle width in MINUTES
-        (Kalshi requires it); the default 60 (hourly) is ample for a decision sampled ~a
-        day or more before resolution.
+        Uses the Kalshi **candlesticks** endpoint. For a LIVE (recent) market that is
+        ``/series/{series_ticker}/markets/{ticker}/candlesticks`` (VERIFIED HTTP 200,
+        OA-15); for a market past the live cutoff (``historical=True``) the live path
+        **404s** and the working endpoint is ``/historical/markets/{ticker}/candlesticks``
+        (LIVE-CONFIRMED this run — a resolved 2022 ``JOBLESS`` market returned real
+        candles there while the ``/series/...`` path 404'd). The old
+        ``/markets/{ticker}/history`` path also 404s (it does not exist). ``series_ticker``
+        (live path only) is the prefix of the market ticker before the first ``-`` (e.g.
+        ``KXBTC`` from ``KXBTC-25DEC-T50000``). ``period_interval`` is the candle width in
+        MINUTES (Kalshi requires it); the default 60 (hourly) is ample for a decision
+        sampled ~a day or more before resolution.
 
         Returns a list of ticks ``[{"t": <unix_seconds>, "p": <price 0..1>}, ...]`` or
         ``[]`` on failure. Prices are normalised to [0, 1] (Kalshi cents 0-100 -> /100).
@@ -308,16 +343,17 @@ class KalshiHistoryFetcher:
         Returns:
             List of normalised tick dicts with keys "t" (unix seconds) and "p" (0..1).
         """
-        series_ticker = _series_ticker(ticker)
         params = {
             "start_ts": int(start_ts),
             "end_ts": int(end_ts),
             "period_interval": int(period_interval),
         }
-        data = self._get(
-            f"{self.base_url}/series/{series_ticker}/markets/{ticker}/candlesticks",
-            params=params,
-        )
+        if historical:
+            url = f"{self.base_url}/historical/markets/{ticker}/candlesticks"
+        else:
+            series_ticker = _series_ticker(ticker)
+            url = f"{self.base_url}/series/{series_ticker}/markets/{ticker}/candlesticks"
+        data = self._get(url, params=params)
         if not isinstance(data, dict):
             return []
 
@@ -359,8 +395,13 @@ class KalshiHistoryFetcher:
         decision_lead: timedelta,
         *,
         buffer: timedelta = timedelta(days=2),
+        historical: bool = False,
     ) -> HistoricalMarket:
         """Build a leakage-safe ``HistoricalMarket`` from a resolved Kalshi market.
+
+        ``historical`` routes the price fetch to the deep ``/historical/*`` candlestick
+        tier — required for any market drawn from ``fetch_resolved_markets(historical=True)``
+        (its live candlesticks 404 past the cutoff).
 
         ``decision_time = resolution_time - decision_lead`` (must be strictly before
         resolution_time). ``market_price`` is the price ``p`` of the LAST tick
@@ -398,7 +439,9 @@ class KalshiHistoryFetcher:
 
         start_ts = int((decision_time - buffer).timestamp())
         end_ts = int(resolved.resolution_time.timestamp())
-        history = self.fetch_price_history(resolved.ticker, start_ts, end_ts)
+        history = self.fetch_price_history(
+            resolved.ticker, start_ts, end_ts, historical=historical
+        )
 
         decision_ts = decision_time.timestamp()
         resolution_ts = resolved.resolution_time.timestamp()
@@ -427,14 +470,23 @@ class KalshiHistoryFetcher:
         decision_lead: timedelta,
         *,
         buffer: timedelta = timedelta(days=2),
+        historical: bool = False,
     ) -> List[HistoricalMarket]:
         """Batch ``to_historical_market``, SKIPPING (loud warning) any market whose
-        anti-leakage guard cannot be satisfied. Returns only leakage-safe records."""
+        anti-leakage guard cannot be satisfied. Returns only leakage-safe records.
+
+        ``historical`` routes every price fetch to the deep ``/historical/*`` candlestick
+        tier — pass it whenever ``resolved_list`` came from ``fetch_resolved_markets(
+        historical=True)``."""
         out: List[HistoricalMarket] = []
         skipped = 0
         for rm in resolved_list:
             try:
-                out.append(self.to_historical_market(rm, decision_lead, buffer=buffer))
+                out.append(
+                    self.to_historical_market(
+                        rm, decision_lead, buffer=buffer, historical=historical
+                    )
+                )
             except (ValueError, AssertionError) as e:
                 skipped += 1
                 logger.warning(
@@ -474,28 +526,70 @@ def _candle_price(item: dict) -> Optional[float]:
     """Extract the YES price from a Kalshi candlestick (or a flat tick), NORMALISED to
     [0, 1]. None if absent/unparseable.
 
-    UNIT-AWARE normalisation (the fix for the cents-boundary fabrication bug an auditor
-    found): a Kalshi candlestick's nested ``price``/``yes_ask``/``yes_bid`` objects are in
-    CENTS (0-100), so they are divided by 100 UNCONDITIONALLY — a 1¢ longshot becomes 0.01,
-    NEVER 1.0. Applying the ``>1.0`` fraction heuristic to the cents domain would emit a 1¢
-    price as a fabricated 100%-certain tick (it passes the [0,1] range check silently). A
-    FLAT tick (``p``/``yes_price``/``close`` — the offline fixtures + any simplified shape)
-    may be a fraction OR cents, so it keeps the magnitude heuristic (``/100`` only when
-    ``>1.0``). Presence, not truthiness, so a legit 0¢ survives. The nested candlestick
-    objects are checked FIRST (a real candle has no top-level price field); the documented
-    field NAMES are verified on the first market with real candlesticks (OA-15), but the
-    UNIT (cents for the nested objects) is part of the documented contract."""
-    # Nested candlestick objects are always CENTS → divide by 100 unconditionally.
+    UNIT-AWARE normalisation across the TWO real Kalshi candlestick schemas (both
+    LIVE-CONFIRMED this run via HTTP 200 probes — the prior "always cents" assumption was
+    encoded against an EMPTY candle list (OA-15) and is contradicted by real data):
+
+    * DOLLAR schema (the current Kalshi contract, the ``*_dollars`` migration #397 first
+      saw on the list feed, now confirmed on candlesticks too). The nested
+      ``price``/``yes_ask``/``yes_bid`` sub-fields carry a dollar value already in [0, 1],
+      either under an explicit ``*_dollars`` key (LIVE ``/series/.../candlesticks``:
+      ``{"close_dollars": "0.2200"}``) or under a BARE key whose VALUE is a decimal string
+      (HISTORICAL ``/historical/markets/{t}/candlesticks``: ``{"close": "0.6700"}``). A
+      dollar value is taken AS-IS — never divided by 100 (dividing "0.6700" by 100 would
+      fabricate 0.0067, a real-money-relevant price error).
+    * LEGACY CENTS schema (the documented 0-100 integer form the offline fixtures use). A
+      bare NUMERIC sub-field is cents → divided by 100 (62 → 0.62; a 1¢ longshot → 0.01,
+      never a fabricated 1.0).
+
+    Disambiguation (per matched sub-field, in this order): an explicit ``*_dollars`` key is
+    unconditionally dollars; a bare value ``> 1.0`` is cents (only cents exceed 1); a bare
+    value ``<= 1.0`` is dollars when it arrived as a STRING (Kalshi formats dollars as
+    ``"0.6700"``) and cents when it arrived as a NUMBER (the legacy fixture form). This is
+    the ONE signal that separates a 1¢ legacy cents tick (number ``1`` → 0.01) from a
+    genuine $1.00 dollar tick (string ``"1.0000"`` → 1.0). The final [0, 1] range check in
+    ``fetch_price_history`` drops anything still out of range rather than fabricating.
+
+    A FLAT tick (``p``/``yes_price``/``close`` — the offline fixtures + any simplified
+    shape) keeps the plain magnitude heuristic (``/100`` only when ``> 1.0``). Presence,
+    not truthiness, so a legit 0¢/`$0.00` survives; nested objects are checked FIRST."""
     for key in ("price", "yes_ask", "yes_bid"):
         obj = item.get(key)
         if isinstance(obj, dict):
-            v = _to_float(_first_present(obj, ("mean", "close", "open")))
-            if v is not None:
-                return v / 100.0
+            p = _price_from_candle_obj(obj)
+            if p is not None:
+                return p
     # Flat tick — fraction (fixtures) or cents; disambiguate by magnitude.
     v = _to_float(_first_present(item, ("p", "yes_price", "close")))
     if v is not None:
         return v / 100.0 if v > 1.0 else v
+    return None
+
+
+def _price_from_candle_obj(obj: dict) -> Optional[float]:
+    """Normalise a nested Kalshi candlestick sub-object (``price``/``yes_ask``/``yes_bid``)
+    to a YES price in [0, 1], handling BOTH the dollar and legacy-cents schemas (see
+    ``_candle_price``). Returns None if no usable value is present.
+
+    Field preference mean > close > open; for each, an explicit ``*_dollars`` key wins over
+    the bare key. Value normalisation: ``*_dollars`` → dollars as-is; bare ``> 1.0`` →
+    cents/100; bare ``<= 1.0`` → dollars if a STRING, cents/100 if a NUMBER."""
+    for base in ("mean", "close", "open"):
+        for key, is_dollars in ((base + "_dollars", True), (base, False)):
+            if key not in obj:
+                continue
+            raw = obj[key]
+            if raw is None:
+                continue
+            v = _to_float(raw)
+            if v is None:
+                continue
+            if is_dollars:
+                return v  # explicit dollar field — already a [0,1] probability
+            if v > 1.0:
+                return v / 100.0  # only cents exceed 1
+            # v in [0,1]: a decimal STRING is dollars ("0.6700"); a NUMBER is legacy cents.
+            return v if isinstance(raw, str) else v / 100.0
     return None
 
 

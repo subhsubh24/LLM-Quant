@@ -120,12 +120,12 @@ SELF_VALIDATION:
       status: validated
     - id: kalshi_market_data
       desc: "read public Kalshi market data + assemble leakage-safe resolved history (no auth)"
-      validates_via: "test_kalshi_client.py + test_kalshi_history_fetcher.py — parsing + anti-leakage core exercised offline with FakeSession fixtures; live reads are egress-gated (same as Polymarket)"
+      validates_via: "test_kalshi_client.py + test_kalshi_history_fetcher.py — parsing + anti-leakage core (incl. the LIVE + HISTORICAL /historical/* tier + the dollar candlestick schema) exercised offline with FakeSession fixtures; live reads run from the now-egress-open build env"
       mode: mocked_offline
       requires_env: []              # NO credentials required; Kalshi market data is public
       active: true
       ci_validatable: true          # no secret needed; the logic-critical parts (parsing + anti-leakage) are tested on realistic fixtures
-      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner runs fetch_kalshi_history.py on a network-permitted host. HONESTY CAVEAT: the Kalshi status-string + price-field CONTRACT (response status='active'/'settled'/'determined'; cent prices; the 'settled' discovery filter) is encoded per Kalshi's DOCUMENTED API but is NOT yet confirmed against a live response (egress-blocked offline) — an unrecognized status is logged LOUDLY (never silently dropped), and the OWNER must confirm the contract on the first real fetch."
+      real_flow_note: "the critical logic is PARSING + anti-leakage (exercised on real-shaped fixtures, fully offline); live HTTP read is a thin GET with no business logic and no side-effect; owner (or the egress-open build env) runs fetch_kalshi_history.py. CONTRACT NOW LIVE-CONFIRMED (2026-07-23, HTTP 200 probes): the resolved-market status/result contract AND the candlestick PRICE UNIT are verified against real responses — Kalshi serves candle prices in DOLLARS ([0,1]), under explicit *_dollars keys on the LIVE /series/.../candlesticks feed and under bare decimal-STRING keys on the /historical/markets/{t}/candlesticks feed (the `*_dollars` migration #397 first saw on the list feed). _candle_price reads both dollar schemas as-is (never /100 — that would fabricate 0.0067 from a real $0.67) while still supporting the legacy numeric-cents fixtures; the deep /historical/* tier (reached via fetch_resolved_markets(historical=True)) is what makes multi-year Kalshi resolved history (EXP-009 employment calibration, B8 co-listed crypto) fetchable past the live ~3-month cutoff. An unrecognized settlement result is still logged LOUDLY."
       status: validated
     - id: manifold_market_data
       desc: "read public Manifold Markets data + assemble leakage-safe resolved history (no auth) — RESEARCH ONLY (PLAY MONEY)"

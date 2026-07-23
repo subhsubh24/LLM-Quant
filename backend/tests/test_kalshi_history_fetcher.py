@@ -731,3 +731,130 @@ def test_resolved_between_strike_refuses_to_guess():
     rm = f._parse_resolved(_kalshi_crypto_raw(floor_strike=70000, cap_strike=75000, strike_type="between"))
     assert rm.floor_strike == 70000.0 and rm.cap_strike == 75000.0 and rm.strike_type == "between"
     assert extract_threshold_from_structured_strike(rm) is None
+
+
+# --------------------------------------------------------------------------- #
+# HISTORICAL TIER (ROADMAP A3/B8/B9 — the deep `/historical/*` unblock).       #
+# The LIVE `/markets?status=settled` feed only serves a rolling ~3-month       #
+# window, so every prior probe missed the multi-year resolved history that     #
+# funds a real Kalshi OOS corpus (EXP-009 employment calibration + the B8      #
+# co-listed crypto ladder). These assert the deep tier is queried correctly    #
+# AND that the current DOLLAR candlestick schema is parsed without fabricating. #
+# Endpoint shapes are LIVE-CONFIRMED (HTTP 200 probes, this run).              #
+# --------------------------------------------------------------------------- #
+def test_historical_resolved_uses_historical_endpoint_no_status_filter():
+    """historical=True must query /historical/markets (NOT /markets), forward the
+    series_ticker, and NOT send a status filter (the historical tier serves only resolved
+    markets and returned 0 when a status filter was passed)."""
+    captured = {}
+
+    def router(url, params):
+        captured["url"] = url
+        captured["params"] = dict(params or {})
+        return {"markets": [_kalshi_market("KXJOBLESS-22NOV05-C215", result="yes",
+                                           status="finalized")], "cursor": None}
+
+    fetcher = KalshiHistoryFetcher(session=FakeSession(router))
+    out = fetcher.fetch_resolved_markets(
+        limit=200, max_pages=2, series_ticker="KXJOBLESS", historical=True
+    )
+    assert len(out) == 1 and out[0].outcome == 1
+    assert captured["url"] == f"{BASE_URL}/historical/markets"
+    assert captured["params"]["series_ticker"] == "KXJOBLESS"
+    assert "status" not in captured["params"]           # historical tier takes no status filter
+
+
+def test_live_resolved_path_unchanged_still_status_settled():
+    """Back-compat: the default (live) path still hits /markets with status=settled and
+    NO series_ticker — byte-unchanged behaviour for every existing caller."""
+    captured = {}
+
+    def router(url, params):
+        captured["url"] = url
+        captured["params"] = dict(params or {})
+        return {"markets": [_kalshi_market("KXA-25MAR", result="no")], "cursor": None}
+
+    KalshiHistoryFetcher(session=FakeSession(router)).fetch_resolved_markets(limit=50)
+    assert captured["url"] == f"{BASE_URL}/markets"
+    assert captured["params"]["status"] == "settled"
+    assert "series_ticker" not in captured["params"]
+
+
+def test_fetch_price_history_historical_uses_historical_candlesticks_endpoint():
+    """historical=True routes to /historical/markets/{ticker}/candlesticks — the live
+    /series/{s}/markets/{t}/candlesticks path 404s for a market past the cutoff."""
+    session = FakeSession(lambda url, params: {"candlesticks": [
+        {"end_period_ts": 100, "yes_ask": {"close": "0.6700"}}]})
+    fetcher = KalshiHistoryFetcher(session=session)
+    ticks = fetcher.fetch_price_history("KXJOBLESS-22NOV05-C215", 0, 1000, historical=True)
+    url = session.calls[0]["url"]
+    assert url == f"{BASE_URL}/historical/markets/KXJOBLESS-22NOV05-C215/candlesticks"
+    assert "/series/" not in url
+    assert ticks == [{"t": 100.0, "p": 0.67}]           # dollar string parsed as-is
+
+
+def test_candle_dollar_schema_live_and_historical_not_divided_by_100():
+    """The current Kalshi DOLLAR candlestick schema (both endpoints, live-confirmed) must be
+    read as-is, NEVER /100. `close_dollars` (LIVE) and a bare decimal STRING (HISTORICAL) are
+    both dollars in [0,1]. Pre-fix code divided nested objects by 100 → "0.6700" became a
+    fabricated 0.0067 crowd price."""
+    # LIVE schema: explicit *_dollars keys.
+    assert _candle_price({"yes_ask": {"close_dollars": "0.2200"}}) == 0.22
+    assert _candle_price({"price": {"mean_dollars": "0.5000"}}) == 0.50
+    # HISTORICAL schema: bare keys, dollar-STRING values.
+    assert _candle_price({"yes_ask": {"close": "0.6700"}}) == 0.67
+    assert _candle_price({"yes_bid": {"close": "0.0300"}}) == 0.03
+    # A genuine $1.00 dollar string is 1.0 (certain) — NOT mistaken for 1¢.
+    assert _candle_price({"price": {"close": "1.0000"}}) == 1.0
+    # $0.00 (a legit extreme) survives (presence, not truthiness).
+    assert _candle_price({"yes_bid": {"close": "0.0000"}}) == 0.0
+
+
+def test_candle_legacy_cents_numbers_still_divided_by_100():
+    """REGRESSION GUARD: the legacy integer/float CENTS schema (numeric values) is unchanged —
+    a NUMBER is cents (/100), a decimal STRING is dollars. This is the one signal that keeps a
+    1¢ legacy tick (number 1 → 0.01) distinct from a $1.00 dollar tick (string "1.0000" → 1.0)."""
+    assert _candle_price({"price": {"mean": 62}}) == 0.62        # number → cents
+    assert _candle_price({"price": {"mean": 1}}) == 0.01         # 1¢ number, NOT 1.0
+    assert _candle_price({"yes_ask": {"close": 40}}) == 0.40
+    assert _candle_price({"price": {"mean": 0.5}}) == 0.005      # sub-cent number, still cents
+    # An explicit *_dollars key wins over a bare key on the same object.
+    assert _candle_price({"price": {"close_dollars": "0.4000", "close": 40}}) == 0.40
+
+
+def test_historical_dollar_candle_feeds_leakage_safe_record():
+    """End-to-end on the REAL historical shape: a dollar-string pre-decision candle becomes the
+    leakage-safe market_price, routed through the /historical/* candlestick tier, and a tick at
+    resolution is still excluded."""
+    decision_lead = timedelta(days=3)
+    decision_time = RESOLUTION - decision_lead
+    pre = int((decision_time - timedelta(hours=1)).timestamp())
+
+    def router(url, params):
+        assert "/historical/markets/" in url and "candlesticks" in url
+        return {"candlesticks": [
+            {"end_period_ts": pre, "yes_ask": {"close": "0.4400"}},                  # 0.44 pre
+            {"end_period_ts": int(RESOLUTION.timestamp()), "yes_ask": {"close": "1.0000"}},  # settled — ignore
+        ]}
+
+    hm = KalshiHistoryFetcher(session=FakeSession(router)).to_historical_market(
+        _resolved(outcome=1), decision_lead, historical=True
+    )
+    assert hm.market_price == 0.44
+    assert hm.outcome == 1
+
+
+def test_historical_volume_fp_fallback():
+    """Historical markets serve `volume: null` and put the count in `volume_fp`; a record must
+    still carry a real volume from the fallback (never silently 0)."""
+    f = KalshiHistoryFetcher()
+    raw = _kalshi_market("KXH-25MAR", result="yes")
+    raw["volume"] = None
+    raw["volume_fp"] = "874.00"
+    rm = f._parse_resolved(raw)
+    assert rm.volume == 874.0
+    # When both are absent, volume is honestly 0.0 (not fabricated).
+    raw2 = _kalshi_market("KXH2-25MAR", result="yes")
+    raw2["volume"] = None
+    rm2 = f._parse_resolved(raw2)
+    assert rm2.volume == 0.0

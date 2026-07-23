@@ -16,11 +16,18 @@ HONESTY — read before trusting any number this enables:
     result yes/no) are kept; ``--decision-lead-days`` is PRE-REGISTERED here (not tuned
     after seeing PnL). Any eval on this sample overstates crowd calibration.
 
-NOTE: In the autonomous build env, outbound egress to Kalshi is blocked. Run this
-script on a network-permitted host. The parsing and anti-leakage logic is
-fully offline-tested in backend/tests/test_kalshi_history_fetcher.py.
+DEEP HISTORICAL TIER (``--historical``): Kalshi's LIVE ``/markets?status=settled`` feed
+only serves a rolling ~3-month window (``GET /historical/cutoff``), so the default fetch
+sees only recent, sports-heavy markets. ``--historical`` queries the SEPARATE public
+``/historical/*`` tier (no auth) that reaches MULTI-YEAR resolved history — the depth that
+funds a real Kalshi OOS corpus. Pair it with ``--series-ticker`` to target a category
+(e.g. ``KXJOBLESS`` weekly initial-jobless-claims; ``KXECONSTATU3`` monthly unemployment).
 
 Usage:
+  # deep employment-category corpus (the NBER-flagged weakest-calibrated Kalshi segment):
+  python3 scripts/fetch_kalshi_history.py --out data/kalshi_jobless.json \\
+      --historical --series-ticker KXJOBLESS --max-pages 3 --decision-lead-days 3
+  # default (live rolling window):
   python3 scripts/fetch_kalshi_history.py --out data/kalshi_history.json \\
       --limit 200 --max-pages 2 --decision-lead-days 7
 """
@@ -53,6 +60,12 @@ def main() -> int:
                          "(PRE-REGISTER; do not tune on PnL)")
     ap.add_argument("--categories", nargs="*", default=None,
                     help="keep only these categories (PRE-REGISTER before seeing results)")
+    ap.add_argument("--series-ticker", default=None,
+                    help="restrict to ONE Kalshi series (e.g. KXJOBLESS) — required in "
+                         "practice to reach a target category on the historical tier")
+    ap.add_argument("--historical", action="store_true",
+                    help="query Kalshi's deep /historical/* tier (multi-year resolved "
+                         "history) instead of the live ~3-month rolling window")
     ap.add_argument("--merge", action="store_true",
                     help="union new records into an existing --out file "
                          "(dedupe by ticker/market_id) so a scheduled refresh "
@@ -70,11 +83,13 @@ def main() -> int:
         limit=args.limit,
         max_pages=args.max_pages,
         categories=args.categories,
+        series_ticker=args.series_ticker,
+        historical=args.historical,
     )
     print(f"  -> {len(resolved)} unambiguously-settled binary markets")
 
     print(f"building leakage-safe records (decision_lead={args.decision_lead_days}d) ...")
-    markets = f.build_historical_markets(resolved, lead)
+    markets = f.build_historical_markets(resolved, lead, historical=args.historical)
     skipped = len(resolved) - len(markets)
     print(
         f"  -> {len(markets)} leakage-safe HistoricalMarket records "
@@ -97,6 +112,7 @@ def main() -> int:
             "market_price": m.market_price,
             "model_prob": m.model_prob,  # crowd baseline; a real model overrides this
             "outcome": m.outcome,
+            "category": m.category,  # for per-category (B9/EXP-009) calibration diagnostics
         }
         for m in markets
     ]
