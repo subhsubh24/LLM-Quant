@@ -197,16 +197,19 @@ def _net_edge_decision(
     cost_model: CostModel,
     min_edge: float,
     kelly_fraction: float,
+    category: Optional[str] = None,
 ) -> TradeDecision:
     """Buy the side whose cost-NET edge clears ``min_edge``, sized at fractional Kelly.
 
     Identical in form to ``walk_forward.make_net_edge_strategy`` so backtest EV and the
     live signal use the SAME cost-aware logic — the only difference is that ``p_yes`` is
-    the calibration model's probability, not the crowd's.
+    the calibration model's probability, not the crowd's. ``category`` selects the
+    per-category fee only when the cost model carries a ``fee_schedule`` (EXP-010);
+    with the default flat model it is ignored (bit-identical), so passing None is safe.
     """
-    yes_edge = cost_model.net_edge(p_yes, market_price)
+    yes_edge = cost_model.net_edge(p_yes, market_price, category=category)
     no_price = 1.0 - market_price
-    no_edge = cost_model.net_edge(1.0 - p_yes, no_price)
+    no_edge = cost_model.net_edge(1.0 - p_yes, no_price, category=category)
 
     side, edge, basis = ("YES", yes_edge, market_price)
     if no_edge > yes_edge:
@@ -215,7 +218,7 @@ def _net_edge_decision(
     if edge < min_edge:
         return TradeDecision(trade=False)
 
-    c_eff = cost_model.effective_buy_price(basis)
+    c_eff = cost_model.effective_buy_price(basis, category=category)
     if c_eff <= 0.0 or c_eff >= 1.0:
         return TradeDecision(trade=False)
     b = (1.0 - c_eff) / c_eff
@@ -259,7 +262,8 @@ def make_calibration_bucket_strategy(
         if model_prob is None:
             return TradeDecision(trade=False)
         return _net_edge_decision(
-            model_prob, view.market_price, cost_model, min_edge, kelly_fraction
+            model_prob, view.market_price, cost_model, min_edge, kelly_fraction,
+            category=view.category,
         )
 
     return strategy

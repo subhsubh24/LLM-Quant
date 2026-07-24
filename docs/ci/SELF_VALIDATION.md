@@ -163,11 +163,20 @@ SELF_VALIDATION:
       ci_validatable: true             # fully validated in-gate with no secret — committed corpus + seeded engine reproduce identically
       real_flow_note: "This capability carries NO edge claim and reaches NO revenue field. It reuses the SINGLE committed corpus, so it is a WITHIN-SAMPLE config-sensitivity map by construction — no cell can be a validated edge, however green, and selecting the greenest cell is refused as p-hacking. Its only outputs are a family verdict (FAMILY-NULL-* / HYPOTHESES-FLAGGED-NOT-AN-EDGE) and, at most, hypotheses for a FRESH pre-registered OOS on NEW data. The critical honesty path (that a green cell is never promoted to an edge) is exercised directly by the test."
       status: validated
+    - id: exp010_cost_realism_rescore
+      desc: "EXP-010 cost-model-realism re-score — re-price the committed leakage-safe OOS corpus (data/real_oos_corpus_polymarket.json) under Polymarket's REAL documented price-dependent, per-category taker-fee formula (feeRate·p·(1-p)) instead of the flat 2%, and check whether any already-refuted verdict is a cost-model artifact. Predicted + observed NULL (the refutation is cost-model-robust; the longshot-heavy corpus is scored MORE punitively under the real formula)."
+      validates_via: "test_exp010_cost_realism.py (REGISTERED in the blocking gate): pins the DEFAULT (flat) path bit-identical (category inert without a fee_schedule — the pinned walk-forward reproduction hash in test_walk_forward_pm.py is unaffected), pins PolymarketFeeSchedule's per-category rates + the vanish-at-extremes + symmetric-in-p formula + the conservative fallback for unmapped categories, asserts the crossover direction (real cheaper only above p>1-0.02/feeRate), and asserts the re-score on the committed corpus is DETERMINISTIC and flips NEITHER model to a validated edge (flip_to_validated_edge=False)."
+      mode: committed_artifact         # pure offline re-score of the committed corpus via the walk-forward engine — no network, no credentials
+      requires_env: []                 # NONE — reuses data/real_oos_corpus_polymarket.json + the deterministic engine
+      active: true
+      ci_validatable: true             # fully validated in-gate with no secret — committed corpus + seeded engine reproduce identically
+      real_flow_note: "This capability carries NO edge claim and reaches NO revenue field — it changes a COST INPUT (fee realism, which VISION requires) and re-tests an already-committed refutation, it does NOT re-parameterize a strategy. A flip_to_validated_edge would NOT be an edge: it is surfaced as a CANDIDATE requiring >=3 FRESH adversarial Opus auditors before any claim; the observed result is flip=False (the honest, predicted NULL — real net -$3,502 vs flat -$3,228, both F11 significant_NEGATIVE). The honesty path (a flip is never auto-promoted; the fallback fee-rate for unmapped categories is the conservative highest documented rate) is exercised directly by the test."
+      status: validated
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 15
+    capabilities_total: 16
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
