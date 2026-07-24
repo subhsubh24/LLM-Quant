@@ -132,6 +132,13 @@ class MarketView:
     decision_time: datetime
     market_price: float
     model_prob: float
+    # OPTIONAL coarse correlation category, carried from ``HistoricalMarket.category`` so a
+    # cost model with a per-category ``fee_schedule`` (EXP-010) can price the decision-side
+    # fee correctly. Pure decision-time METADATA (the category IS knowable at decision time
+    # — it is a static property of the market, never the outcome), so it is leakage-neutral.
+    # Defaulted to None so every existing MarketView construction is unchanged, and with the
+    # default (flat) cost model the field is ignored entirely (bit-identical behavior).
+    category: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -200,10 +207,14 @@ def make_net_edge_strategy(
 
     def strategy(training: Sequence[HistoricalMarket], view: MarketView) -> TradeDecision:
         p_yes = view.model_prob
-        # Net edge on each side, costs included (price basis = the side's raw price).
-        yes_edge = cost_model.net_edge(p_yes, view.market_price)
+        # Net edge on each side, costs included (price basis = the side's raw price). The
+        # category is threaded so a per-category ``fee_schedule`` prices the fee correctly;
+        # with the default (flat) cost model it is ignored (bit-identical). Both legs of the
+        # SAME market share one category (the fee is symmetric in p<->(1-p) anyway).
+        cat = view.category
+        yes_edge = cost_model.net_edge(p_yes, view.market_price, category=cat)
         no_price = 1.0 - view.market_price
-        no_edge = cost_model.net_edge(1.0 - p_yes, no_price)
+        no_edge = cost_model.net_edge(1.0 - p_yes, no_price, category=cat)
 
         side, edge, basis = ("YES", yes_edge, view.market_price)
         if no_edge > yes_edge:
@@ -213,7 +224,7 @@ def make_net_edge_strategy(
             return TradeDecision(trade=False)
 
         # Fractional Kelly on net odds b = (1 - c_eff)/c_eff with win prob q.
-        c_eff = cost_model.effective_buy_price(basis)
+        c_eff = cost_model.effective_buy_price(basis, category=cat)
         if c_eff <= 0.0 or c_eff >= 1.0:
             return TradeDecision(trade=False)
         b = (1.0 - c_eff) / c_eff
@@ -243,6 +254,7 @@ def _to_view(m: HistoricalMarket) -> MarketView:
         decision_time=m.decision_time,
         market_price=m.market_price,
         model_prob=m.model_prob,
+        category=m.category,
     )
 
 
@@ -280,12 +292,17 @@ def _settle(
     # per dollar and therefore earns a smaller payout), not added as a second cash charge
     # on top of the budget. Impact is computed once at a representative size, so it is
     # neither double-counted nor self-referential.
+    # Category is threaded so a per-category ``fee_schedule`` (EXP-010) prices the fill fee;
+    # with the default (flat) cost model it is ignored, so the fill is bit-identical. The
+    # real per-contract fee is symmetric in p<->(1-p), so the YES/NO ``basis`` split above
+    # does not change it.
+    cat = m.category
     if m.liquidity is None:
-        c_eff = cost_model.effective_buy_price(basis)
-        contracts = cost_model.contracts_for_budget(budget_usd, basis)
+        c_eff = cost_model.effective_buy_price(basis, category=cat)
+        contracts = cost_model.contracts_for_budget(budget_usd, basis, category=cat)
     else:
-        size0 = cost_model.contracts_for_budget(budget_usd, basis)
-        c_eff = cost_model.effective_buy_price_with_impact(basis, size0, m.liquidity)
+        size0 = cost_model.contracts_for_budget(budget_usd, basis, category=cat)
+        c_eff = cost_model.effective_buy_price_with_impact(basis, size0, m.liquidity, category=cat)
         contracts = budget_usd / c_eff if c_eff > 0.0 else 0.0
     if contracts <= 0.0:
         return None

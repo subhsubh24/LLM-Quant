@@ -35,6 +35,74 @@ from typing import Optional
 DEFAULT_SLIPPAGE_RATE = 0.005   # market-order slippage, fraction of price
 DEFAULT_FEE_RATE = 0.02         # venue fee, fraction of traded notional
 
+
+# ---------------------------------------------------------------------------
+# Polymarket's REAL price-dependent, per-category taker-fee schedule (EXP-010)
+# ---------------------------------------------------------------------------
+# The flat ``DEFAULT_FEE_RATE`` above is a MULTIPLICATIVE 2%-of-price approximation
+# ("Polymarket-style"). Research Run 29 (2026-07-23) directly WebFetched
+# docs.polymarket.com's official fee page and found the ACTUAL documented taker fee is a
+# fundamentally different SHAPE: an ADDITIVE per-contract dollar fee
+#
+#     fee_usdc = contracts * feeRate * p * (1 - p)
+#
+# with a PER-CATEGORY ``feeRate`` (below) and makers paying nothing. As a FRACTION of the
+# per-contract notional this is ``feeRate * (1 - p)`` (vs the flat 0.02), so the real fee is
+# cheaper than the flat 2% only ABOVE a per-category crossover price (real < flat iff
+# ``p > 1 - 0.02/feeRate`` -> Politics p>0.50, Sports/Econ p>0.60, Crypto p>0.71) and is
+# MORE expensive than the flat 2% at LOW prices and near p=0.5 for the 0.05/0.07 categories.
+# (The Run 29 shorthand "lower near the extremes" is only true at the HIGH extreme p->1; at
+# the LOW extreme the real fee fraction rises to ``feeRate`` > 0.02.) Since the committed
+# EXP-002/003/005 corpus is longshot-heavy (median price ~0.04), the real formula is, on
+# balance, MORE punitive there — so the refutation is if anything reinforced, not rescued.
+# EXP-010 re-scores the committed corpora under this real formula to check whether any
+# already-refuted verdict is a cost-model ARTIFACT (predicted NULL — the diagnosed problem
+# was signal quality/concentration, not cost; the re-score confirms it).
+#
+# feeRate values are the ones Run 29 verified verbatim from the primary source. Keys are
+# matched case-insensitively against the coarse ``market_category`` labels. A category
+# NOT documented here (e.g. the corpus' "General"/"ScienceTech" buckets) falls back to
+# ``PolymarketFeeSchedule.default_fee_rate`` — deliberately the HIGHEST documented rate,
+# so an unmapped category can only OVER-state cost (the safe direction; it can never
+# manufacture a spurious edge). The re-score harness reports the per-category assignment
+# so the fallback is transparent, never silent.
+POLYMARKET_FEE_RATES: dict = {
+    "politics": 0.04,
+    "sports": 0.05,
+    "economics": 0.05,
+    "crypto": 0.07,
+    "geopolitical": 0.0,   # world-events; makers-and-takers free per the fee page
+}
+
+
+@dataclass(frozen=True)
+class PolymarketFeeSchedule:
+    """Polymarket's real, price-dependent, per-category taker-fee schedule.
+
+    Frozen + hashable (only a float field; the rate map is a module constant, never a
+    per-instance mutable), so it can be a field on the frozen ``CostModel`` without
+    breaking equality/hash. ``fee_per_contract`` returns the ADDITIVE per-contract dollar
+    fee; the flat multiplicative path in ``CostModel`` is untouched when no schedule is set.
+    """
+
+    # Conservative fallback for a category absent from POLYMARKET_FEE_RATES: the HIGHEST
+    # documented rate, so an unknown category NEVER under-states cost (safe direction).
+    default_fee_rate: float = 0.07
+
+    def rate_for(self, category: Optional[str]) -> float:
+        """The per-category taker feeRate; the conservative fallback when unmapped/None."""
+        if category is None:
+            return self.default_fee_rate
+        return POLYMARKET_FEE_RATES.get(category.strip().lower(), self.default_fee_rate)
+
+    def fee_per_contract(self, price: float, category: Optional[str]) -> float:
+        """Additive per-contract dollar fee ``feeRate * p * (1 - p)`` (Polymarket's real
+        taker formula). Symmetric in ``p <-> (1 - p)`` — so the YES and NO legs of the SAME
+        market pay the IDENTICAL fee — and always >= 0 (a fee can only add cost). Price is
+        clamped to [0, 1] so an out-of-range quote cannot produce a negative fee."""
+        p = min(max(price, 0.0), 1.0)
+        return self.rate_for(category) * p * (1.0 - p)
+
 # Default market-impact coefficient for the depth/order-book model (see
 # CostModel.effective_buy_price_with_impact). This is a SIMPLIFIED, NOT-CALIBRATED
 # parameter: at impact_coeff = 0.5, an order equal to the visible depth (size == depth)
@@ -61,16 +129,30 @@ class CostModel:
     # *_with_impact methods below; the flat-rate path (effective_buy_price / net_edge /
     # contracts_for_budget) ignores it entirely, so existing behavior is BIT-IDENTICAL.
     impact_coeff: float = DEFAULT_IMPACT_COEFF
+    # OPTIONAL real per-category, price-dependent Polymarket fee schedule (EXP-010). When
+    # None (the DEFAULT), every method below uses the flat multiplicative ``fee_rate``
+    # EXACTLY as before — the arithmetic is byte-identical, so ``DEFAULT_COST_MODEL``,
+    # frozen-dataclass equality/hash, and every pinned walk-forward reproduction hash are
+    # UNCHANGED. When set, the fee becomes the ADDITIVE ``feeRate * p * (1-p)`` per contract
+    # and the (optional) ``category`` argument selects the per-category feeRate. Only the
+    # re-score harness / a caller that explicitly opts in constructs a CostModel with it.
+    fee_schedule: Optional[PolymarketFeeSchedule] = None
 
-    def effective_buy_price(self, market_price: float) -> float:
+    def effective_buy_price(self, market_price: float, category: Optional[str] = None) -> float:
         """All-in cost per YES contract when buying at ``market_price``.
 
-        Applies market-order slippage (price moves against us) and the venue fee on the
-        traded notional. The result is the true cost basis used for honest EV/Kelly:
-        on a win the contract pays $1, so the net odds are ``(1 - c_eff) / c_eff``.
+        Applies market-order slippage (price moves against us) and the venue fee. With no
+        ``fee_schedule`` (default) the fee is the flat multiplicative 2%-of-notional
+        (BIT-IDENTICAL to the prior behavior; ``category`` is ignored). With a
+        ``fee_schedule`` set, the fee is the real ADDITIVE ``feeRate * p * (1-p)`` per
+        contract for the given ``category``. The result is the true cost basis used for
+        honest EV/Kelly: on a win the contract pays $1, so net odds are ``(1 - c_eff)/c_eff``.
         """
         slipped = market_price * (1.0 + self.slippage_rate)
-        c_eff = slipped * (1.0 + self.fee_rate)
+        if self.fee_schedule is None:
+            c_eff = slipped * (1.0 + self.fee_rate)
+        else:
+            c_eff = slipped + self.fee_schedule.fee_per_contract(market_price, category)
         # A contract whose all-in cost is >= $1 has no possible profit (it pays at most
         # $1). Cap at exactly 1.0 (breakeven), NOT just below it — capping below would
         # understate the cost and report an optimistic (slightly positive) edge in the
@@ -78,16 +160,19 @@ class CostModel:
         # contract is correctly never sized. Floor above 0 to keep odds finite.
         return min(max(c_eff, 1e-6), 1.0)
 
-    def net_edge(self, win_probability: float, market_price: float) -> float:
+    def net_edge(
+        self, win_probability: float, market_price: float, category: Optional[str] = None
+    ) -> float:
         """Edge net of costs, in price units: ``win_probability - effective_cost``.
 
         This is what the Kelly sizer and the ``min_edge`` filter should screen on. A
         trade whose GROSS edge (``win_probability - market_price``) is positive but
         whose net edge is <= 0 is a losing trade after costs and must be skipped.
+        ``category`` selects the per-category fee only when a ``fee_schedule`` is set.
         """
-        return win_probability - self.effective_buy_price(market_price)
+        return win_probability - self.effective_buy_price(market_price, category)
 
-    def effective_sell_price(self, market_price: float) -> float:
+    def effective_sell_price(self, market_price: float, category: Optional[str] = None) -> float:
         """All-in PROCEEDS per contract when SELLING (closing a position) at ``market_price``.
 
         The exit analogue of ``effective_buy_price``. Selling a market order also pays the
@@ -105,13 +190,18 @@ class CostModel:
         proceeds are 0; the result is continuous and monotone non-decreasing in ``p``.
         """
         deslipped = market_price * (1.0 - self.slippage_rate)
-        proceeds = deslipped * (1.0 - self.fee_rate)
+        if self.fee_schedule is None:
+            proceeds = deslipped * (1.0 - self.fee_rate)
+        else:
+            proceeds = deslipped - self.fee_schedule.fee_per_contract(market_price, category)
         # Clamp into [0, 1]: proceeds are never negative and never exceed par ($1). Unlike the
         # BUY cap (which pins the near-certain cost at exactly breakeven 1.0 to avoid optimism),
         # the SELL floor at 0.0 is the conservative direction — it never overstates proceeds.
         return min(max(proceeds, 0.0), 1.0)
 
-    def contracts_for_budget(self, budget_usd: float, market_price: float) -> float:
+    def contracts_for_budget(
+        self, budget_usd: float, market_price: float, category: Optional[str] = None
+    ) -> float:
         """How many contracts ``budget_usd`` actually buys, costs included.
 
         ``budget_usd`` is the capital we intend to deploy. Because the executor charges
@@ -119,7 +209,7 @@ class CostModel:
         NOT ``budget / market_price`` (which would overstate the position and cause us
         to deploy more cash than intended).
         """
-        c_eff = self.effective_buy_price(market_price)
+        c_eff = self.effective_buy_price(market_price, category)
         if c_eff <= 0:
             return 0.0
         return budget_usd / c_eff
@@ -177,6 +267,7 @@ class CostModel:
         order_size_contracts: float,
         depth_contracts: Optional[float],
         impact_coeff: Optional[float] = None,
+        category: Optional[str] = None,
     ) -> float:
         """All-in cost per contract INCLUDING size/depth market impact.
 
@@ -186,15 +277,21 @@ class CostModel:
         applied to the impacted notional, and the result is capped at $1.0 (breakeven)
         exactly like the flat path. When ``depth_contracts`` is None or huge relative to
         the order, impact -> 0 and this returns exactly the flat ``effective_buy_price``
-        (no discontinuity).
+        (no discontinuity). ``category`` selects the per-category fee only when a
+        ``fee_schedule`` is set (otherwise ignored, so the impact path is bit-identical).
         """
-        flat = self.effective_buy_price(market_price)
+        flat = self.effective_buy_price(market_price, category)
         impact = self.impact_fraction(order_size_contracts, depth_contracts, impact_coeff)
         if impact <= 0.0:
             return flat
         slipped = market_price * (1.0 + self.slippage_rate)
         impacted = slipped * (1.0 + impact)
-        c_eff = impacted * (1.0 + self.fee_rate)
+        if self.fee_schedule is None:
+            c_eff = impacted * (1.0 + self.fee_rate)
+        else:
+            # The additive real fee is charged on the QUOTED price (venue formula uses p),
+            # independent of impact — impact grows the price component, the fee does not.
+            c_eff = impacted + self.fee_schedule.fee_per_contract(market_price, category)
         # Floor at the flat all-in price (never reduce below it) and cap at 1.0 (breakeven),
         # matching effective_buy_price's no-optimism cap.
         return min(max(c_eff, flat), 1.0)
@@ -206,6 +303,7 @@ class CostModel:
         order_size_contracts: float,
         depth_contracts: Optional[float],
         impact_coeff: Optional[float] = None,
+        category: Optional[str] = None,
     ) -> float:
         """Edge net of costs INCLUDING market impact: ``win_probability - impacted_cost``.
 
@@ -214,7 +312,7 @@ class CostModel:
         intended guard against over-stating capacity in illiquid near-certainty books.
         """
         return win_probability - self.effective_buy_price_with_impact(
-            market_price, order_size_contracts, depth_contracts, impact_coeff
+            market_price, order_size_contracts, depth_contracts, impact_coeff, category
         )
 
 
