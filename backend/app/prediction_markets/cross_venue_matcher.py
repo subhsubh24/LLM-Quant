@@ -363,11 +363,14 @@ def extract_threshold_from_structured_strike(market: "Market") -> Optional[Thres
     (tightening-only). Only a ``currency`` or ``percent`` structured strike yields a
     threshold.
 
-    NOTE (semantic scope, ROADMAP B8 step iii — NOT yet done): a returned threshold is a
-    same-STRIKE candidate only. It does NOT classify the resolution MECHANIC (Kalshi
-    KXBTCMAXY barrier / KXBTCD daily-terminal vs. Polymarket touch), so a pair that clears
-    the matcher is a SEMANTICALLY-UNCLASSIFIED candidate — the touch/barrier/terminal
-    classifier must still gate any pair before it is used for an OOS/edge claim.
+    NOTE (semantic scope, ROADMAP B8 step iii — NOW BUILT): a returned threshold is a
+    same-STRIKE candidate. The resolution MECHANIC (Kalshi KXBTCMAXY barrier / daily-terminal
+    vs. Polymarket touch) is classified separately by :func:`classify_resolution_mechanic`
+    and enforced in :func:`match_markets`: a CONFIDENT touch-vs-terminal conflict is rejected,
+    and every surviving match carries ``mechanic_confirmed`` so an OOS/edge claim can require
+    both legs share a known mechanic (``evaluate_cross_venue_pairs(require_mechanic_confirmed=True)``).
+    A same-strike pair with an unclassifiable mechanic is admitted but flagged, never silently
+    treated as semantically confirmed.
     """
     strike_type = getattr(market, "strike_type", None)
     if not strike_type:
@@ -386,6 +389,84 @@ def extract_threshold_from_structured_strike(market: "Market") -> Optional[Thres
     # "between"/range, "functional"/"custom"/"structured"/"unknown", or a directional
     # type with its defining bound absent → no confident single strike.
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Resolution-mechanic classifier (ROADMAP B8 step iii — the touch/barrier/terminal gate). #
+# --------------------------------------------------------------------------- #
+# Two markets on the SAME strike can still resolve OPPOSITELY if they resolve on a
+# DIFFERENT MECHANIC. A TOUCH / BARRIER market ("does BTC EVER reach $100k during the
+# window", Kalshi ``KXBTCMAXY``/``KXBTCMINY``) resolves YES the instant the strike is
+# touched; a TERMINAL market ("is BTC above $100k AT the close/expiry", Kalshi daily-close
+# series) resolves on the value at a SINGLE instant. A barrier that is touched then retraces
+# resolves YES while the co-strike terminal resolves NO — so a same-strike pair whose
+# mechanics DIFFER is NOT the same event and, sized, is exactly the OPPOSITELY-resolving
+# false pairing the module docstring warns is the cardinal risk.
+#
+# This is a CONSERVATIVE classifier: it returns ``"touch"``, ``"terminal"``, or
+# ``"unknown"`` and is used TIGHTENING-ONLY. Only a CONFIDENT ``touch`` vs ``terminal``
+# conflict HARD-REJECTS a pair; an ``"unknown"`` on either side (neither cue found, OR BOTH
+# cues found = genuinely ambiguous) NEVER hard-rejects — instead the pair is admitted with
+# ``mechanic_confirmed=False`` so a downstream edge-claim consumer can require BOTH legs be
+# the SAME known mechanic before trading (``evaluate_cross_venue_pairs(require_mechanic_
+# confirmed=True)``). So a same-strike pair that clears the matcher is no longer a
+# SEMANTICALLY-UNCLASSIFIED candidate silently — its mechanic status is explicit.
+TOUCH_MECHANIC = "touch"
+TERMINAL_MECHANIC = "terminal"
+UNKNOWN_MECHANIC = "unknown"
+
+# TOUCH/BARRIER text cues. Deliberately OMITS bare "high"/"low" (too many false positives —
+# "record high unemployment" is not a price barrier); requires an explicit barrier verb or a
+# max/min/peak extremum word. "reach/hit/touch/ever/at any point/intraday" are the barrier
+# verbs; "max(imum)/min(imum)/peak" are the extremum-over-window words Kalshi barrier series use.
+_TOUCH_MECHANIC_RE = re.compile(
+    r"\b(ever|reach(?:es|ed|ing)?|hit(?:s|ting)?|touch(?:es|ed|ing)?|"
+    r"at any (?:point|time)|any\s?time|intraday|"
+    r"max(?:imum)?|min(?:imum)?|peak)\b",
+    re.IGNORECASE,
+)
+# TERMINAL text cues — resolution at a single instant (close/expiry/settlement/end).
+_TERMINAL_MECHANIC_RE = re.compile(
+    r"\b(clos(?:e|es|ed|ing)|settl(?:e|es|ed|ement)|expir(?:y|ation|es|ed)|"
+    r"end of (?:day|the day|the month|the year|month|year)|at the end|"
+    r"as of|final\s+(?:value|price|level))\b",
+    re.IGNORECASE,
+)
+# Kalshi STRUCTURED barrier hint: a MAX/MIN series ticker (KXBTCMAXY / KXBTCMINY / *MAX / *MIN)
+# is an extremum-over-window = barrier, stronger than free text. Matched on the ticker only.
+_KALSHI_BARRIER_TICKER_RE = re.compile(r"(?:MAX|MIN)[A-Z]?\b", re.IGNORECASE)
+
+
+def _market_ticker_text(market: "Market") -> str:
+    """Concatenated Kalshi ticker/series-ticker text (lower-cased), or "" — used only for the
+    structured barrier hint. Polymarket markets carry no ticker, so this is "" for them."""
+    parts = []
+    for attr in ("ticker", "series_ticker"):
+        v = getattr(market, attr, None)
+        if v:
+            parts.append(str(v))
+    return " ".join(parts)
+
+
+def classify_resolution_mechanic(market: "Market") -> str:
+    """Classify how a market RESOLVES: ``"touch"`` (barrier — YES if the strike is ever
+    reached during the window), ``"terminal"`` (YES on the value at close/expiry), or
+    ``"unknown"`` (no confident cue, or genuinely ambiguous both-cues text).
+
+    Pure + deterministic (regex over the question text + any Kalshi ticker). CONSERVATIVE:
+    when both a touch and a terminal cue appear it returns ``"unknown"`` rather than guessing,
+    so an ambiguous market never manufactures a mechanic conflict.
+    """
+    text = str(getattr(market, "question", "") or "")
+    ticker = _market_ticker_text(market)
+    touch = bool(_TOUCH_MECHANIC_RE.search(text)) or bool(_KALSHI_BARRIER_TICKER_RE.search(ticker))
+    terminal = bool(_TERMINAL_MECHANIC_RE.search(text))
+    if touch and not terminal:
+        return TOUCH_MECHANIC
+    if terminal and not touch:
+        return TERMINAL_MECHANIC
+    # neither cue (no signal) OR both cues (ambiguous) → not confidently classified.
+    return UNKNOWN_MECHANIC
 
 
 def _threshold_for(market: "Market") -> Optional[Threshold]:
@@ -429,6 +510,15 @@ class CrossVenueMatch:
     end_date_a: Optional[datetime]
     end_date_b: Optional[datetime]
     coherence_score: float
+    # Resolution-mechanic classification of each leg (ROADMAP B8 step iii). A pair with a
+    # CONFIDENT touch-vs-terminal conflict never reaches here (match_markets returns None),
+    # so these are either equal-and-known (``mechanic_confirmed=True``) or carry an
+    # ``"unknown"`` on at least one side (``mechanic_confirmed=False`` — a semantically
+    # unclassified candidate a downstream edge claim must still gate). Defaulted so the
+    # backtest half and existing constructions are unchanged.
+    mechanic_a: str = UNKNOWN_MECHANIC
+    mechanic_b: str = UNKNOWN_MECHANIC
+    mechanic_confirmed: bool = False
 
 
 def _yes_price(market: Market) -> Optional[float]:
@@ -506,6 +596,18 @@ def match_markets(
     else:
         matched_threshold = None
 
+    # RESOLUTION-MECHANIC gate (B8 step iii): a CONFIDENT touch-vs-terminal conflict on the
+    # same strike is NOT the same event (a barrier that is touched then retraces resolves YES
+    # while the co-strike terminal resolves NO → the OPPOSITELY-resolving false pairing). This
+    # is tightening-only: it rejects ONLY a confident conflict; an "unknown" on either side is
+    # admitted (with mechanic_confirmed=False) rather than rejected, so no previously-matched
+    # pair with an unclassifiable mechanic is lost.
+    mech_a = classify_resolution_mechanic(market_a)
+    mech_b = classify_resolution_mechanic(market_b)
+    if mech_a != UNKNOWN_MECHANIC and mech_b != UNKNOWN_MECHANIC and mech_a != mech_b:
+        return None
+    mechanic_confirmed = (mech_a != UNKNOWN_MECHANIC and mech_a == mech_b)
+
     # Content-overlap gate, conditioned on threshold strength: a MATCHED numeric strike is
     # strong same-event evidence, so a single shared subject token (e.g. "bitcoin") is
     # enough alongside it; WITHOUT a threshold the pairing rests on token overlap alone and
@@ -538,6 +640,9 @@ def match_markets(
         end_date_a=market_a.end_date,
         end_date_b=market_b.end_date,
         coherence_score=coherence,
+        mechanic_a=mech_a,
+        mechanic_b=mech_b,
+        mechanic_confirmed=mechanic_confirmed,
     )
 
 
@@ -672,12 +777,19 @@ def evaluate_cross_venue_pairs(
     cost_model: CostModel = DEFAULT_COST_MODEL,
     min_coherence: float = DEFAULT_MIN_COHERENCE,
     min_net_edge: float = 0.0,
+    require_mechanic_confirmed: bool = False,
 ) -> CrossVenueBacktestReport:
     """Realized cost-net PnL of the coherence trade over RESOLVED matched pairs.
 
     Trades only pairs whose ``coherence_score >= min_coherence`` AND whose cost-net
     coherence edge ``> min_net_edge`` (an efficient, agreeing pair is not traded — no
-    fabricated edge). PnL per traded pair, 1 contract per leg:
+    fabricated edge). When ``require_mechanic_confirmed`` is True (the honest gate for any
+    OOS/edge CLAIM, ROADMAP B8 step iii), a pair is ALSO skipped unless BOTH legs classify
+    to the SAME known resolution mechanic (``match.mechanic_confirmed``) — so a
+    semantically-unclassified same-strike pair never contributes to a claimed edge. Default
+    False keeps the backtest byte-for-byte unchanged (mechanic status is still recorded on
+    every match, so a caller can measure the confirmed-only subset without re-matching).
+    PnL per traded pair, 1 contract per leg:
 
         payout = (1 if outcome_[cheap-yes venue] else 0)      # the YES leg
                + (1 if not outcome_[other venue]  else 0)     # the NO leg
@@ -697,6 +809,9 @@ def evaluate_cross_venue_pairs(
     for p in pairs:
         edge = coherence_edge(p.match.yes_price_a, p.match.yes_price_b, cost_model)
         if p.match.coherence_score < min_coherence or edge.net_edge_per_pair <= min_net_edge:
+            continue
+        if require_mechanic_confirmed and not p.match.mechanic_confirmed:
+            # Semantically-unclassified same-strike pair: excluded from a claimed edge.
             continue
         traded += 1
         if p.outcome_a != p.outcome_b:

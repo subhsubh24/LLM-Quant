@@ -122,6 +122,14 @@ class Market:
     floor_strike: Optional[float] = None
     cap_strike: Optional[float] = None
     strike_type: Optional[str] = None
+    # OPTIONAL venue ticker (Kalshi market ticker, e.g. ``KXBTCMAXY-26DEC31-B100000``). Kalshi
+    # crypto/scalar markets carry a GENERIC title, so the resolution MECHANIC (barrier vs.
+    # terminal) lives in the ticker/series prefix (``KXBTCMAXY``/``KXBTCMINY`` = extremum-over-
+    # window barrier; a daily-close series = terminal), NOT the title. ``KalshiClient._parse_market``
+    # populates it; ``cross_venue_matcher.classify_resolution_mechanic`` reads it for the barrier
+    # hint. Polymarket markets leave it ``None`` (title carries the mechanic). Defaulted so every
+    # existing constructor is unaffected; never enters a backtest seed_hash.
+    ticker: Optional[str] = None
 
     def volume_below(self, floor: float) -> bool:
         """True iff this market's volume is KNOWN and strictly below ``floor``.

@@ -573,3 +573,129 @@ def test_match_probe_rejects_mismatched_structured_strike():
                                 floor_strike=110000.0, strike_type="greater",
                                 end_date=datetime(2026, 12, 31, tzinfo=timezone.utc))
     assert match_markets(poly, kalshi) is None
+
+
+# --------------------------------------------------------------------------- #
+# Resolution-mechanic classifier (B8 step iii — the touch/barrier/terminal gate)          #
+# --------------------------------------------------------------------------- #
+
+from app.prediction_markets.cross_venue_matcher import (  # noqa: E402
+    TERMINAL_MECHANIC,
+    TOUCH_MECHANIC,
+    UNKNOWN_MECHANIC,
+    classify_resolution_mechanic,
+)
+
+
+def _with_ticker(m: Market, ticker: str) -> Market:
+    m.ticker = ticker
+    return m
+
+
+def test_classify_terminal_from_title():
+    for q in ("Will Bitcoin close above $100k on Dec 31?",
+              "BTC price at the close on 2026-12-31",
+              "Will unemployment settle above 4% at expiry?"):
+        assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == TERMINAL_MECHANIC, q
+
+
+def test_classify_touch_from_title():
+    for q in ("Will Bitcoin ever reach $100k in 2026?",
+              "Will BTC hit $100k at any point this year?",
+              "Will ETH touch $5000 before year end?",
+              "Will Bitcoin's maximum price exceed $120k in December?"):
+        assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == TOUCH_MECHANIC, q
+
+
+def test_classify_unknown_when_no_cue():
+    for q in ("Will Bitcoin be above $100k in December 2026?",
+              "Will the Democrats win the House?"):
+        assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == UNKNOWN_MECHANIC, q
+
+
+def test_classify_ambiguous_both_cues_is_unknown():
+    # Both a touch cue ("reach") and a terminal cue ("close") → refuse to guess.
+    q = "Will Bitcoin reach $100k before the close on Dec 31?"
+    assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == UNKNOWN_MECHANIC
+
+
+def test_classify_touch_from_kalshi_max_ticker():
+    # Kalshi generic-title barrier series: the mechanic lives in the TICKER, not the title.
+    m = _with_ticker(_kalshi_struct_mkt("k", "Bitcoin price on Dec 31, 2026?", 0.14,
+                                        floor_strike=100000.0, strike_type="greater"),
+                     "KXBTCMAXY-26DEC31-B100000")
+    assert classify_resolution_mechanic(m) == TOUCH_MECHANIC
+    m2 = _with_ticker(_kalshi_struct_mkt("k", "Ethereum price on Dec 31, 2026?", 0.2,
+                                         floor_strike=5000.0, strike_type="greater"),
+                      "KXETHMINY-26DEC31-B5000")
+    assert classify_resolution_mechanic(m2) == TOUCH_MECHANIC
+
+
+def test_bare_high_low_is_not_a_touch_cue():
+    # "record high" must NOT be read as a barrier (false-positive guard).
+    q = "Will unemployment be at a record high level in December 2026?"
+    assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == UNKNOWN_MECHANIC
+
+
+def test_match_rejects_touch_vs_terminal_conflict():
+    """The load-bearing gate: same strike + same window + shared content, but one resolves on
+    a TOUCH and the other on a TERMINAL close → they can resolve OPPOSITELY → REJECT."""
+    touch = _mkt("P1", "Will Bitcoin ever reach $100k in December 2026?", 0.60,
+                 end_date=_BASE)
+    terminal = _mkt("K1", "Will Bitcoin close above $100000 in December 2026?", 0.52,
+                    end_date=_BASE + timedelta(days=1))
+    assert match_markets(touch, terminal) is None
+
+
+def test_match_confirms_same_mechanic():
+    """Both TERMINAL → matched AND mechanic_confirmed=True."""
+    a = _mkt("P1", "Will Bitcoin close above $100k in December 2026?", 0.60, end_date=_BASE)
+    b = _mkt("K1", "Bitcoin close above $100000 in December 2026", 0.52,
+             end_date=_BASE + timedelta(days=1))
+    m = match_markets(a, b)
+    assert m is not None
+    assert m.mechanic_a == TERMINAL_MECHANIC and m.mechanic_b == TERMINAL_MECHANIC
+    assert m.mechanic_confirmed is True
+
+
+def test_match_admits_unknown_mechanic_but_flags_unconfirmed():
+    """One side has no mechanic cue → NOT rejected (tightening-only) but mechanic_confirmed=False."""
+    known = _mkt("P1", "Will Bitcoin close above $100k in December 2026?", 0.60, end_date=_BASE)
+    unknown = _mkt("K1", "Will Bitcoin be above $100000 in December 2026?", 0.52,
+                   end_date=_BASE + timedelta(days=1))
+    m = match_markets(known, unknown)
+    assert m is not None  # admitted
+    assert m.mechanic_a == TERMINAL_MECHANIC and m.mechanic_b == UNKNOWN_MECHANIC
+    assert m.mechanic_confirmed is False
+
+
+def test_backtest_require_mechanic_confirmed_filters_unconfirmed():
+    """The edge-claim gate: require_mechanic_confirmed excludes a semantically-unclassified pair."""
+    # Build a disagreeing, coherent pair whose match is NOT mechanic-confirmed.
+    unconfirmed = CrossVenueMatch(
+        market_a_id="a", market_b_id="b", question_a="q", question_b="q",
+        shared_tokens=frozenset({"bitcoin"}), threshold=None,
+        yes_price_a=0.30, yes_price_b=0.70, end_date_a=_BASE, end_date_b=_BASE,
+        coherence_score=0.9, mechanic_a=TERMINAL_MECHANIC, mechanic_b=UNKNOWN_MECHANIC,
+        mechanic_confirmed=False,
+    )
+    pair = ResolvedCrossVenuePair(match=unconfirmed, outcome_a=True, outcome_b=True)
+    # Without the gate the disagreement is traded; with it, it is excluded.
+    traded = evaluate_cross_venue_pairs([pair], min_coherence=0.5)
+    gated = evaluate_cross_venue_pairs([pair], min_coherence=0.5, require_mechanic_confirmed=True)
+    assert traded.pairs_traded == 1
+    assert gated.pairs_traded == 0
+
+
+def test_backtest_default_unchanged_by_mechanic_param():
+    """Default (require_mechanic_confirmed=False) is byte-for-byte the prior behavior."""
+    confirmed = CrossVenueMatch(
+        market_a_id="a", market_b_id="b", question_a="q", question_b="q",
+        shared_tokens=frozenset({"bitcoin"}), threshold=None,
+        yes_price_a=0.30, yes_price_b=0.70, end_date_a=_BASE, end_date_b=_BASE,
+        coherence_score=0.9,
+    )
+    assert confirmed.mechanic_confirmed is False  # default field value
+    pair = ResolvedCrossVenuePair(match=confirmed, outcome_a=True, outcome_b=True)
+    r = evaluate_cross_venue_pairs([pair], min_coherence=0.5)
+    assert r.pairs_traded == 1
