@@ -5,6 +5,129 @@
 
 ---
 
+## 2026-07-24 — overall `C` (↓ from B) · ship gate NOT met (10th grade — the largest downward revision in project history, and MOST OF IT IS A CORRECTION OF MY OWN PRIOR GRADES, not a factory regression)
+
+**Diff vs 2026-07-17:** overall **B → C**. **Seven dimensions moved down:**
+`correctness_reliability` **A+ → C**, `backtest_integrity` **A → B**, `functional_reality` **A → B**,
+`artifact_integrity` **A → B**, `design_taste` **A → B**, `tests_evals` **A+ → B**,
+`performance` **A → B**. `security` **A+ → A**. Held: `run_risk_readiness` **A**,
+`business_case_strength` **B** (still the binding business constraint).
+
+**READ THIS FIRST — the honest framing.** Of the seven downgrades, **five rest on defects that
+PRE-DATE this cycle** and that my own prior grades missed: the Metrics-tab 404s (introduced
+2026-07-17), the unseeded Monte-Carlo pricer, the O(n²) rescan, the fabricated MC sizing
+parameters, and the doc/code drift. **The failure mode was mine.** Prior cycles graded several
+dimensions by inference — *"`git diff --stat` since the last grade is empty ⇒ the prior grade
+holds"* — most explicitly `design_taste` on 2026-07-17 ("static (already-good), no advancement").
+That is not grading; that is assuming. A dimension with no diff can still be wrong, and this
+cycle it was: a one-line-per-URL prefix bug had the entire Metrics tab rendering six HTTP-404
+error cards the whole time. **Lesson for every future run: never let "no diff" substitute for a
+mechanical signal. Re-verify the artifact, not the diff.**
+
+**The one genuinely NEW defect — a reproducibility-fingerprint hole (cross-verified 3×):**
+`_seed_hash` does not fingerprint `m.category`, but since #388/#404 `category` is
+**PnL-determining** whenever either per-category cap is active (`walk_forward.py:540-552`,
+`cat_room` sizes the trade DOWN). I reproduced it myself — two datasets identical in every
+fingerprinted field, differing ONLY in category labels:
+`category_exposure_cap=0.10` → **same hash `0bf8214f4c56f8a6`**, trades 5 vs 15, PnL $3,769.24 vs
+$5,811.48; `cap=0.20` → **same hash**, PnL $4,961.66 vs $12,948.43 (**2.6×**). An independent
+grader extended it to the cumulative lane at **3.9×**, defeating the `effective_cumulative_cap`
+mitigation (`walk_forward.py:459-466` keys on distinct-category **count**, so
+same-count-different-assignment collides). The engine's own comment (`walk_forward.py:669-673`)
+asserts *"category … never affects a decision or PnL"* as fact, and a gate test
+(`test_walk_forward_category.py:50`) **pins the false invariant** while only exercising the
+cap-free case. This is the same bug class the repo itself caught and fixed for `fee_schedule`
+in #413 — applied incompletely.
+
+**Bounding it honestly — NO PUBLISHED NUMBER IS WRONG.** `b3a8d5e0e9579853` (synthetic) and
+`79a4cca4b966138f` / −$3,228.02 (frozen corpus) are both cap-free and both reproduced
+**sha256-identical** under my own hands. I initially called the hole "latent"; **a grader
+corrected me and was right**: the cumulative lane **binds** on the frozen corpus (39→27 trades,
+−$3,228.02→−$1,684.13, `top_category_budget_share` 0.3816→0.2445) and **publishes**
+`seed_hash 2e4380ec2cd1f9c6` — a hash that cannot distinguish a different category assignment. I
+verified that correction directly before recording it. What is unsound is the claim that the
+hash *certifies* a capped run, not any committed result.
+
+**What the factory genuinely earned — residual (a) CLOSED (#377).** A **real** (not synthetic)
+OOS result now reproduces **offline from committed bytes**: `data/real_oos_corpus_polymarket.json`
+(187 records) + `--from-corpus` → byte-identical across two runs, 39 trades, **−$3,228.02**, F11
+**significant_negative**. I verified the corpus invariants directly: uniform **7.0-day** decision
+lead, **zero** records with `decision_time >= resolution_time`, all `research_only: false`, zero
+`0x` addresses, base rate 0.246 matching the reported `yes_base_rate`. A grader confirmed the
+loader **fails loud** on every shape mutation (`outcome=2`, price out of range, resolution ≤
+decision, duplicate ids) and that injected leakage is caught by a committed test. This closes the
+exact A→A+ gap the last two scorecards named, and is why `backtest_integrity` is a **B**, not lower.
+
+**Research — two honest nulls, faithfully reported.** EXP-006 fade-the-spike got its first
+real-data OOS run (#390: N=108, +$285.44 but F11 `indistinguishable_from_zero`, F10 fragile;
+large spikes |move|≥0.25 N=43 **LOSE** −$657.34 at 33% hit) and then a pre-registered 60-cell
+surface (#393): **0/60 validate**, 0 significant_positive, 18 significant_**NEGATIVE**, every
+positive-PnL cell also F10-fragile, and the tool **refuses to select a cell**. EXP-006 joins
+bucket-calibration as **REFUTED**. EXP-010 (#410) re-scored the corpus under Polymarket's **real**
+price-dependent per-category fee — making the refutation **worse** (−$3,228 → −$3,502) — and the
+loop reported that faithfully rather than keeping the kinder flat model. The fee formula
+`fee = C × feeRate × p × (1−p)` was verified **verbatim against docs.polymarket.com**. Both nulls
+reproduced exactly.
+
+**Mechanical signals actually run (cold start):**
+- `pip install -r backend/requirements-ci.txt`; `bash scripts/preflight.sh code` → **GREEN**
+  (runtime harness passed, scorecard parses, self-validation 16 capabilities `unmet=[]`).
+- Full `scripts/preflight.sh` → **honest-RED** (`floor_met_year1: false`, 10 DoD boxes, quality
+  below the go-live bar).
+- `scripts/run_walk_forward.py` ×2 → **sha256-IDENTICAL** (`c7d628ef…`), seed 42 / hash
+  `b3a8d5e0e9579853`, PnL 910,880.71 (SYNTHETIC, labeled NOT a validated edge).
+- `scripts/validate_real_oos.py --from-corpus …` ×2 → **sha256-IDENTICAL** (`60bba984…`), n=187,
+  39 trades, −$3,228.02, F11 significant_negative CI [−4325.52, −2403.58].
+- `pytest` over the 78 preflight-registered files → **1374 passed / 1 xfailed / 0 skipped**;
+  `--collect-only` → 1375 collected / 13 errors (all `No module named pandas`, documented).
+- `ruff check backend/app --select E9,F821,F811` → clean (131 hygiene findings unenforced by design).
+- Secret scan clean; ZERO `live_trading_enabled = True`; `next 14.2.35`.
+- `check_scorecard.py gate` → **NOT-READY** on 5 ship-critical dimensions.
+
+**Grades (fresh adversarial per-dimension graders, none the maker — 6 subagents covering all 10 dims):**
+functional_reality **B**, backtest_integrity **B**, correctness_reliability **C**, security **A**,
+run_risk_readiness **A**, artifact_integrity **B**, business_case_strength **B**, design_taste **B**,
+tests_evals **B**, performance **B**.
+
+**Anti-inflation check run in BOTH directions.** This cycle I gave graders pointedly adversarial
+framing ("A+ is a high bar to HOLD — find a replacement finding"), which can manufacture findings.
+So I personally re-verified every grade-moving defect before accepting it: the `_seed_hash`
+collision (reproduced myself), the MC pricer (`orchestrator.py:212-236`, `use_monte_carlo` default
+`True` at `:68`, 9 tests disabling it), the Metrics 404 (`MetricsPanel.tsx:88-103` vs
+`main.py:146`, panel live at `page.tsx:1037`), the quadratic (`spike_detection.py:247-252`),
+`ROADMAP.md:106`'s "48 test files" vs **93** actual, the fee-shape contradiction
+(`GROWTH_STATUS.md:842` vs `cost_model.py:53-57`), and the broken `detect.mjs`. **Every downgrade
+is backed by a defect I confirmed with my own hands — none rests on grader assertion alone.**
+I also declined to over-punish: `tests_evals` stayed **B** and not lower because mutation testing
+killed **10/10** mutants (the suite is genuinely non-tautological and there is **no** false-coverage
+trap), and `business_case_strength` stayed **B** and not **C** because honest, reproducible negative
+results are legitimate scientific progress even though they are not revenue.
+
+**Why `correctness_reliability` fell A+ → C (the steepest drop, and the one I weighed longest):**
+the dimension's stated A-bar names determinism explicitly, and determinism is broken **twice
+independently** — the `_seed_hash`/category collision on the research lane, and an **unseeded**
+`EnhancedContractPricer()` (`orchestrator.py:212`) on the **production-default** paper path
+(`DETERMINISTIC? False`, ~1.7e-6). Add a latent swallowed-crash (`polymarket_client.py:892` lacks
+the tz guard all four sibling parsers have; `orchestrator.py:885` swallows the resulting
+`TypeError` into a permanent silent scan blackout) and a gate test pinning a false invariant.
+More than one real gap, striking the dimension's core requirement, = **C**, not B. The prior **A+**
+was plainly too high: the unseeded pricer pre-dates this cycle entirely and was never caught.
+
+**Overall = C:** five ship-critical dimensions below A. Ship gate correctly closed.
+
+**Issues:** **#79 kept open + refreshed** (business case — the binding constraint, now with the
+stale-`BUSINESS_CASE.md` gap named). **New issues filed** for `correctness_reliability`,
+`functional_reality`, `backtest_integrity`, `artifact_integrity` and the `design_taste`
+Metrics-tab break.
+
+**Weakest link (honest, unchanged):** there is still no validated out-of-sample edge, and **both**
+mechanisms tested to date are now dead. The nearest thing to a validated result this project owns
+is an honest, reproducible **loss** — correctly labeled, correctly gated, reaching no revenue
+field. That discipline is why this is a C and not an F. The engineering around it needs a
+correctness pass, not a rewrite.
+
+---
+
 ## 2026-07-17 — overall `B` · ship gate NOT met (9th grade — `correctness_reliability` A→A+ PROMOTED (#338 closed the last named residual); everything else held; business_case still the lone binding B; EXP-006 grew as an honest PILOT, not a validated edge)
 
 **Diff vs 2026-07-13:** overall unchanged at **B**. **Exactly one dimension crossed a threshold —
