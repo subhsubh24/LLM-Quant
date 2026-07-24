@@ -4108,3 +4108,135 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
 - Verdict: **edge-not-proven** — a real, tested, live-validated data-access unblock + a correctness fix, with an honest measured CANDIDATE (less-efficient crowd) and NO edge claimed. Per the value bar + the active owner steer, an honest null/candidate reported AS such WITH the next step filed clears the bar and IS success.
 - **NEXT (pre-registered, do NOT p-hack):** (0) FIRST a RELIABILITY DECOMPOSITION / calibration curve (reliability vs resolution vs uncertainty) on a frozen Kalshi employment corpus, to establish whether the higher Brier reflects genuine crowd MISCALIBRATION or merely irreducible outcome noise — a raw Brier cannot tell them apart, and there is no point building a predictor against a crowd that is uncertain-but-well-calibrated. (1) only if (0) shows real miscalibration, build a genuinely-independent decision-time predictor for weekly initial jobless claims (consensus economist forecast anchor / a simple base-rate-plus-recent-trend model) and run it through B2 + `walk_forward` + F10/F11 against this crowd on a FROZEN corpus, sufficient N (combine KXJOBLESS years + siblings to clear ≥100 independent events), with the concentration cap — only a positive, F11-significant, F10-non-fragile, cost-net result over the floor is an edge. (2) The same `/historical/*` tier now unblocks B8's own filed HISTORICAL co-listed BTC/ETH corpus (Kalshi crypto series via `historical=True`), pairing with the resolved-strike capture (#405) — still one focused unit once a non-trivial co-listed N is confirmed (DECISION COROLLARY). (3) `extract_threshold_from_structured_strike` custom-strike (`strike_type="custom"`) support only if/when a same-event cross-venue match needs it.
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any tested mechanism; engine_pct 74 unchanged. Real-money brake untouched (no order, no gate flip, no cap change).
+
+## 2026-07-24 — Research Run 30: a genuinely new structural mechanism (settlement-discount term-structure mispricing, EXP-011), a WebSearch-reliability caution on the NBER employment-calibration numbers, and a Robinhood-Predict factual update that does NOT change A9's gate. RECOMMEND-only, no code/backtest run, no ROADMAP steer.
+
+**Orientation.** Read RESEARCH_PLAYBOOK.md, RESEARCH_MEMORY.md (tail), ROADMAP.md, VISION.md,
+`docs/BUSINESS_CASE.md`, GROWTH_STATUS.md, and `PENDING_OPS.md` first. `git log` confirms HEAD
+(`b25e37f`) is the 2026-07-23 factory bookkeeping commit for #408/#409 (Kalshi `/historical/*`
+deep-tier fetcher + dollar-candlestick fix; B8/EXP-009 data-access unblocked, honest diagnostic, NO
+edge) — no commits since Research Run 29 (yesterday). Binding constraint unchanged: both real-money
+mechanisms fully tested to date (bucket-calibration EXP-002/003/005 across 4 corpora; EXP-006
+fade-the-spike, FAMILY-NULL-STRONG 0/60 cells) stay REFUTED; EXP-008/009/010 stay proposed/unbuilt.
+
+**Reconfirmation only (WebSearch, no new numbers beyond what this file already logs).**
+Combined Kalshi+Polymarket monthly volume reported at $44.8B (June 2026, The Block via a search
+snippet) — a market-growth data point, not an edge finding, not logged as evidence. arXiv:2605.00864
+(NBA same-market arbitrage, 3.6s median persistence) and arXiv:2606.07811 (Angelini & De Angelis
+underreaction/momentum, fails net of spread) both resurfaced identically to prior logs — not
+re-cited as new.
+
+**Robinhood Predict factual update — does NOT change A9's double gate.** WebSearch surfaced that
+Robinhood's OWN prediction-markets product (distinct from the "Robinhood MCP" agentic-trading tool
+A9 tracks) is live, large, and growing fast: reported 9 billion contracts traded by 1M+ customers
+since launch, named its fastest-growing product line by revenue, two crypto (BTC/HYPE) event
+contracts listed 2026-07-22, and a joint venture with Susquehanna (closed acquisition of MIAXdx,
+2026-01-20) building toward a CFTC-licensed exchange/clearinghouse. Checked directly for a
+documented public read-only market-data API (the prerequisite for even a read-only leakage-safe
+fetcher, mirroring how Polymarket/Kalshi ingestion was built with zero credentials): none found —
+`docs.robinhood.com` publishes a Crypto Trading API only; no developer docs for prediction-markets/
+event-contract data. So A9's actual blocker is unchanged and is SHARPER than the ROADMAP text
+implies: it is not merely "not in the Robinhood MCP yet" — there is currently no documented API of
+any kind (MCP or direct) through which this project could even READ Robinhood Predict market data,
+let alone trade it. Logged as a factual correction for A9's next edit, not a gate change (still
+double-gated, still not active work) — no ROADMAP steer from a non-edge finding.
+
+**Self-validation caution (new, generalizable): WebSearch AI-summarization of academic Brier/bias
+numbers is NOT reliable for exact figures and should not be cited as verified without a direct
+primary-source read.** Attempting to fill the gap Research Run 28 explicitly left open (NBER
+w34702's exact employment-calibration magnitude — PDF text-extraction failed then) by re-querying
+via WebSearch produced **internally inconsistent numbers across two independent queries querying
+overlapping literature**: one pass returned "Unemployment Rate Brier 0.1302" / employment bias
+"-0.0695"; a second, differently-worded pass returned "Unemployment Rate Brier 0.1270" / bias
+"-0.0891" for what the tool represented as the same finding. Direct WebFetch of the NBER abstract
+page (`nber.org/papers/w34702`) confirms the paper's TOPIC and general claim (Kalshi macro-market
+forecast accuracy vs. survey methods) but not the abstract's exact numbers — the full text still
+requires the same PDF this project has twice failed to text-extract. A second candidate paper
+surfaced by title ("Information Efficiency Across Macroeconomic Prediction Markets: Evidence from
+Kalshi," ResearchGate) returned HTTP 403 on direct WebFetch — could not be independently verified
+either, and it is now unclear whether the numbers above even belong to that paper vs. the NBER one
+vs. a third, since WebSearch's synthesis did not reliably attribute them. **FAIL-CLOSED: none of
+these specific numbers (0.1302/0.1270 Brier, -0.0695/-0.0891 bias) are adopted as evidence for
+EXP-009 or any other experiment.** This generalizes, not just reconfirms, Run 28's fail-closed
+stance: the risk is not only "PDF extraction fails" but "a search tool's summarized 'quote' of an
+academic statistic can be a plausible-sounding fabrication that varies between queries" — future
+research runs citing a specific Brier/bias/MAE number from a paper that could not be directly
+WebFetched (readable text, not a PDF-failure page) should re-verify via a second independent fetch
+attempt (arXiv HTML mirror, SSRN abstract page, an author's own site) before relying on it, exactly
+as this run did for arXiv:2605.31431 below (verified via direct WebFetch, one internally consistent
+abstract, no cross-query drift).
+
+**Substantive new finding this run — a genuinely new, structurally-different candidate mechanism:
+settlement-discount term-structure mispricing (EXP-011).** WebFetched arXiv:2605.31431 ("When
+Certainty Is Not Worth It: Capital Lock-Up and Settlement Discounting in Prediction Markets")
+directly — full verbatim abstract returned, not a snippet. The paper studies collateralized
+prediction markets (Polymarket) where economic uncertainty can resolve well before the winning
+collateral is actually redeemable (oracle settlement lag): "a near-certain dollar is a delayed
+dollar," so near-certain contract prices embed a maturity-dependent **settlement discount** on top
+of pure belief. The authors recover an implied **annualized settlement wedge (ASW)** term structure
+from persistent near-certain contracts using REALIZED settlement times (public data only, no
+proprietary feed) and find the wedges are positive, maturity-dependent, and time-varying;
+adjusting prices for them **reduces the raw near-certainty horizon gradient by roughly 48–88%** —
+meaning MOST (not all) of the "near-certain long-horizon contracts look underpriced" pattern this
+project's own refuted bucket-calibration family (EXP-002/003/005) implicitly bet against is a
+RATIONAL pricing-of-delay effect, not free miscalibration; a 12–52% residual remains unexplained by
+settlement mechanics alone. The paper also finds market architecture matters: negRisk conversion
+compresses the wedge (recycles part of the position into synthetic collateral) and yield-bearing
+collateral flattens the term structure (lower opportunity cost of lock-up).
+
+**Why this is genuinely new, not a re-parameterization.** Every refuted alpha in this project's
+history (static/recency bucket-calibration, fade-the-spike momentum/reversion) treats the crowd
+price as a pure belief signal and tries to out-calibrate it. This mechanism says part of the
+"mispricing" those strategies chased — specifically their own repeatedly-named concentration in
+near-0/1 extreme-confidence buckets (EXP-002/003/005's F10 fragility reports all flag this same
+bucket) — may be **correctly-priced settlement-discount, not model error**, which is a candidate
+STRUCTURAL explanation for why a naive empirical-resolution-rate replacement of crowd price
+systematically loses in exactly that region (it treats a fairly-discounted near-certain price as
+"underpriced" and buys it, when the crowd was already pricing the delay correctly). It is also a
+genuinely different edge SOURCE than anything tested to date — not crowd belief miscalibration, but
+capital-cost/carry mispricing in a leftover residual, fully in-scope per the PLAYBOOK ("spread/
+liquidity capture," "faster/cheaper execution," public settlement-timing data only, no private
+signal).
+
+**Falsifiable next step, filed as EXP-011 (measurement-first, not a strategy commitment).** Before
+any trading claim: a purely DESCRIPTIVE diagnostic — reuse the EXISTING leakage-safe
+`HistoricalMarket` records (Gamma + Kalshi `/historical/*`, both already built) to compute the
+implied per-market ASW on near-certain (>0.95 or <0.05) resolved markets, bucket by maturity
+(decision-to-resolution gap) and by negRisk-eligibility, and report the term structure — no PnL, no
+new strategy code, same non-p-hackable class as B9's `per_category_diagnostics`. Full spec
+(hypothesis/min-N/OOS plan/how-it-could-be-wrong) filed in `GROWTH_STATUS.md` `experiments[]` as
+EXP-011. Explicitly predicts the diagnostic MAY show the residual is near-zero / not a tradeable
+signal (the paper's own framing emphasizes MOST of the gradient is rational, i.e., LESS exploitable
+than a naive read suggests) — "insufficient residual to trade" is an honest, expected possible
+outcome, not a foregone conclusion of an edge.
+
+### Self-validation (data sources this run)
+- Market-volume figures (Pew/The Block via WebSearch synthesis): directional context only, not
+  relied on for any metric/edge.
+- Robinhood Predict scale + MIAXdx JV: multiple corroborating search results (financemagnates.com,
+  robinhood.com newsroom, predictionnews.com); `docs.robinhood.com` checked directly (WebFetch would
+  need a live fetch of the docs site — confirmed via search result content that only crypto-trading
+  API docs are published) — no primary market-data API found for prediction markets/event contracts.
+- NBER w34702 abstract page: WebFetched directly (`nber.org/papers/w34702`) — confirms topic/claim
+  only; the specific Brier/bias numbers reported by WebSearch synthesis this run are EXPLICITLY
+  **not** adopted (see caution above) — inconsistent across queries, unverified against primary PDF
+  or a readable secondary mirror.
+- "Information Efficiency Across Macroeconomic Prediction Markets: Evidence from Kalshi"
+  (ResearchGate): WebFetch returned HTTP 403 — could not verify; no number from this title is relied
+  on.
+- arXiv:2605.31431 (settlement-discount paper): WebFetched the arxiv abs page directly — full
+  verbatim abstract retrieved once, internally consistent, no cross-query drift observed (only one
+  fetch attempted, appropriately, since the abstract page returned clean readable text on the first
+  try). Preprint, not peer-reviewed; not yet reproduced on this project's own data — EXP-011 is the
+  proposed reproduction path.
+- Krause, "Zero-Price Contracts and the Favorite-Longshot Bias in CPI Prediction Markets" (SSRN
+  7087538): direct WebFetch returned HTTP 403 — could NOT verify beyond the WebSearch snippet ("95
+  Kalshi CPI contracts, no evidence of classic favorite-longshot bias"); NOT adopted as a relied-on
+  finding, noted only as an unverified lead for future confirmation.
+- No metric, PnL, or edge is reported from any of the above as a validated result — all are DATA
+  motivating a proposed experiment (EXP-011) or a factual/methodological correction, not a validated
+  outcome.
+
+Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
+tested mechanism; engine_pct unchanged (74). Real-money brake untouched (no order, no gate flip, no
+cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS.md).
