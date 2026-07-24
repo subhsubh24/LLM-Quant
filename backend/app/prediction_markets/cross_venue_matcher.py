@@ -415,21 +415,31 @@ TOUCH_MECHANIC = "touch"
 TERMINAL_MECHANIC = "terminal"
 UNKNOWN_MECHANIC = "unknown"
 
-# TOUCH/BARRIER text cues. Deliberately OMITS bare "high"/"low" (too many false positives —
-# "record high unemployment" is not a price barrier); requires an explicit barrier verb or a
-# max/min/peak extremum word. "reach/hit/touch/ever/at any point/intraday" are the barrier
-# verbs; "max(imum)/min(imum)/peak" are the extremum-over-window words Kalshi barrier series use.
-_TOUCH_MECHANIC_RE = re.compile(
-    r"\b(ever|reach(?:es|ed|ing)?|hit(?:s|ting)?|touch(?:es|ed|ing)?|"
-    r"at any (?:point|time)|any\s?time|intraday|"
-    r"max(?:imum)?|min(?:imum)?|peak)\b",
+# UNAMBIGUOUS touch/barrier text cues — an explicit intraday-PATH word that means "reached at
+# any instant during the window" regardless of the underlying. These are barrier cues for ANY
+# unit. Deliberately OMITS bare "high"/"low" (false positives — "record high unemployment").
+_UNAMBIGUOUS_TOUCH_RE = re.compile(
+    r"\b(ever|touch(?:es|ed|ing)?|intraday|at any (?:point|time)|any\s?time)\b",
     re.IGNORECASE,
 )
-# TERMINAL text cues — resolution at a single instant (close/expiry/settlement/end).
+# COLLOQUIAL barrier verbs / extremum words. For a CONTINUOUS-PRICE (currency) underlying these
+# are genuine barrier cues (BTC "reaches"/"hits" $100k, its "maximum" over the year). But for a
+# DISCRETE TERMINAL statistic (a monthly econ print, a vote count) "unemployment HIT 5%" reads
+# as TERMINAL, not an intraday barrier — so these fire as touch ONLY when the strike unit is
+# currency (adversarial-auditor finding: colloquial verbs over-classified terminal-only
+# underlyings as touch and manufactured a false conflict). This also removes the bare "max"/"min"
+# proper-noun false positive (a name like "Max" carries no currency strike, so it never fires).
+_PRICE_CONTEXT_TOUCH_RE = re.compile(
+    r"\b(reach(?:es|ed|ing)?|hit(?:s|ting)?|max(?:imum)?|min(?:imum)?|peak)\b",
+    re.IGNORECASE,
+)
+# TERMINAL text cues — resolution at a single instant (close/expiry/settlement/end). Deliberately
+# OMITS the generic "as of" (an "as of <date>" window phrase is not reliably a terminal-mechanic
+# cue — keeping it risked a false terminal that manufactured a conflict).
 _TERMINAL_MECHANIC_RE = re.compile(
     r"\b(clos(?:e|es|ed|ing)|settl(?:e|es|ed|ement)|expir(?:y|ation|es|ed)|"
     r"end of (?:day|the day|the month|the year|month|year)|at the end|"
-    r"as of|final\s+(?:value|price|level))\b",
+    r"final\s+(?:value|price|level))\b",
     re.IGNORECASE,
 )
 # Kalshi STRUCTURED barrier hint: a MAX/MIN series ticker (KXBTCMAXY / KXBTCMINY / *MAX / *MIN)
@@ -459,7 +469,14 @@ def classify_resolution_mechanic(market: "Market") -> str:
     """
     text = str(getattr(market, "question", "") or "")
     ticker = _market_ticker_text(market)
-    touch = bool(_TOUCH_MECHANIC_RE.search(text)) or bool(_KALSHI_BARRIER_TICKER_RE.search(ticker))
+    # Unconditional path words + the Kalshi MAX/MIN barrier ticker are touch for any unit.
+    touch = bool(_UNAMBIGUOUS_TOUCH_RE.search(text)) or bool(_KALSHI_BARRIER_TICKER_RE.search(ticker))
+    # Colloquial barrier verbs (reach/hit/max/min/peak) are touch ONLY for a continuous-price
+    # (currency) underlying — for a terminal-only percent/plain statistic they read as terminal.
+    if not touch and _PRICE_CONTEXT_TOUCH_RE.search(text):
+        thr = extract_threshold(text) or extract_threshold_from_structured_strike(market)
+        if thr is not None and thr.unit == "currency":
+            touch = True
     terminal = bool(_TERMINAL_MECHANIC_RE.search(text))
     if touch and not terminal:
         return TOUCH_MECHANIC
