@@ -332,6 +332,7 @@ class KalshiClient:
             floor_strike=floor_strike,
             cap_strike=cap_strike,
             strike_type=strike_type,
+            ticker=ticker,  # real Kalshi market ticker (B8 resolution-mechanic classifier hint)
         )
 
 

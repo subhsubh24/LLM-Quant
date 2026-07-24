@@ -8,11 +8,12 @@ book — it is a documented, re-runnable METHOD + a point-in-time measurement, N
 bit-reproducible artifact. It counts pairs only (no PnL, no selection) so it cannot be
 p-hacked into an edge.
 
-HONESTY: a "candidate pair" is a same-STRIKE, same-window, same-content match. It is NOT
-semantically classified — the touch/barrier/terminal resolution-mechanic classifier
-(ROADMAP B8 step iii) is still outstanding and MUST gate any pair before it is treated as
-the same event for an OOS/edge claim. A candidate count is a feasibility signal, never an
-edge.
+HONESTY: a "candidate pair" is a same-STRIKE, same-window, same-content match. The
+touch/barrier/terminal resolution-mechanic classifier (ROADMAP B8 step iii) is NOW BUILT:
+match_markets rejects a confident touch-vs-terminal conflict, and each surviving candidate
+carries ``mechanic_confirmed`` (both legs the SAME known mechanic). Only mechanic-confirmed
+pairs are eligible for an OOS/edge claim; an unconfirmed candidate is a feasibility signal,
+never an edge. This probe reports BOTH counts.
 
 Usage:  python scripts/b8_match_probe.py
 """
@@ -78,15 +79,21 @@ def main() -> int:
     print(f"POLYMARKET: tradeable_binary={len(p_trad)}")
 
     matches = find_cross_venue_matches(p_trad, k_trad)
-    print(f"\n=== CANDIDATE cross-venue pairs (UNCLASSIFIED — step iii pending): {len(matches)} ===")
+    confirmed = [m for m in matches if m.mechanic_confirmed]
+    print(
+        f"\n=== CANDIDATE cross-venue pairs: {len(matches)} "
+        f"(mechanic-CONFIRMED, edge-eligible: {len(confirmed)}) ==="
+    )
     for mt in matches[:10]:
+        tag = "CONFIRMED" if mt.mechanic_confirmed else f"unclassified({mt.mechanic_a}/{mt.mechanic_b})"
         print(
-            f"  thr={mt.threshold} coh={mt.coherence_score:.2f} | "
-            f"A={mt.question_a[:44]!r} B={mt.question_b[:44]!r}"
+            f"  thr={mt.threshold} coh={mt.coherence_score:.2f} [{tag}] | "
+            f"A={mt.question_a[:40]!r} B={mt.question_b[:40]!r}"
         )
     print(
-        "\nNOTE: candidates are same-strike/window/content only. Touch/barrier/terminal "
-        "mechanic classification (B8 step iii) still gates any OOS/edge use."
+        "\nNOTE: a candidate is same-strike/window/content. A confident touch-vs-terminal "
+        "conflict is already REJECTED; only the mechanic-CONFIRMED subset is edge-eligible "
+        "(B8 step iii). An unconfirmed candidate is a feasibility signal, never an edge."
     )
     return 0
 
