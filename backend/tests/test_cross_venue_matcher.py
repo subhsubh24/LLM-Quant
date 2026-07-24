@@ -637,6 +637,35 @@ def test_bare_high_low_is_not_a_touch_cue():
     assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == UNKNOWN_MECHANIC
 
 
+def test_colloquial_verb_on_percent_stat_is_not_touch():
+    # ADVERSARIAL-AUDITOR REGRESSION: a terminal-only percent statistic phrased with a
+    # colloquial "hit"/"reach" must NOT be mis-classified as touch (no intraday path exists) —
+    # otherwise a genuine same-event pair is falsely rejected as a touch-vs-terminal conflict.
+    for q in ("Will US unemployment hit 5% in December 2026?",
+              "Will CPI reach 3% in December 2026?",
+              "Will the Democrats reach 218 seats in 2026?"):
+        assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == UNKNOWN_MECHANIC, q
+
+
+def test_colloquial_verb_on_currency_price_is_touch():
+    # ...but the SAME verbs ARE a barrier cue for a continuous-price (currency) underlying.
+    for q in ("Will Bitcoin reach $100k in December 2026?",
+              "Will Bitcoin hit $100,000 this year?"):
+        assert classify_resolution_mechanic(_mkt("m", q, 0.5)) == TOUCH_MECHANIC, q
+
+
+def test_percent_stat_same_event_pair_not_falsely_rejected():
+    """The end-to-end fix: a terminal-only unemployment pair phrased with 'hit'/'at or above'
+    (both -> unknown mechanic now) MATCHES instead of being killed by a spurious conflict."""
+    poly = _mkt("P1", "Will US unemployment hit 5% in December 2026?", 0.40, end_date=_BASE)
+    kalshi = _mkt("K1", "Will US unemployment be at or above 5% in the December 2026 report?",
+                  0.55, end_date=_BASE + timedelta(days=1))
+    m = match_markets(poly, kalshi)
+    assert m is not None
+    assert m.mechanic_a == UNKNOWN_MECHANIC and m.mechanic_b == UNKNOWN_MECHANIC
+    assert m.mechanic_confirmed is False
+
+
 def test_match_rejects_touch_vs_terminal_conflict():
     """The load-bearing gate: same strike + same window + shared content, but one resolves on
     a TOUCH and the other on a TERMINAL close → they can resolve OPPOSITELY → REJECT."""
