@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Sequence
 
-from .cost_model import DEFAULT_COST_MODEL, CostModel
+from .cost_model import DEFAULT_COST_MODEL, POLYMARKET_FEE_RATES, CostModel
 
 # When the per-category exposure cap sizes a trade DOWN, a position smaller than this fraction of
 # the starting bankroll is treated as "dust" and SKIPPED — so a sub-cent capped fill can't count
@@ -687,6 +687,18 @@ def _seed_hash(
     # reproduction hash unchanged.
     if cumulative_category_budget_cap is not None:
         payload["cumulative_category_budget_cap"] = round(cumulative_category_budget_cap, 12)
+    # Same byte-identical-when-None discipline for the EXP-010 real fee schedule: a set
+    # fee_schedule changes the per-fill fee (feeRate·p·(1-p) instead of the flat fee_rate) and
+    # therefore PnL, so it MUST enter the fingerprint or two runs with identical data/seed but
+    # different fee models would share a hash yet diverge in PnL. Omitting the key when None
+    # (the default) keeps every pinned flat-model reproduction hash (b3a8d5e0e9579853 / …)
+    # byte-identical. The schedule's PnL-affecting identity = its default fallback rate + the
+    # per-category rate map. Covered by test_seed_hash_covers_fee_schedule.
+    if cost_model.fee_schedule is not None:
+        payload["fee_schedule"] = {
+            "default_fee_rate": round(cost_model.fee_schedule.default_fee_rate, 12),
+            "rates": {k: round(v, 12) for k, v in sorted(POLYMARKET_FEE_RATES.items())},
+        }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 

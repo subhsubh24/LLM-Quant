@@ -66,12 +66,17 @@ DEFAULT_FEE_RATE = 0.02         # venue fee, fraction of traded notional
 # so an unmapped category can only OVER-state cost (the safe direction; it can never
 # manufacture a spurious edge). The re-score harness reports the per-category assignment
 # so the fallback is transparent, never silent.
-POLYMARKET_FEE_RATES: dict = {
+POLYMARKET_FEE_RATES: "dict[str, float]" = {
     "politics": 0.04,
     "sports": 0.05,
     "economics": 0.05,
     "crypto": 0.07,
-    "geopolitical": 0.0,   # world-events; makers-and-takers free per the fee page
+    # world-events; makers-and-takers free per the fee page. NOTE: this is the ONE documented
+    # rate that UNDER-states cost vs the flat 2% — but it is unreachable via the standard
+    # pipeline (market_category.derive_market_category has no "Geopolitical" bucket; geopolitics
+    # keywords map to Politics) and no committed corpus carries it, so it never zeroes a real
+    # fill. It is kept only for fidelity to Polymarket's genuinely-free world-events tier.
+    "geopolitical": 0.0,
 }
 
 
