@@ -290,19 +290,22 @@ def test_bisect_baseline_matches_the_linear_scan_oracle():
     `_window_baseline` used to rescan the series from index 0 on every tick — O(n^2), and
     measured by the independent Quality Auditor at 91% of the backtest engine's wall clock.
     It is now a binary search. The optimization is only legitimate if it is EXACTLY
-    equivalent, including the awkward cases: duplicate timestamps (must pick the FIRST of
-    the run), an advanced `floor_time`, a window wider than the whole series, and a window
-    so narrow nothing qualifies.
-    """
-    from app.prediction_markets.spike_detection import clean_ticks
+    equivalent, including the awkward cases: an advanced `floor_time`, a window wider than
+    the whole series, and a window so narrow nothing qualifies.
 
-    raw = []
+    NOT covered here, deliberately: duplicate timestamps. `clean_ticks` dedups by timestamp
+    before `_window_baseline` ever runs, so a duplicate cannot reach it in production — and
+    an earlier version of this test tried to build one anyway, which `clean_ticks` silently
+    collapsed, leaving an inert sub-case behind a docstring that claimed to cover it. The
+    series is therefore built DIRECTLY as `Tick`s (bypassing `clean_ticks`) so the fixture
+    is exactly what the function under test actually sees.
+    """
+    from app.prediction_markets.spike_detection import Tick
+
     t = 1_700_000_000
-    for i in range(60):
-        raw.append({"t": t + i * 60, "p": round(0.30 + (i % 7) * 0.03, 4)})
-    raw.append({"t": t + 10 * 60, "p": 0.99})   # duplicate timestamp, higher price
-    raw.append({"t": t + 10 * 60, "p": 0.01})   # duplicate timestamp, lower price
-    series = clean_ticks(raw)
+    series = [
+        Tick(t=t + i * 60, p=round(0.30 + (i % 7) * 0.03, 4)) for i in range(60)
+    ]
     times = [tk.t for tk in series]
 
     from bisect import bisect_left

@@ -255,10 +255,15 @@ def detect_spikes(
 
         Equivalence with the old scan: it returned the first `tk` with `tk.t >= lower`,
         breaking once `tk.t >= cur.t`. `bisect_left` on `lower` yields exactly that first
-        index (and, on a run of duplicate timestamps, the FIRST of the run — matching the
-        old first-match behavior); the `< cur.t` check reproduces the break. Note this is
-        correct per-call and does NOT lean on `lower` advancing monotonically, so the
-        mutation of `floor_time` between iterations cannot invalidate it.
+        index; the `< cur.t` check reproduces the break. This holds for every case,
+        including `idx == 0`, `idx == len(series)`, and `lower > cur.t` (both return None).
+        Note it is correct PER CALL and does NOT lean on `lower` advancing monotonically,
+        so the mutation of `floor_time` between iterations cannot invalidate it.
+
+        (`clean_ticks` dedups by timestamp upstream, so `times` is strictly increasing and
+        the duplicate-timestamp tie-break question never arises here in practice —
+        `bisect_left` would pick the first of a run regardless, which is what the old scan
+        did.)
         """
         lower = cur.t - window_seconds
         if lower < floor_time:
