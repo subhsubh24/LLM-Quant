@@ -82,28 +82,43 @@ def test_category_is_excluded_from_seed_hash_WHEN_NO_CAP_IS_ACTIVE():
     assert r_unlabeled.n_trades == r_labeled.n_trades
 
 
-def _relabel_dataset():
-    """Two datasets identical in EVERY fingerprinted field except the category assignment,
-    deliberately sharing the same distinct-category COUNT (2) so the
-    ``effective_cumulative_cap`` count-based mitigation cannot mask the difference."""
+def _relabel_dataset(n=60, category_a=CATEGORY_POLITICS, category_b=CATEGORY_SPORTS):
+    """Two datasets identical in EVERY fingerprinted field except the category ASSIGNMENT.
+
+    Two properties are load-bearing and easy to get wrong:
+
+    * Both share the same distinct-category COUNT (2), so the ``effective_cumulative_cap``
+      count-based mitigation cannot mask the difference — a same-count relabel is exactly
+      what defeats it.
+    * Decisions are spaced 4 days apart across ~240 days, comfortably past the
+      ``train_min_days=28`` default, so real OOS windows OPEN and real trades SETTLE. An
+      earlier version of this fixture spanned only 14 days and produced ``n_trades=0`` for
+      every variant — the hash assertion still passed, but only because the category strings
+      differed in the JSON payload; no cap-driven sizing ever ran. A test that cannot
+      distinguish "the fingerprint works" from "no trade happened" is not evidence.
+    """
     def build(cats):
         return [
-            _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i, category=c, res_offset_days=6)
+            _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i * 4, category=c, res_offset_days=6)
             for i, c in enumerate(cats)
         ]
-    n = 14
-    interleaved = [CATEGORY_POLITICS if i % 2 == 0 else CATEGORY_SPORTS for i in range(n)]
-    blocked = [CATEGORY_POLITICS if i < n // 2 else CATEGORY_SPORTS for i in range(n)]
+    interleaved = [category_a if i % 2 == 0 else category_b for i in range(n)]
+    blocked = [category_a if i < n // 2 else category_b for i in range(n)]
     return build(interleaved), build(blocked)
 
 
 def test_seed_hash_covers_category_when_cap_active():
-    """CAP-ACTIVE lane — the regression that pins the #415-era reproducibility fix.
+    """CAP-ACTIVE lane — the regression that pins the reproducibility fix.
 
     With either per-category cap on, ``category`` is PnL-determining, so two datasets that
     differ ONLY in their category labels MUST NOT share a ``seed_hash``. Before the fix they
-    did (the Quality Auditor measured up to a 3.9x PnL divergence under one hash), which
-    actively misled any reviewer comparing hashes."""
+    did (the independent Quality Auditor measured up to a 3.9x PnL divergence under one
+    hash), which actively misled any reviewer comparing hashes.
+
+    Crucially this asserts the PnL genuinely DIVERGES as well as the hash differing — that
+    divergence is the whole reason the fingerprint must cover category, so a test that only
+    checked the hash would be pinning the fix without demonstrating the defect.
+    """
     a, b = _relabel_dataset()
     for cap_kwargs in (
         {"category_exposure_cap": 0.10},
@@ -112,32 +127,58 @@ def test_seed_hash_covers_category_when_cap_active():
     ):
         ra = wf.walk_forward_backtest(a, seed=42, **cap_kwargs)
         rb = wf.walk_forward_backtest(b, seed=42, **cap_kwargs)
+        assert ra.n_trades > 0 and rb.n_trades > 0, (
+            f"fixture produced NO trades under {cap_kwargs} — the cap never bound, so this "
+            f"assertion would pass vacuously"
+        )
+        assert ra.total_pnl_usd != rb.total_pnl_usd, (
+            f"fixture PnL did not diverge under {cap_kwargs} — without divergence there is "
+            f"no reproducibility hole to close, so the hash assertion proves nothing"
+        )
         assert ra.seed_hash != rb.seed_hash, (
-            f"category relabel shares a seed_hash under {cap_kwargs} — the cap makes "
-            f"category PnL-determining, so the fingerprint MUST distinguish it"
+            f"category relabel shares a seed_hash under {cap_kwargs} despite PnL "
+            f"{ra.total_pnl_usd:.2f} vs {rb.total_pnl_usd:.2f} — the cap makes category "
+            f"PnL-determining, so the fingerprint MUST distinguish it"
         )
 
 
 def test_uncategorized_none_and_sentinel_hash_identically_under_cap():
     """``None`` and the literal ``__uncategorized__`` land in the SAME cap bucket, so they
     must also fingerprint identically — otherwise the hash would report a difference the
-    sizing logic does not actually make (the mirror-image defect)."""
-    none_labeled = [_mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i, category=None) for i in range(8)]
+    sizing logic does not actually make (the mirror-image defect).
+
+    Spaced like ``_relabel_dataset`` so real trades settle: an equal-PnL assertion over two
+    zero-trade runs is ``0.0 == 0.0`` and proves nothing.
+    """
+    none_labeled = [
+        _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i * 4, category=None, res_offset_days=6)
+        for i in range(60)
+    ]
     sentinel = [
-        _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i, category="__uncategorized__") for i in range(8)
+        _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i * 4, category="__uncategorized__",
+             res_offset_days=6)
+        for i in range(60)
     ]
     ra = wf.walk_forward_backtest(none_labeled, seed=42, category_exposure_cap=0.10)
     rb = wf.walk_forward_backtest(sentinel, seed=42, category_exposure_cap=0.10)
+    assert ra.n_trades > 0, "fixture produced no trades — the equality assertions are vacuous"
     assert ra.seed_hash == rb.seed_hash
     assert ra.total_pnl_usd == rb.total_pnl_usd
+    assert ra.n_trades == rb.n_trades
 
 
-def test_cap_free_hash_unchanged_by_the_category_fingerprint():
+def test_cap_free_hash_and_pnl_unchanged_by_the_category_fingerprint():
     """The fix must be strictly additive: turning a cap ON is what introduces the category
-    key, so a cap-free run's payload — and therefore its hash — is untouched."""
+    key, so a cap-free run's payload — and therefore its hash — is untouched. The SAME two
+    datasets that diverge under a cap must be indistinguishable without one."""
     a, b = _relabel_dataset()
-    assert wf.walk_forward_backtest(a, seed=42).seed_hash == (
-        wf.walk_forward_backtest(b, seed=42).seed_hash
+    ra = wf.walk_forward_backtest(a, seed=42)
+    rb = wf.walk_forward_backtest(b, seed=42)
+    assert ra.n_trades > 0, "fixture produced no trades — this assertion would be vacuous"
+    assert ra.seed_hash == rb.seed_hash
+    assert ra.total_pnl_usd == rb.total_pnl_usd, (
+        "cap-free PnL must NOT depend on category — if it does, the premise that category "
+        "is pure metadata while both caps are off is false"
     )
 
 
