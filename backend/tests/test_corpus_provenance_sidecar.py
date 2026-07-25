@@ -124,3 +124,72 @@ def test_sidecar_does_not_dress_the_refutation_up_as_an_edge(meta):
     assert h["f11_verdict"] == "significant_negative"
     assert "REFUTATION" in h["note"] or "not an edge" in h["note"].lower()
     assert meta["disclosures"], "a provenance file with no disclosed biases is a red flag"
+
+
+def test_sidecar_resolution_span_matches(corpus, meta):
+    """Re-derived, not trusted. A reviewer mutated this field to
+    ["2000-01-01", "2099-01-01"] and every test still passed — the coverage did not match
+    the claim that every measurable field is compared."""
+    res = sorted(datetime.fromisoformat(r["resolution_time"]) for r in corpus)
+    declared = meta["measured"]["resolution_time_span"]
+    assert declared == [res[0].date().isoformat(), res[-1].date().isoformat()]
+
+
+def test_sidecar_leakage_bullet_counts_are_true(meta, corpus):
+    """The anti-leak sanity bullet quotes SPECIFIC counts ("46 outcome=1 of which 14 priced
+    < 0.50; 141 outcome=0 of which 9 priced > 0.50"). Those numbers are the evidence that the
+    decision price is not the settled outcome, so they must be re-derived — a reviewer proved
+    they could be replaced with "999/999/999/999" undetected."""
+    yes = [r for r in corpus if r["outcome"] == 1]
+    no = [r for r in corpus if r["outcome"] == 0]
+    counts = (
+        len(yes),
+        sum(1 for r in yes if r["market_price"] < 0.50),
+        len(no),
+        sum(1 for r in no if r["market_price"] > 0.50),
+    )
+    bullet = next(
+        (b for b in meta["leakage_safety"] if "anti-leak sanity" in b), None
+    )
+    assert bullet is not None, "the anti-leak sanity bullet is missing from the sidecar"
+    for n in counts:
+        assert str(n) in bullet, (
+            f"the anti-leak sanity bullet does not mention the true count {n}; "
+            f"derived counts are {counts} and the bullet reads: {bullet!r}"
+        )
+
+
+def test_sidecar_headline_result_reproduces_exactly():
+    """The load-bearing block: the sidecar's headline IS "the project's only real OOS
+    number". A reviewer mutated trades / net_pnl_usd / seed_hash / hit_rate to nonsense and
+    every test still passed, because nothing re-ran the evaluation. Now it does.
+
+    This is the difference between a provenance file that is checked and one that merely
+    looks checked.
+    """
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(repo_root / "backend"))
+    v = __import__("scripts.validate_real_oos", fromlist=["x"])
+    wf = __import__("app.prediction_markets.walk_forward", fromlist=["x"])
+    cal = __import__("app.prediction_markets.calibration_bucket_strategy", fromlist=["x"])
+
+    meta_doc = json.loads(SIDECAR.read_text())
+    h = meta_doc["headline_result"]
+    markets = v.load_corpus_from_json(str(CORPUS), wf)
+    report = v.evaluate(markets, wf, cal, seed=h["seed"], decision_lead_days=7.0)
+    alpha = report["calibration_alpha_b4a"]
+
+    assert alpha["trades"] == h["trades"]
+    assert alpha["total_pnl_usd"] == pytest.approx(h["net_pnl_usd"], abs=0.005)
+    assert alpha["seed_hash"] == h["seed_hash"], (
+        "the sidecar's published seed_hash does not reproduce from the committed corpus"
+    )
+    sig = report["significance_alpha_f11"]
+    assert sig["verdict"] == h["f11_verdict"]
+    assert sig["hit_rate"] == pytest.approx(h["hit_rate"], abs=1e-6)
+    assert [sig["total_ci_low"], sig["total_ci_high"]] == pytest.approx(
+        h["f11_total_ci"], abs=0.005
+    )
