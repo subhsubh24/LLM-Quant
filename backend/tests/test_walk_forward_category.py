@@ -8,11 +8,23 @@ The resolved-history fetchers now derive a coarse correlation CATEGORY
 (an aggregate edge concentrated in one category is NOT robust). Previously the category
 was dropped, so the F10 category dimension was never assessed on real corpora.
 
-The load-bearing safety property tested here: ``category`` is METADATA — it never enters
-a decision or PnL, so it is EXCLUDED from ``_seed_hash``. A dataset labeled with
-categories MUST reproduce bit-for-bit identically to the same dataset unlabeled (the
-pinned real-data reproduction hash 8dc358439ffb5746 must not move because we added a
-category field). All offline + deterministic.
+The load-bearing safety property tested here is CONDITIONAL, and the condition matters:
+
+* **While both per-category caps are OFF**, ``category`` is pure metadata — it never enters
+  a decision or PnL, so it is EXCLUDED from ``_seed_hash``. A dataset labeled with
+  categories MUST reproduce bit-for-bit identically to the same dataset unlabeled (the
+  pinned real-data reproduction hash 8dc358439ffb5746 must not move because we added a
+  category field).
+* **The moment EITHER cap is active**, category becomes PnL-DETERMINING (the concurrent
+  lane sizes by ``cat_room``, the cumulative lane by ``cum_room``), so it MUST enter the
+  fingerprint — otherwise two differently-labeled datasets share a hash while producing
+  different PnL.
+
+An earlier version of this module documented and pinned the unconditional claim ("category
+is never a PnL input"), which became FALSE when the per-category caps shipped (#388/#404).
+The independent Quality Auditor reproduced up to a 3.9x PnL divergence under one shared
+hash. That false invariant is corrected here, and the cap-active case — which the old test
+never exercised — is now covered directly. All offline + deterministic.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -47,10 +59,11 @@ def _mkt(mid, price, prob, outcome, day, *, category=None, res_offset_days=10):
 # --------------------------------------------------------------------------- #
 # 1. seed_hash INVARIANCE — the reproducibility guarantee.                     #
 # --------------------------------------------------------------------------- #
-def test_category_is_excluded_from_seed_hash():
-    """The SAME dataset, once unlabeled and once fully category-labeled, must produce the
-    IDENTICAL seed_hash (category is regime-slice metadata, never a PnL input). If this
-    fails, adding categories would silently break the pinned real-data reproduction hash."""
+def test_category_is_excluded_from_seed_hash_WHEN_NO_CAP_IS_ACTIVE():
+    """CAP-FREE lane: the SAME dataset, once unlabeled and once fully category-labeled, must
+    produce the IDENTICAL seed_hash — with both caps off, category really is regime-slice
+    metadata and never a PnL input. If this fails, every pinned cap-free reproduction hash
+    (8dc358439ffb5746 / b3a8d5e0e9579853 / 79a4cca4b966138f) has silently moved."""
     base = [
         _mkt("a", 0.80, 0.95, 1, 0),
         _mkt("b", 0.30, 0.10, 0, 5),
@@ -67,6 +80,65 @@ def test_category_is_excluded_from_seed_hash():
     # ... and the realized PnL series must be identical too (categories change nothing).
     assert r_unlabeled.total_pnl_usd == r_labeled.total_pnl_usd
     assert r_unlabeled.n_trades == r_labeled.n_trades
+
+
+def _relabel_dataset():
+    """Two datasets identical in EVERY fingerprinted field except the category assignment,
+    deliberately sharing the same distinct-category COUNT (2) so the
+    ``effective_cumulative_cap`` count-based mitigation cannot mask the difference."""
+    def build(cats):
+        return [
+            _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i, category=c, res_offset_days=6)
+            for i, c in enumerate(cats)
+        ]
+    n = 14
+    interleaved = [CATEGORY_POLITICS if i % 2 == 0 else CATEGORY_SPORTS for i in range(n)]
+    blocked = [CATEGORY_POLITICS if i < n // 2 else CATEGORY_SPORTS for i in range(n)]
+    return build(interleaved), build(blocked)
+
+
+def test_seed_hash_covers_category_when_cap_active():
+    """CAP-ACTIVE lane — the regression that pins the #415-era reproducibility fix.
+
+    With either per-category cap on, ``category`` is PnL-determining, so two datasets that
+    differ ONLY in their category labels MUST NOT share a ``seed_hash``. Before the fix they
+    did (the Quality Auditor measured up to a 3.9x PnL divergence under one hash), which
+    actively misled any reviewer comparing hashes."""
+    a, b = _relabel_dataset()
+    for cap_kwargs in (
+        {"category_exposure_cap": 0.10},
+        {"cumulative_category_budget_cap": 0.30},
+        {"category_exposure_cap": 0.10, "cumulative_category_budget_cap": 0.30},
+    ):
+        ra = wf.walk_forward_backtest(a, seed=42, **cap_kwargs)
+        rb = wf.walk_forward_backtest(b, seed=42, **cap_kwargs)
+        assert ra.seed_hash != rb.seed_hash, (
+            f"category relabel shares a seed_hash under {cap_kwargs} — the cap makes "
+            f"category PnL-determining, so the fingerprint MUST distinguish it"
+        )
+
+
+def test_uncategorized_none_and_sentinel_hash_identically_under_cap():
+    """``None`` and the literal ``__uncategorized__`` land in the SAME cap bucket, so they
+    must also fingerprint identically — otherwise the hash would report a difference the
+    sizing logic does not actually make (the mirror-image defect)."""
+    none_labeled = [_mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i, category=None) for i in range(8)]
+    sentinel = [
+        _mkt(f"m{i}", 0.30, 0.62, i % 3 == 0, i, category="__uncategorized__") for i in range(8)
+    ]
+    ra = wf.walk_forward_backtest(none_labeled, seed=42, category_exposure_cap=0.10)
+    rb = wf.walk_forward_backtest(sentinel, seed=42, category_exposure_cap=0.10)
+    assert ra.seed_hash == rb.seed_hash
+    assert ra.total_pnl_usd == rb.total_pnl_usd
+
+
+def test_cap_free_hash_unchanged_by_the_category_fingerprint():
+    """The fix must be strictly additive: turning a cap ON is what introduces the category
+    key, so a cap-free run's payload — and therefore its hash — is untouched."""
+    a, b = _relabel_dataset()
+    assert wf.walk_forward_backtest(a, seed=42).seed_hash == (
+        wf.walk_forward_backtest(b, seed=42).seed_hash
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -50,6 +50,21 @@ from .cost_model import DEFAULT_COST_MODEL, POLYMARKET_FEE_RATES, CostModel
 # Applies ONLY on the capped path, so the cap=None reproduction contract is byte-for-byte unchanged.
 _CAP_DUST_FLOOR_FRACTION: float = 1e-4
 
+# The label an UNCATEGORIZED market buckets into for BOTH per-category caps.
+_UNCATEGORIZED_KEY: str = "__uncategorized__"
+
+
+def _cat_key_for_fingerprint(category: Optional[str]) -> str:
+    """The single definition of "which per-category bucket does this market fall in".
+
+    Deliberately module-level and shared by BOTH the cap sizing logic (via the inner
+    ``_cat_key``) and ``_seed_hash``'s ``market_categories`` fingerprint. Two copies of this
+    rule could drift, and a drift between "what the caps bucket on" and "what the hash
+    fingerprints" would silently re-open the very reproducibility hole the fingerprint exists
+    to close — so there is exactly one.
+    """
+    return category if category is not None else _UNCATEGORIZED_KEY
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -456,7 +471,7 @@ def walk_forward_backtest(
     # to no cap (no phantom hash change), and a binding cap enters the fingerprint. The decision
     # is a pure function of the DATA (category set), never of strategy_fn, so the hash stays
     # data+config-only.
-    _distinct_cats = {(m.category if m.category is not None else "__uncategorized__") for m in markets}
+    _distinct_cats = {_cat_key_for_fingerprint(m.category) for m in markets}
     effective_cumulative_cap: Optional[float] = (
         cumulative_category_budget_cap
         if (cumulative_category_budget_cap is not None
@@ -520,8 +535,9 @@ def walk_forward_backtest(
     pending: list[tuple[datetime, str, int, BacktestTrade]] = []
     seq = 0
 
-    def _cat_key(category: Optional[str]) -> str:
-        return category if category is not None else "__uncategorized__"
+    # Delegates to the module-level definition so the cap bucketing and the seed_hash
+    # category fingerprint can never disagree (see _cat_key_for_fingerprint).
+    _cat_key = _cat_key_for_fingerprint
 
     def _drain_until(when: datetime) -> None:
         nonlocal cash, committed
@@ -662,15 +678,15 @@ def _seed_hash(
         "test_window_days": test_window_days,
         "max_fraction_per_trade": round(max_fraction_per_trade, 12),
         "markets": [
-            # (category_exposure_cap is added below ONLY when set — see note.)
+            # (category_exposure_cap + the per-market category labels are added below ONLY
+            # when set/active — see notes.)
             # liquidity is included so determinism/fingerprint covers the depth signal
             # that now affects fill cost. Existing markets have liquidity=None → stored as
             # JSON null, a stable representation, so same-data runs keep consistent hashes
-            # and the cost-rate-change hash test still holds. NOTE: m.category is
-            # deliberately NOT fingerprinted — it is regime-slice metadata that never affects
-            # a decision or PnL, so including it would needlessly break the pinned real-data
-            # reproduction hash (8dc358439ffb5746). Same-data runs must hash identically
-            # whether or not categories are labeled (test_walk_forward_category pins this).
+            # and the cost-rate-change hash test still holds. NOTE: m.category is NOT in
+            # this row — it is fingerprinted separately, and only when a per-category cap is
+            # active (see the ``market_categories`` block below). Keeping it out of the row
+            # is what preserves the pinned cap-free reproduction hash 8dc358439ffb5746.
             [m.market_id, m.decision_time.isoformat(), m.resolution_time.isoformat(),
              round(m.market_price, 12), round(m.model_prob, 12), m.outcome,
              None if m.liquidity is None else round(m.liquidity, 12)]
@@ -699,6 +715,34 @@ def _seed_hash(
             "default_fee_rate": round(cost_model.fee_schedule.default_fee_rate, 12),
             "rates": {k: round(v, 12) for k, v in sorted(POLYMARKET_FEE_RATES.items())},
         }
+    # PER-MARKET CATEGORY LABELS — added ONLY when a per-category cap is active.
+    #
+    # This closes a real reproducibility hole (found by the independent Quality Auditor,
+    # 2026-07-24). Category is regime-slice metadata and is genuinely PnL-IRRELEVANT while
+    # BOTH caps are off — which is why it stays out of the market row above and why every
+    # pinned cap-free hash (8dc358439ffb5746, b3a8d5e0e9579853, 79a4cca4b966138f) is
+    # byte-identical before and after this block.
+    #
+    # But the moment EITHER cap is active, category becomes PnL-DETERMINING: the concurrent
+    # lane sizes a trade down by ``cat_room`` (see ``_cat_key``/``committed_by_cat`` above)
+    # and the cumulative lane by ``cum_room``. Two datasets identical in every other
+    # fingerprinted field and differing ONLY in their category labels then produce
+    # materially different trade counts and PnL (measured up to 3.9x) — and, before this
+    # fix, the SAME seed_hash. A reviewer comparing hashes was actively misled. Note the
+    # ``effective_cumulative_cap`` mitigation does NOT cover this: it keys on the
+    # distinct-category COUNT, so a same-count/different-assignment relabel defeats it.
+    #
+    # The labels are fingerprinted through ``_cat_key`` (not the raw field) because that is
+    # exactly the value the cap logic buckets on — ``None`` and the literal
+    # ``"__uncategorized__"`` are the same bucket and so must hash the same. Ordering
+    # follows the same total ``(decision_time, market_id)`` sort as the market rows, so the
+    # fingerprint stays input-order-invariant. Covered by
+    # ``test_seed_hash_covers_category_when_cap_active``.
+    if category_exposure_cap is not None or cumulative_category_budget_cap is not None:
+        payload["market_categories"] = [
+            _cat_key_for_fingerprint(m.category)
+            for m in sorted(markets, key=lambda x: (x.decision_time, x.market_id))
+        ]
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 
