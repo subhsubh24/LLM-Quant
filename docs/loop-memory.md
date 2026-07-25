@@ -3125,6 +3125,21 @@ provenance statement — the ledger exists precisely to answer "has this been tr
 lesson: when re-running an existing grid, DIFF the parameters against the prior run and disclose
 every delta, or the write-up will claim more novelty than the work has.
 
+**INCIDENT 5 — the 2-cycle brake did its job: I ABANDONED a fix rather than guess a third time.**
+The `_seed_hash` category fix was broken by TWO independent adversarial auditors at two
+successive boundaries. Cycle 1 guarded on the per-category caps; broken by
+`cost_model.fee_schedule`. Cycle 2 widened to include the engine's `fee_schedule`; broken again
+because the STRATEGY carries its own uncoupled cost model — reproduced on the shipped corpus
+where the PUBLISHED headline hash `79a4cca4b966138f` covers four distinct (trades, PnL) pairs.
+Both cycles spent, so PR #424 was CLOSED unmerged rather than forced. **Nothing regressed: main
+is unchanged and the scorecard's finding stays correctly open. Merging a fix that CLAIMS to close
+a hole while a published hash still collides would have been strictly worse than not merging.**
+The transferable lesson is the root cause, not the clauses: **the defect was conditioning a DATA
+field on ENGINE CONFIG.** Every other `HistoricalMarket` field is fingerprinted unconditionally;
+`category` was the sole conditional one, which is exactly what kept being breakable. The
+pre-verified unconditional fix (plus its four replacement hash pins) is filed as ROADMAP C6.
+**When a fix has been broken twice at successive boundaries, stop widening and fix the shape.**
+
 **Reviewer findings this run (all fixed within the ≤2-cycle bound):** a fabricated `ROADMAP B2`
 citation (B2 is the crowd-calibration eval, unrelated to pricer calibration — a numbered citation
 that does not cover the referenced work is worse than none); cap-active regression tests that
