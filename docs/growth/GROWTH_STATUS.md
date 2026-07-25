@@ -828,8 +828,15 @@ GROWTH_STATUS:
         ROADMAP steer.
     - id: EXP-010
       name: "Cost-Model Realism Recalibration — Price-Dependent Fee Formula vs. Flat Rate"
-      status: proposed
+      status: shipped-null
       proposed_date: 2026-07-23
+      shipped_date: 2026-07-24
+      result: >
+        SHIPPED #410 and produced the predicted NULL. Flat 2%: 39 trades / -$3,228.02.
+        Real per-category fee: 42 trades / -$3,502.27. Both F11 significant_negative;
+        flip_to_validated_edge=False. The real fee made the refutation WORSE, so the
+        bucket family is now cost-model-ROBUST refuted. (Status was left at `proposed`
+        after shipping — corrected 2026-07-25.)
       edge_source: "instrument-hardening (cost-model realism, not a new alpha mechanism) — tests whether the standing REFUTATIONS are an artifact of an unrealistic flat fee assumption"
       hypothesis: >
         `cost_model.py`'s DEFAULT_FEE_RATE=0.02 applies a FLAT, price-proportional fee
@@ -839,10 +846,14 @@ GROWTH_STATUS:
         and PER-CATEGORY: `fee = contracts x feeRate x p x (1-p)` in USDC (Politics
         feeRate=0.04, Sports/Economics=0.05, Crypto=0.07, Geopolitical=0; makers pay
         nothing) — a fundamentally different functional shape that is HIGHER than the
-        flat 2% assumption near p=0.5 (for Sports/Economics/Crypto) and materially LOWER
-        near the price extremes, exactly where EXP-002/003/005's refuted signal
-        concentrated (the near-0/1 and extreme-confidence buckets repeatedly named in
-        their F10 fragility reports). HYPOTHESIS (falsifiable, predicts a NULL): re-
+        flat 2% assumption near p=0.5 (for Sports/Economics/Crypto). CORRECTION (2026-07-25,
+        reconciled against cost_model.py:53-57): the Run 29 shorthand "materially LOWER
+        near the price extremes" is true ONLY at the HIGH extreme. As a fraction of
+        notional the real fee is `feeRate*(1-p)`, which is cheaper than the flat 0.02 only
+        ABOVE `p > 1 - 0.02/feeRate` (Politics 0.50, Sports/Econ 0.60, Crypto 0.71) and MORE
+        expensive below it. The committed corpus is longshot-heavy (median price 0.037 --
+        the LOW extreme), so the real formula is on balance MORE punitive there, which is
+        why EXP-010 made the refutation worse rather than rescuing it. HYPOTHESIS (falsifiable, predicts a NULL): re-
         scoring the EXISTING, already-collected, already-committed corpora (the frozen
         N=187 corpus used for the concentration-cap tests, plus any other already-
         committed leakage-safe corpus) under the documented price-dependent Polymarket

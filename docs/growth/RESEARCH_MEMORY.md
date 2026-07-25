@@ -4120,3 +4120,74 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
 - Verdict: **edge-not-proven.** EXP-010 is an honest null that hardens cost realism and confirms the bucket family is cost-model-robust refuted; B8 step iii is infrastructure (no edge claim) that unblocks the dual-venue harness. Per the value bar + the active owner steer, an honest null reported AS such WITH the specific next buildable step filed clears the bar and IS success.
 - **NEXT (pre-registered, do NOT p-hack):** (1) B8 step (ii) — the egress-gated HISTORICAL co-listed BTC/ETH corpus (Kalshi crypto via `historical=True` #408 + resolved-strike capture #405) + a common-instant leakage-safe dual-venue snapshot; only a non-trivial co-listed N (DECISION COROLLARY) unblocks the dual-venue OOS coherence harness with `require_mechanic_confirmed=True`. (2) EXP-009 step 0 — the Kalshi employment reliability decomposition (still the filed next econ step). (3) A Kalshi analog of EXP-010 only after the CFTC fee filing is primary-verified (secondary-sourced this run, excluded).
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any tested mechanism; engine_pct 74 unchanged. Real-money brake untouched (no order, no gate flip, no cap change).
+
+## 2026-07-25 — Factory build (model/strategy factory): EXP-011 — the Run 21 recommendation finally RUN on real data (honest NULL, family refuted under its own remediation) + 7 ship-critical quality fixes. NO edge claimed.
+
+- Hypothesis (falsifiable, PRE-REGISTERED before any real-data run of this module): EXP-011 — a
+  recency-weighted bucket model (`half_life_days=60`, `min_effective_n=30`) tracks a time-varying
+  true bucket rate better than EXP-002's all-time average, and combined with the per-category
+  concentration caps produces a better-calibrated decision-time probability than the crowd. This
+  is the owner-steer **priority #1** item and the RESEARCH_MEMORY **Run 21** recommendation.
+- **Why it was still worth running on an already-refuted family.** Run 21's diagnosis was that
+  EXP-002 failed for a *specific, addressable* reason: it replaces the crowd price with a bucket's
+  **all-time** empirical YES-rate, and the true rate appears time-varying (the `[0, 0.1)` bucket
+  resolved YES at 1.0% in the 2024-01→2026-01 training slice vs 7.59% in the 2026-01→2026-06 OOS
+  slice), so an all-time average is a LAGGING estimate. Two remediations were named
+  (recency-weighting, concentration capping); **both were already built and neither had ever been
+  run on real data together**. That is a real gap between "mechanism exists" and "mechanism works".
+- **RESULT — the redesign is REFUTED. 0 of 6 cells positive, 0 of 6 F11 `significant_positive`.**
+
+  | family | lane | trades | net PnL | F11 |
+  |---|---|---:|---:|---|
+  | static (EXP-002) | uncapped | 39 | −$3,228.02 | significant_negative |
+  | static | concurrent cap 0.10 | 39 | −$3,228.02 | significant_negative |
+  | static | cumulative cap 0.30 | 27 | −$1,684.13 | insufficient_data |
+  | **recency-weighted** | uncapped | 21 | **−$3,443.79** | insufficient_data |
+  | **recency-weighted** | concurrent cap 0.10 | 21 | −$2,855.05 | insufficient_data |
+  | **recency-weighted** | cumulative cap 0.30 | 3 | −$142.69 | insufficient_data |
+
+- **The headline: recency-weighting makes it WORSE.** ~$164 lost per trade vs the static alpha's
+  ~$83 — roughly double, while being *more* selective. Run 21's "the estimate is too stale"
+  diagnosis is not supported; making it fresher did not help.
+- **Three honesty points, all load-bearing.** (a) The −$142.69 cell is **3 trades**; F11's floor is
+  `min_trades=30` so it is `insufficient_data` — that means NO INFORMATION, not "nearly
+  break-even". The cap starved the strategy, it did not improve it. (b) Caps are risk controls,
+  not alpha: on a net-negative signal capping mechanically shrinks the loss, and that shrinkage is
+  not evidence. (c) **The cap test is VACUOUS on this corpus by construction** — a concentration
+  cap can only change a verdict where the signal is net-POSITIVE but F10-fragile; here the
+  aggregate is negative before any cap applies and the engine itself reports
+  `f10_nonfragile_is_vacuous: true`.
+- **Anti-p-hacking.** `half_life_days=60` / `min_effective_n=30` were fixed from first principles
+  and committed in the module docstring BEFORE any real-data run. Nothing was tuned. Re-tuning
+  against this corpus is explicitly recorded as out of bounds.
+- Fully offline + deterministic: replays committed bytes, two consecutive runs byte-identical
+  (sha256 `13624a65fc1290b1…`). No egress, no credentials, no order.
+- **Also shipped this run — 7 file-disjoint quality PRs, all driven by the independent Quality
+  Auditor's sub-A ship-critical dimensions** (the one category the owner steer exempts from
+  deprioritization): the `_seed_hash`/category reproducibility hole (a same-count category relabel
+  shared a hash across a **3.3× PnL divergence**; cap-free hashes byte-identical); the simulation
+  pricer's fabricated `vol=0.3`/`T=30/365` override that silently inflated real bets **+37.5%** on
+  a path **no test covered**; two timezone-naive parse holes (one a permanent silent scan
+  blackout); the entire Metrics tab 404'ing since 2026-07-17; an O(n²) hot loop (**>26×** faster,
+  byte-identical output); the frozen corpus's missing provenance sidecar + a misreported
+  `decision_lead_days`; and a credential accepted on argv.
+- **Two-gate readiness:** preflight code GREEN + runtime harness PASSED + deterministic
+  reproduction; 2 Sonnet reviewers + a fresh Opus adversarial auditor. Reviewers caught **four real
+  defects** — a fabricated `ROADMAP B2` citation, a vacuous duplicate-timestamp test fixture
+  neutralized by `clean_ticks`, cap-active regression tests that produced **zero trades** (so they
+  pinned the fix without demonstrating the defect), and a wrong path in a skip message — all fixed
+  and re-validated within the ≤2-cycle bound.
+- Verdict: **edge-not-proven.** An honest null on the owner's priority-#1 experiment, reported as
+  such with the specific next buildable step filed. Per the value bar + the active owner steer,
+  this clears the bar and IS success.
+- **NEXT (pre-registered, do NOT p-hack):** (1) the ONE thing that would make the cap test
+  informative — a corpus on which the bucket signal is net-POSITIVE but F10-fragile. Until such a
+  corpus exists, further cap variants on negative-signal corpora are uninformative by construction
+  and must not be run as if they were tests. (2) EXP-009 step 0 — the Kalshi employment
+  RELIABILITY DECOMPOSITION on a frozen corpus (a raw Brier cannot separate miscalibration from
+  irreducible noise). (3) B8 step (ii) — the egress-gated HISTORICAL co-listed BTC/ETH corpus +
+  a common-instant dual-venue snapshot, then the dual-venue OOS harness with
+  `require_mechanic_confirmed=True`. (4) Market impact/capacity remains untested on real data
+  (all 187 frozen records `liquidity: null`).
+- Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
+  tested mechanism. Real-money brake untouched (no order, no gate flip, no cap change).
