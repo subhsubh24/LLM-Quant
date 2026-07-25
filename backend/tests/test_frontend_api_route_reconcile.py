@@ -35,7 +35,7 @@ _MOUNT_PREFIX = re.compile(r'include_router\(\s*router\s*,\s*prefix="([^"]+)"')
 
 def _mount_prefix() -> str:
     if not MAIN_PY.exists():
-        pytest.skip("backend/app/main.py not present")
+        pytest.skip("backend/app/api/main.py not present")
     m = _MOUNT_PREFIX.search(MAIN_PY.read_text())
     return m.group(1) if m else ""
 
