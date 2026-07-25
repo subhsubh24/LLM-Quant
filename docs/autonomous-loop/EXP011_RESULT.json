@@ -1,0 +1,182 @@
+{
+  "frozen_corpus": "data/real_oos_corpus_polymarket.json",
+  "combined": {
+    "corpus": {
+      "n_markets": 187,
+      "yes_base_rate": 0.246,
+      "crowd_brier": 0.0947,
+      "price_pinned_pct": 0.583,
+      "price_median": 0.037,
+      "decision_lead_days": 7.0
+    },
+    "crowd_baseline": {
+      "trades": 0,
+      "total_pnl_usd": 0,
+      "seed_hash": "79a4cca4b966138f"
+    },
+    "calibration_alpha_b4a": {
+      "trades": 39,
+      "total_pnl_usd": -3228.02,
+      "seed_hash": "79a4cca4b966138f"
+    },
+    "regime_slice_alpha": {
+      "n_trades": 39,
+      "total_pnl_usd": -3228.02,
+      "has_positive_edge": false,
+      "fragile": false,
+      "fragile_reasons": [
+        "aggregate net PnL -3228.02 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+      ],
+      "top_market_pnl_share": null,
+      "top_confidence_bucket_pnl_share": null,
+      "top_horizon_bucket_pnl_share": null,
+      "n_categories": 6,
+      "top_category_pnl_share": null,
+      "top_category_budget_share": 0.3816
+    },
+    "significance_alpha_f11": {
+      "n_trades": 39,
+      "total_pnl_usd": -3228.0152,
+      "total_ci_low": -4325.5199,
+      "total_ci_high": -2403.5774,
+      "hit_rate": 0.128205,
+      "hit_rate_ci_low": 0.025641,
+      "hit_rate_ci_high": 0.23141,
+      "verdict": "significant_negative",
+      "is_significant_edge": false
+    },
+    "biases_disclosed": [
+      "liquidity-selection (volumeNum order)",
+      "survivorship (clean-resolution only)",
+      "late-life pinning (decision sampled near resolution)"
+    ],
+    "verdict": "alpha took 39 trades, net $-3228.02 OOS \u2014 F11 significance: significant_negative (total-PnL 95% CI [-4325.5199, -2403.5774]) \u2014 NOT a validated edge; requires a larger corpus + a passing B2 calibration eval + a NON-fragile (unconcentrated) result whose total-PnL CI EXCLUDES 0 (F11 significant_positive) over sufficient N, >= floor.",
+    "concentration_capped_variant": {
+      "category_exposure_cap": 0.1,
+      "cumulative_category_budget_cap": 0.3,
+      "concurrent_cap_bound_on_this_corpus": true,
+      "cumulative_cap_bound_on_this_corpus": true,
+      "cumulative_share_bounded_where_engaged": true,
+      "calibration": {
+        "uncapped": {
+          "trades": 39,
+          "total_pnl_usd": -3228.02,
+          "seed_hash": "79a4cca4b966138f",
+          "f10_fragile": false,
+          "f10_fragile_reasons": [
+            "aggregate net PnL -3228.02 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+          ],
+          "f10_nonfragile_is_vacuous": true,
+          "top_category_budget_share": 0.3816,
+          "max_trade_budget_share": 0.0827,
+          "f11_verdict": "significant_negative",
+          "f11_total_ci": [
+            -4325.5199,
+            -2403.5774
+          ],
+          "f11_is_significant_edge": false
+        },
+        "concurrent_capped": {
+          "trades": 39,
+          "total_pnl_usd": -3228.02,
+          "seed_hash": "001fa784479fce74",
+          "f10_fragile": false,
+          "f10_fragile_reasons": [
+            "aggregate net PnL -3228.02 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+          ],
+          "f10_nonfragile_is_vacuous": true,
+          "top_category_budget_share": 0.3816,
+          "max_trade_budget_share": 0.0827,
+          "f11_verdict": "significant_negative",
+          "f11_total_ci": [
+            -4325.5199,
+            -2403.5774
+          ],
+          "f11_is_significant_edge": false,
+          "cap_bound": false
+        },
+        "cumulative_capped": {
+          "trades": 27,
+          "total_pnl_usd": -1684.13,
+          "seed_hash": "2e4380ec2cd1f9c6",
+          "f10_fragile": false,
+          "f10_fragile_reasons": [
+            "aggregate net PnL -1684.13 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+          ],
+          "f10_nonfragile_is_vacuous": true,
+          "top_category_budget_share": 0.2445,
+          "max_trade_budget_share": 0.075,
+          "f11_verdict": "insufficient_data",
+          "f11_total_ci": [
+            null,
+            null
+          ],
+          "f11_is_significant_edge": false,
+          "cap_bound": true,
+          "cumulative_share_bounded": true
+        }
+      },
+      "recency_weighted": {
+        "uncapped": {
+          "trades": 21,
+          "total_pnl_usd": -3443.79,
+          "seed_hash": "79a4cca4b966138f",
+          "f10_fragile": false,
+          "f10_fragile_reasons": [
+            "aggregate net PnL -3443.79 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+          ],
+          "f10_nonfragile_is_vacuous": true,
+          "top_category_budget_share": 0.554,
+          "max_trade_budget_share": 0.1028,
+          "f11_verdict": "insufficient_data",
+          "f11_total_ci": [
+            null,
+            null
+          ],
+          "f11_is_significant_edge": false
+        },
+        "concurrent_capped": {
+          "trades": 21,
+          "total_pnl_usd": -2855.05,
+          "seed_hash": "001fa784479fce74",
+          "f10_fragile": false,
+          "f10_fragile_reasons": [
+            "aggregate net PnL -2855.05 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+          ],
+          "f10_nonfragile_is_vacuous": true,
+          "top_category_budget_share": 0.4754,
+          "max_trade_budget_share": 0.1165,
+          "f11_verdict": "insufficient_data",
+          "f11_total_ci": [
+            null,
+            null
+          ],
+          "f11_is_significant_edge": false,
+          "cap_bound": true
+        },
+        "cumulative_capped": {
+          "trades": 3,
+          "total_pnl_usd": -142.69,
+          "seed_hash": "2e4380ec2cd1f9c6",
+          "f10_fragile": false,
+          "f10_fragile_reasons": [
+            "aggregate net PnL -142.69 <= 0: no positive edge to assess for concentration (the aggregate already shows no edge)."
+          ],
+          "f10_nonfragile_is_vacuous": true,
+          "top_category_budget_share": 0.49,
+          "max_trade_budget_share": 0.49,
+          "f11_verdict": "insufficient_data",
+          "f11_total_ci": [
+            null,
+            null
+          ],
+          "f11_is_significant_edge": false,
+          "cap_bound": true,
+          "cumulative_share_bounded": true
+        }
+      },
+      "seed_hash_note": "seed_hash excludes strategy_fn (walk_forward contract), so different strategies with the same data+config share a hash \u2014 compare trades/PnL, NOT hashes, across variants.",
+      "verdict": "A per-category de-concentration cap is a RISK CONTROL, not an alpha: it can only reduce/reallocate exposure, never manufacture PnL. Concurrent cap: BOUND here. Cumulative budget-share cap: BOUND, holding every engaged family's top_category_budget_share at/under the cap (+ disclosed bootstrap slack). The signal is net-NEGATIVE on this corpus \u2014 no concentration control can manufacture an edge from a losing signal. Honest NULL. The cumulative cap the family test needed now EXISTS; the remaining ingredient is a net-positive-but-fragile per-category corpus (egress-gated; filed to RESEARCH_MEMORY/ROADMAP)."
+    }
+  }
+}
