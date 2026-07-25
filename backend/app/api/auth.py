@@ -13,8 +13,16 @@ SECURE BY DEFAULT (fail-closed). The guarded routes are CLOSED unless explicitly
               unauthenticated — it exposes no kill-switch/execute/bot-control surface.
   * ``BACKEND_API_TOKEN`` set        -> the guarded routes REQUIRE ``Authorization: Bearer
               <token>``; a missing/wrong token is 401. The owner sets it on a public deploy
-              (PENDING_OPS OA-14) and the frontend attaches it via a server-side proxy (so
-              the secret is never shipped to the browser).
+              (PENDING_OPS OA-14 step 1).
+              NOT YET BUILT — the frontend has no way to send this token. OA-14 step (2),
+              a server-side proxy that injects the header from a server-only env var (so
+              the secret never reaches the browser), is still OPEN. An earlier version of
+              this docstring described that proxy in the PRESENT tense, as though it
+              existed; it does not, and there are zero ``BACKEND_API_TOKEN`` references
+              under ``frontend/`` to back the claim. The consequence today is fail-CLOSED
+              and therefore safe — setting the token makes the monitoring panel 401 rather
+              than leaking the secret — but a reader was being told a control was in place
+              when it was not.
   * ``BACKEND_AUTH_DISABLED=1``      -> explicit dev/paper opt-out: run OPEN on a trusted
               single-user host (local dev, tests). NEVER honoured with real money — config
               refuses to boot if it is set while ``LIVE_TRADING_ENABLED`` is on.
