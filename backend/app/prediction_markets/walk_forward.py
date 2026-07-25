@@ -96,9 +96,13 @@ class HistoricalMarket:
     # OPTIONAL coarse correlation category (Crypto / Politics / Sports / …, via
     # market_category.derive_market_category), carried from the resolved-history fetcher so
     # the F10 regime-slice report can assess CATEGORY concentration on real OOS trades (an
-    # aggregate edge concentrated in one category is NOT robust). It is pure METADATA — it
-    # never enters the decision (leakage-neutral) NOR the PnL, so it is deliberately EXCLUDED
-    # from _seed_hash (reproducibility invariant: category=None vs a value → identical hash).
+    # aggregate edge concentrated in one category is NOT robust). It is leakage-neutral (it
+    # never enters a decision), but it is NOT PnL-neutral: a per-category cap or EXP-010's
+    # per-category fee schedule each make it PnL-DETERMINING. It is therefore excluded from
+    # the market row in _seed_hash but fingerprinted separately whenever one of those is
+    # engaged — see the ``market_categories`` block there for the full rule. (This comment
+    # previously asserted category "never enters the PnL" unconditionally; that became false
+    # when the caps and the real fee schedule shipped.)
     # Defaulted to None so every existing construction is byte-unchanged.
     category: Optional[str] = None
     # RESEARCH-ONLY provenance flag. TRUE marks a record sourced from a PLAY-MONEY venue
@@ -108,9 +112,10 @@ class HistoricalMarket:
     # (scripts/validate_real_oos.evaluate) REFUSES any record with this set, so a play-money
     # corpus can never inflate the floor even by an accidental copy-paste — replacing the
     # prior convention-only (module-name + comment) marker (named A8 follow-up). Pure
-    # METADATA: it never enters the decision (leakage-neutral) NOR the PnL, so — like
-    # `category` — it is EXCLUDED from _seed_hash (reproducibility invariant: the flag never
-    # changes a hash or a number). Defaulted to False so every existing construction is
+    # METADATA: it never enters the decision (leakage-neutral) NOR the PnL, so it is EXCLUDED
+    # from _seed_hash (reproducibility invariant: the flag never changes a hash or a number).
+    # NOTE this flag is genuinely unconditional, UNLIKE `category` — nothing consumes it as a
+    # cost or sizing input, so the comparison to `category` that used to sit here is dropped. Defaulted to False so every existing construction is
     # byte-unchanged and real-money records are unaffected.
     research_only: bool = False
 
@@ -715,22 +720,32 @@ def _seed_hash(
             "default_fee_rate": round(cost_model.fee_schedule.default_fee_rate, 12),
             "rates": {k: round(v, 12) for k, v in sorted(POLYMARKET_FEE_RATES.items())},
         }
-    # PER-MARKET CATEGORY LABELS — added ONLY when a per-category cap is active.
+    # PER-MARKET CATEGORY LABELS — added ONLY when something makes category PnL-determining.
     #
     # This closes a real reproducibility hole (found by the independent Quality Auditor,
-    # 2026-07-24). Category is regime-slice metadata and is genuinely PnL-IRRELEVANT while
-    # BOTH caps are off — which is why it stays out of the market row above and why every
-    # pinned cap-free hash (8dc358439ffb5746, b3a8d5e0e9579853, 79a4cca4b966138f) is
-    # byte-identical before and after this block.
+    # 2026-07-24, then WIDENED by an adversarial auditor who broke the first fix).
     #
-    # But the moment EITHER cap is active, category becomes PnL-DETERMINING: the concurrent
-    # lane sizes a trade down by ``cat_room`` (see ``_cat_key``/``committed_by_cat`` above)
-    # and the cumulative lane by ``cum_room``. Two datasets identical in every other
-    # fingerprinted field and differing ONLY in their category labels then produce
-    # materially different trade counts and PnL (measured up to 3.9x) — and, before this
-    # fix, the SAME seed_hash. A reviewer comparing hashes was actively misled. Note the
-    # ``effective_cumulative_cap`` mitigation does NOT cover this: it keys on the
-    # distinct-category COUNT, so a same-count/different-assignment relabel defeats it.
+    # There are THREE independent paths by which ``m.category`` reaches PnL, and the
+    # fingerprint must cover all of them or it lies:
+    #
+    #   1. ``category_exposure_cap`` — the concurrent lane sizes a trade down by
+    #      ``cat_room`` (see ``_cat_key``/``committed_by_cat`` above).
+    #   2. ``cumulative_category_budget_cap`` — the cumulative lane sizes by ``cum_room``.
+    #      Note ``effective_cumulative_cap`` is NOT a mitigation here: it keys on the
+    #      distinct-category COUNT, so a same-count/different-assignment relabel defeats it.
+    #   3. ``cost_model.fee_schedule`` — EXP-010's REAL Polymarket fee is PER-CATEGORY
+    #      (Politics 0.04 / Sports+Economics 0.05 / Crypto 0.07 / Geopolitical 0.0), so with
+    #      BOTH CAPS OFF a relabel still changes every fill's fee, and therefore the trade
+    #      count and the PnL. The first version of this fix guarded on the caps alone and an
+    #      adversarial auditor broke it on the shipped, cap-free
+    #      ``scripts/exp010_cost_realism.py`` path over the committed 187-market corpus:
+    #      three category assignments produced -$3,502.27 / -$3,849.82 / -$3,501.84 under
+    #      ONE hash (13cd1342e1c0d416) — and -$3,502.27 is a PUBLISHED headline.
+    #
+    # While NONE of the three is engaged, category really is regime-slice metadata and is
+    # genuinely PnL-irrelevant — which is why it stays out of the market row above, and why
+    # every pinned flat-fee cap-free hash (8dc358439ffb5746, b3a8d5e0e9579853,
+    # 79a4cca4b966138f) is byte-identical before and after this block.
     #
     # The labels are fingerprinted through ``_cat_key`` (not the raw field) because that is
     # exactly the value the cap logic buckets on — ``None`` and the literal
@@ -738,7 +753,11 @@ def _seed_hash(
     # follows the same total ``(decision_time, market_id)`` sort as the market rows, so the
     # fingerprint stays input-order-invariant. Covered by
     # ``test_seed_hash_covers_category_when_cap_active``.
-    if category_exposure_cap is not None or cumulative_category_budget_cap is not None:
+    if (
+        category_exposure_cap is not None
+        or cumulative_category_budget_cap is not None
+        or cost_model.fee_schedule is not None
+    ):
         payload["market_categories"] = [
             _cat_key_for_fingerprint(m.category)
             for m in sorted(markets, key=lambda x: (x.decision_time, x.market_id))

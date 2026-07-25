@@ -278,3 +278,51 @@ def test_hf_assembler_derives_category_from_question():
     hm = _assemble_one("hf1", rows, decision_lead=timedelta(days=3), cats=None)
     assert hm is not None
     assert hm.category == CATEGORY_POLITICS  # derived from "election"/"Senate"/"Democrats"
+
+
+# --------------------------------------------------------------------------- #
+# 1c. FEE-SCHEDULE lane — the path an adversarial auditor used to break the     #
+#     first version of this fix (BOTH caps off, category still PnL-determining) #
+# --------------------------------------------------------------------------- #
+def test_seed_hash_covers_category_when_fee_schedule_active_and_no_cap():
+    """EXP-010's REAL Polymarket fee is PER-CATEGORY, so a relabel changes every fill's fee
+    — and therefore trades and PnL — with BOTH caps OFF.
+
+    The first version of this fix guarded the category fingerprint on the caps alone. An
+    adversarial auditor broke it on the shipped, cap-free ``scripts/exp010_cost_realism.py``
+    path over the committed corpus: three category assignments produced -$3,502.27 /
+    -$3,849.82 / -$3,501.84 under ONE hash — and -$3,502.27 is a PUBLISHED headline. This
+    test pins the widened guard so the boundary cannot silently move back.
+    """
+    from app.prediction_markets.cost_model import CostModel, PolymarketFeeSchedule
+
+    # Geopolitical is fee-FREE (0.0) while Crypto is the most expensive (0.07), so a relabel
+    # between them is the sharpest available fee divergence.
+    cost_model = CostModel(fee_schedule=PolymarketFeeSchedule())
+    a, b = _relabel_dataset(category_a="Geopolitical", category_b="Geopolitical")
+    _, c = _relabel_dataset(category_a=CATEGORY_CRYPTO, category_b=CATEGORY_CRYPTO)
+
+    r_free = wf.walk_forward_backtest(a, seed=42, cost_model=cost_model)
+    r_pricey = wf.walk_forward_backtest(c, seed=42, cost_model=cost_model)
+
+    assert r_free.n_trades > 0, "fixture produced no trades — the assertions would be vacuous"
+    assert r_free.total_pnl_usd != r_pricey.total_pnl_usd, (
+        "the per-category fee did not change PnL — pick categories with different feeRates "
+        "or this test cannot detect the defect"
+    )
+    assert r_free.seed_hash != r_pricey.seed_hash, (
+        f"category relabel shares a seed_hash under a per-category fee schedule with NO cap "
+        f"active, despite PnL {r_free.total_pnl_usd:.2f} vs {r_pricey.total_pnl_usd:.2f}"
+    )
+
+
+def test_flat_fee_cap_free_hash_still_excludes_category():
+    """The complement: with NO cap AND NO fee schedule, nothing consumes category, so the
+    fingerprint must still omit it — this is what keeps every pinned flat-fee reproduction
+    hash (8dc358439ffb5746 / b3a8d5e0e9579853 / 79a4cca4b966138f) byte-identical."""
+    a, b = _relabel_dataset()
+    ra = wf.walk_forward_backtest(a, seed=42)
+    rb = wf.walk_forward_backtest(b, seed=42)
+    assert ra.n_trades > 0
+    assert ra.seed_hash == rb.seed_hash
+    assert ra.total_pnl_usd == rb.total_pnl_usd
