@@ -305,3 +305,40 @@ def test_malformed_loss_cap_env_falls_back_loud(monkeypatch, caplog):
     assert ex.max_daily_loss_usd == 25.0   # conservative fallback (tighter, never looser)
     assert ex.max_total_loss_usd == 100.0
     assert any("MAX_DAILY_LOSS_USD" in r.getMessage() for r in caplog.records)
+
+
+# --------------------------------------------------------------------------- #
+# kill_switch_time must rehydrate TIMEZONE-AWARE (#370 bug class, sibling miss) #
+# --------------------------------------------------------------------------- #
+def test_kill_switch_time_rehydrates_timezone_aware():
+    """The durable store used to hand back a NAIVE ``kill_switch_time``.
+
+    SQLModel maps a plain ``datetime`` column to a timezone-naive SQL column, so a value
+    read back is naive however it was written — the same defect #370 fixed in the sibling
+    ``persistence.py``, missed here. Latent today (display-only) but it lands inside the
+    KILL-SWITCH path, so any future age check on rehydrated state would raise
+    ``TypeError: can't compare offset-naive and offset-aware datetimes``.
+    """
+    from app.prediction_markets.executor_state_store import _parse_dt
+
+    naive = datetime(2026, 7, 25, 12, 0)
+    aware = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+
+    for value in (naive, naive.isoformat(), aware, aware.isoformat()):
+        got = _parse_dt(value)
+        assert got is not None
+        assert got.tzinfo is not None, f"{value!r} rehydrated TIMEZONE-NAIVE"
+        assert got.utcoffset().total_seconds() == 0
+        # normalization must STAMP the zone, never shift the wall clock
+        assert got.replace(tzinfo=None) == naive
+
+    # ...and the comparison that would raise must now be safe.
+    assert (datetime.now(timezone.utc) - _parse_dt(naive)).total_seconds() >= 0
+
+
+def test_parse_dt_still_degrades_to_none_not_a_fabricated_time():
+    from app.prediction_markets.executor_state_store import _parse_dt
+
+    assert _parse_dt(None) is None
+    assert _parse_dt("") is None
+    assert _parse_dt("not-a-timestamp") is None
