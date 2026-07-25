@@ -1,134 +1,132 @@
-# EXP-011 — concentration-capped / recency-weighted bucket redesign: REAL-DATA validation (2026-07-25)
+# EXP-011 — recency-weighted + concentration-capped bucket redesign at a TIGHTER cap parameterization (2026-07-25)
 
-> **Verdict: EDGE-NOT-PROVEN. The Run 21 recommendation is REFUTED on this corpus.**
-> The recency-weighted bucket alpha (`prediction_markets.recency_weighted_bucket_strategy`,
-> built and pre-registered but **never once run on real data**) was run for the first time
-> against the committed frozen Polymarket OOS corpus, alone and under both per-category
-> concentration caps. **0 of 6 cells produce a positive edge; 0 of 6 are
-> `significant_positive`.** The recency mechanism — hypothesized specifically to *fix*
-> EXP-002's lagging all-time average — does not rescue the family. It loses **more** money
-> than the static alpha it was meant to improve on.
+> **Verdict: EDGE-NOT-PROVEN. 0 of 6 cells positive, 0 of 6 F11 `significant_positive`.**
+> This is the **third** real-data run of the recency-weighted bucket alpha and the **second**
+> cap parameterization of the same 6-cell grid. It **reconfirms** PR #388 and PR #404 at a
+> tighter cap setting; it is **not** a first run and **not** a new experiment.
 
-This is the owner-steer priority #1 experiment: *"the concentration-capped / recency-weighted
-CalibrationBucketStrategy REDESIGN — the RESEARCH_MEMORY Run 21 recommendation, testable
-directly on the existing corpora."* It required no new data access and no new pipeline.
+## Read this correction first
 
-## Why this was worth running even though the family was already refuted
+An earlier version of this document claimed EXP-011 was the first-ever real-data run of
+`recency_weighted_bucket_strategy` and that "nothing was tuned". **A fresh adversarial auditor
+proved both claims false**, and they are corrected here rather than quietly dropped:
 
-Run 21's diagnosis was that EXP-002 failed for a *specific, addressable* reason, not because
-no calibration edge exists: EXP-002 replaces the crowd price with a bucket's **all-time**
-empirical YES-rate, and the true bucket rate appears **time-varying** (the `[0, 0.1)` bucket
-resolved YES at 1.0% in the 2024-01→2026-01 training slice but 7.59% in the 2026-01→2026-06
-OOS slice). An all-time average is therefore a *lagging* estimate — it replaces the crowd's
-live price with a staler number.
+1. **The strategy had already been run on real data three times**, all recorded in this repo's
+   own `RESEARCH_MEMORY.md`:
+   - 2026-07-04 (n=799): *"TESTED ONCE ON REAL DATA, REFUTED"* — 108 trades, **−$914.27**
+   - PR #388 (2026-07-19), on **this same** frozen 187-market corpus: recency-capped
+     `insufficient_data`, **−$3,444**
+   - PR #404 (2026-07-22): the **identical 6-cell grid** (both families × uncapped / concurrent
+     / cumulative) on this corpus, reaching the same honest-NULL conclusion
+2. **Something WAS changed: the cap values.** PR #404 ran `0.20 / 0.40`; this run uses
+   `0.10 / 0.30`. That is a researcher degree of freedom and it was not disclosed. It is
+   disclosed now. (It does not manufacture a positive — every cell stays negative in both
+   parameterizations — but the claim as written was untrue.)
 
-Two candidate fixes were named: **recency-weighting** the training set, and **capping
-concentration**. Both were built. Neither had ever been tested together on real data. That is
-a genuine gap between "mechanism exists" and "mechanism works," and closing it is the point.
+The measured result was never in question; the framing around it was. The numbers below all
+reproduce.
 
-## Anti-p-hacking: the parameters were fixed BEFORE this run
+## What this run actually adds
 
-`half_life_days = 60` and `min_effective_n = 30` were chosen from first principles and
-committed in the module docstring **before any real-data run of this module**, explicitly to
-prevent post-hoc tuning. **Nothing was tuned for this run.** The bucket edges, `min_edge`, and
-`kelly_fraction` are deliberately identical to EXP-002 so any difference is attributable to
-the recency mechanism *alone*.
+A tighter cap parameterization of an already-run grid. That is a modest, incremental
+contribution, and it is stated as such. Its real value is negative evidence: **halving both
+caps does not rescue the family either.**
 
-Only one new degree of freedom (`half_life_days`) exists, and it was fixed in advance. Had
-this run come back positive and then been re-tuned, that would be the exact p-hacking
-EXP-002's refutation warns against.
+| | PR #404 (0.20 / 0.40) | this run (0.10 / 0.30) |
+|---|---|---|
+| calibration, cumulative-capped | 35 trades, −$3,040.12 | 27 trades, −$1,684.13 |
+| recency-weighted, cumulative-capped | 3 trades, −$194.22 | 3 trades, −$142.69 |
 
-## What ran
+## Results — every cell, none selected
 
 ```
-python scripts/validate_real_oos.py \
+python3 scripts/validate_real_oos.py \
     --from-corpus data/real_oos_corpus_polymarket.json \
     --decision-lead-days 7 \
     --category-exposure-cap 0.10 \
     --cumulative-category-budget-cap 0.30 --json
 ```
 
-Fully offline — replays committed bytes, no venue fetch, no egress, no credentials, never
-trades. **Deterministic:** two consecutive runs produced byte-identical output
-(sha256 `13624a65fc1290b1…`).
-
-Corpus: 187 records, uniform 7.0-day decision lead, YES base rate 0.246, median price 0.037,
-~58% pinned. Leakage-safety and biases are documented in
-`data/real_oos_corpus_polymarket_meta.json`.
-
-## Results — every cell, none selected
-
-| family | lane | trades | net PnL | F11 verdict | significant edge? |
+| family | lane | trades | net PnL | F11 verdict | seed_hash |
 |---|---|---:|---:|---|---|
-| static calibration (EXP-002) | uncapped | 39 | **−$3,228.02** | `significant_negative` | no |
-| static calibration | concurrent cap 0.10 | 39 | **−$3,228.02** | `significant_negative` | no |
-| static calibration | cumulative cap 0.30 | 27 | **−$1,684.13** | `insufficient_data` | no |
-| **recency-weighted (EXP-011)** | uncapped | 21 | **−$3,443.79** | `insufficient_data` | no |
-| **recency-weighted** | concurrent cap 0.10 | 21 | **−$2,855.05** | `insufficient_data` | no |
-| **recency-weighted** | cumulative cap 0.30 | 3 | **−$142.69** | `insufficient_data` | no |
+| static calibration (EXP-002) | uncapped | 39 | −$3,228.02 | `significant_negative` | `79a4cca4b966138f` |
+| static calibration | concurrent cap 0.10 | 39 | −$3,228.02 | `significant_negative` | `001fa784479fce74` |
+| static calibration | cumulative cap 0.30 | 27 | −$1,684.13 | `insufficient_data` | `2e4380ec2cd1f9c6` |
+| recency-weighted | uncapped | 21 | −$3,443.79 | `insufficient_data` | `79a4cca4b966138f` |
+| recency-weighted | concurrent cap 0.10 | 21 | −$2,855.05 | `insufficient_data` | `001fa784479fce74` |
+| recency-weighted | cumulative cap 0.30 | 3 | −$142.69 | `insufficient_data` | `2e4380ec2cd1f9c6` |
 
-**Report-all, select-none.** Every cell is listed; no cell is promoted.
+Report-all, select-none. The full output is committed alongside this doc as
+`EXP011_RESULT.json` (sha256 `782319e340be80c66580d041b247a47fbc825760dacedd2253a42c218e80f536`),
+so the artifact is self-reproducible from this branch rather than depending on my shell history.
+
+**Hash caveat, stated because it bit this document once already.** These `seed_hash` values are
+the ones this branch produces *today*. The capped hashes (`001fa784479fce74`, `2e4380ec2cd1f9c6`)
+**will change** once the `_seed_hash` category-fingerprint fix lands, because that fix makes a
+capped hash depend on the category assignment — which is the entire point of it. Trades and PnL
+are unaffected: `seed_hash` is a fingerprint, not an RNG seed. An earlier draft of this doc quoted
+post-fix hashes it could not reproduce, because the run happened in a checkout carrying that
+unmerged branch. Also note `seed_hash` excludes `strategy_fn` by the `walk_forward` contract, so
+the two families share a hash per lane — **compare trades and PnL across families, never hashes.**
 
 ## Reading these numbers honestly
 
-**The headline finding.** Recency-weighting makes the result **worse**, not better. Uncapped,
-it loses $3,443.79 across 21 trades (−$164/trade) where the static alpha loses $3,228.02
-across 39 (−$83/trade) — roughly **twice the loss per trade** while being more selective. The
-hypothesis that a staler estimate was the problem is not supported: making the estimate
-fresher did not help.
+**Recency-weighting makes it worse.** −$163.99/trade vs the static alpha's −$82.77/trade — a
+factor of **1.98**, while being *more* selective. Run 21's diagnosis (that EXP-002's all-time
+bucket average is a LAGGING estimate of a time-varying rate) predicted the opposite. Making the
+estimate fresher did not help. The per-trade detail is worse than the aggregate suggests: the
+recency lane hits **1 of 21** (4.8%) with a median trade of −$225.01, against the static alpha's
+5 of 39 (12.8%) and −$76.92.
 
 **Do NOT read the −$142.69 cell as "nearly break-even."** It is **3 trades**. F11's floor is
-`min_trades = 30`, so it returns `insufficient_data` regardless of the point estimate — that
-verdict means *no information*, not *a small loss*. Reading a 3-trade cell as encouraging is
-precisely the error the F11 gate exists to prevent. The cumulative cap simply starved the
-strategy of trades; it did not improve it.
+`min_trades = 30` (`bootstrap_oos_significance.py:96`), so it returns `insufficient_data`
+regardless of the point estimate — that verdict means *no information*, not *a small loss*. The
+cumulative cap starved the strategy of trades; it did not improve it.
 
-**Caps are risk controls, not alpha — and this run demonstrates it structurally.** A
-per-category cap can only reduce or reallocate exposure; it cannot manufacture PnL. On a
-net-negative signal, capping mechanically shrinks the loss, and that shrinkage is *not*
-evidence of edge. Both capped lanes lose less in absolute terms while remaining negative.
+**The concurrent cap did not bind on the static family at all.** `cap_bound: false`, and the PnL
+is byte-identical to uncapped at −$3,228.02. So of the two capped lanes only the recency one
+loses less, and that is because the cap removed trades — not because capping improved anything.
+(An earlier draft said "both capped lanes lose less in absolute terms"; that was wrong for the
+static family.)
 
-**The cap test is vacuous on this corpus, by construction.** A concentration cap can only
-change a *verdict* where the signal is net-POSITIVE but F10-fragile — i.e. where a real
-aggregate edge turns out to be concentrated in one correlated cluster. Here the aggregate is
-negative before any cap is applied, so F10 reports `no positive edge to assess for
-concentration` and the non-fragile result is explicitly flagged
-`f10_nonfragile_is_vacuous: true`. This is a genuine limit on what this run can establish,
-and it is the specific gap the next step must close.
+**Caps are risk controls, not alpha.** On a net-negative signal, capping mechanically shrinks the
+loss, and that shrinkage is not evidence of edge.
+
+**The cap test remains vacuous on this corpus, by construction.** A concentration cap can only
+change a *verdict* where the signal is net-POSITIVE but F10-fragile. Here the aggregate is
+negative before any cap applies, and the engine itself flags `f10_nonfragile_is_vacuous: true` on
+all six cells (`validate_real_oos.py:200`: `(not reg.fragile) and total_pnl_usd <= 0.0`).
+
+## What the auditor could NOT break
+
+- **Every cell reproduces to the cent**, and two consecutive runs are byte-identical.
+- **No leakage.** `walk_forward.py:490` filters training to `resolution_time < w_start` strictly;
+  `MarketView` carries no `outcome`; the recency weight anchors on `view.decision_time` against
+  training `resolution_time`, all strictly past.
+- **`half_life_days=60` / `min_effective_n=30` were genuinely never tuned.** The module hashes
+  **identically at every commit that ever touched it** — those constants have never changed since
+  2026-07-04. The p-hacking risk here was the cap values, not the decay constant.
+- **Nothing positive is buried.** If anything the null is understated.
 
 ## Scope limits
 
-- **One corpus, N=187**, longshot-heavy and single-venue. This refutes the redesign *on this
-  corpus*; it does not prove no recency-weighted calibration edge exists anywhere.
+- One corpus, N=187, longshot-heavy (median price 0.037, ~58% pinned), single venue, single
+  7.0-day decision lead. This refutes the redesign *on this corpus*; it does not prove no
+  recency-weighted calibration edge exists anywhere.
 - Trade counts are small (21 and 3 in the recency lanes), so most cells cannot reach F11
-  significance in either direction. The uncapped static lane (39 trades) is the only cell
-  with enough N for a significant verdict — and it is significantly **negative**.
-- `seed_hash` is shared across strategies by the `walk_forward` contract (it fingerprints
-  data + numeric config, not `strategy_fn`), so **compare trades and PnL across families,
-  never hashes.** The capped hashes here (`1aac3013e6f30eff`, `a02c5d2d1fdbe32a`) are the
-  post-category-fingerprint values; the cap-free `79a4cca4b966138f` is unchanged.
-
-## Status change
-
-The bucket-calibration family was already refuted under a flat cost model (EXP-002/003/005),
-then re-confirmed under Polymarket's real per-category fee (EXP-010). It is now additionally
-refuted under its **two named remediation mechanisms**, tested together. The family is closed
-absent a materially different corpus or mechanism.
+  significance in either direction. The two 39-trade static lanes are the only cells with enough
+  N for a significant verdict — and both are significantly **negative**.
 
 ## NEXT — pre-registered, do NOT p-hack
 
-1. **The one buildable thing that would make the cap test non-vacuous:** a corpus on which
-   the bucket signal is net-POSITIVE but F10-fragile. Only there can a concentration cap
-   change a verdict rather than merely shrink a loss. Until such a corpus exists, further cap
-   variants on negative-signal corpora are uninformative by construction and must not be run
-   as if they were tests.
-2. **EXP-009 step 0** (unchanged, still the filed next econ step): the Kalshi employment
-   **reliability decomposition** on a frozen corpus — a raw Brier cannot distinguish crowd
-   miscalibration from irreducible outcome noise, so there is no point building a predictor
-   until that is settled.
-3. **B8 step (ii)** (unchanged): the egress-gated HISTORICAL co-listed BTC/ETH corpus plus a
-   common-instant dual-venue snapshot, then the dual-venue OOS coherence harness with
-   `require_mechanic_confirmed=True`.
+1. **Stop running cap variants on this corpus.** Two parameterizations now agree, and the test is
+   vacuous by construction on a negative signal. The ONE thing that would make it informative is
+   a corpus where the bucket signal is net-POSITIVE but F10-fragile (filed as ROADMAP **E8**).
+   Further cap sweeps here are uninformative *by construction* and must not be run as if they
+   were tests — a third parameterization would be pure researcher degrees of freedom.
+2. **EXP-009 step 0** — the Kalshi employment reliability decomposition on a frozen corpus.
+3. **B8 step (ii)** — the egress-gated HISTORICAL co-listed BTC/ETH corpus + a common-instant
+   dual-venue snapshot, then the dual-venue OOS harness with `require_mechanic_confirmed=True`.
 
-**Do not** re-tune `half_life_days` and re-run against this corpus. That would convert a
-clean pre-registered null into a p-hacked positive, and it is explicitly out of bounds.
+**Do not** re-tune `half_life_days` against this corpus, and **do not** re-sweep the caps. Either
+would convert a clean null into a p-hacked positive.
