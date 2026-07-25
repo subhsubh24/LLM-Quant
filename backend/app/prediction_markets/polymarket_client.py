@@ -885,13 +885,30 @@ class PolymarketClient:
                 raw.get("id", ""), n_labels, len(outcome_prices), len(token_ids),
             )
 
-        # Parse end date
+        # Parse end date.
+        #
+        # The tz-normalization guard is LOAD-BEARING, not defensive dressing. Every sibling
+        # parser in this codebase has it (`polymarket_history_fetcher._parse_dt`,
+        # `kalshi_history_fetcher._parse_dt`, `kalshi_client._parse_dt`,
+        # `polymarket_v1_hf_fetcher`); this one did not. Gamma's `endDate` normally carries
+        # a trailing "Z", but a value WITHOUT an offset parses to a timezone-NAIVE datetime,
+        # and the stale-market filter on the scan path then evaluates `m.end_date < now`
+        # against `now = datetime.now(timezone.utc)` — which raises
+        # `TypeError: can't compare offset-naive and offset-aware datetimes`. The
+        # orchestrator's scan loop catches Exception broadly, so that TypeError would not
+        # crash anything visible: it would be logged once per cycle and the scan would
+        # return nothing, forever. A permanent silent scan blackout from one missing guard.
+        #
+        # Venue times are UTC by construction, so a naive value is stamped UTC.
         end_date = None
         if raw.get("endDate"):
             try:
                 end_date = datetime.fromisoformat(raw["endDate"].replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 pass
+            else:
+                if end_date is not None and end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timezone.utc)
 
         # Parse tags
         tags = raw.get("tags", [])
