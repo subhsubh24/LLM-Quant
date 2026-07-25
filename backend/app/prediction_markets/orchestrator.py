@@ -66,6 +66,20 @@ class KellyConfig:
     """Configuration for Kelly criterion sizing."""
     fractional_kelly: float = 0.25   # Use quarter-Kelly (conservative)
     use_monte_carlo: bool = True     # Use Monte Carlo Kelly when historical data available
+    # SEPARATE flag for the simulation PRICER's probability override — deliberately NOT
+    # folded into `use_monte_carlo`, and deliberately DEFAULT-OFF. See the long note at the
+    # override site in `size_from_scan_result`: the two are different mechanisms with very
+    # different evidence behind them (mc_kelly sizes off REAL recorded trade history; the
+    # pricer override REPLACES the strategy's own probability from a simulation). Conflating
+    # them under one flag meant the unvalidated one rode along with the validated one.
+    use_simulation_pricer: bool = False
+    # Deterministic seed for the simulation pricer. The paper/live path must be
+    # reproducible, so the pricer is never constructed with an unseeded RNG.
+    simulation_pricer_seed: int = 42
+    # Annualized volatility for the simulation pricer. There is no default: a market-agnostic
+    # constant is a FABRICATED parameter on a real sizing decision, so the override is
+    # SKIPPED rather than run on an invented number (see the override site).
+    simulation_vol: Optional[float] = None
     min_bet_usd: float = 1.0        # Don't place orders smaller than this
     max_bet_usd: float = 50.0       # Hard cap per position
     min_edge: float = 0.01          # Don't trade edges below 1%
@@ -169,6 +183,37 @@ def kelly_size(
     return round(bet_usd, 2)
 
 
+# Seconds per year, as used to convert a real resolution horizon into the pricer's
+# annualized `T`. 365-day convention, matching the annualized-vol convention.
+_SECONDS_PER_YEAR: float = 365.0 * 24.0 * 60.0 * 60.0
+
+
+def _time_to_resolution_years(market: Market, *, now: datetime) -> Optional[float]:
+    """The market's REAL time to resolution, in years — or ``None`` when it cannot be
+    derived from real data.
+
+    Returning ``None`` (rather than a fallback constant) is the point: the caller then SKIPS
+    the simulation override instead of pricing off an invented horizon. A market with no
+    ``end_date``, or one that has already resolved, has no honest horizon to offer.
+
+    ``end_date`` is normalized to UTC before the subtraction. Polymarket's parser can yield a
+    timezone-NAIVE value, and subtracting that from a tz-aware ``now`` raises
+    ``TypeError: can't compare offset-naive and offset-aware datetimes`` — inside a sizing
+    path whose caller catches broadly, which would turn a real bug into a silent behavior
+    change. Stored times are UTC by construction, so a naive value is stamped UTC.
+    """
+    end = getattr(market, "end_date", None)
+    if end is None:
+        return None
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    reference = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    seconds = (end - reference).total_seconds()
+    if seconds <= 0:
+        return None
+    return seconds / _SECONDS_PER_YEAR
+
+
 def size_from_scan_result(
     result: ScanResult,
     bankroll: float,
@@ -208,32 +253,74 @@ def size_from_scan_result(
     if naive_bet_usd <= 0:
         return 0.0, 0.0
 
-    # Simulation-enhanced pricing (stacked variance reduction)
-    if EnhancedContractPricer is not None and config.use_monte_carlo:
+    # ------------------------------------------------------------------
+    # Simulation-enhanced pricing — DEFAULT OFF, and NEVER on fabricated parameters.
+    #
+    # This block used to run on `config.use_monte_carlo` (default True, i.e. ON in
+    # production) with a hardcoded `vol=0.3` and `T=30/365` — market-agnostic invented
+    # constants, with the market's real `end_date` available and ignored — and it REPLACED
+    # the strategy's own `win_probability` whenever the simulation disagreed with the market
+    # by >0.02. Because the estimator is systematically biased away from the market price,
+    # that override fired on essentially every market: it enlarged real bets (measured +37%
+    # at price 0.62) and silently zeroed the entire 0.02-0.15 band that NOPositionScanner
+    # targets. Worse, it was excluded from every test (`use_monte_carlo=False` in 9 places),
+    # so BACKTEST SIZING != LIVE SIZING — the backtest never exercised the code that actually
+    # sized production bets. The pricer was also constructed UNSEEDED, making the
+    # production-default paper path non-deterministic. Reported by the independent Quality
+    # Auditor (functional_reality B, correctness_reliability C).
+    #
+    # Three changes, all in the honest direction:
+    #   1. It is now behind its OWN default-OFF flag, so the default paper/live path sizes
+    #      exactly as the backtest does. Turning it on is a deliberate, reviewable act.
+    #   2. `T` comes from the market's REAL time to resolution. If that cannot be derived
+    #      from real data, the override is SKIPPED — never run on an invented horizon.
+    #   3. `vol` must be supplied explicitly. There is no default, so an uncalibrated
+    #      constant can no longer masquerade as a measured input, and the pricer is
+    #      constructed with an explicit seed so the path is reproducible.
+    #
+    # This does NOT claim the pricer is now correct — it is still uncalibrated and has never
+    # been shown to round-trip against the market price. It claims only that it can no longer
+    # silently alter real bet sizes off fabricated inputs. Re-enabling it by default requires
+    # a calibration test, tracked in ROADMAP B2.
+    if (
+        EnhancedContractPricer is not None
+        and config.use_simulation_pricer
+        and config.simulation_vol is not None
+    ):
         try:
-            pricer = EnhancedContractPricer()
-            sim_result = pricer.price_contract(
-                current_prob=market_price,
-                vol=0.3,  # Default prediction market vol
-                T=30 / 365,  # Default 30-day horizon
-                n_paths=10_000,
-            )
-            sim_prob = sim_result["probability"]
-            # If simulation disagrees with market by > 2%, use sim estimate
-            if abs(sim_prob - market_price) > 0.02:
-                win_probability = sim_prob
-                naive_bet_usd = kelly_size(
-                    edge=DEFAULT_COST_MODEL.net_edge(win_probability, market_price),
-                    confidence=result.confidence,
-                    win_probability=win_probability,
-                    bankroll=bankroll,
-                    config=config,
-                )
+            horizon_years = _time_to_resolution_years(result.market, now=result.timestamp)
+            if horizon_years is None:
+                # No real end_date (or it is already past): the ONLY honest options are to
+                # invent a horizon or to skip. We skip.
                 logger.debug(
-                    f"[SIM-KELLY] {result.strategy}: market={market_price:.3f} → "
-                    f"sim={sim_prob:.3f} (method={sim_result['method']}, "
-                    f"VR={sim_result.get('variance_reduction', 'N/A')})"
+                    f"[SIM-KELLY] {result.strategy}: no usable end_date on "
+                    f"{result.market.question[:60]!r} — override SKIPPED (never fabricated)"
                 )
+            else:
+                pricer = EnhancedContractPricer(seed=config.simulation_pricer_seed)
+                sim_result = pricer.price_contract(
+                    current_prob=market_price,
+                    vol=config.simulation_vol,
+                    T=horizon_years,
+                    n_paths=10_000,
+                )
+                sim_prob = sim_result["probability"]
+                # If simulation disagrees with market by > 2%, use sim estimate
+                if abs(sim_prob - market_price) > 0.02:
+                    win_probability = sim_prob
+                    naive_bet_usd = kelly_size(
+                        edge=DEFAULT_COST_MODEL.net_edge(win_probability, market_price),
+                        confidence=result.confidence,
+                        win_probability=win_probability,
+                        bankroll=bankroll,
+                        config=config,
+                    )
+                    logger.debug(
+                        f"[SIM-KELLY] {result.strategy}: market={market_price:.3f} → "
+                        f"sim={sim_prob:.3f} (T={horizon_years:.4f}y, "
+                        f"vol={config.simulation_vol:.3f}, method={sim_result['method']}, "
+                        f"VR={sim_result.get('variance_reduction', 'N/A')})"
+                    )
         except Exception as e:
             logger.debug(f"[SIM-KELLY] Simulation pricing failed: {e}")
 
