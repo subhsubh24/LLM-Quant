@@ -13,13 +13,18 @@ on:
   pull_request:
   push:
     branches: ["claude/llm-stock-trading-app-fXupf"]
+    paths-ignore:
+      - 'PENDING_OPS.md'
+      - 'IMPROVEMENT_LOG.md'
+      - 'ROADMAP.md'
+      - 'docs/**'
   workflow_dispatch:
 
 # Cancel superseded in-progress runs for the same PR — the autonomous loop pushes commits in rapid
 # succession; without this every intermediate push ran full CI to completion. Only PR runs cancel.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true   # was PR-only, so push bursts never cancelled
 
 jobs:
   gate:
