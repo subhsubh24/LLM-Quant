@@ -261,7 +261,7 @@ def run(args: argparse.Namespace) -> int:
     run_id = args.run_id or time.strftime("%Y%m%dT%H%M%S")
     session_id = f"eval:{run_id}"
     ingest_url = args.ingest_url or os.environ.get("MARGIN_INGEST_URL")
-    ingest_key = args.ingest_key or os.environ.get("MARGIN_INGEST_KEY")
+    ingest_key = os.environ.get("MARGIN_INGEST_KEY")
     # HERMETIC GUARD: never emit real telemetry from a CI context. A keyless
     # gate (e.g. `preflight code`) runs with CI=true and must stay inert — this
     # ensures it can never accidentally emit even if ingest creds are present in
@@ -420,7 +420,11 @@ def main() -> int:
                    help="stop the batch once measured spend crosses this (default 1.0).")
     p.add_argument("--timeout", type=float, default=2.0, help="meter HTTP timeout (s).")
     p.add_argument("--ingest-url", default=None, help="override MARGIN_INGEST_URL.")
-    p.add_argument("--ingest-key", default=None, help="override MARGIN_INGEST_KEY.")
+    # NO --ingest-key. A secret passed on argv is world-readable in the process table
+    # (`ps aux`) for the life of the run and lands in shell history — and this one
+    # authenticates a real telemetry ingest endpoint. The env var is the only accepted
+    # source, matching how `config.py` reads every other credential. Removing the flag is
+    # the fix; a flag that warns is still a flag that leaks.
     p.add_argument("--allow-ci-emit", action="store_true",
                    help="emit even when CI is set (the margin-eval workflow instead "
                         "clears CI on its step; use this only for a local CI-like shell).")
