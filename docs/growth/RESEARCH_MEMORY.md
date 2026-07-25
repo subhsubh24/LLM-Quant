@@ -4121,20 +4121,27 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
 - **NEXT (pre-registered, do NOT p-hack):** (1) B8 step (ii) — the egress-gated HISTORICAL co-listed BTC/ETH corpus (Kalshi crypto via `historical=True` #408 + resolved-strike capture #405) + a common-instant leakage-safe dual-venue snapshot; only a non-trivial co-listed N (DECISION COROLLARY) unblocks the dual-venue OOS coherence harness with `require_mechanic_confirmed=True`. (2) EXP-009 step 0 — the Kalshi employment reliability decomposition (still the filed next econ step). (3) A Kalshi analog of EXP-010 only after the CFTC fee filing is primary-verified (secondary-sourced this run, excluded).
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any tested mechanism; engine_pct 74 unchanged. Real-money brake untouched (no order, no gate flip, no cap change).
 
-## 2026-07-25 — Factory build (model/strategy factory): EXP-011 — the Run 21 recommendation finally RUN on real data (honest NULL, family refuted under its own remediation) + 7 ship-critical quality fixes. NO edge claimed.
+## 2026-07-25 — Factory build (model/strategy factory): EXP-011 — a SECOND cap parameterization of the recency-weighted bucket grid (honest NULL, reconfirms #388/#404) + 7 ship-critical quality fixes. NO edge claimed.
 
 - Hypothesis (falsifiable, PRE-REGISTERED before any real-data run of this module): EXP-011 — a
   recency-weighted bucket model (`half_life_days=60`, `min_effective_n=30`) tracks a time-varying
   true bucket rate better than EXP-002's all-time average, and combined with the per-category
   concentration caps produces a better-calibrated decision-time probability than the crowd. This
   is the owner-steer **priority #1** item and the RESEARCH_MEMORY **Run 21** recommendation.
-- **Why it was still worth running on an already-refuted family.** Run 21's diagnosis was that
-  EXP-002 failed for a *specific, addressable* reason: it replaces the crowd price with a bucket's
-  **all-time** empirical YES-rate, and the true rate appears time-varying (the `[0, 0.1)` bucket
-  resolved YES at 1.0% in the 2024-01→2026-01 training slice vs 7.59% in the 2026-01→2026-06 OOS
-  slice), so an all-time average is a LAGGING estimate. Two remediations were named
-  (recency-weighting, concentration capping); **both were already built and neither had ever been
-  run on real data together**. That is a real gap between "mechanism exists" and "mechanism works".
+- **CORRECTION — what this run is, and what an earlier draft of this entry wrongly claimed.** An
+  adversarial auditor proved two framing claims FALSE, and they are corrected here rather than
+  quietly dropped. (a) This is **NOT** the first real-data run of the recency-weighted alpha. It is
+  the **THIRD**, and all three priors are recorded in THIS file: 2026-07-04 (n=799, "TESTED ONCE ON
+  REAL DATA, REFUTED", 108 trades −$914.27); PR #388 (2026-07-19, this SAME 187-corpus, recency
+  −$3,444); PR #404 (2026-07-22, the IDENTICAL 6-cell grid). A scout reported "never run on a real
+  corpus" and I did not cross-check this file, which answers it three times. (b) "Nothing was
+  tuned" was FALSE: #404 ran caps **0.20/0.40**, this run uses **0.10/0.30** — an undisclosed
+  researcher degree of freedom. It manufactures no positive (every cell is negative in both
+  parameterizations), but the claim as written was untrue.
+- **What this run therefore actually is:** a SECOND cap parameterization of an already-run grid —
+  a modest, incremental contribution whose value is the negative evidence that **halving both caps
+  does not rescue the family either**. #404 cumulative-capped: calibration 35 tr/−$3,040.12,
+  recency 3 tr/−$194.22. This run: 27 tr/−$1,684.13 and 3 tr/−$142.69.
 - **RESULT — the redesign is REFUTED. 0 of 6 cells positive, 0 of 6 F11 `significant_positive`.**
 
   | family | lane | trades | net PnL | F11 |
@@ -4157,11 +4164,17 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
   cap can only change a verdict where the signal is net-POSITIVE but F10-fragile; here the
   aggregate is negative before any cap applies and the engine itself reports
   `f10_nonfragile_is_vacuous: true`.
-- **Anti-p-hacking.** `half_life_days=60` / `min_effective_n=30` were fixed from first principles
-  and committed in the module docstring BEFORE any real-data run. Nothing was tuned. Re-tuning
-  against this corpus is explicitly recorded as out of bounds.
+- **Anti-p-hacking — what held and what did not.** HELD: `half_life_days=60` /
+  `min_effective_n=30` were genuinely never tuned — the auditor verified the module hashes
+  IDENTICALLY at every commit that ever touched it, so those constants have not changed since
+  2026-07-04. DID NOT HOLD: the **cap values** were changed from #404's 0.20/0.40 without
+  disclosure (see the correction above). The p-hacking surface here was the caps, not the decay
+  constant. Both are now recorded as out of bounds for re-tuning against this corpus.
 - Fully offline + deterministic: replays committed bytes, two consecutive runs byte-identical
-  (sha256 `13624a65fc1290b1…`). No egress, no credentials, no order.
+  (sha256 `782319e340be80c6…`, committed as `docs/autonomous-loop/EXP011_RESULT.json` so the
+  finding does not depend on shell history). An earlier draft quoted a hash the branch could NOT
+  reproduce — the run had executed in a shared checkout carrying an unmerged `walk_forward.py`.
+  No egress, no credentials, no order.
 - **Also shipped this run — 7 file-disjoint quality PRs, all driven by the independent Quality
   Auditor's sub-A ship-critical dimensions** (the one category the owner steer exempts from
   deprioritization): the `_seed_hash`/category reproducibility hole (a same-count category relabel
@@ -4180,8 +4193,10 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
 - Verdict: **edge-not-proven.** An honest null on the owner's priority-#1 experiment, reported as
   such with the specific next buildable step filed. Per the value bar + the active owner steer,
   this clears the bar and IS success.
-- **NEXT (pre-registered, do NOT p-hack):** (1) the ONE thing that would make the cap test
-  informative — a corpus on which the bucket signal is net-POSITIVE but F10-fragile. Until such a
+- **NEXT (pre-registered, do NOT p-hack):** (1) STOP running cap variants on this corpus — two
+  parameterizations now agree and a third would be pure researcher degrees of freedom. The ONE
+  thing that would make the cap test informative is a corpus on which the bucket signal is
+  net-POSITIVE but F10-fragile. Until such a
   corpus exists, further cap variants on negative-signal corpora are uninformative by construction
   and must not be run as if they were tests. (2) EXP-009 step 0 — the Kalshi employment
   RELIABILITY DECOMPOSITION on a frozen corpus (a raw Brier cannot separate miscalibration from

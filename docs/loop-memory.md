@@ -3111,6 +3111,20 @@ named and stopped there, which moved the boundary instead of closing the hole.**
 caught two stale comments in the same file still asserting the false invariant — shipping a fix
 for one false-invariant comment while leaving two behind would have been its own defect.
 
+**INCIDENT 4 — I trusted a scout instead of the repo's own memory, and shipped a false claim.**
+A Haiku scout reported that `recency_weighted_bucket_strategy` had "NEVER been run on a real
+corpus". I wrote that into the EXP-011 doc AND the RESEARCH_MEMORY entry as "the first real-data
+run". An adversarial auditor found it false in the most embarrassing possible place: **this repo's
+own RESEARCH_MEMORY says otherwise in three separate entries** (2026-07-04 n=799 "TESTED ONCE ON
+REAL DATA, REFUTED"; PR #388 on the same corpus; PR #404 running the identical 6-cell grid). The
+auditor also caught that I HAD changed something — the cap values, 0.20/0.40 → 0.10/0.30 — while
+the doc asserted "nothing was tuned". **Lesson: a scout's negative claim ("X has never happened")
+is the single least reliable kind of scout output, because absence-of-evidence is exactly what a
+fast survey gets wrong. Cross-check any novelty claim against RESEARCH_MEMORY before it becomes a
+provenance statement — the ledger exists precisely to answer "has this been tried?".** Second
+lesson: when re-running an existing grid, DIFF the parameters against the prior run and disclose
+every delta, or the write-up will claim more novelty than the work has.
+
 **Reviewer findings this run (all fixed within the ≤2-cycle bound):** a fabricated `ROADMAP B2`
 citation (B2 is the crowd-calibration eval, unrelated to pricer calibration — a numbered citation
 that does not cover the referenced work is worse than none); cap-active regression tests that
