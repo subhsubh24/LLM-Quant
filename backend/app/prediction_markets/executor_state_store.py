@@ -86,15 +86,41 @@ def _default_session_factory():
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
-    """Best-effort ISO/`datetime` -> aware datetime. Returns None on anything unparseable."""
+    """Best-effort ISO/`datetime` -> **timezone-AWARE UTC** datetime. ``None`` on anything
+    unparseable.
+
+    The docstring used to promise "aware" while both return paths could hand back a NAIVE
+    value: SQLModel maps a plain ``datetime`` column to a timezone-naive SQL column, so a
+    value read back is naive no matter how it was written, and ``fromisoformat`` on a
+    string without an offset is naive too. This is exactly the bug class #370 fixed in the
+    sibling ``persistence.py`` (`_as_utc`) — the same miss on ``kill_switch_time``, which
+    the independent Quality Auditor caught here on 2026-07-24.
+
+    Today ``kill_switch_time`` is display-only, so the mismatch is latent rather than live.
+    It stops being latent the moment anything subtracts it: the whole trading path
+    standardized on ``datetime.now(timezone.utc)``, so a
+    ``datetime.now(timezone.utc) - _kill_switch_time`` age check on a REHYDRATED (not
+    fresh) state would raise ``TypeError: can't compare offset-naive and offset-aware
+    datetimes`` — inside the kill-switch path, which is the last place a latent throw
+    belongs. Persisted times are UTC by construction, so a naive value is stamped UTC and
+    an already-aware value passes through unchanged.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value
+        return _as_utc(value)
     try:
-        return datetime.fromisoformat(str(value))
+        return _as_utc(datetime.fromisoformat(str(value)))
     except (ValueError, TypeError):
         return None
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Stamp UTC on a naive timestamp; pass an aware one through. Mirrors
+    ``persistence._as_utc`` (#370) so both durable stores rehydrate the same way."""
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=timezone.utc)
 
 
 # ============================================================

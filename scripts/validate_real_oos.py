@@ -40,6 +40,32 @@ def _imp(a, b):
         return __import__(b, fromlist=["x"])
 
 
+def _lead_days(markets) -> list:
+    """Per-record decision lead in days, measured from the data itself."""
+    return [
+        (m.resolution_time - m.decision_time).total_seconds() / 86400.0 for m in markets
+    ]
+
+
+def _measured_lead_days(markets) -> "float | None":
+    """The corpus's ACTUAL decision lead (median), or None on an empty corpus.
+
+    Reporting the caller's *requested* lead as if it described the data is how the frozen
+    replay came to publish ``decision_lead_days: 2.0`` (the CLI default) for a corpus whose
+    187 records are uniformly 7.0 — a reported metric that did not describe the data, and
+    one the committed test (which hard-codes 7.0) silently disagreed with.
+    """
+    leads = _lead_days(markets)
+    return round(statistics.median(leads), 4) if leads else None
+
+
+def _measured_lead_days_range(markets) -> "list | None":
+    """``[min, max]`` lead in days — makes a NON-uniform corpus visible instead of letting a
+    single median imply a uniformity the data does not have."""
+    leads = _lead_days(markets)
+    return [round(min(leads), 4), round(max(leads), 4)] if leads else None
+
+
 def evaluate(
     markets, wf_mod, cal_mod, *, seed: int = 42, decision_lead_days: float = 2.0,
     category_exposure_cap: "float | None" = None,
@@ -113,7 +139,13 @@ def evaluate(
         "corpus": {
             "n_markets": n, "yes_base_rate": round(sum(outs) / n, 4),
             "crowd_brier": round(crowd_brier, 4), "price_pinned_pct": round(pinned, 3),
-            "price_median": round(statistics.median(prices), 4), "decision_lead_days": decision_lead_days,
+            "price_median": round(statistics.median(prices), 4),
+            # MEASURED from the corpus, not echoed from the CLI. `..._requested` keeps the
+            # caller's parameter visible (it is what the LIVE lane actually fetches with) and
+            # `..._range` surfaces a non-uniform corpus rather than hiding it behind a median.
+            "decision_lead_days": _measured_lead_days(markets),
+            "decision_lead_days_requested": decision_lead_days,
+            "decision_lead_days_range": _measured_lead_days_range(markets),
         },
         "crowd_baseline": {"trades": baseline.n_trades, "total_pnl_usd": round(baseline.total_pnl_usd, 2),
                            "seed_hash": baseline.seed_hash},

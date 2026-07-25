@@ -1,0 +1,57 @@
+{
+  "corpus_file": "real_oos_corpus_polymarket.json",
+  "corpus_sha256": "c42899d17caefa77b2149b5b5ab0cfa66deb36265e9cc16974fe1d567ab649c3",
+  "frozen_by": "scripts/validate_real_oos.py --freeze-corpus (PR #377)",
+  "replayed_by": "scripts/validate_real_oos.py --from-corpus data/real_oos_corpus_polymarket.json --decision-lead-days 7",
+  "source": "Polymarket Gamma (resolved binary markets) + CLOB price history — public, no credentials",
+  "purpose": "The REAL-MONEY out-of-sample floor lane. This is the corpus behind the project's only committed real OOS result, and it is significantly NEGATIVE. It exists so a real (not synthetic) result reproduces offline from committed bytes.",
+  "records": 187,
+  "measured": {
+    "decision_lead_days": {
+      "min": 7.0,
+      "max": 7.0,
+      "median": 7.0,
+      "uniform": true
+    },
+    "yes_base_rate": 0.246,
+    "market_price_median": 0.037,
+    "resolution_time_span": ["2024-07-20", "2026-07-20"],
+    "categories": {
+      "General": 57,
+      "Politics": 57,
+      "Economics": 45,
+      "Sports": 17,
+      "Crypto": 8,
+      "ScienceTech": 3
+    },
+    "liquidity_non_null": 0,
+    "research_only_records": 0
+  },
+  "headline_result": {
+    "strategy": "CalibrationBucketStrategy (B4a / EXP-002), cap-free lane",
+    "seed": 42,
+    "seed_hash": "79a4cca4b966138f",
+    "trades": 39,
+    "net_pnl_usd": -3228.02,
+    "f11_verdict": "significant_negative",
+    "f11_total_ci": [-4325.5199, -2403.5774],
+    "hit_rate": 0.128205,
+    "note": "Reproduces sha256-identical offline. This is a REFUTATION, not an edge."
+  },
+  "leakage_safety": [
+    "decision-time market_price is a CLOB tick at-or-before decision_time AND strictly before resolution_time",
+    "the settled outcomePrice is NEVER used as the decision price — the fetcher RAISES rather than fabricating",
+    "zero records with decision_time >= resolution_time (verified)",
+    "zero prices at exactly 0.0 or 1.0 — the decision price is emphatically not the settled outcome",
+    "anti-leak sanity: 46 outcome=1 of which 14 priced < 0.50; 141 outcome=0 of which 9 priced > 0.50"
+  ],
+  "disclosures": [
+    "settled-only survivorship bias — only markets that actually resolved are present",
+    "longshot-heavy: median price 0.037 and ~58% of prices pinned below 0.05 or above 0.95, so results are dominated by the low-price extreme",
+    "cross-market same-event correlation NOT removed (this is what the per-category concentration caps exist to bound)",
+    "liquidity is null on ALL 187 records — this is deliberate and honest (Gamma's `liquidity` is a USD metric, not contract depth; mapping it would be a units fabrication), but it means the market-impact and capacity paths are INERT on this corpus and therefore untested on real data",
+    "single venue (Polymarket) and a single 7.0-day decision lead — no lead-time or venue robustness is established by this corpus alone",
+    "no wallet addresses, tokens, emails or IPs — forensically verified clean"
+  ],
+  "provenance_note": "Added 2026-07-25. The independent Quality Auditor flagged the absence of this sidecar under `artifact_integrity`: the corpus behind the project's only real OOS number carried no fetch date, source attribution, parameters, or bias disclosure, in contrast to the exemplary spike_corpus_politics_meta.json. Every number above is MEASURED from the committed bytes, not copied from a report."
+}
