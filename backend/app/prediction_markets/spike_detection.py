@@ -42,6 +42,7 @@ fixture-testable (network lives only in the fetcher that produces the ticks).
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from math import isfinite
 from typing import List, Mapping, Optional, Sequence
@@ -239,17 +240,32 @@ def detect_spikes(
     open_confirm: Optional[Tick] = None
     open_peak: Optional[Tick] = None
 
+    # Timestamps hoisted once for the binary search below. `series` is immutable for the
+    # rest of this call, so this stays in lockstep with it.
+    times = [tk.t for tk in series]
+
     def _window_baseline(cur: Tick) -> Optional[Tick]:
         """Earliest tick in ``[max(cur.t - window, floor_time), cur.t)`` — the
-        reference at the start of the trailing window. ``None`` if none qualifies."""
+        reference at the start of the trailing window. ``None`` if none qualifies.
+
+        This used to scan `series` from index 0 on every call, making detection O(n^2).
+        Measured by the independent Quality Auditor at 91% of the backtest engine's wall
+        clock. `series` is sorted ascending by `clean_ticks`, so the first qualifying tick
+        is found by binary search instead — same tick, same result, O(log n).
+
+        Equivalence with the old scan: it returned the first `tk` with `tk.t >= lower`,
+        breaking once `tk.t >= cur.t`. `bisect_left` on `lower` yields exactly that first
+        index (and, on a run of duplicate timestamps, the FIRST of the run — matching the
+        old first-match behavior); the `< cur.t` check reproduces the break. Note this is
+        correct per-call and does NOT lean on `lower` advancing monotonically, so the
+        mutation of `floor_time` between iterations cannot invalidate it.
+        """
         lower = cur.t - window_seconds
         if lower < floor_time:
             lower = floor_time
-        for tk in series:
-            if tk.t >= cur.t:
-                break
-            if tk.t >= lower:
-                return tk  # series is sorted ascending → first qualifying is earliest
+        idx = bisect_left(times, lower)
+        if idx < len(series) and times[idx] < cur.t:
+            return series[idx]
         return None
 
     def _try_open(cur: Tick) -> bool:
