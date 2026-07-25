@@ -280,8 +280,17 @@ def size_from_scan_result(
     #
     # This does NOT claim the pricer is now correct — it is still uncalibrated and has never
     # been shown to round-trip against the market price. It claims only that it can no longer
-    # silently alter real bet sizes off fabricated inputs. Re-enabling it by default requires
-    # a calibration test, tracked in ROADMAP B2.
+    # silently alter real bet sizes off fabricated inputs.
+    #
+    # What re-enabling by default would REQUIRE (deliberately stated as a requirement rather
+    # than a cross-reference: no ROADMAP item covers pricer calibration today, and citing a
+    # number that does not mean this would be worse than citing none):
+    #   * a test showing the pricer ROUND-TRIPS against the market price — i.e. that with a
+    #     market-derived vol it reproduces the market price rather than disagreeing with it
+    #     on essentially every market, which is the behavior that made the >0.02 override
+    #     fire almost always;
+    #   * a per-market volatility input measured from real data, since a single vol across
+    #     all markets is the same fabricated-constant defect in a different place.
     if (
         EnhancedContractPricer is not None
         and config.use_simulation_pricer
