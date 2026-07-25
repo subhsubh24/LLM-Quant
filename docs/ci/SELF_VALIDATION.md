@@ -172,11 +172,20 @@ SELF_VALIDATION:
       ci_validatable: true             # fully validated in-gate with no secret — committed corpus + seeded engine reproduce identically
       real_flow_note: "This capability carries NO edge claim and reaches NO revenue field — it changes a COST INPUT (fee realism, which VISION requires) and re-tests an already-committed refutation, it does NOT re-parameterize a strategy. A flip_to_validated_edge would NOT be an edge: it is surfaced as a CANDIDATE requiring >=3 FRESH adversarial Opus auditors before any claim; the observed result is flip=False (the honest, predicted NULL — real net -$3,502 vs flat -$3,228, both F11 significant_NEGATIVE). The honesty path (a flip is never auto-promoted; the fallback fee-rate for unmapped categories is the conservative highest documented rate) is exercised directly by the test."
       status: validated
+    - id: simulation_pricer_probability_override
+      desc: "Monte-Carlo simulation pricer that can REPLACE a strategy's own win_probability on the live/paper sizing path and re-size the bet (orchestrator.size_from_scan_result). DEACTIVATED 2026-07-25: it ran on a hardcoded vol=0.3 / T=30/365 — market-agnostic FABRICATED constants, with the market's real end_date available and ignored — and inflated real bet sizes (measured +37.5% at price 0.62) on a path NO test covered (all 9 test call sites set use_monte_carlo=False while the production default was True, so backtest sizing != live sizing). It was also constructed UNSEEDED, making the production-default paper path non-deterministic."
+      validates_via: "test_simulation_pricer_sizing.py (REGISTERED in the blocking gate), 13 tests: asserts the capability is OFF by default (KellyConfig().use_simulation_pricer is False); that the DEFAULT config sizes IDENTICALLY to explicitly-disabled (the property the 9 pre-existing test call sites assumed but never verified); that use_monte_carlo=True alone — still the production default for the SEPARATE, evidence-backed mc_kelly path — no longer drags this override along with it; that when explicitly enabled it SKIPS rather than fabricating whenever the horizon cannot be derived from the market's real end_date or vol is not supplied; that T comes from the real end_date (never the old 30/365) and the pricer is constructed SEEDED; and that repeated sizing of identical inputs is bit-identical."
+      mode: gated_off_proven           # default-OFF; the gate itself is what the tests exercise, not a mock standing in for a live flow
+      requires_env: []                 # NONE — no credential; pure in-process sizing computation
+      active: false                    # DEFAULT-OFF. Enabling is a deliberate, reviewable config act.
+      ci_validatable: true             # fully validated in-gate with no secret
+      real_flow_note: "The gated-off state is the HONEST one, not a convenience: the pricer remains UNCALIBRATED and has never been shown to round-trip against the market price. Because it is systematically biased away from the market price, its >0.02 disagreement override fired on essentially every market. Gating it off is what makes backtest sizing == live sizing again. This is NOT a stub hiding an un-exercised critical path — the sizing path it sits on IS exercised, by 13 tests here plus the 9 pre-existing sizing tests, and the runtime harness continues to produce real paper fills through it. Re-activation requires (a) a round-trip test against the market price with a market-derived vol and (b) a per-market volatility measured from real data (ROADMAP E9); it is NOT re-enabled by this or any loop run."
+      status: gated_off
   # The dashboard validation feed (mirror of LOOP_HEALTH.validation; computed by
   # `check_self_validation.py --readiness`). unmet MUST be empty here AND in LOOP_HEALTH.
   readiness:
     enforced_in_ci: true
-    capabilities_total: 16
+    capabilities_total: 17
     unmet: []                       # active + ci_validatable:false. NON-EMPTY => urgent OWNER_ACTION + blocks.
   # Every credential the CODE reads must appear here (checker enforces). new + undeclared => gate FAILS.
   credential_inventory:
