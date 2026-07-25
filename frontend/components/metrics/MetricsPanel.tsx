@@ -12,6 +12,14 @@ import { EvaluationWindowsCard, EvaluationWindowsData } from "./EvaluationWindow
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Every backend route is mounted under `/api` (`main.py`: `app.include_router(router,
+// prefix="/api")`). This panel's six fetches omitted it and 404'd in EVERY configuration,
+// so the entire Metrics tab rendered six stacked "Failed to load: HTTP 404" cards — since
+// 2026-07-17. Because the URLs are absolute, next.config.js's `/api/:path*` rewrite never
+// applied either. Building the prefix once here means a new endpoint cannot re-introduce
+// the same drift by being typed by hand.
+const METRICS_BASE = `${API_BASE}/api/prediction-markets/metrics`;
+
 type FetchState<T> =
   | { status: "idle" }
   | { status: "loading" }
@@ -85,22 +93,22 @@ export function MetricsPanel() {
   useEffect(() => setMounted(true), []);
 
   const weekly = useFetch<WeeklyMetricsData>(
-    `${API_BASE}/prediction-markets/metrics/weekly`, mounted
+    `${METRICS_BASE}/weekly`, mounted
   );
   const floor = useFetch<FloorStatusData>(
-    `${API_BASE}/prediction-markets/metrics/floor-status`, mounted
+    `${METRICS_BASE}/floor-status`, mounted
   );
   const calibration = useFetch<CalibrationData>(
-    `${API_BASE}/prediction-markets/metrics/calibration`, mounted
+    `${METRICS_BASE}/calibration`, mounted
   );
   const perStrategy = useFetch<PerStrategyData>(
-    `${API_BASE}/prediction-markets/metrics/per-strategy`, mounted
+    `${METRICS_BASE}/per-strategy`, mounted
   );
   const evalWindows = useFetch<EvaluationWindowsData>(
-    `${API_BASE}/prediction-markets/metrics/evaluation-windows`, mounted
+    `${METRICS_BASE}/evaluation-windows`, mounted
   );
   const drift = useFetch<DriftData>(
-    `${API_BASE}/prediction-markets/metrics/calibration-drift`, mounted
+    `${METRICS_BASE}/calibration-drift`, mounted
   );
 
   const allLoading = [weekly, floor, calibration, perStrategy, evalWindows, drift].every(
