@@ -3075,3 +3075,78 @@ the cumulative-cap tooling the family test needed now EXISTS but is null on the 
 constraint (`business_case_strength = B`) STANDS. Named next steps filed to ROADMAP/RESEARCH_MEMORY: (1) a net-positive-but-
 fragile per-category corpus to make the cumulative-cap de-concentration test non-vacuous (egress-gated); (2) the B8
 resolved→Market price bridge + historical co-listed corpus fetch (egress-gated); (3) the B8 touch/barrier/terminal classifier.
+
+## 2026-07-25 — Factory build: EXP-011 honest null + 7 ship-critical quality fixes. Three incidents worth remembering.
+
+**INCIDENT 1 — my benchmark was wrong, not the code (DEEP_DIAGNOSIS: observe the real system FIRST).**
+Benchmarking the O(n²) spike-detection fix, I measured 0 events across the entire 255-market
+corpus and only a 2% speedup — flatly contradicting the auditor's "91% of wall clock / 34×
+faster" claim. The instinct to trust my own measurement and downgrade the finding would have
+been wrong. Observing the actual system found the cause immediately: `detect_spikes` takes RAW
+`{"t","p"}` mappings and calls `clean_ticks` itself; I had passed `Tick` dataclass instances,
+which fail `isinstance(raw, Mapping)` and were ALL silently dropped. Re-run correctly: 11,563
+events, pre-fix >600s (timed out) vs post-fix 22.9s. **Lesson: a benchmark that disagrees with a
+credible report is a bug in the benchmark until proven otherwise — and a silent all-rows-dropped
+path produces a confident, entirely fictional zero.**
+
+**INCIDENT 2 — concurrent agents share the working tree; committed work is safe, uncommitted is not.**
+An adversarial auditor running in parallel was stashing/reverting source files to test pre-fix
+behavior, and clobbered my uncommitted edits to `scripts/validate_real_oos.py` mid-run. All five
+already-committed branches were untouched. **Fix applied: moved all subsequent work into isolated
+`git worktree`s, and every review/audit subagent is now instructed to create its own.** Also
+relevant: `git stash push -- <path>` is a NO-OP on a file that is committed rather than dirty, so
+a "prove it fails pre-fix" check that stashes can silently test the FIXED code and pass. Use
+`git checkout <base-sha> -- <path>` instead. I hit exactly this and briefly believed a
+regression test had passed against pre-fix source when it had not.
+
+**INCIDENT 3 — the adversarial gate earned its keep: my fix was BROKEN and shipped-wrong-boundary.**
+The `_seed_hash` category fix guarded the new fingerprint on the two per-category caps. A fresh
+Opus auditor returned **BROKEN** with a reproduction: `cost_model.fee_schedule` (EXP-010's
+PER-CATEGORY Polymarket fee) ALSO makes category PnL-determining with both caps off. On the
+shipped, cap-free `exp010_cost_realism.py` path over the committed corpus, three category
+assignments produced −$3,502.27 / −$3,849.82 / −$3,501.84 under ONE hash — and −$3,502.27 is a
+PUBLISHED headline. **Lesson: when fixing "field X is not fingerprinted although it affects PnL",
+enumerate EVERY path from X to PnL before choosing the guard. I fixed the path the scorecard
+named and stopped there, which moved the boundary instead of closing the hole.** The auditor also
+caught two stale comments in the same file still asserting the false invariant — shipping a fix
+for one false-invariant comment while leaving two behind would have been its own defect.
+
+**INCIDENT 4 — I trusted a scout instead of the repo's own memory, and shipped a false claim.**
+A Haiku scout reported that `recency_weighted_bucket_strategy` had "NEVER been run on a real
+corpus". I wrote that into the EXP-011 doc AND the RESEARCH_MEMORY entry as "the first real-data
+run". An adversarial auditor found it false in the most embarrassing possible place: **this repo's
+own RESEARCH_MEMORY says otherwise in three separate entries** (2026-07-04 n=799 "TESTED ONCE ON
+REAL DATA, REFUTED"; PR #388 on the same corpus; PR #404 running the identical 6-cell grid). The
+auditor also caught that I HAD changed something — the cap values, 0.20/0.40 → 0.10/0.30 — while
+the doc asserted "nothing was tuned". **Lesson: a scout's negative claim ("X has never happened")
+is the single least reliable kind of scout output, because absence-of-evidence is exactly what a
+fast survey gets wrong. Cross-check any novelty claim against RESEARCH_MEMORY before it becomes a
+provenance statement — the ledger exists precisely to answer "has this been tried?".** Second
+lesson: when re-running an existing grid, DIFF the parameters against the prior run and disclose
+every delta, or the write-up will claim more novelty than the work has.
+
+**INCIDENT 5 — the 2-cycle brake did its job: I ABANDONED a fix rather than guess a third time.**
+The `_seed_hash` category fix was broken by TWO independent adversarial auditors at two
+successive boundaries. Cycle 1 guarded on the per-category caps; broken by
+`cost_model.fee_schedule`. Cycle 2 widened to include the engine's `fee_schedule`; broken again
+because the STRATEGY carries its own uncoupled cost model — reproduced on the shipped corpus
+where the PUBLISHED headline hash `79a4cca4b966138f` covers four distinct (trades, PnL) pairs.
+Both cycles spent, so PR #424 was CLOSED unmerged rather than forced. **Nothing regressed: main
+is unchanged and the scorecard's finding stays correctly open. Merging a fix that CLAIMS to close
+a hole while a published hash still collides would have been strictly worse than not merging.**
+The transferable lesson is the root cause, not the clauses: **the defect was conditioning a DATA
+field on ENGINE CONFIG.** Every other `HistoricalMarket` field is fingerprinted unconditionally;
+`category` was the sole conditional one, which is exactly what kept being breakable. The
+pre-verified unconditional fix (plus its four replacement hash pins) is filed as ROADMAP C6.
+**When a fix has been broken twice at successive boundaries, stop widening and fix the shape.**
+
+**Reviewer findings this run (all fixed within the ≤2-cycle bound):** a fabricated `ROADMAP B2`
+citation (B2 is the crowd-calibration eval, unrelated to pricer calibration — a numbered citation
+that does not cover the referenced work is worse than none); cap-active regression tests that
+produced ZERO trades (14-day fixtures vs `train_min_days=28`), so they pinned the fix without
+demonstrating the defect and one PnL assertion was literally `0.0 == 0.0`; a duplicate-timestamp
+test fixture neutralized by `clean_ticks`'s dedup while its docstring claimed to cover that case;
+and a skip message naming the wrong path. **Pattern: four of the five review findings this run
+were tests or comments that CLAIMED more than they checked — not broken production code.** That
+is the failure mode this repo's grading actually catches, and it is worth budgeting review
+attention for specifically.
