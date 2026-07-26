@@ -140,9 +140,10 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
       level, no result in this family means much — this ranks AHEAD of any new alpha.**
 - [ ] C9. **F10 has no axis for SINGLE-OBSERVATION dominance (filed 2026-07-26 by the EXP-006b
       audit).** F10 gates category / horizon / confidence / time / top-MARKET concentration,
-      but nothing catches "one trade of 141 carries the result". On corrected EXP-006b, dropping
-      the single largest trade moved the 0.15 cell from `significant_positive` to
-      indistinguishable, and the top 10 of ~150 trades carried the entire result in both cells —
+      but nothing catches "a handful of trades carry the whole result". On corrected EXP-006b,
+      dropping the TWO largest trades moved the 0.15 cell from `significant_positive` to
+      `indistinguishable_from_zero` (drop-1 survives with a CI floor of just +$21.28; drop-2
+      gives CI [-289.60, +2955.27]), and the top 10 of ~140 trades carried the entire result —
       while the existing top-market check PASSED (0.4715 vs a 0.50 threshold, and it passed
       *because of* a leaked trade). A drop-top-k or winsorized-PnL check would have flagged both
       cells immediately, and would have flagged EXP-006 too. Cheap, offline, and it makes every

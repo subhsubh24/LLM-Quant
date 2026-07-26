@@ -4295,17 +4295,19 @@ the audit correctly called out as making a two-year trickle read like a result.
 **Three further corrections the auditors forced on my own write-up** (recorded because being
 wrong in a specific, checkable way is the useful part):
 1. **"Both cells" was ~ONE test**, not two: the 0.20 cell's markets are a 100% subset of the
-   0.15 cell's and 90 trades are byte-identical across them, carrying 99.8% of the 0.15 total.
+   0.15 cell's, and **83 of the 0.15 cell's 141 trades are identical in the 0.20 cell** (same
+   market, same confirm instant, same PnL to 1e-9), carrying **96.0%** of the 0.15 total.
    Any future pre-registration in this family must pick NON-NESTED cells.
 2. **There is no "high-threshold corner."** A threshold sweep on this corpus returns
-   `significant_positive` at 0.10, 0.12, 0.13, 0.14, 0.16, 0.17, 0.18 and 0.22 — including the
-   0.10 default that was REFUTED on the old corpus. Whatever differs, differs at the corpus
+   `significant_positive` at 0.10, 0.12, 0.13, 0.14, 0.16, 0.17, 0.18 and 0.19 — including the
+   0.10 default that was REFUTED on the old corpus (0.22 is `insufficient_data`, N=93). Whatever differs, differs at the corpus
    level, not at the threshold.
 3. **Event correlation was NOT the main risk.** I had named it "the single most likely way this
    result is wrong". Measured: 152 trades span 110–113 event clusters but the design effect is
    only **1.11–1.15**, and every clustering (event/week/month/quarter) keeps the CI above zero.
-   The real fragility is **single-observation dominance** — dropping ONE trade of 141 moves the
-   0.15 cell to indistinguishable, and the top 10 of ~150 carry the whole result. F10 has no
+   The real fragility is **single-observation dominance** — dropping the TWO largest trades
+   moves the 0.15 cell to indistinguishable (drop-1 survives on a +$21.28 CI floor), and the
+   top 10 of ~140 carry the whole result. F10 has no
    axis for this (ROADMAP C9). My named next-step ordering was wrong and is corrected.
 
 **What survived the audit:** spike detection is genuinely causal (prefix-only re-detection
