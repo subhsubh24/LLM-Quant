@@ -4229,3 +4229,175 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
   (all 187 frozen records `liquidity: null`).
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
   tested mechanism. Real-money brake untouched (no order, no gate flip, no cap change).
+
+## 2026-07-26 — Research Run 31: EXP-009 continuation (KXECONSTATU3 closed structurally-infeasible, pivoted to KXPAYROLLS — a small but cluster-robust reliability signal) + a B8 step (ii) historical co-listed BTC/ETH match-count feasibility probe (0 mechanic-confirmed pairs). RECOMMEND-only, no code shipped, no ROADMAP steer.
+
+- **Orientation.** Read RESEARCH_MEMORY.md/RESEARCH_PLAYBOOK.md/ROADMAP.md/VISION.md/docs/BUSINESS_CASE.md/GROWTH_STATUS.md first. `git log` HEAD is `44900c6` (2026-07-25 bookkeeping — EXP-011 honest null + 7 quality fixes, not new alpha work). No commits since Research Run 30 (yesterday). Binding constraint unchanged since 07-25: bucket-calibration (EXP-002/003/005, cost-model-robust-refuted; EXP-011's second cap parameterization reconfirms) and EXP-006 fade-the-spike both stay REFUTED; B8 stays the standing highest-priority track, blocked on step (ii); EXP-009 is `proposed`, diagnostic-only.
+- **Egress check (self-validated, not assumed): open.** Direct `curl` from this run's own environment to `gamma-api.polymarket.com`, `clob.polymarket.com`, `api.elections.kalshi.com`, and `huggingface.co` all returned HTTP 200 — per the standing "re-probe before assuming owner-gated" instruction, this run executed two real measurements against unmodified repo modules.
+
+### Finding 1 — EXP-009: KXECONSTATU3 closed (structurally infeasible), pivoted to KXPAYROLLS
+
+Run 30's filed NEXT step named `KXECONSTATU3` (Kalshi's monthly unemployment-**rate** "exactly X%"
+strike ladder — the series NBER w34702's strongest calibration-mispricing claim was actually about,
+not the weekly `KXJOBLESS` threshold series Run 30 tested) as the next series for the SAME
+reliability/Murphy decomposition. Fetched it first, via the unmodified `KalshiHistoryFetcher`
+(`fetch_resolved_markets(historical=True, series_ticker="KXECONSTATU3")`): **only 115 resolved
+markets across 5 distinct monthly release-events** (event key = `ticker.split("-")[:2]`, e.g.
+`KXECONSTATU3-26APR`) exist in Kalshi's own historical tier for this series — a full order of
+magnitude below even a loose diagnostic floor, let alone the pre-registered ≥100-event backtest
+floor. **This is a genuine, decisive CLOSE of the originally-named series** (Run 28's original
+depth-probe already logged "KXECONSTATU3 5 events/Dec-2025" for the LIVE tier; this run confirms
+the deep historical tier adds nothing — the series itself only has 5 resolved monthly releases in
+Kalshi's history, presumably a recently-launched contract, not a fetch-depth gap).
+
+**PRE-REGISTERED pivot, disclosed as a deviation (not a silent substitution).** Before running
+anything, switched the target to `KXPAYROLLS` — Kalshi's monthly non-farm-payrolls **threshold**
+ladder ("above X jobs added"), which (unlike `KXECONSTATU3`'s single-point "exactly X%" ladder,
+where ~22 of 23 sibling markets per event are near-certain longshots by construction) spans a real
+range of price levels per event, much closer in shape to the Polymarket calibration-bucket tests
+already run (EXP-002/003/005). Live depth check: **319 resolved markets / 38 distinct monthly
+release-events back to April 2023.**
+
+Method: `decision_lead=5 days` (a live spot-check found this series' markets typically open ~3
+weeks before close — 5 days is comfortably before late-life pinning, matching the scale of prior
+choices without being tuned after seeing results), `n_bins=5` (matching Run 30's KXJOBLESS
+decomposition for comparability), paced fetch (1.3s/request + 1 retry on transient errors — the
+same 429-avoidance method Run 30's KXJOBLESS re-run used) → **283 leakage-safe records** (36
+skipped, no qualifying pre-resolution tick). Event key parsed from the `ticker` field the dataclass
+already exposes — **no repo module modified**; a scratch script only.
+
+**Result.** `base_rate(YES) = 0.5795`. `crowd_brier = 0.1550` **≪** `base_rate_brier = 0.2437` — the
+crowd massively beats a naive constant-base-rate guess, but this is expected and NOT itself
+informative: unlike `KXJOBLESS`'s near-50/50 single-question shape, this ladder mixes deep-ITM
+(price → 1), deep-OTM (price → 0), and near-the-money contracts within one event, so ANY
+price-sensitive predictor beats a flat guess trivially. Murphy decomposition: **reliability =
+0.0045** (~2.9% of total Brier — SMALLER, as a fraction, than `KXJOBLESS`'s 8%), resolution =
+0.0890, uncertainty = 0.2437 (still the dominant term). Per-bin table:
+
+| bucket | n | pred_mean | emp_freq | gap |
+|---|---:|---:|---:|---:|
+| [0.0,0.2) | 63 | 0.095 | 0.127 | −0.032 |
+| [0.2,0.4) | 44 | 0.295 | 0.364 | −0.068 |
+| [0.4,0.6) | 37 | 0.494 | 0.649 | **−0.154** |
+| [0.6,0.8) | 40 | 0.700 | 0.700 | −0.000 |
+| [0.8,1.0) | 99 | 0.924 | 0.889 | +0.036 |
+
+**Unlike `KXJOBLESS`'s mixed-sign gaps, this is DIRECTIONALLY CONSISTENT**: the crowd underprices
+YES (predicted < empirical) in 4 of 5 bins, largest in the near-the-money [0.4,0.6) bucket, with
+only the largest-n extreme bin flipping sign (and only slightly). An **event-clustered bootstrap**
+(B=2000, resampling the **38 release-events** with replacement — NOT the 283 individual-market rows
+— the standing correlated-strike-ladder caution this file has repeated since Run 22, since ~7.4
+threshold markets per event share the same underlying payroll number and are not independent
+draws) gives a reliability **95% CI = [0.0011, 0.0303] — EXCLUDES ZERO**.
+
+**Honest interpretation.** This is a small but cluster-robust-detectable, directionally-consistent
+miscalibration signal on `KXPAYROLLS` — genuinely more promising than `KXJOBLESS`'s tempering read
+(mixed-sign gaps, reliability not separately CI-tested there). BUT: (a) a nonzero **in-sample**
+reliability term is NOT a tradeable edge — it is a bin-gap description of the SAME historical
+records used to compute the bins, not an out-of-sample fit; the bucket-calibration mechanism that
+produced apparently-promising in-sample gaps has now been refuted 4× on Polymarket (EXP-002/003/
+005, all 4 corpora) precisely because in-sample bucket means do not survive a chronological
+train/test split. (b) N=38 independent release-events is still well below the pre-registered
+≥100-event floor for any significance-gated backtest. (c) Disclosed arithmetic note: the Murphy
+identity check (`reliability − resolution + uncertainty`) evaluates to 0.1592, vs. the true
+`crowd_brier` of 0.1550 — a ~0.004 residual from 5-bin coarseness (within-bin prediction variance
+the binned decomposition does not capture), not a computation error; worth flagging since finer
+binning would shrink but not eliminate this gap.
+
+**Self-validation.** Not a frozen/committed corpus — a re-run could return a different N (as Run
+30's 29-vs-67 KXJOBLESS gap already demonstrated for this same fetch method). Reported as a live
+diagnostic, not a committed artifact. The known illiquid-book fidelity caveat (one-sided book falls
+back to the ask, biased high) is inherited unchanged from `KalshiHistoryFetcher`'s own docstring.
+
+**NEXT (pre-registered, do not p-hack):** `KXECONSTATU3` is DROPPED from any future combination (too
+thin to contribute). `KXPAYROLLS` (38 events) + `KXJOBLESS` (67 events, Run 30) together clear
+105 independent events — above the ≥100 floor — as the combined corpus for an eventual
+chronological-split `walk_forward` + F10/F11 test, PROVIDED the two series' differing question
+shapes (single clean market vs. threshold ladder) are disclosed, not silently pooled as if
+homogeneous. Not built this run.
+
+### Finding 2 — B8 step (ii): a historical co-listed BTC/ETH match-count feasibility probe (0 mechanic-confirmed pairs)
+
+ROADMAP B8's own DECISION COROLLARY states: do not build the dual-venue OOS harness until a
+non-trivial co-listed MATCH COUNT is confirmed on RESOLVED data — building it against an unconfirmed
+universe would be a speculative skeleton. This run ran exactly that count-only probe, reusing
+`cross_venue_matcher.find_cross_venue_matches` / `extract_threshold_from_structured_strike` /
+`classify_resolution_mechanic` **UNMODIFIED** (no repo module changed). Since `match_markets`'s
+match DECISION never reads price (price only decorates the returned `CrossVenueMatch`), resolved
+records from both venues were wrapped in transient `Market`/`Outcome` objects (constructed in the
+scratch script only) carrying a placeholder 0.5/0.5 Yes/No price plus each venue's real
+question/ticker/end_date/floor_strike/cap_strike/strike_type fields — enough for the matcher's
+strike/window/content/mechanic gates, which is all this probe measures.
+
+- **Kalshi side:** `KalshiHistoryFetcher.fetch_resolved_markets(historical=True)` across the SAME 8
+  crypto series the existing LIVE `scripts/b8_match_probe.py` already targets (`KXBTCD`, `KXBTC`,
+  `KXETHD`, `KXETH`, `KXBTCMAXY`, `KXETHMAXY`, `KXBTCMINY`, `KXETHMINY`) → **8,083 resolved
+  records**. Disclosed cap: 4 of the 8 series (`KXBTCD`/`KXBTC`/`KXETHD`/`KXETH`) hit exactly
+  `limit(200) × max_pages(10) = 2,000` — a SAMPLING CEILING from this probe's own `max_pages`
+  choice, not the venue's true depth; the real resolved history for those 4 series is at least
+  2,000, likely more. Not re-fetched deeper this run (time-boxed).
+- **Polymarket side:** `PolymarketHistoryFetcher.fetch_resolved_markets(order="volumeNum",
+  max_pages=10)` → 1,000 resolved markets total, of which **only 34** are `category=="crypto"` AND
+  mention bitcoin/btc/ethereum/eth in the question (a PRE-REGISTERED filter, not tuned after seeing
+  the count). This is itself a bounded-sampling read (top-1000-by-volume, not full history), not
+  Polymarket's true all-time BTC/ETH resolved count.
+- **Result:** `find_cross_venue_matches` returned **4 candidate pairs — all 4 the SAME weak
+  text-only match** ("Ethereum all time high in 2024?" vs. "How high will Ethereum get this
+  year?", repeated across 4 near-identical Kalshi tickers), with **no numeric threshold on either
+  side** (both are open-ended superlatives, correctly not strike-matched), coherence capped at
+  0.30 (below the 0.5 trade bar), and mechanic **unclassified** on one side (unknown/touch — not
+  mechanic-confirmed). **Zero mechanic-confirmed pairs. Zero threshold-matched pairs.** This is the
+  first count run at real HISTORICAL scale on both venues (vs. the existing LIVE-only
+  `b8_match_probe.py`, which found 1 candidate pair on a much thinner live snapshot — 823 Kalshi
+  crypto markets vs. ~94 Polymarket).
+- **Why this matters, honestly.** Kalshi's crypto data access is now excellent (8,083+ resolved
+  records reachable, not remotely the blocker). Polymarket's historically-TRADED BTC/ETH universe,
+  under this sampling method, is genuinely thin — most Polymarket crypto markets that DO exist are
+  open-ended superlatives ("how high will X get") or single flagship strikes, not the dense
+  per-strike ladders Kalshi runs, so even a much larger Polymarket pull may not manufacture many
+  more STRIKE-matched (as opposed to text-only) candidates. This reinforces, with the first REAL
+  resolved-history count rather than a live snapshot, the ROADMAP's own standing read that the B8
+  binding blocker is co-listed-universe availability, not data access.
+- **Disclosed limitation, not hidden:** both pulls were BOUNDED by this probe's own
+  `max_pages`/`order` choices. This probe LOWER-BOUNDS the current confirmed-thin read; it does not
+  prove a hard ceiling on either venue's true resolved history. A deeper or differently-ordered
+  Polymarket pull (e.g. paging further, or a crypto-specific `tag_id` if one is ever resolved from
+  `GET /tags`) is the concrete next step before concluding BTC/ETH co-listing is a dead end for B8.
+  A non-crypto co-listed category (Fed-rate-decision or election markets, where both venues run
+  dense ladders) is untested and may be a more promising co-listed universe than BTC/ETH
+  specifically — also untested this run, filed as an alternative avenue.
+
+### External literature sweep (2 WebSearch passes, both fail-closed on primary verification)
+
+One potentially on-thesis new working paper surfaced: **SSRN 6905683, "From Forecasting Tool to
+Financial Asset: Evidence of Persistent Arbitrage in Prediction Markets" (David Krause, Marquette
+University, dated 2026-06-09)** — a WebSearch synthesis (not a direct fetch) reports a claimed
+4.87% mean cross-venue (Kalshi/Polymarket) arbitrage profit after fees on 89.1% of trading days for
+one legislative-bill event (the Digital Asset Market Clarity Act) plus a July-2026 FOMC-meeting
+event, and a general claim that most cross-platform discrepancies close within 4–18 minutes.
+**Both the SSRN abstract page and its PDF returned HTTP 403 (bot-gated) to direct WebFetch** — per
+the standing FAIL-CLOSED discipline (the same class of failure Run 24/25/28 hit on the Kalshi fee
+PDF and NBER FEDS PDF), this is reported ONLY as an unverified, WebSearch-synthesized directional
+claim — 2 events studied total even by its own claimed scope, no methodology self-verified — and is
+NOT relied on as evidence for anything in this entry. If ever prioritized, retry from a
+non-bot-gated path (e.g. the owner's own authenticated SSRN session). No other genuinely new primary
+source surfaced this run; general "prediction market arbitrage" queries otherwise returned
+SEO/marketing-grade content (StartupHub.ai "N opportunities live now" listicles, arbitrage-guide
+blogs) consistent with prior runs' finding on this identical query shape, not logged as evidence.
+
+- Verdict: **edge-not-proven.** EXP-009's KXECONSTATU3 close is a genuine, decisive infeasibility
+  finding (not a temper); its KXPAYROLLS pivot is a modestly more promising, still in-sample,
+  still sub-floor-N diagnostic. The B8 probe is a real, disclosed, decisive-enough NULL at
+  historical scale for the specific BTC/ETH sampling tested. Both are honestly reported as such
+  with concrete next steps filed — per the value bar, this clears it.
+- **NEXT (pre-registered, do not p-hack):** (1) B8 — either a deeper/differently-ordered Polymarket
+  pull to confirm the BTC/ETH thinness is real and not a sampling artifact, OR pivot the historical
+  co-listed probe to a non-crypto category (Fed-rate-decisions, elections) where both venues run
+  denser ladders. (2) EXP-009 — combine KXPAYROLLS (38 events) + KXJOBLESS (67 events, Run 30) for
+  a chronological-split walk_forward + F10/F11 test once ≥100 combined events are confirmed stable,
+  disclosing the two series' differing question shapes. (3) The SSRN 6905683 fee/arbitrage claim
+  stays unverified — low priority to re-attempt given the repeated bot-gating pattern, unless the
+  owner has an authenticated path.
+- Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
+  tested mechanism. Real-money brake untouched (no order, no gate flip, no cap change, no capital,
+  no live-trading surface touched).
