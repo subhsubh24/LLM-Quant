@@ -57,6 +57,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -124,6 +125,40 @@ def _build_series(
     return [tick for tick in raw if tick["t"] < cutoff_ts]
 
 
+def _load_exclusions(path: Optional[str], ap: argparse.ArgumentParser) -> set[str]:
+    """Read a market-id exclusion set from a JSON list OR any JSON object's keys.
+
+    Accepting an object's keys means a prior corpus's ``--cats-out`` sidecar
+    (``{market_id: category}``) is a valid exclusion file with no reshaping, which is the
+    common case and removes a step where a hand-built list could silently miss ids.
+
+    Fails LOUD on a missing/unparseable/empty file. A silently-empty exclusion set is the
+    dangerous failure here: the run would look like a fresh OOS fetch while actually
+    re-selecting the same markets, and the resulting "out-of-sample" verdict would be a
+    re-test of in-sample data.
+    """
+    if not path:
+        return set()
+    p = Path(path)
+    if not p.is_file():
+        ap.error(f"--exclude-market-ids: no such file: {path}")
+    try:
+        blob = json.loads(p.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        ap.error(f"--exclude-market-ids: unreadable JSON in {path}: {type(e).__name__}")
+    if isinstance(blob, dict):
+        ids = {str(k) for k in blob}
+    elif isinstance(blob, list):
+        ids = {str(x) for x in blob}
+    else:
+        ap.error(f"--exclude-market-ids: {path} must be a JSON list or object, got "
+                 f"{type(blob).__name__}")
+    if not ids:
+        ap.error(f"--exclude-market-ids: {path} yielded ZERO ids — refusing to run, because "
+                 "an empty exclusion set silently produces an overlapping corpus")
+    return ids
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="path for the {market_id:[{t,p}]} tick JSON")
@@ -139,6 +174,17 @@ def main() -> int:
     ap.add_argument("--min-ticks", type=int, default=24,
                     help="drop markets with fewer than this many pre-settlement ticks "
                          "(too thin for hourly spike detection)")
+    ap.add_argument("--tag-id", type=int, default=POLITICS_TAG_ID,
+                    help="Gamma tag id for the universe (default 2 = Politics)")
+    ap.add_argument("--exclude-market-ids",
+                    help="path to a JSON list of market ids — or any JSON object whose KEYS "
+                         "are market ids, so a prior run's --cats-out sidecar can be passed "
+                         "directly. Excluded markets are dropped from the universe BEFORE any "
+                         "tick is fetched. This is the ONLY mechanism that makes a second "
+                         "corpus structurally DISJOINT from a first: the volumeNum ranking of "
+                         "resolved markets is near-stable, so re-fetching with the same "
+                         "parameters would silently re-select most of the same markets and a "
+                         "'fresh OOS' run would be re-testing already-tested data.")
     ap.add_argument("--stamp", default="unstamped", help="UTC date string for provenance")
     args = ap.parse_args()
 
@@ -151,14 +197,28 @@ def main() -> int:
                  "reversal horizon so no fade exit can read a settlement pin)")
     if args.window_cap_days <= 0:
         ap.error("--window-cap-days must be positive")
+    excluded = _load_exclusions(args.exclude_market_ids, ap)
     fetcher = PolymarketHistoryFetcher()
 
-    print(f"[1/3] fetching resolved Politics markets (tag_id={POLITICS_TAG_ID}, "
+    print(f"[1/3] fetching resolved markets (tag_id={args.tag_id}, "
           f"order=volumeNum, max_pages={args.max_pages}) ...", file=sys.stderr)
     markets = fetcher.fetch_resolved_markets(
-        limit=100, max_pages=args.max_pages, order="volumeNum", tag_id=POLITICS_TAG_ID,
+        limit=100, max_pages=args.max_pages, order="volumeNum", tag_id=args.tag_id,
     )
-    print(f"      got {len(markets)} resolved binary Politics markets", file=sys.stderr)
+    n_fetched = len(markets)
+    if excluded:
+        markets = [m for m in markets if str(m.market_id) not in excluded]
+        print(f"      excluded {n_fetched - len(markets)} already-tested markets "
+              f"({len(excluded)} ids supplied)", file=sys.stderr)
+        if not markets:
+            # Fail LOUD rather than silently writing an empty "fresh" corpus, which would
+            # then be reported as an honest null when in fact nothing was tested.
+            print("FATAL: every fetched market was excluded — the universe is exhausted at "
+                  "this --max-pages. Raise --max-pages or the corpus is not obtainable.",
+                  file=sys.stderr)
+            return 2
+    print(f"      got {len(markets)} resolved binary markets (of {n_fetched} fetched)",
+          file=sys.stderr)
 
     ticks_by_market: dict[str, list[dict]] = {}
     cats: dict[str, str] = {}
@@ -194,8 +254,13 @@ def main() -> int:
             "fetched_utc": args.stamp,
             "source": "Polymarket Gamma + CLOB (public, no credentials)",
             "universe": {
-                "tag_id": POLITICS_TAG_ID, "tag": "Politics", "order": "volumeNum",
+                "tag_id": args.tag_id,
+                "tag": "Politics" if args.tag_id == POLITICS_TAG_ID else f"tag_{args.tag_id}",
+                "order": "volumeNum",
                 "max_pages": args.max_pages, "resolved_binary_only": True,
+                "excluded_market_ids_source": args.exclude_market_ids,
+                "excluded_market_ids_count": len(excluded),
+                "markets_excluded_from_universe": n_fetched - len(markets),
             },
             "ticks": {
                 "fidelity_min": FIDELITY_MIN, "chunk_days": CHUNK_DAYS,
@@ -203,7 +268,8 @@ def main() -> int:
                 "leakage_margin_hours": args.leakage_margin_hours,
                 "min_ticks": args.min_ticks,
             },
-            "markets_fetched": len(markets),
+            "markets_fetched": n_fetched,
+            "markets_after_exclusion": len(markets),
             "markets_kept": len(ticks_by_market),
             "markets_dropped_thin": n_thin,
             "total_ticks": total_ticks,
