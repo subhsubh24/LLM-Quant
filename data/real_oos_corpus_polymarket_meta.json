@@ -30,7 +30,9 @@
   "headline_result": {
     "strategy": "CalibrationBucketStrategy (B4a / EXP-002), cap-free lane",
     "seed": 42,
-    "seed_hash": "79a4cca4b966138f",
+    "seed_hash": "77ce67d0eacc552e",
+    "seed_hash_before_c6": "79a4cca4b966138f",
+    "seed_hash_migration": "ROADMAP C6 (2026-07-26): _seed_hash now fingerprints market_categories UNCONDITIONALLY. The RESULT below is unchanged (same 39 trades, same -$3228.02, same F11 verdict and CI) — only the fingerprint's input set widened. The pre-C6 hash 79a4cca4b966138f was a COLLIDING hash: it also covered 42tr/-$3540.44, 43tr/-$3895.06 and 42tr/-$3537.67 under different category labelings of this same corpus. See docs/autonomous-loop/SEED_HASH_CATEGORY_MIGRATION.md.",
     "trades": 39,
     "net_pnl_usd": -3228.02,
     "f11_verdict": "significant_negative",
