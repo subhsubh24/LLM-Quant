@@ -60,6 +60,10 @@ DEFAULT_SPIKE_THRESHOLD: float = 0.10
 DEFAULT_WINDOW_SECONDS: int = 3600
 # Forward horizon over which reversal is measured, in seconds. 86400 = 24h.
 DEFAULT_REVERSAL_HORIZON_SECONDS: int = 86400
+# Slack allowed when checking that a series actually COVERS the forward horizon. An hourly
+# series will often land a few minutes short of an exact horizon multiple; one hour of
+# tolerance accepts that without accepting an exit that is materially early.
+DEFAULT_HORIZON_TOLERANCE_SECONDS: int = 3600
 
 # A prediction-market price is a probability. Ticks outside [PRICE_MIN, PRICE_MAX]
 # (or non-finite) are corrupt and are DROPPED, never clamped (clamping would
@@ -335,6 +339,8 @@ def label_reversal(
     spike: SpikeEvent,
     *,
     horizon_seconds: int = DEFAULT_REVERSAL_HORIZON_SECONDS,
+    require_full_horizon: bool = True,
+    horizon_tolerance_seconds: int = DEFAULT_HORIZON_TOLERANCE_SECONDS,
 ) -> Optional[ReversalOutcome]:
     """Label how much of ``spike`` reverted over the forward ``horizon_seconds``.
 
@@ -345,6 +351,20 @@ def label_reversal(
     Returns ``None`` if no tick exists strictly after ``confirm_time`` within the
     horizon (honest "cannot label" — never fabricates a future price), or if the
     spike magnitude is zero (no move to revert).
+
+    HORIZON COVERAGE (``require_full_horizon``, default True). A spike near the END of a
+    series used to be labelled against whatever the last available tick happened to be, at
+    whatever holding period that implied — a 2-hour hold silently scored as a 24-hour trade.
+    That is not merely imprecise: the last tick of a resolved market's series sits adjacent
+    to settlement, so an end-of-data exit tends to book the venue's terminal pinned quote
+    (0.9995 / 0.0005) as "reversion". An adversarial audit of EXP-006b traced 39% of the
+    reported net PnL to seven trades exiting on the series' final tick.
+
+    With ``require_full_horizon`` the label is REFUSED unless the data actually extends to
+    ``confirm_time + horizon_seconds`` (within ``horizon_tolerance_seconds``, so an hourly
+    series is not rejected for landing a few minutes short of an exact multiple). Refusing
+    to label is the honest outcome — it costs sample size, and a fabricated holding period
+    costs correctness.
 
     Raises ``ValueError`` on a non-positive ``horizon_seconds``.
     """
@@ -366,6 +386,10 @@ def label_reversal(
         future = tk  # keep advancing to the last tick within the horizon
     if future is None:
         return None
+    if require_full_horizon and future.t < horizon_end - horizon_tolerance_seconds:
+        # The series ends before the horizon does. We cannot know the price at the exit we
+        # would actually have traded, so we decline to invent one.
+        return None
 
     subsequent = future.p - spike.confirm_price
     reversal_fraction = -subsequent / move
@@ -383,16 +407,21 @@ def label_reversals(
     spikes: Sequence[SpikeEvent],
     *,
     horizon_seconds: int = DEFAULT_REVERSAL_HORIZON_SECONDS,
+    require_full_horizon: bool = True,
 ) -> List[ReversalOutcome]:
     """Label every spike, DROPPING those with no qualifying forward tick.
 
-    Convenience batch wrapper over :func:`label_reversal`. The returned list is in
-    spike order but may be shorter than ``spikes`` (un-labelable spikes are
-    honestly omitted rather than filled with a placeholder).
+    Convenience batch wrapper over :func:`label_reversal`; ``require_full_horizon`` is
+    forwarded unchanged. The returned list is in spike order but may be shorter than
+    ``spikes`` (un-labelable spikes are honestly omitted rather than filled with a
+    placeholder).
     """
     out: List[ReversalOutcome] = []
     for sp in spikes:
-        outcome = label_reversal(ticks, sp, horizon_seconds=horizon_seconds)
+        outcome = label_reversal(
+            ticks, sp, horizon_seconds=horizon_seconds,
+            require_full_horizon=require_full_horizon,
+        )
         if outcome is not None:
             out.append(outcome)
     return out

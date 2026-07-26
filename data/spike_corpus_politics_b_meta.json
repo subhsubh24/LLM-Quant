@@ -1,0 +1,34 @@
+{
+  "fetched_utc": "2026-07-26",
+  "source": "Polymarket Gamma + CLOB (public, no credentials)",
+  "universe": {
+    "tag_id": 2,
+    "tag": "Politics",
+    "order": "volumeNum",
+    "max_pages": 8,
+    "resolved_binary_only": true,
+    "excluded_market_ids_source": "data/spike_corpus_politics_cats.json",
+    "excluded_market_ids_count": 255,
+    "markets_excluded_from_universe": 255
+  },
+  "ticks": {
+    "fidelity_min": 60,
+    "chunk_days": 15,
+    "window_cap_days": 120,
+    "leakage_margin_hours": 24,
+    "min_ticks": 24
+  },
+  "markets_fetched": 800,
+  "markets_after_exclusion": 545,
+  "markets_kept": 438,
+  "markets_dropped_thin": 106,
+  "total_ticks": 711086,
+  "disclosures": [
+    "liquidity-selection bias (volumeNum)",
+    "settled-only survivorship bias",
+    "final-window sampling bias (window_cap_days)",
+    "cross-market same-event correlation NOT removed",
+    "ticks truncated strictly before ACTUAL settlement (min of closedTime/umaEndDate/endDate) minus leakage_margin \u2014 no settlement pin. NOTE: the original 2026-07-26 fetch anchored on endDate (the SCHEDULED end) and this disclosure was FALSE for 98 of 439 markets; the corpus has been re-truncated at true settlement and the fetcher fixed. Per-market settlement instants used are in data/spike_corpus_politics_b_close_times.json."
+  ],
+  "retruncated_utc": "2026-07-26"
+}

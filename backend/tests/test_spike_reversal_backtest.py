@@ -25,9 +25,14 @@ from backend.app.prediction_markets.spike_reversal_backtest import (
 # One market = 3 ticks: baseline, confirm (>= threshold move within the window), and a
 # forward tick inside the horizon. Timestamps are staggered per market so trades spread
 # across weeks (no time-window concentration in the "validated" fixture).
-_STAGGER_S = 3 * 86400          # 3 days between markets
+_STAGGER_S = 3 * 86400          # 3 days between markets (> the 24h series span)
 _CONFIRM_DT = 1800             # confirm 30min after baseline (inside the 3600 window)
-_HORIZON_HIT_DT = 5400         # forward tick 90min after baseline (inside the 24h horizon)
+# Forward tick placed AT the 24h horizon measured from CONFIRM (not 90min after baseline).
+# The engine now requires the series to actually COVER the horizon before it will book a
+# trade (`require_full_horizon`, added after an adversarial audit found end-of-data exits
+# booking settlement-adjacent prices as "reversion"). A fixture that stops 90 minutes in
+# no longer produces trades — and a fixture that silently produces zero trades pins nothing.
+_HORIZON_HIT_DT = _CONFIRM_DT + 86400
 _MOVE = 0.15                   # spike magnitude (> the 0.10 default threshold)
 _REVERT = 0.075                # how far it reverts by the forward tick (half the move)
 
@@ -51,6 +56,10 @@ def _reverting_market(base_t: int, band: float, direction: str) -> list[dict]:
         {"t": base_t, "p": round(baseline, 4)},
         {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
         {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
+        # Covers a SWEPT horizon up to 3 days. Out of range (and inert) for the default
+        # 24h horizon, but without it a swept-horizon test yields ZERO trades under
+        # `require_full_horizon` and would silently assert nothing.
+        {"t": base_t + _CONFIRM_DT + 3 * 86400, "p": round(forward, 4)},
     ]
 
 
@@ -68,6 +77,10 @@ def _momentum_market(base_t: int, band: float, direction: str) -> list[dict]:
         {"t": base_t, "p": round(baseline, 4)},
         {"t": base_t + _CONFIRM_DT, "p": round(confirm, 4)},
         {"t": base_t + _HORIZON_HIT_DT, "p": round(forward, 4)},
+        # Covers a SWEPT horizon up to 3 days. Out of range (and inert) for the default
+        # 24h horizon, but without it a swept-horizon test yields ZERO trades under
+        # `require_full_horizon` and would silently assert nothing.
+        {"t": base_t + _CONFIRM_DT + 3 * 86400, "p": round(forward, 4)},
     ]
 
 
@@ -209,7 +222,10 @@ def test_max_trades_per_market_cap():
         {"t": 1000, "p": 0.65},        # UP spike #1 confirms
         {"t": 2000, "p": 0.50},        # >=0.10 retrace -> closes #1, opens DOWN spike #2
         {"t": 3000, "p": 0.55},        # forward tick for both
-        {"t": 90000, "p": 0.55},       # ensure a labelable forward tick within horizon
+        # A tick AT each spike's own 24h horizon end (confirm 1000 -> 87400,
+        # confirm 2000 -> 88400) so `require_full_horizon` can label both legs.
+        {"t": 87400, "p": 0.55},
+        {"t": 88400, "p": 0.55},
     ]
     corpus = {"multi": multi}
     one = backtest_fade_the_spike(corpus, config=FadeSpikeConfig(max_trades_per_market=1))
@@ -581,3 +597,42 @@ def test_spike_magnitude_recorded_on_every_trade():
     for t in res.trades:
         assert t.spike_magnitude > 0.0
         assert abs(t.spike_magnitude - _MOVE) < 1e-6
+
+
+def test_engine_refuses_a_trade_whose_horizon_is_not_covered_by_data():
+    """ENGINE-LEVEL coverage for `require_full_horizon` (a re-review proved the call site
+    at `spike_reversal_backtest` had NONE: flipping it to False left all 38 tests green,
+    so the actual production wiring that fixed the leakage was untested).
+
+    A market whose ticks stop shortly after the spike must produce NO trade. Before the
+    guard it produced one, exiting at the last available tick — which on a resolved market
+    sits adjacent to settlement, so the trade booked the terminal pinned quote as
+    "reversion". That path carried 39% of EXP-006b's raw net PnL.
+    """
+    truncated = {
+        "m0": [
+            {"t": 0, "p": 0.50},
+            {"t": 1800, "p": 0.65},     # spike confirms
+            {"t": 5400, "p": 0.9995},   # last tick, ~1h later — a settlement-shaped print
+        ]
+    }
+    res = backtest_fade_the_spike(truncated)
+    assert res.n_spikes_detected >= 1, "fixture must detect a spike, else this pins nothing"
+    assert res.n_trades == 0, (
+        "the engine must REFUSE a trade whose 24h horizon is not covered by data — "
+        "exiting at the last available tick books a settlement-adjacent price as reversion"
+    )
+
+
+def test_engine_takes_the_trade_once_the_horizon_is_covered():
+    """The complement, so the guard cannot pass by simply refusing everything."""
+    covered = {
+        "m0": [
+            {"t": 0, "p": 0.50},
+            {"t": 1800, "p": 0.65},
+            {"t": 5400, "p": 0.60},
+            {"t": 1800 + 86400, "p": 0.58},   # a tick AT the horizon
+        ]
+    }
+    res = backtest_fade_the_spike(covered)
+    assert res.n_trades == 1

@@ -1,5 +1,21 @@
 # EXP-006 fade-the-spike — pre-registered config ROBUSTNESS SURFACE (2026-07-20)
 
+> ⚠️ **STALE AS OF 2026-07-26 — the per-cell numbers below no longer reproduce.** The
+> EXP-006b audit fixed two real defects in the shared engine: `resolution_time` now anchors on
+> ACTUAL settlement (`min(closedTime, umaEndDate, endDate)`) rather than the scheduled
+> `endDate`, and reversal labeling now REFUSES to label a spike whose forward horizon is not
+> covered by data (`require_full_horizon`). Both change which spikes are tradeable, so
+> **44 of the 60 cells below now report a different trade count** (e.g. the default cell:
+> this table says N=108 / +$285, a post-fix re-run gives N=103 / +$477). The
+> "Reproduce (deterministic)" instruction further down is therefore **false for most rows**
+> until this surface is re-run.
+>
+> **The family verdict is UNCHANGED**: a post-fix re-run still returns `FAMILY-NULL-STRONG`
+> with 0 of 60 cells validating. Leakage of the shape that was fixed inflates PnL *upward*,
+> so this refutation stands a fortiori — but the individual numbers are stale and are flagged
+> rather than silently left to look reproducible. Re-running this surface is filed as a named
+> next step in `EXP006B_RESULT.md`.
+
 > **Verdict: `FAMILY-NULL-STRONG` — 0 of 60 pre-registered cells validate.** The first
 > real-data EXP-006 run (#390) reported EDGE-NOT-PROVEN at the DEFAULT config; this surface
 > answers the next filed question — *is that null a fluke of the default knobs, or

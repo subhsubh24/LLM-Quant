@@ -544,3 +544,67 @@ def test_tag_id_forwarded_to_every_page():
         )
     # The filter does not break parsing — the 11 settled markets all yield records.
     assert [m.market_id for m in out] == [f"s{i}" for i in range(10)] + ["s10"]
+
+
+# --------------------------------------------------------------------------- #
+# resolution_time must be ACTUAL settlement, not the SCHEDULED end.            #
+# (EXP-006b adversarial-audit fix. A re-review proved the fix had NO coverage: #
+# reverting it left all 26 pre-existing tests green, because none constructs a #
+# market whose closedTime / umaEndDate / endDate diverge.)                     #
+# --------------------------------------------------------------------------- #
+def _resolved_raw(**overrides):
+    raw = {
+        "id": "m-early", "conditionId": "c1",
+        "question": "Will the government shutdown end November 13?",
+        "outcomes": '["Yes","No"]', "outcomePrices": '["1","0"]',
+        "clobTokenIds": '["tok_yes","tok_no"]',
+    }
+    raw.update(overrides)
+    return raw
+
+
+def test_resolution_time_prefers_actual_settlement_over_scheduled_end_date():
+    """`endDate` is the SCHEDULED end; a market that resolves EARLY keeps its later
+    endDate. Anchoring on it made every downstream leakage guard a no-op for 22% of a real
+    corpus, and trades exited on venue settlement pins.
+
+    Mirrors the real market that exposed it (673598: endDate 2025-11-21, actual settlement
+    2025-11-13T14:37:32Z — 8 days earlier).
+    """
+    rm = PolymarketHistoryFetcher()._parse_resolved(_resolved_raw(
+        endDate="2025-11-21T00:00:00Z",        # scheduled — 8 days LATE
+        closedTime="2025-11-13T14:37:32Z",     # actual settlement
+        umaEndDate="2025-11-13T14:37:32Z",
+    ))
+    assert rm is not None
+    assert rm.resolution_time.isoformat().startswith("2025-11-13T14:37:32"), (
+        "resolution_time must be ACTUAL settlement; anchoring on the scheduled endDate "
+        "silently disables every leakage guard downstream"
+    )
+
+
+def test_resolution_time_takes_the_earliest_candidate_whichever_field_it_is():
+    """`min` is the leakage-safe direction — it can only move a cutoff EARLIER, so it can
+    never admit a tick the previous behaviour excluded. Each field is made the earliest in
+    turn, so the choice cannot regress to "whichever field is listed first"."""
+    f = PolymarketHistoryFetcher()
+    early, mid, late = "2025-01-01T00:00:00Z", "2025-06-01T00:00:00Z", "2025-12-01T00:00:00Z"
+    for winner in ("closedTime", "umaEndDate", "endDate"):
+        fields = {"closedTime": mid, "umaEndDate": late, "endDate": mid}
+        fields[winner] = early
+        rm = f._parse_resolved(_resolved_raw(**fields))
+        assert rm is not None
+        assert rm.resolution_time.isoformat().startswith("2025-01-01"), (
+            f"earliest candidate was {winner}={early} but resolution_time came back "
+            f"{rm.resolution_time}"
+        )
+
+
+def test_resolution_time_falls_back_when_settlement_fields_are_absent():
+    """Older/partial records carry only endDate. That must still parse — the fix must not
+    turn a missing settlement field into a dropped market."""
+    rm = PolymarketHistoryFetcher()._parse_resolved(
+        _resolved_raw(endDate="2025-06-01T00:00:00Z")
+    )
+    assert rm is not None
+    assert rm.resolution_time.isoformat().startswith("2025-06-01")
