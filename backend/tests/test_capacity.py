@@ -308,3 +308,58 @@ def test_implied_coeff_refuses_a_partial_fill():
     inverting it yields a coefficient that is too LOW — wrong in the dangerous direction.
     Returning None is the honest answer."""
     assert implied_impact_coeff([{"price": 0.5, "size": 10.0}], 100.0, 1_000.0) is None
+
+
+# --------------------------------------------------------------------------- #
+# 8. Saturated-impact regime — refuse a ceiling that does not exist.           #
+#    (Adversarial-review finding: the module's own worst failure mode.)        #
+# --------------------------------------------------------------------------- #
+def test_saturated_impact_regime_is_refused_not_reported_as_unlimited_capacity():
+    """`impact_fraction` is CLAMPED at 1.0. Past saturation the impacted price plateaus while
+    contracts still grow linearly, so drag becomes LINEAR — and an edge above that linear
+    slope makes modelled profit grow without bound. The peak search would then return its own
+    upper bound dressed up as "the most this signal can EVER earn".
+
+    A reviewer reproduced exactly that at price 0.95 / edge 0.0369: a $1.12bn "peak" and a
+    $112m/wk "ceiling". That regime is not exotic — the crossover sits near price 0.965, and
+    NearCertaintyStrategy trades above 0.90 with a default min_edge of 0.02.
+
+    Emitting a fabricated unbounded capacity is the precise failure this module exists to
+    prevent, so it must be named as a model artifact.
+    """
+    r = floor_feasibility(
+        weekly_target_usd=100.0, trades_per_week=10, edge_fraction_per_trade=0.0369,
+        market_price=0.95, depth_contracts=100.0,
+    )
+    assert r.feasible is False, "an unbounded model artifact must never read as feasible"
+    assert "NO CAPACITY CEILING EXISTS" in r.binding_reason
+    assert "MODEL ARTIFACT" in r.binding_reason
+    # And it must NOT hand back a finite, quotable dollar ceiling.
+    assert r.max_achievable_weekly_usd == float("inf")
+
+
+def test_the_saturation_guard_does_not_fire_in_the_normal_regime():
+    """The complement — at a mid price with a modest edge the ordinary peak logic still
+    applies, so the guard cannot silently swallow every real answer."""
+    r = floor_feasibility(
+        weekly_target_usd=100.0, trades_per_week=10, edge_fraction_per_trade=0.03,
+        market_price=0.50, depth_contracts=500.0,
+    )
+    assert "NO CAPACITY CEILING EXISTS" not in r.binding_reason
+    assert r.peak_budget_per_trade_usd < float("inf")
+
+
+def test_walk_book_rejects_a_worst_first_ladder():
+    """`touch = levels[0]` is load-bearing. A worst-first ladder silently produced NEGATIVE
+    realized impact — "buying more made it cheaper" — contradicting the invariant the sibling
+    parametric model enforces. Guarded because this function is public and the named next
+    step wires it into the live impact path."""
+    with pytest.raises(ValueError, match="best-first"):
+        walk_book([{"price": 0.30, "size": 500.0}, {"price": 0.20, "size": 500.0}], 1_000.0)
+
+
+def test_walk_book_rejects_non_positive_level_sizes():
+    """A negative size produced a negative `contracts_filled`, violating the documented
+    partial-fill invariant."""
+    with pytest.raises(ValueError, match="positive size"):
+        walk_book([{"price": 0.50, "size": -10.0}], 5.0)

@@ -305,6 +305,50 @@ def floor_feasibility(
     peak_net = net_at(peak_b)
     max_weekly = peak_net * trades_per_week
 
+    # SATURATION CHECK — refuse to report a ceiling that does not exist.
+    #
+    # The "impact grows super-linearly so a finite peak exists" reasoning holds only while
+    # `impact_fraction` is UNSATURATED. Once it hits its clamp (`DEFAULT_MAX_IMPACT_FRACTION`)
+    # the impacted price plateaus near $1 while contracts still grow linearly with budget, so
+    # drag becomes LINEAR with slope `(1-flat)/flat`. If `edge_fraction_per_trade` exceeds
+    # that slope, `net_at` increases without bound and there is NO peak — the grid search
+    # would then return wherever it happened to stop (its 1e9 upper bound) dressed up as
+    # "the most this signal can EVER earn". An adversarial reviewer reproduced exactly that:
+    # a $1.12bn "peak" and a $112m/wk "ceiling" at price 0.95 / edge 0.037.
+    #
+    # That regime is not exotic — `(1-flat)/flat` shrinks as price -> 1, and this bot's own
+    # NearCertaintyStrategy trades above 0.90 with a default `min_edge` of 0.02, so the
+    # crossover sits around price 0.965, inside its operating envelope.
+    #
+    # Reporting a fabricated unbounded capacity is the precise failure this module exists to
+    # prevent, so we detect it and say so instead.
+    _flat = cost_model.effective_buy_price(market_price, category)
+    _saturated_slope = (1.0 - _flat) / _flat if _flat > 0.0 else float("inf")
+    if edge_fraction_per_trade > _saturated_slope and net_at(peak_b * 10.0) > peak_net:
+        return FloorFeasibility(
+            weekly_target_usd=weekly_target_usd,
+            trades_per_week=trades_per_week,
+            edge_fraction_per_trade=edge_fraction_per_trade,
+            naive_budget_per_trade_usd=naive_budget,
+            required_budget_per_trade_usd=float("nan"),
+            impact_drag_usd_per_trade=float("nan"),
+            net_pnl_per_trade_usd=float("nan"),
+            achieved_weekly_usd=float("nan"),
+            max_achievable_weekly_usd=float("inf"),
+            peak_budget_per_trade_usd=float("inf"),
+            feasible=False,
+            binding_reason=(
+                f"NO CAPACITY CEILING EXISTS under this model at price {market_price:.4f}: "
+                f"the assumed per-trade edge ({edge_fraction_per_trade:.4f}) exceeds the "
+                f"saturated-impact slope ({_saturated_slope:.4f}), so modelled profit grows "
+                f"without bound in size. That is a MODEL ARTIFACT — the impact fraction is "
+                f"clamped at {1.0:.1f}, and a real book does not let an order of arbitrary "
+                f"size fill at a bounded price. Treat this as 'the impact model does not "
+                f"apply here', NOT as unlimited capacity, and use a real book walk "
+                f"(`walk_book`) instead."
+            ),
+        )
+
     if peak_net < per_trade_target:
         # Unreachable at ANY stake: past the peak, more capital earns less.
         pt_peak = capacity_point(
@@ -406,6 +450,21 @@ def walk_book(levels: Sequence[dict], contracts: float) -> BookWalk:
     touch = float(levels[0]["price"])
     if not (touch > 0.0):
         raise ValueError(f"touch price must be > 0: {touch}")
+    # VALIDATE THE LADDER SHAPE. `touch = levels[0]` is load-bearing, so a worst-first (or
+    # otherwise unsorted) ladder would silently produce NEGATIVE realized impact — "buying
+    # more made it cheaper" — contradicting the invariant the sibling parametric model
+    # enforces. `get_order_book` normalizes order today, so this cannot fire through the
+    # live client; it is guarded because this function is public and the named next step is
+    # to wire it into the live impact path, where a future caller with a hand-built or
+    # third-venue ladder would otherwise introduce a silent pricing bug.
+    prices = [float(lvl["price"]) for lvl in levels]
+    if any(b < a for a, b in zip(prices, prices[1:])):
+        raise ValueError(
+            "ask ladder must be best-first (non-decreasing price); got "
+            f"{prices[:5]}... — an unsorted ladder yields negative realized impact"
+        )
+    if any(float(lvl["size"]) <= 0.0 for lvl in levels):
+        raise ValueError("every ladder level must carry a positive size")
 
     remaining = contracts
     spend = 0.0
