@@ -281,9 +281,39 @@ class PolymarketHistoryFetcher:
             )
             return None
 
-        resolution_time = _parse_dt(raw.get("endDate")) or _parse_dt(raw.get("closedTime"))
+        # RESOLUTION TIME = the EARLIEST credible settlement instant, not `endDate`.
+        #
+        # `endDate` is the market's SCHEDULED end; `closedTime` / `umaEndDate` are when it
+        # ACTUALLY settled. A market that resolves early keeps its original (later)
+        # `endDate`, and the gap is routinely large: on the committed EXP-006b Politics
+        # universe, `endDate` is more than 24h AFTER the real close for 94 of 439 markets
+        # (21.9%), median gap 30h, max 97 days. Example verified live: market 673598
+        # ("Will the government shutdown end November 13?") has endDate 2025-11-21 but
+        # closedTime/umaEndDate 2025-11-13T14:37:32Z — 8 days early.
+        #
+        # Taking `endDate` first made every downstream leakage guard anchored on
+        # `resolution_time` a NO-OP for those markets: the CLOB stops emitting ticks at the
+        # ACTUAL close, so "truncate 24h before resolution" removed nothing and the series
+        # ran right up to the settlement pin (0.9995 / 0.0005). An adversarial auditor
+        # traced 43.9% of EXP-006b's reported net PnL to six trades that exited on such
+        # pins, one of them 47% of the cell on its own — a "reversion" that was the market
+        # settling 37 minutes later.
+        #
+        # `min` of whichever fields are present is the conservative choice in the
+        # leakage-safe direction: it can only move the cutoff EARLIER, never later, so it
+        # can never admit a tick that the previous behaviour excluded.
+        _candidates = [
+            dt for dt in (
+                _parse_dt(raw.get("closedTime")),
+                _parse_dt(raw.get("umaEndDate")),
+                _parse_dt(raw.get("endDate")),
+            ) if dt is not None
+        ]
+        resolution_time = min(_candidates) if _candidates else None
         if resolution_time is None:
-            logger.debug("skip market missing endDate/closedTime id=%s", raw.get("id"))
+            logger.debug(
+                "skip market missing closedTime/umaEndDate/endDate id=%s", raw.get("id")
+            )
             return None
 
         return ResolvedMarket(

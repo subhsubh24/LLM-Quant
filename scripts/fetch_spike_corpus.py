@@ -122,7 +122,18 @@ def _build_series(
     raw = _chunked_price_history(fetcher, rm.yes_token_id, start_ts, cutoff_ts)
     # Hard leakage guard: drop anything at/after the cutoff (belt-and-suspenders — the
     # fetch already ends at cutoff_ts, but a boundary tick could equal it).
-    return [tick for tick in raw if tick["t"] < cutoff_ts]
+    series = [tick for tick in raw if tick["t"] < cutoff_ts]
+    # POST-CONDITION, asserted rather than assumed. The guard above is only as good as
+    # `rm.resolution_time`, and it was silently wrong for 22% of markets when that resolved
+    # to the SCHEDULED `endDate` instead of actual settlement — the series then ran to the
+    # settlement pin while the corpus metadata claimed a 24h margin. A false disclosure is
+    # worse than a missing one, so the invariant is now checked, not documented.
+    if series and series[-1]["t"] >= cutoff_ts:
+        raise AssertionError(
+            f"leakage-margin violation for market {rm.market_id}: last tick "
+            f"{series[-1]['t']} >= cutoff {cutoff_ts} (resolution {resolution_ts})"
+        )
+    return series
 
 
 def _load_exclusions(path: Optional[str], ap: argparse.ArgumentParser) -> set[str]:

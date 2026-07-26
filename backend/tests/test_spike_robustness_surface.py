@@ -83,6 +83,12 @@ def _broad_reverting_corpus(n_markets: int = 140):
             {"t": base, "p": round(baseline, 4)},
             {"t": base + confirm_dt, "p": round(confirm, 4)},
             {"t": base + forward_dt, "p": round(forward, 4)},
+        ] + [
+            # A forward tick at EACH swept horizon — `require_full_horizon` needs the series
+            # to cover the horizon before a trade is booked. Same price at each, so the exit
+            # price is unchanged; without these the surface produces zero trades everywhere.
+            {"t": base + confirm_dt + h, "p": round(forward, 4)}
+            for h in PRE_REGISTERED_HORIZONS_SECONDS
         ]
     return out
 

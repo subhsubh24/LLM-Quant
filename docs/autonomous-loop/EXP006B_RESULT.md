@@ -1,135 +1,215 @@
-# EXP-006b result — EDGE-NOT-PROVEN (F10 category concentration), on the first F11-positive OOS the project has produced
+# EXP-006b result — NULL. Fade-the-spike stays REFUTED, and the run found two real defects.
 
-**Verdict: EDGE-NOT-PROVEN.** Both pre-registered cells return `is_validated_edge = false`.
-Per the pre-registration's committed rule, that is a **null**, no revenue field moves, no DoD
-box ticks, and `business_case_strength` stays **B**.
+**Verdict: EDGE-NOT-PROVEN.** Neither pre-registered cell validates. No revenue field moves,
+no DoD box ticks, `business_case_strength` stays **B**. The fade-the-spike family remains
+refuted.
 
-That said, this null is not the same shape as the previous ones, and the write-up would be
-dishonest in the other direction if it buried that. Read the caveats before reading the
-numbers.
+The more useful output of this run is not the verdict but the two defects the adversarial
+gate found, both of which affected *every* corpus this project has built:
 
-Pre-registration: [`EXP006B_PREREGISTRATION.md`](EXP006B_PREREGISTRATION.md), committed
-before the corpus was fetched.
+1. **A settlement-anchor leakage bug** in the resolved-market fetcher. 22% of markets had a
+   leakage guard that did nothing, and trades were exiting on venue settlement pins.
+2. **A missing horizon-coverage check** in reversal labeling, which let a spike near
+   end-of-data exit at whatever the last tick was — typically that same settlement-adjacent
+   price.
 
-## The corpus
+An earlier draft of this document reported this run as *"the first F11-significant-positive
+OOS the project has produced."* **That claim was wrong and has been retracted.** It is
+recorded here rather than quietly deleted, because the mechanism that produced it is the
+finding.
 
-| | EXP-006 (prior) | **EXP-006b (this run)** |
-|---|---|---|
-| markets | 255 | **439** |
-| ticks | 496,056 | **713,348** |
-| universe | Politics `tag_id=2`, `order=volumeNum`, pages 1–3 | Politics `tag_id=2`, `order=volumeNum`, pages 1–8 |
-| exclusion | — | the 255 EXP-006 markets, dropped before any tick was fetched |
-| **overlap with EXP-006** | — | **0 markets** (verified: set intersection is empty) |
+---
 
-800 fetched → 255 excluded → 545 candidates → 106 dropped as too thin (<24 ticks) → **439
-kept**. Committed: `data/spike_corpus_politics_b.json.gz` + `_cats.json` + `_meta.json`.
+## What the adversarial gate found
 
-Category mix: Politics 306, General 119, Economics 12, Crypto 1, Sports 1.
+Three fresh Opus auditors were run with the mandate *"prove the edge is not real."* Two
+returned **BROKEN**.
 
-## Results — both cells, neither selected
+### Defect 1 — `resolution_time` anchored on `endDate`, not actual settlement
 
-| | threshold 0.15 | threshold 0.20 |
+`polymarket_history_fetcher._parse_resolved` resolved `resolution_time` as
+`endDate or closedTime`. `endDate` is the **scheduled** end; `closedTime` / `umaEndDate` are
+when the market **actually** settled. A market that resolves early keeps its later `endDate`.
+
+Because the CLOB stops emitting ticks at the *actual* close, every downstream guard anchored
+on `resolution_time` — including the corpus fetcher's "truncate 24h before resolution" —
+became a **no-op** for those markets.
+
+Measured on this corpus: **98 of 439 markets (22.3%)** had series violating the claimed 24h
+margin against true settlement. Verified independently against Gamma:
+
+```
+market 673598  "Will the government shutdown end November 13?"
+  endDate    2025-11-21T00:00:00Z     <- what the fetcher used
+  closedTime 2025-11-13T14:37:32Z     <- when it actually settled (8 days earlier)
+  corpus last tick: 2025-11-13 14:00  p = 0.9995   (the settlement pin)
+  trade: entry 0.045 -> exit 0.9995, +$2,012.77 = 47% of the whole cell
+```
+
+That single trade's "reversion" was the market settling 37 minutes later. Six such trades
+carried **43.9%** of the reported net PnL.
+
+**Fixed**: `resolution_time` is now `min(closedTime, umaEndDate, endDate)`. `min` is the
+conservative choice — it can only move a cutoff *earlier*, never later, so it can never admit
+a tick the old behaviour excluded.
+
+### Defect 2 — reversal labeling did not require the horizon to be covered
+
+`label_reversal` returned `None` only when there was *no* later tick at all. It never checked
+that the forward horizon was actually **covered**, so a spike near end-of-data was labelled
+against whatever the final tick happened to be — a 2-hour hold silently scored as a 24-hour
+trade, at a price adjacent to settlement. Seven trades exited on the series' final tick,
+carrying 39% of the raw PnL.
+
+**Fixed**: `require_full_horizon=True` (default). If the data does not extend to
+`confirm_time + horizon` (within one hour of tolerance), the label is **refused**. This costs
+sample size; a fabricated holding period costs correctness.
+
+### Defect 3 (not fixed — it is a property of the data) — the corpus prices are MIDPOINTS
+
+The third auditor established that CLOB `/prices-history` returns the book **midpoint**, not a
+traded price — confirmed live (`/prices-history` 0.1965 == `/midpoint` 0.1965, book 0.196 /
+0.197) and corroborated by the corpus itself (42.7% of ticks carry 4 decimals, the signature
+of a half-tick mid; only 12.6% sit on the 0.01 grid).
+
+So the engine buys and sells at the mid and never pays a spread. Its entire crossing cost is
+`DEFAULT_SLIPPAGE_RATE = 0.005`. Measured against 747 live political books, the real
+half-spread as a fraction of price is:
+
+| best ask | median half-spread / price | engine assumes |
 |---|---:|---:|
-| spikes detected | 277 | 159 |
-| **trades (N)** | **152** | **109** |
-| net PnL | **+$4,268.79** | **+$4,875.27** |
-| hit rate | 57.2% | 57.8% |
-| **F11 verdict** | **`significant_positive`** | **`significant_positive`** |
-| F11 95% CI (total) | [+$512.68, +$9,763.10] | [+$1,043.04, +$10,015.33] |
-| **F10** | **FRAGILE** | **FRAGILE** |
-| size-robustness screen | passed (large spikes not significantly negative) | passed |
-| **`is_validated_edge`** | **false** | **false** |
+| < 0.01 | **16.7%** | 0.5% |
+| 0.01–0.02 | 4.5% | 0.5% |
+| 0.02–0.05 | 2.5% | 0.5% |
+| 0.05–0.10 | 5.8% | 0.5% |
+| 0.10–0.30 | 3.1% | 0.5% |
 
-Both cells clear N ≥ 100, both clear hit-rate > 50%, and both have a bootstrap CI on total PnL
-that **excludes zero on the positive side**. Under the pre-registered rule that is still a
-null, because F10 fails.
+A **5x–33x** understatement, worst precisely in the low-price band that carries most of the
+PnL. Breakeven cost multiple is 5.93x (th=0.15) and 8.33x (th=0.20); **F11 significance is
+lost at 1.7x and 2.9x**. Under every realistic execution model the auditor built — including
+measured VWAP against real books for the engine's own order sizes — **the 0.15 cell is not
+significant**.
 
-## Why it fails — the blocker is concentration, and it is the same blocker in both cells
+This is not fixed here because it is not a code bug: it is what the only available historical
+price series *is*. It is a hard limit on what any backtest built on this data can claim.
 
-| cell | F10 fragility reasons |
-|---|---|
-| 0.15 | category: **94%** of net PnL from `Politics` (>70%); confidence: 78% from the `0-10%` band (>70%); horizon: 100% `<=1d` |
-| 0.20 | category: **89%** of net PnL from `Politics` (>70%); horizon: 100% `<=1d` |
+---
 
-- The **horizon** reason is structural and is correctly excluded by the engine's own gate: a
-  single-horizon strategy trivially puts 100% of PnL in one horizon bucket. It is not
-  evidence of fragility.
-- The **category** reason is the real blocker in both cells, and it is not a technicality: on
-  a corpus that is 70% Politics by market count, ~90%+ of the PnL coming from Politics means
-  this is a *political-markets* effect, not a demonstrated general one.
-- The **confidence-band** reason at 0.15 is the one that should worry us most. 78% of the PnL
-  sits in the `0-10%` entry-price band — the longshot region where the entire
-  bucket-calibration family (EXP-002/003/005/011) previously died. An effect concentrated
-  there deserves more suspicion than an effect spread across the price range, not less.
+## The corrected numbers
 
-## The magnitude structure, which cuts both ways
+Corpus after re-truncation at true settlement: **438 markets, 711,086 ticks**, spanning
+2024-03-14 to 2026-07-13. Zero overlap with the EXP-006 corpus (verified). Removing the
+leaked ticks removed **0.32% of the data** — and 43% of the result.
 
-| band | 0.15 cell: N / PnL / hit | 0.20 cell: N / PnL / hit |
-|---|---|---|
-| 0.15–0.25 | 48 / +$3,158.61 / 83.3% | 16 / +$2,631.54 / 87.5% |
-| 0.25–0.40 | 59 / +$1,397.98 / 54.2% | 46 / +$2,019.53 / 65.2% |
-| **≥0.40** | **45 / −$287.80 / 33.3%** | **47 / +$224.20 / 40.4%** |
+| | th=0.15 before | **th=0.15 after** | th=0.20 before | **th=0.20 after** |
+|---|---:|---:|---:|---:|
+| N | 152 | **141** | 109 | **99** |
+| net PnL | $4,268.79 | **$2,441.03** | $4,875.27 | **$2,855.43** |
+| hit rate | 57.2% | 58.2% | 57.8% | 57.6% |
+| F11 | significant_positive | significant_positive | significant_positive | **insufficient_data** |
+| F11 CI | [+513, +9763] | [+365, +4736] | [+1043, +10015] | — |
+| F10 | FRAGILE (cat 94%) | FRAGILE (cat 82%) | FRAGILE (cat 89%) | FRAGILE |
+| **validated** | false | **false** | false | **false** |
 
-The very largest spikes still **degrade** — hit rate falls to 33–40% and mean reversal
-fraction goes **negative** (−0.37 / −0.10), i.e. the biggest moves keep trending rather than
-reverting. That is Research Run 21's N=1 caution ("the biggest 2024 political spike did NOT
-revert") reproducing as a real gradient across ~90 trades. The profit is concentrated in the
-*moderate* 0.15–0.25 band.
+- **th=0.20 now falls below the pre-registered N≥100 floor** (99 trades) → `insufficient_data`.
+  Under-powered is neither positive nor negative; it is reported as under-powered.
+- **th=0.15 remains F10-fragile** (82% of net PnL in one category) — and, per Defect 3, is not
+  significant under any realistic execution model.
+- Dropping the **single largest trade** takes th=0.15 to indistinguishable. Ten trades of ~150
+  carry the whole result.
 
-Note what this does **not** license: carving out the 0.15–0.25 band post hoc. Magnitude is
-knowable at decision time, so unlike the EXP-006 small-spike carve-out it would at least be
-*implementable* — but it was not pre-registered here, and selecting it now after seeing the
-strata is exactly the p-hack this project has refused three times. If it is worth testing it
-must be pre-registered and run on a *third* disjoint corpus.
+The "after" column applies **both** fixes (settlement anchor + horizon coverage). Applying
+only the anchor fix — which is what two auditors independently measured — gives N=148 /
++$2,423 and N=104 / +$3,078; the horizon guard accounts for the remaining difference. Both
+corrections are real and both are shipped, so the joint figures are the ones that stand.
 
-## Why this differs from EXP-006, honestly
+### The scale, which the earlier draft omitted
 
-EXP-006 on the top-255 corpus: 0 of 60 config cells validated, 18 significantly **negative**.
-EXP-006b on the disjoint next-545: both pre-registered cells F11 significantly **positive**.
+The corpus spans **121.7 weeks**. $2,441.03 over that period is **$20.06 per week**, against
+a floor of **$2,000/week**. That is **1% of the floor**. Quoting `+$2,441` without the
+timespan made a two-year trickle read like a result; the auditor was right to call that out.
 
-Two candidate explanations, and I cannot distinguish them with this run:
+Reaching the floor would need ~100x the size. At $5,000/trade in the 0.02–0.05 price band,
+measured round-trip friction against real books is **330%–1144% of entry price**. There is no
+size at which this is a business.
 
-1. **The high-threshold corner is real** and EXP-006's default (0.10) diluted it with
-   unprofitable small spikes. The robustness surface did flag 0.15–0.20 as the
-   underpowered-positive corner, which is why it was the pre-registered follow-up. This would
-   be a genuine finding.
-2. **The stratum changed.** This corpus is pages 4–8 by volume — a materially
-   **lower-liquidity** population than EXP-006's top-255. Fade effects plausibly survive
-   longer in less-liquid markets precisely because fewer participants arbitrage them away.
-   If so, the effect may be real but **uncapturable at size** — which is a capacity question
-   this run cannot answer (see below).
+## Other audit findings worth recording
 
-Explanation 2 was pre-registered as a caveat before the fetch, and it is not a
-rationalization added after the fact.
+Several of these correct claims **I** made. They are listed as corrections, not as
+observations I happened to agree with.
 
-## What this run cannot establish, even taken at face value
+- **"Both cells" was ~one test, not two.** The 0.20 cell's markets are a 100% subset of the
+  0.15 cell's, and **90 trades are byte-identical across both**, carrying 99.8% of the 0.15
+  total. The pre-registration's "if both cells validate → CANDIDATE" rule implicitly treated
+  them as independent confirmations. They are one result reported twice, and any future
+  pre-registration in this family must pick non-nested cells.
+- **There is no "high-threshold corner."** A threshold sweep on this corpus returns
+  `significant_positive` at 0.10, 0.12, 0.13, 0.14, 0.16, 0.17, 0.18 and 0.22 — including
+  the 0.10 default that was *refuted* on the old corpus. So the pre-registered mechanism
+  (that the high-threshold corner is special) is **not** what is going on; whatever differs,
+  differs at the corpus level.
+- **Single-observation dominance is the real statistical fragility — not event correlation.**
+  I had named same-event correlation as "the single most likely way this result is wrong."
+  Measured, that was **wrong**: 152 trades span 110–113 event clusters, but the design effect
+  is only 1.11–1.15 and *every* clustering (event, week, month, quarter) keeps the CI above
+  zero, because the dominant PnL sits in singleton clusters. What actually breaks it is
+  concentration in a handful of trades: on the corrected corpus, **dropping the single
+  largest trade** moves the 0.15 cell to indistinguishable, and the top 10 trades of ~150
+  carry the entire result in both cells.
+- **The lower-liquidity-stratum hypothesis is REFUTED.** I offered it as one of two
+  explanations. PnL by volume quintile is non-monotone and the *least* liquid quintile earns
+  ~zero/negative in both cells. Removed as an explanation rather than left standing.
+- **The F10 single-market gate passed by 2.8 points** (`top_market_pnl_share` 0.4715 vs a 0.50
+  threshold) — and it passed *because of* a leaked trade. A gate that clears by that margin
+  on contaminated data is not evidence of robustness.
+- Spike detection itself is **causal and unbroken**: re-running detection on the prefix
+  `t <= confirm_time` for all 277 spikes disagreed on zero. It also survived an
+  entry-price-matched random-trading placebo and a direction-randomization test.
+- The shipped F11 percentile bootstrap is **conservative, not anti-conservative**, on this
+  payoff shape: a 600-replication placebo calibration returned `significant_positive` 0.0–0.2%
+  of the time against a 2.5% nominal. The method is sound; the data was not.
+- Pre-registration integrity verified independently from git timestamps: the prereg was
+  committed ~11 minutes before the corpus existed, and no engine or gate code changed between
+  prereg and result.
+- Disjointness holds: zero market overlap; no N inflation from duplicate series.
 
-- **Capacity.** The fade engine prices at flat cost and the corpus carries no depth. Depth at
-  a past decision instant is unobtainable from this venue (Gamma serves `liquidity: null` on
-  resolved markets; CLOB `/book` 404s on a settled token — both verified live 2026-07-26). So
-  **no $/week claim follows from these numbers at all**, and the lower-liquidity-stratum
-  hypothesis above makes capacity the *first* thing that would have to be answered.
-- **Same-event correlation.** 439 top-volume political markets contain many restatements of
-  one underlying event. `max_trades_per_market=1` caps per *market*, and F10's single-market
-  check passed — but nothing here caps per *event*. If the 152 trades span far fewer distinct
-  events, the effective N is smaller than reported and the CI is too narrow. **This is the
-  single most likely way the result is wrong**, and it is not currently measured.
-- **Survivorship.** Resolved-only, clean-settlement-only.
+**One pre-registration promise unmet:** the prereg said any of EXP-006's 45 thin-dropped
+markets that survived this fetch would be disclosed. The exclusion list was the 255 *kept*
+markets, so the 45 were not tracked and this cannot be recovered from the committed
+artifacts. Recorded as unmet rather than quietly dropped.
 
-## Named next steps (in priority order)
+## What ships from this run
 
-1. **Event-level de-correlation.** Cluster the corpus by underlying event (the B5
-   `market_text.content_tokens` / cross-venue matcher machinery already does most of this) and
-   re-run with one trade per *event*. If the result survives at event-level N, it gets much
-   more interesting; if N collapses, this null is explained and the family stays refuted.
-   Buildable now, offline, on the committed corpus.
-2. **A non-political corpus.** The category-concentration blocker is only answerable by
-   testing whether the effect exists outside Politics. `--tag-id` now exists for exactly this.
-3. **Capacity.** Only after 1 and 2, and only with the forward depth-capture path, since
-   retrospective depth is unobtainable.
+- The two fixes above, with regression tests.
+- A fetch-time assertion so a corpus that violates its own leakage margin **fails loud**
+  instead of being committed with a false disclosure.
+- The re-truncated corpus + a `close_times` sidecar recording the true settlement instant used
+  for every market, so the truncation is auditable without a re-fetch.
 
-Until at least 1 and 2 clear, this is a **candidate mechanism with a positive OOS signal and
-an unresolved concentration problem** — not an edge, and not go-live evidence.
+## Effect on prior results
+
+The `endDate` anchor bug affected **every** corpus this fetcher built, including EXP-006's and
+the frozen real-OOS corpus. Both of those concluded **negative/refuted**, and leakage of this
+shape (exits on settlement pins) inflates PnL *upward* — so it can only have made those
+results look **better** than they were. Their refutations therefore stand a fortiori. No
+published negative conclusion is overturned by this fix, and I have not re-run them.
+
+## Named next steps
+
+Ordered by measured importance, which is **not** the order I first guessed.
+
+1. **A spread-aware cost model — the binding methodological constraint.** Every backtest in
+   this repo prices at the CLOB midpoint and pays a flat 0.5% for crossing, against real
+   half-spreads of 2.5–16.7% at the prices that carry the PnL. Until entry and exit pay a
+   measured half-spread at the traded price level, no result in this family means much. This
+   ranks ahead of any new alpha.
+2. **A concentration gate on single-observation dominance.** F10 has no axis that catches
+   "one trade of 148 carries the result." Drop-top-k or a winsorized-PnL check would have
+   flagged both cells immediately, and would have flagged EXP-006 too.
+3. **Re-run EXP-006 on the original corpus with both fixes**, to confirm the refutation is
+   unchanged rather than assume it.
+4. Cap trades per *event cluster* rather than per market — worth doing for correctness, but
+   **demoted**: the measured design effect is only 1.11–1.15, so this was not the problem.
 
 ## Reproduction
 
@@ -137,8 +217,8 @@ an unresolved concentration problem** — not an edge, and not go-live evidence.
 python scripts/run_spike_reversal.py \
   --data data/spike_corpus_politics_b.json.gz \
   --category-data data/spike_corpus_politics_b_cats.json \
-  --threshold 0.15 --json
-# and again with --threshold 0.20
+  --threshold 0.15 --json     # and again with --threshold 0.20
 ```
 
-Committed raw results: `EXP006B_RESULT_th015.json`, `EXP006B_RESULT_th020.json`.
+Committed raw results: `EXP006B_RESULT_th015.json`, `EXP006B_RESULT_th020.json`
+(corrected run). Pre-registration: `EXP006B_PREREGISTRATION.md`, committed before the fetch.

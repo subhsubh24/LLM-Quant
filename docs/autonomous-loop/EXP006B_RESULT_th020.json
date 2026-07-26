@@ -1,23 +1,23 @@
 {
-  "source": "data/spike_corpus_politics_b.json",
-  "n_markets_scanned": 439,
-  "n_spikes_detected": 159,
-  "n_spikes_unlabelable": 1,
-  "n_trades": 109,
-  "n_markets_traded": 109,
-  "total_pnl_usd": 4875.271832,
-  "hit_rate": 0.577982,
-  "f11_verdict": "significant_positive",
+  "source": "data/spike_corpus_politics_b.json.gz",
+  "n_markets_scanned": 438,
+  "n_spikes_detected": 149,
+  "n_spikes_unlabelable": 10,
+  "n_trades": 99,
+  "n_markets_traded": 99,
+  "total_pnl_usd": 2855.425987,
+  "hit_rate": 0.575758,
+  "f11_verdict": "insufficient_data",
   "f11_total_ci": [
-    1043.0447,
-    10015.3259
+    null,
+    null
   ],
   "f10_fragile_raw": true,
   "f10_fragile_reasons_raw": [
-    "category: 89% of net PnL from a single bucket ('Politics') > 70% threshold",
+    "category: 81% of net PnL from a single bucket ('Politics') > 70% threshold",
     "horizon: 100% of net PnL from a single bucket ('<=1d') > 70% threshold"
   ],
-  "size_robustness": "assessed: large-spike set (|move| >= 0.25, N=93, net $2,243.73, hit 53%) not significantly negative (indistinguishable_from_zero)",
+  "size_robustness": "assessed: large-spike set (|move| >= 0.25, N=87, net $2,281.44, hit 53%) not significantly negative (significant_positive)",
   "magnitude_strata": [
     {
       "band": "0.00-0.15",
@@ -29,29 +29,29 @@
     },
     {
       "band": "0.15-0.25",
-      "n_trades": 16,
-      "total_pnl_usd": 2631.543807,
-      "hit_rate": 0.875,
-      "mean_reversal_fraction": 1.002276,
-      "mean_magnitude": 0.221938
+      "n_trades": 12,
+      "total_pnl_usd": 573.990459,
+      "hit_rate": 0.916667,
+      "mean_reversal_fraction": 0.86595,
+      "mean_magnitude": 0.222458
     },
     {
       "band": "0.25-0.40",
-      "n_trades": 46,
-      "total_pnl_usd": 2019.528269,
-      "hit_rate": 0.652174,
-      "mean_reversal_fraction": 0.48658,
-      "mean_magnitude": 0.318652
+      "n_trades": 45,
+      "total_pnl_usd": 1853.571329,
+      "hit_rate": 0.644444,
+      "mean_reversal_fraction": 0.44278,
+      "mean_magnitude": 0.318722
     },
     {
       "band": ">=0.40",
-      "n_trades": 47,
-      "total_pnl_usd": 224.199757,
-      "hit_rate": 0.404255,
-      "mean_reversal_fraction": -0.098751,
-      "mean_magnitude": 0.558638
+      "n_trades": 42,
+      "total_pnl_usd": 427.864199,
+      "hit_rate": 0.404762,
+      "mean_reversal_fraction": -0.083054,
+      "mean_magnitude": 0.548976
     }
   ],
   "is_validated_edge": false,
-  "verdict": "EDGE-NOT-PROVEN: fade-the-spike net $4,875.27 over 109 trades \u2014 F10 fragile (horizon dim excluded \u2014 single-horizon strategy): category: 89% of net PnL in one category > 70%. [size-robustness: assessed: large-spike set (|move| >= 0.25, N=93, net $2,243.73, hit 53%) not significantly negative (indistinguishable_from_zero)]. Honest null / not-yet \u2014 NOT go-live evidence."
+  "verdict": "EDGE-NOT-PROVEN: fade-the-spike net $2,855.43 over 99 trades \u2014 N=99 < pre-registered floor 100; F11 verdict=insufficient_data (not significant_positive); F10 fragile (horizon dim excluded \u2014 single-horizon strategy): category: 81% of net PnL in one category > 70%. [size-robustness: assessed: large-spike set (|move| >= 0.25, N=87, net $2,281.44, hit 53%) not significantly negative (significant_positive)]. Honest null / not-yet \u2014 NOT go-live evidence."
 }

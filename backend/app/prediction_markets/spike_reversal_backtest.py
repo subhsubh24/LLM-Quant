@@ -663,7 +663,14 @@ def backtest_fade_the_spike(
         for spike in spikes:
             if taken >= cfg.max_trades_per_market:
                 break
-            outcome = label_reversal(ticks, spike, horizon_seconds=cfg.horizon_seconds)
+            # require_full_horizon: refuse to book a trade whose exit tick predates the
+            # horizon. Without it a spike near end-of-data exits at whatever the last tick
+            # is — which on a resolved market is adjacent to settlement, so the trade books
+            # the terminal pinned quote as "reversion" (39% of EXP-006b's raw net PnL).
+            outcome = label_reversal(
+                ticks, spike, horizon_seconds=cfg.horizon_seconds,
+                require_full_horizon=True,
+            )
             if outcome is None:
                 n_unlabelable += 1
                 continue

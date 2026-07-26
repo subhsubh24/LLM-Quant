@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.prediction_markets import spike_detection as sd
 from app.prediction_markets.spike_detection import (
     DOWN,
     UP,
@@ -190,7 +191,8 @@ def test_full_reversal_labeled_positive():
     spike = _up_spike()
     # Price returns all the way to baseline 0.50 by the horizon → reversal_fraction == 1.0.
     ticks = _ticks([(0, 0.50), (60, 0.65), (3660, 0.50)])
-    out = label_reversal(ticks, spike, horizon_seconds=86400)
+    out = label_reversal(ticks, spike, horizon_seconds=86400,
+                          require_full_horizon=False)
     assert isinstance(out, ReversalOutcome)
     assert out.reverted is True
     assert abs(out.reversal_fraction - 1.0) < 1e-12
@@ -201,7 +203,8 @@ def test_continuation_labeled_negative():
     spike = _up_spike()
     # Price keeps rising to 0.80 → moved a further +0.15 in the SAME direction → -1.0.
     ticks = _ticks([(60, 0.65), (3660, 0.80)])
-    out = label_reversal(ticks, spike, horizon_seconds=86400)
+    out = label_reversal(ticks, spike, horizon_seconds=86400,
+                          require_full_horizon=False)
     assert out.reverted is False
     assert abs(out.reversal_fraction - (-1.0)) < 1e-12
 
@@ -211,7 +214,8 @@ def test_reversal_uses_only_strictly_later_ticks_no_leakage():
     # Include ticks AT and BEFORE confirm_time with extreme prices — they must be ignored;
     # only the strictly-later 0.55 tick is the forward price.
     ticks = _ticks([(0, 0.99), (60, 0.01), (120, 0.55)])
-    out = label_reversal(ticks, spike, horizon_seconds=86400)
+    out = label_reversal(ticks, spike, horizon_seconds=86400,
+                          require_full_horizon=False)
     assert out.future_time == 120 and out.future_price == 0.55
     # move=+0.15, subsequent=0.55-0.65=-0.10 → reversal_fraction = 0.10/0.15 ≈ 0.6667.
     assert abs(out.reversal_fraction - (0.10 / 0.15)) < 1e-9
@@ -220,7 +224,8 @@ def test_reversal_uses_only_strictly_later_ticks_no_leakage():
 def test_reversal_takes_last_tick_within_horizon():
     spike = _up_spike()
     ticks = _ticks([(120, 0.60), (3660, 0.58), (999999, 0.20)])  # last is beyond horizon
-    out = label_reversal(ticks, spike, horizon_seconds=86400)
+    out = label_reversal(ticks, spike, horizon_seconds=86400,
+                          require_full_horizon=False)
     assert out.future_time == 3660 and out.future_price == 0.58
 
 
@@ -263,7 +268,8 @@ def test_label_reversals_drops_unlabelable():
     # A forward tick exists after the first confirm (t=60) but nothing after the second
     # confirm (t=100) within horizon → only the first is labeled.
     ticks = _ticks([(80, 0.55)])
-    out = label_reversals(ticks, spikes, horizon_seconds=86400)
+    out = label_reversals(ticks, spikes, horizon_seconds=86400,
+                          require_full_horizon=False)
     assert len(out) == 1 and out[0].spike.confirm_time == 60
 
 
@@ -351,3 +357,50 @@ def test_detect_spikes_is_subquadratic():
         f"detect_spikes scaled ~quadratically: {small:.4f}s at n=2000 vs {large:.4f}s at "
         f"n=8000 (4x length). A linear/log implementation should be near 4x, not 16x."
     )
+
+
+# --------------------------------------------------------------------------- #
+# Horizon COVERAGE (EXP-006b adversarial-audit fix).                           #
+# A spike near end-of-data used to be labelled against whatever the final tick #
+# was — a short hold silently scored as a full-horizon trade, at a price that  #
+# on a resolved market sits adjacent to settlement. 39% of EXP-006b's raw net  #
+# PnL came from seven such trades.                                            #
+# --------------------------------------------------------------------------- #
+def test_label_reversal_refuses_when_the_horizon_is_not_covered():
+    """Data ends 2h after the spike; the horizon is 24h. The label must be REFUSED
+    rather than booked against the last available tick."""
+    ticks = [
+        {"t": 0, "p": 0.50},
+        {"t": 3600, "p": 0.70},      # spike confirm
+        {"t": 7200, "p": 0.99},      # last tick, only 1h later — nowhere near +24h
+    ]
+    spikes = sd.detect_spikes(ticks, threshold=0.10, window_seconds=3600)
+    assert spikes, "fixture must produce a spike, else this pins nothing"
+    out = sd.label_reversal(ticks, spikes[0], horizon_seconds=86400)
+    assert out is None, (
+        "a spike whose forward horizon is not covered by data must not be labelled — "
+        "the exit price at the horizon is unknown and must not be invented"
+    )
+
+
+def test_label_reversal_still_labels_when_the_horizon_is_covered():
+    """The complement: with data extending past the horizon the label is produced as
+    before, so the guard costs nothing where the data is adequate."""
+    ticks = [{"t": 0, "p": 0.50}, {"t": 3600, "p": 0.70}]
+    ticks += [{"t": 3600 + 3600 * i, "p": 0.60} for i in range(1, 26)]  # out to +25h
+    spikes = sd.detect_spikes(ticks, threshold=0.10, window_seconds=3600)
+    assert spikes
+    out = sd.label_reversal(ticks, spikes[0], horizon_seconds=86400)
+    assert out is not None
+    assert out.future_time >= 3600 + 86400 - sd.DEFAULT_HORIZON_TOLERANCE_SECONDS
+
+
+def test_horizon_coverage_guard_can_be_disabled_for_research():
+    """The old behaviour remains reachable explicitly, so a researcher can measure the
+    difference — but it is never the default."""
+    ticks = [{"t": 0, "p": 0.50}, {"t": 3600, "p": 0.70}, {"t": 7200, "p": 0.99}]
+    spikes = sd.detect_spikes(ticks, threshold=0.10, window_seconds=3600)
+    out = sd.label_reversal(
+        ticks, spikes[0], horizon_seconds=86400, require_full_horizon=False
+    )
+    assert out is not None and out.future_time == 7200
