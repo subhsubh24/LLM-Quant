@@ -97,38 +97,74 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 - [~] E1. Training/retraining loop (training modules exist under `backend/app/trading/` and `models/`).
 - [~] E2. Drift / regime detection feeding strategy retirement. **Engine built (2026-06-29, pure):** `prediction_markets/calibration_drift.py` — a deterministic calibration-drift detector: rolling-window Brier vs a `CalibrationBaseline`, **significance-gated** (seeded two-sample bootstrap CI lower-bound > 0 AND a relative effect-size floor) so pure noise does NOT trigger drift (measured FP-rate ~1–4% over hundreds of seeds vs ~47% for a naive point comparison; 100% power on a real shift), an explicit `insufficient_data` path that PREFERS "not enough data" over a noisy alarm (E7 discipline), and a monotone, bounded `confidence_de_rating` ∈ [1−cut, 1.0] Kelly multiplier. Decides a SIGNAL only — does not auto-retire (human/registry scope). 41 tests; 1 Opus auditor CANNOT-BREAK the significance/insufficient-data/monotonicity claims. **WIRED (2026-06-29):** `metrics_aggregator.compute_calibration_drift` splits time-ordered resolved predictions (`orchestrator.get_resolved_predictions()`, sorted oldest→newest) into an older baseline + a recent window and runs the detector; exposed read-only at `GET /prediction-markets/metrics/calibration-drift`. Honest E7 discipline: with too few non-degenerate predictions (the current paper reality) it returns `status=insufficient_data` / `drift_detected=false` WITHOUT calling `build_baseline` — never a false alarm. 2 Sonnet reviewers + 1 Opus auditor CANNOT-BREAK (can't fabricate a drift signal or invert the chronological split). **Remaining:** feed retirement via the B3 registry once a real alpha produces non-degenerate calibration data.
 - [~] E3. Strategy + feature research loop (web research + model reasoning) → `docs/growth/RESEARCH_MEMORY.md`. **EXP-006 detection primitive BUILT (2026-07-15b, #350):** `backend/app/prediction_markets/spike_detection.py` implements the two pieces Research Run 20/21 named as EXP-006's only missing scope — `detect_spikes()` (causal, leakage-safe, threshold-Δ over the `[{t,p}]` tick series `fetch_price_history` already returns) + `label_reversal()` (strictly-forward reversal labeling). Pure/deterministic/stdlib-only, imported by nothing but its test. **EXP-006 FULL BACKTEST LAYER BUILT (2026-07-19, #385):** `spike_reversal_backtest.py` turns that primitive into a cost-net, leakage-safe, F10/F11-gated fade-the-spike strategy backtest — the exact "spike→reversal harness + per-trade concentration cap" this note previously named as still-needed. Fades each confirmed spike (UP→NO, DOWN→YES), enters at `confirm_time`, exits at the forward-horizon price, cost-net BOTH legs (new `cost_model.effective_sell_price()`); ships the concentration cap two ways (EQUAL-WEIGHT sizing + `max_trades_per_market=1`, the structurally-correct answer to Run 22's finding that concentration came from many small CORRELATED trades, not one oversized bet); `is_validated_edge` = AND of N≥100, F11 significant_positive, F10 non-fragile (horizon axis excluded only while ≤1d), hit-rate>50% — every criterion the scorecard's validated-edge bar names. 15 in-gate tests; 3 fresh Opus auditors cleared it (leakage CANNOT-BREAK, cost ACCOUNTING-SOUND, gate GATE-SOUND). This UNBLOCKS a real EXP-006 test but is **NOT** an edge and ticks **no** DoD box: no real-data run, no PnL, no trading-path wiring, `business_case_strength` stays **B**. Still needed (the research routine's job): a real point-in-time NON-survivorship intraday Politics tick corpus (egress/owner-gated) reaching N≥100 → run the engine → honest F10/F11 verdict; market-impact on the fade legs before any capacity/live claim. **SIZE-ROBUSTNESS SCREEN BUILT (2026-07-19b, #387 — the spike-size/salience stratification named above):** a per-magnitude-band `strata` report + a size-robustness SCREEN operationalizing Run 21's N=1 caution ("the biggest 2024 political spike did NOT revert — it kept trending"). FOUR successive fresh Opus adversarial audits each broke a version of the gate (edges-gameable → rank-count-dilutable → range-fraction-outlier-sensitive), converging on a FIXED ABSOLUTE magnitude cut (large-spike set = `|move| >= 0.25`, config-independent, not-diluted, outlier-insensitive), judged by bootstrap significance (N≥20) or net-PnL sign (underpowered); every reproduced counterexample now blocks a green VALIDATED-CANDIDATE. 24 tests pass. **Disclosed limitation:** it is a SCREEN, not an adversarially-complete proof (a losing mid tier beneath a larger winning tier can still dilute within the pool) — the per-band strata REPORT exists for manual review; no single automated cohort test is robust (four audits confirmed). **FIRST REAL-DATA RUN DONE — EDGE-NOT-PROVEN (2026-07-19c, #390):** the egress-gated next-step above was RUN. New `scripts/fetch_spike_corpus.py` built a leakage-safe intraday-tick corpus (255 resolved binary Politics markets by `volumeNum`, 496k hourly ticks, truncated strictly before `resolution−24h` so no fade exit reads a settlement pin; committed gzipped `data/spike_corpus_politics.json.gz` for offline reproduction). The unmodified engine at the pre-registered DEFAULT config, run ONCE: **N=108** (above the 100 floor), net +$285.44, hit 58.3% — but **F11 indistinguishable_from_zero** (CI [−527, +1091]) and **F10 FRAGILE** (confidence-band 168% + category 107% + leave-one-out → −$19.99). The largest spikes (≥0.25, N=43) LOSE −$657 and COMPOUND (Run 21's caution confirmed on real data). `is_validated_edge=False`; the small-spike profit is NOT a carve-out (magnitude unknowable at decision time). 3 fresh Opus auditors: leakage CANNOT-BREAK, p-hacking SOUND-NULL, survivorship/cost/stats SOUND-NULL (re-ran at zero costs → still insignificant). See `docs/autonomous-loop/EXP006_REAL_DATA_VALIDATION.md`. **EXP-006 fade-the-spike now joins the bucket-calibration family as REFUTED on real data at the default config** — ticks NO DoD box (`business_case_strength` stays B, no revenue field). Named next steps: a robustness surface on the same committed corpus (offline); a momentum/EXP-007 candidate (N=19, do NOT claim). **CONFIG ROBUSTNESS SURFACE — FAMILY-NULL-STRONG (2026-07-20):** the robustness-surface next-step was BUILT + RUN. New pure/deterministic `spike_robustness_surface.py` sweeps the fade engine over a pre-registered 5×4×3=60-cell grid (threshold×window×horizon, bracketing the default) on the SAME committed corpus — report-all, select-none. Result: **0 of 60 cells validate** — 0 F11 significant_positive, **18 significant_negative**, and every one of the 14 positive-PnL cells is ALSO F10-gate-fragile (0 broad). The default's EDGE-NOT-PROVEN is **config-family-wide, not a default artifact** (a strictly stronger refutation). In-sample by construction (no cell can be an edge — selection refused as p-hacking in code); ticks NO DoD box, `business_case_strength` stays **B**. Two-gate PASSED (preflight code GREEN incl. 14 in-gate tests + new `exp006_robustness_surface` SELF_VALIDATION capability; 3 fresh Opus auditors + 2 Sonnet reviewers — a real F10 raw-vs-gate-column mislabel + doc summary-count errors were caught and FIXED, a 4th fresh Opus confirmation auditor verified the fix). See `docs/autonomous-loop/EXP006_ROBUSTNESS_SURFACE.md`. Named next step: **EXP-006b** — a FRESH pre-registered OOS of the high-threshold (0.15–0.20) fade variant on NEW/larger political data (the only underpowered-positive corner; the detection threshold is decision-time-knowable so legitimately pre-registrable, unlike the post-hoc magnitude carve-out) — do NOT reuse the committed corpus.
-- [ ] C6. **`_seed_hash` must fingerprint `category` UNCONDITIONALLY (filed 2026-07-25; PR #424
-      ABANDONED at the 2-cycle brake after two auditors broke two different guards).** The
-      Quality Scorecard's named defect is REAL and still OPEN: `_seed_hash` does not
-      fingerprint `m.category`, yet category is PnL-determining. Two attempts to guard the
-      fingerprint conditionally both failed adversarial audit, at successive boundaries:
-      (1) guarding on the two per-category caps missed `cost_model.fee_schedule` (EXP-010's
-      per-category fee makes category PnL-determining with both caps off); (2) guarding on
-      the engine's `fee_schedule` missed that `make_calibration_bucket_strategy` carries its
-      OWN cost model, uncoupled from the engine's. Reproduced on the shipped corpus with the
-      shipped strategy — same strategy object, only the data's category column differing:
-      `79a4cca4b966138f` (the PUBLISHED flat-fee headline hash) covers 42tr/-$3,540.44,
-      43tr/-$3,895.06 and 42tr/-$3,537.67.
-      **ROOT CAUSE — do not attempt a third clause.** The defect is conditioning a DATA field
-      on ENGINE CONFIG. Every other `HistoricalMarket` field is fingerprinted
-      unconditionally; `category` is the sole conditional one, which is precisely what keeps
-      being breakable.
-      **THE FIX, pre-verified by the auditor in place (4 failed / 1364 passed, all four being
-      hash-pin updates, zero logic failures):** make `payload["market_categories"]`
-      UNCONDITIONAL and re-pin four constants with a migration note —
-      `8dc358439ffb5746 -> c6cfde99dfcd606a` (`test_real_data_validation.py:46`),
-      `79a4cca4b966138f -> 77ce67d0eacc552e` (the frozen-corpus headline), plus the two
-      complement tests in `test_walk_forward_category.py`. Byte-identity of a hash that
-      PROVABLY COLLIDES is not worth preserving. This also deletes the 40-line conditional
-      rationale and the "phantom hash change" inconsistency the conditional guard introduced.
-      **NOTE for the Quality Auditor (maker != checker, so the loop does not edit the
-      scorecard):** `QUALITY_SCORECARD.md:82` currently prescribes "add category to the
-      payload ONLY when a cap is active" — that instruction is now PROVEN INSUFFICIENT, and
-      applying the unconditional fix will move the published headline hash (the trades and
-      PnL, 39 / -$3,228.02, are unchanged).
-      Also carried forward: three stale comments still asserting the false invariant
-      (`walk_forward.py` `_seed_hash` note, `BacktestTrade.category` "Metadata only", and the
-      two cap docstrings' "seed_hash byte-identical to before"), and one E501 (146 chars).
+- [x] C6. **`_seed_hash` fingerprints `category` UNCONDITIONALLY — DONE 2026-07-26 (PR #433).**
+      The Quality Scorecard's named defect (`_seed_hash` omitted `m.category` while category is
+      PnL-determining via BOTH per-category caps AND the per-category `fee_schedule`) is CLOSED.
+      `payload["market_categories"]` is now unconditional. PR #424 had been abandoned at the
+      2-cycle brake after two auditors broke two successive conditional guards; the root cause
+      was the SHAPE — conditioning a DATA field on ENGINE CONFIG — so the third attempt stopped
+      widening the condition and removed it. **Proof:** the frozen corpus still replays to 39
+      trades / −$3,228.02 / F11 `significant_negative` CI [−4325.5199, −2403.5774], two replays
+      sha256-identical; only the fingerprint's input set widened. Hashes re-pinned to MEASURED
+      values: fixture `8dc358439ffb5746 -> 44cc4fd8dd1aefc7`, frozen headline
+      `79a4cca4b966138f -> 77ce67d0eacc552e`. (The frozen-corpus prediction recorded here
+      matched exactly; the fixture-lane prediction `c6cfde99dfcd606a` did NOT, and the measured
+      value was pinned instead — disclosed in
+      `docs/autonomous-loop/SEED_HASH_CATEGORY_MIGRATION.md` rather than papered over.) A
+      cap-ACTIVE collision-closure regression asserts BOTH different-PnL and different-hash so
+      it cannot pass tautologically, and both new tests were proven to FAIL on the pre-fix
+      engine. 1 Sonnet reviewer independently reproduced the pre-fix collision and APPROVED.
+      **Residual filed by that review (NOT part of C6):** `_seed_hash` still does not
+      fingerprint `strategy_fn`, which is pre-existing and explicitly disclosed in the
+      docstring — two runs whose STRATEGY carries a different cost model can share a hash and
+      diverge in PnL. Tracked as C7.
+- [ ] C7. **`seed_hash` does not cover `strategy_fn` (filed 2026-07-26 by the C6 review).** The
+      fingerprint covers DATA + engine CONFIG but not the strategy closure. Reproduced by the
+      reviewer: `make_calibration_bucket_strategy` with a flat vs a scheduled cost model, under
+      an identical engine cost model, gives net_edge 0.0202 (trades) vs 0.0139 (abstains) at
+      the same market — same hash, different PnL. Currently mitigated only by a docstring
+      warning ("compare hashes only across same-strategy runs"). The honest fix is a
+      strategy-supplied `config_fingerprint()` the engine folds in; an arbitrary closure cannot
+      be hashed, so the strategy must declare its own identity.
+- [ ] C8. **Backtests price at the CLOB MIDPOINT and never pay a spread — the binding
+      methodological constraint (filed 2026-07-26 by the EXP-006b audit).** CLOB
+      `/prices-history` returns the book midpoint, not a traded price (verified live:
+      `/prices-history` 0.1965 == `/midpoint` 0.1965 against a 0.196/0.197 book; 42.7% of
+      corpus ticks carry 4 decimals, the half-tick signature). Every backtest in this repo
+      therefore enters and exits at an unattainable price, paying only
+      `DEFAULT_SLIPPAGE_RATE=0.005` for crossing, against measured real half-spreads of 2.5%
+      (0.02-0.05), 5.8% (0.05-0.10) and 16.7% (<0.01) of price — a **5x-33x understatement**,
+      worst exactly in the low-price band where the refuted families concentrated their signal.
+      Measured breakeven cost multiple on EXP-006b was 5.93x/8.33x with F11 significance lost
+      at 1.7x/2.9x. **Until entry and exit pay a measured half-spread at the traded price
+      level, no result in this family means much — this ranks AHEAD of any new alpha.**
+- [ ] C9. **F10 has no axis for SINGLE-OBSERVATION dominance (filed 2026-07-26 by the EXP-006b
+      audit).** F10 gates category / horizon / confidence / time / top-MARKET concentration,
+      but nothing catches "one trade of 141 carries the result". On corrected EXP-006b, dropping
+      the single largest trade moved the 0.15 cell from `significant_positive` to
+      indistinguishable, and the top 10 of ~150 trades carried the entire result in both cells —
+      while the existing top-market check PASSED (0.4715 vs a 0.50 threshold, and it passed
+      *because of* a leaked trade). A drop-top-k or winsorized-PnL check would have flagged both
+      cells immediately, and would have flagged EXP-006 too. Cheap, offline, and it makes every
+      past and future result more honest.
+- [ ] E11. **Forward depth capture at decision time (filed 2026-07-26 by the capacity work).**
+      Retrospective depth is UNOBTAINABLE from Polymarket — Gamma serves `liquidity: null` on
+      resolved markets and CLOB `/book` 404s on a settled token (both verified live). So the
+      `liquidity: null` on all 187 frozen OOS records is a venue data-availability FACT, not a
+      fetcher threading bug, and no past corpus can ever be capacity-tested. Depth IS
+      observable going forward: recording the book alongside every paper decision is the only
+      route to a MEASURED historical capacity curve. `scripts/capacity_probe.py` is the read
+      side; the capture-at-decision-time wiring is the remaining half.
+- [ ] E12. **Replace the parametric impact model with a real book walk where a ladder exists
+      (filed 2026-07-26).** `capacity.walk_book()` computes impact from a real ask ladder with
+      NO free parameter. Calibrating `DEFAULT_IMPACT_COEFF=0.5` against 62 real ladders showed
+      it is wrong in BOTH directions: the median book absorbs a $1,000 order at the touch
+      (implied coeff 0.0000, robust across every depth denominator tested), while thin books
+      imply far higher values. Impact on this venue is near-bimodal — absorbed at the touch or
+      a deep walk — which a single global coefficient in a smooth sqrt model cannot represent.
+      The fix is to walk the book where one is available and keep the parametric model only as
+      a documented crude fallback. NOTE the tail magnitude is denominator-dependent (touch-depth
+      gives a max of 0.93, 2c-depth 17.6, total-ask 137), so do NOT quote a single tail number.
 - [ ] E4. Strategy A/B + decayed-alpha retirement.
 - [ ] E8. **A net-POSITIVE-but-F10-FRAGILE corpus — the one thing that would make the
       per-category concentration-cap test informative (filed 2026-07-25 by EXP-011).** Both

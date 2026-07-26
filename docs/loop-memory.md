@@ -3150,3 +3150,63 @@ and a skip message naming the wrong path. **Pattern: four of the five review fin
 were tests or comments that CLAIMED more than they checked — not broken production code.** That
 is the failure mode this repo's grading actually catches, and it is worth budgeting review
 attention for specifically.
+
+## 2026-07-26 — incidents
+
+**INCIDENT 6 — I restored a file with `git checkout HEAD -- <path>` and destroyed my own
+uncommitted fix.** Proving a regression test fails pre-fix requires reverting source, and I
+used `git checkout <base-sha> -- <path>` correctly (per Incident 2's lesson) — but then
+"restored" with `git checkout HEAD -- <path>` while the branch had **no commit yet**, so HEAD
+*was* the base and the restore silently reverted my entire fix. I had to re-apply every edit
+from context. **Lesson: COMMIT the fix BEFORE running any pre-fix check.** Then the pre-fix
+experiment is a checkout away from a real restore point, and "restore" cannot mean "discard".
+A second instance of the same class: a concurrent review subagent clobbered my worktree's
+working copy despite instructions not to; the commit and pushed branch were unaffected, which
+is exactly why committing first is the fix.
+
+**INCIDENT 7 — a scout's causal story was confidently wrong and would have shipped a
+LEAKAGE bug as a "fix".** A Haiku scout reported the capacity gap as "the fetcher parses
+Gamma's `liquidity` and drops it before building `HistoricalMarket` — BROKEN threading", with
+file:line evidence. The evidence was accurate; the conclusion was inverted. Probing the live
+API showed Gamma returns `liquidity: null` for **all** resolved markets and CLOB `/book` 404s
+on settled tokens — so the field is not droppable-but-recoverable, it does not exist, and
+threading it would have injected a POST-RESOLUTION value into the backtest as decision-time
+depth. **Lesson: when a scout says "X is parsed but dropped, just thread it through", check
+what X actually CONTAINS at the point of use before believing the fix is a one-liner.** A
+correct code reading can still support a wrong causal claim. (Compare Incident 4: scout
+*negative* claims are unreliable; this shows scout *mechanism* claims are too.)
+
+**INCIDENT 8 — the adversarial gate found a real leakage bug in shipped code, and my headline
+was contaminated.** EXP-006b's first pass returned F11 `significant_positive` on both
+pre-registered cells — the strongest signal this project had produced — and I wrote it up as
+such. Two of three fresh Opus auditors independently traced 43.9% of the PnL to six trades
+exiting on venue settlement pins, caused by `resolution_time` resolving to `endDate` (the
+SCHEDULED end) instead of actual settlement. The leakage guard was a NO-OP for 22% of markets.
+**Three transferable lessons.** (a) *A guard is only as good as its anchor* — "truncate 24h
+before resolution" is worthless if `resolution` is the wrong timestamp, and the corpus metadata
+asserted "no settlement pin" while that was false for 98 markets. A disclosure that is not
+CHECKED is a liability; there is now a fetch-time post-condition that fails loud. (b) *When a
+result is suddenly much better than every prior one, the prior is that the pipeline changed,
+not the market.* I did write cautious framing, but I still led with the positive F11 rather
+than treating the discontinuity itself as the finding. (c) *Removing 0.32% of the data removed
+43% of the result* — that ratio is itself a fragility metric worth computing routinely.
+
+**INCIDENT 9 — my own anti-fabrication module could fabricate.** A Sonnet reviewer broke
+`capacity.floor_feasibility`, whose entire purpose is to stop a made-up capacity number from
+shipping. Its "impact grows super-linearly so a finite peak exists" reasoning holds only while
+the impact fraction is unsaturated; past the clamp, drag is LINEAR, so an edge above that slope
+has no finite peak and the grid search returned its own 1e9 upper bound dressed up as "the most
+this signal can EVER earn" ($1.12bn peak / $112m/wk at price 0.95, inside NearCertaintyStrategy's
+own envelope). **Lesson: a bounded search returning its bound must never be reported as a
+maximum — check for the unbounded case explicitly and name it a model artifact.** Also: my
+SELF_VALIDATION entry claimed the capability "CANNOT produce a $/week number" when the guard
+only covered `edge <= 0`. **An absolute "cannot" in a validation manifest is a claim about all
+future callers; write the weaker true thing.**
+
+**INCIDENT 10 — I published tables computed from a superseded artifact.** The capacity doc's
+numbers came from an earlier probe run than the one committed (64 vs 62 tokens; median spread
+quoted 0.8c vs the artifact's 0.3c), because I re-ran the probe to add ladder capture and did
+not regenerate the tables. The reviewer caught it by recomputing from the committed file.
+**Lesson: when the artifact is regenerated, EVERY number derived from it is stale until
+recomputed — and the "Reproduction" section that claims they come from the committed file is
+precisely the claim that fails.** Fixed by recomputing all of them from the committed artifact.

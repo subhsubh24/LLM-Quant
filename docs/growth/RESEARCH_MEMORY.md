@@ -4229,3 +4229,126 @@ no cap change, no code shipped this run — docs-only: this file + GROWTH_STATUS
   (all 187 frozen records `liquidity: null`).
 - Binding constraint UNCHANGED: business_case_strength B, no validated real-money OOS edge on any
   tested mechanism. Real-money brake untouched (no order, no gate flip, no cap change).
+
+## 2026-07-26 — Factory build (model/strategy factory): EXP-006b run on a FRESH disjoint corpus → NULL, and the adversarial gate found a REAL LEAKAGE BUG affecting every corpus this project has built. Plus the first real capacity measurement. NO edge claimed; fade-the-spike stays REFUTED.
+
+- Hypothesis (falsifiable, pre-registered BEFORE the fetch in
+  `docs/autonomous-loop/EXP006B_PREREGISTRATION.md`): on political markets NOT used in
+  EXP-006, fading confirmed intraday spikes of magnitude >= 0.15 produces a cost-net positive
+  edge that is F11-significant and F10-non-fragile at N >= 100.
+- **VERDICT: EDGE-NOT-PROVEN. Fade-the-spike remains REFUTED.** No revenue field moved, no DoD
+  box ticked, `business_case_strength` stays **B**. `engine_pct` unchanged.
+
+**The corpus (new, committed, disjoint).** `scripts/fetch_spike_corpus.py` gained
+`--exclude-market-ids` / `--tag-id`, which is the only mechanism that makes a second corpus
+structurally disjoint from a first: the volumeNum ranking of resolved markets is near-stable,
+so a re-fetch with identical parameters silently re-selects most of the same markets and a
+"fresh OOS" would be re-testing in-sample data. It fails LOUD on a missing/unparseable/empty
+exclusion file. Result: 800 fetched → 255 excluded (the exact EXP-006 market ids) → 545
+candidates → 439 kept → **re-truncated to 438 markets / 711,086 ticks**. Set intersection with
+the EXP-006 corpus: **zero**, verified directly.
+
+**The first-pass result looked like the best signal this project has produced. It was
+contaminated.** Both pre-registered cells came back F11 `significant_positive` above the N
+floor (152 trades/+$4,269 and 109/+$4,875, hit ~57%). An earlier draft of the write-up called
+this "the first F11-significant-positive OOS the project has produced". **That claim was wrong
+and is retracted.**
+
+**Three fresh Opus auditors, mandate "prove the edge is not real". TWO returned BROKEN, and
+they independently found the SAME defect.**
+
+*Defect 1 — the leakage cutoff was anchored on the wrong timestamp.*
+`polymarket_history_fetcher._parse_resolved` resolved `resolution_time` as
+`endDate or closedTime`. `endDate` is the SCHEDULED end; `closedTime`/`umaEndDate` are when the
+market ACTUALLY settled, and a market that resolves early keeps its later `endDate`. Because
+the CLOB stops emitting ticks at the actual close, every guard anchored on `resolution_time` —
+including "truncate 24h before resolution" — was a **NO-OP** for those markets. Measured: **98
+of 439 (22.3%)** had series running past the claimed margin to the settlement pin. Verified
+independently against Gamma: market 673598 ("Will the government shutdown end November 13?")
+has `endDate` 2025-11-21 but `closedTime` 2025-11-13T14:37:32Z — its corpus series ends 37
+minutes before settlement at p=0.9995, and that single trade was **47% of the cell's PnL**. Its
+"reversion" was the market settling. Six such trades carried **43.9%** of net PnL.
+FIXED to `min(closedTime, umaEndDate, endDate)` — `min` can only move a cutoff EARLIER, so it
+can never admit a tick the old code excluded.
+
+*Defect 2 — reversal labeling never required the horizon to be covered.* `label_reversal`
+returned `None` only when NO later tick existed; it never checked the forward horizon was
+reached, so a spike near end-of-data was labelled against the final tick — a 2h hold scored as
+a 24h trade, at a settlement-adjacent price. Seven trades exited on the series' last tick, 39%
+of raw PnL. FIXED: `require_full_horizon=True` by default.
+
+*Defect 3 — NOT fixed, because it is not a code bug: the corpus prices are book MIDPOINTS.*
+CLOB `/prices-history` returns the midpoint (verified live: `/prices-history` 0.1965 ==
+`/midpoint` 0.1965 against a 0.196/0.197 book; 42.7% of ticks carry 4 decimals). The engine
+therefore buys and sells at an unattainable price, paying 0.5% for crossing against measured
+real half-spreads of 2.5%/5.8%/16.7% — a **5x–33x understatement**, worst exactly in the band
+carrying the PnL. Breakeven cost multiple 5.93x/8.33x; F11 significance lost at 1.7x/2.9x.
+**This is now the binding methodological constraint, ahead of any new alpha** (ROADMAP C8).
+
+**Corrected numbers.** Removing **0.32% of the data** removed **43% of the result**:
+th=0.15 → N=141, +$2,441.03, F10 still FRAGILE (82% one category); th=0.20 → N=99, +$2,855.43,
+now **below the pre-registered N>=100 floor** → `insufficient_data`. Both
+`is_validated_edge=false`. Over the corpus's 121.7 weeks that is **$20/week against a
+$2,000/week floor** — the earlier draft quoted the raw dollar total without the timespan, which
+the audit correctly called out as making a two-year trickle read like a result.
+
+**Three further corrections the auditors forced on my own write-up** (recorded because being
+wrong in a specific, checkable way is the useful part):
+1. **"Both cells" was ~ONE test**, not two: the 0.20 cell's markets are a 100% subset of the
+   0.15 cell's and 90 trades are byte-identical across them, carrying 99.8% of the 0.15 total.
+   Any future pre-registration in this family must pick NON-NESTED cells.
+2. **There is no "high-threshold corner."** A threshold sweep on this corpus returns
+   `significant_positive` at 0.10, 0.12, 0.13, 0.14, 0.16, 0.17, 0.18 and 0.22 — including the
+   0.10 default that was REFUTED on the old corpus. Whatever differs, differs at the corpus
+   level, not at the threshold.
+3. **Event correlation was NOT the main risk.** I had named it "the single most likely way this
+   result is wrong". Measured: 152 trades span 110–113 event clusters but the design effect is
+   only **1.11–1.15**, and every clustering (event/week/month/quarter) keeps the CI above zero.
+   The real fragility is **single-observation dominance** — dropping ONE trade of 141 moves the
+   0.15 cell to indistinguishable, and the top 10 of ~150 carry the whole result. F10 has no
+   axis for this (ROADMAP C9). My named next-step ordering was wrong and is corrected.
+
+**What survived the audit:** spike detection is genuinely causal (prefix-only re-detection
+disagreed on 0 of 277 spikes; it also survived an entry-price-matched placebo and a
+direction-randomization test); the F11 percentile bootstrap is CONSERVATIVE on this payoff
+shape (600-replication placebo returned `significant_positive` 0.0–0.2% vs a 2.5% nominal);
+corpus disjointness is real; the per-market cap is enforced; both legs are genuinely cost-net;
+and pre-registration integrity was verified from git timestamps (prereg committed ~11 minutes
+before the corpus existed, no engine/gate code changed between prereg and result).
+
+**Effect on prior results:** the anchor bug affected EVERY corpus this fetcher built, including
+EXP-006's and the frozen real-OOS corpus. Leakage of this shape inflates PnL **upward**, so
+those **refutations stand a fortiori** — no published negative conclusion is overturned. Filed:
+re-run them with the fixes to confirm rather than assume.
+
+**Separately — the first real capacity measurement (QUALITY_SCORECARD `backtest_integrity`
+residual (b)).** Two findings, the first of which CORRECTS the scorecard's own proposed fix:
+(1) the `liquidity: null` on all 187 frozen records is **not** a fetcher threading bug. Gamma
+serves `liquidity`/`liquidityNum`/`liquidityClob` all NULL on resolved markets and CLOB `/book`
+404s on a settled token (both verified live), while both are populated for OPEN markets. The
+venue does not retain depth for settled markets, so retrospective capacity testing is
+**impossible**, not merely unbuilt — and threading Gamma's field would have injected a
+POST-RESOLUTION value as decision-time depth. (2) `DEFAULT_IMPACT_COEFF=0.5` is wrong in BOTH
+directions: new `capacity.walk_book()` measures impact off a real captured ladder with no free
+parameter, and over 62 real ladders the **median book absorbs a $1,000 order entirely at the
+touch** (implied coeff 0.0000 — robust across all four depth denominators tested) while thin
+books imply far more. Impact here is near-bimodal, which one global coefficient in a smooth
+sqrt model cannot represent. **The tail magnitude is denominator-dependent** (touch-depth max
+0.93, 2c-depth 17.6, total-ask 137), so no single tail number is quoted as a finding. No
+revenue or $/week claim follows and none is made — there is no validated positive edge to size.
+
+**The gate earned its keep three times this run**, which is the honest headline:
+- 2 of 3 Opus auditors BROKE the EXP-006b result and found a real leakage bug in shipped code.
+- A Sonnet reviewer found that my own `capacity.floor_feasibility` — the function whose entire
+  job is to stop a fabricated capacity number shipping — could itself emit one: past
+  impact saturation drag becomes linear, so an edge above that slope has no finite peak and the
+  grid search returned its own 1e9 bound as "the most this signal can EVER earn" ($1.12bn peak,
+  $112m/wk ceiling at price 0.95/edge 0.037 — inside NearCertaintyStrategy's own envelope).
+  Now detected and refused as a model artifact, pinned by a test.
+- The same reviewer caught that my SELF_VALIDATION entry claimed the capability "CANNOT produce
+  a $/week number" (false — the refusal only covers edge <= 0) and that the capacity doc's
+  tables were computed from an EARLIER probe run than the one committed (64 vs 62 tokens,
+  spread 0.8c vs 0.3c). Both corrected; every number now recomputes from the committed artifact.
+
+Binding constraint UNCHANGED: `business_case_strength` **B**, no validated real-money OOS edge
+on any tested mechanism. Real-money brake untouched (no order, no gate flip, no cap change).

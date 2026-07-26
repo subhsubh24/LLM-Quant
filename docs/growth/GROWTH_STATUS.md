@@ -826,6 +826,46 @@ GROWTH_STATUS:
         exactly as done for every prior bucket-calibration test. Only then can EXP-009 be
         declared passing or retired. RECOMMEND-only this run — no code shipped, no
         ROADMAP steer.
+    - id: EXP-006b
+      name: "Fade-the-Spike, high-threshold variant, on a FRESH disjoint political corpus"
+      status: refuted
+      proposed_date: 2026-07-20
+      shipped_date: 2026-07-26
+      result: >
+        SHIPPED #436. EDGE-NOT-PROVEN; fade-the-spike stays REFUTED. Pre-registered BEFORE
+        the fetch (docs/autonomous-loop/EXP006B_PREREGISTRATION.md, committed ~11 minutes
+        before the corpus existed — verified independently from git timestamps by an
+        auditor). Corpus: 438 markets / 711,086 hourly ticks, Polymarket Politics
+        volumeNum pages 1-8 EXCLUDING the 255 EXP-006 markets; set intersection ZERO.
+        FIRST PASS looked like the strongest signal this project had produced — both cells
+        F11 significant_positive above the N floor. TWO of three fresh Opus auditors BROKE
+        it, independently finding a REAL LEAKAGE BUG in shipped code: resolution_time
+        resolved to `endDate` (the SCHEDULED end) rather than actual settlement, so the
+        24h truncation guard was a NO-OP for 98 of 439 markets (22.3%) and six trades
+        exited on venue settlement pins carrying 43.9% of net PnL — one of them 47% of the
+        cell, whose "reversion" was the market settling 37 minutes later. FIXED at the root
+        (min of closedTime/umaEndDate/endDate) plus a horizon-coverage guard and a
+        fetch-time post-condition. CORRECTED: removing 0.32% of the data removed 43% of the
+        result. th=0.15 -> N=141 / +$2,441.03, F10 still FRAGILE (82% one category);
+        th=0.20 -> N=99, BELOW the pre-registered N>=100 floor -> insufficient_data. Both
+        is_validated_edge=false. Over the corpus's 121.7 weeks that is ~$20/week against a
+        $2,000/week floor. The earlier "first F11-significant-positive OOS" claim is
+        RETRACTED in the write-up. Auditors also corrected three of my own claims: the two
+        cells were ~ONE test (90 byte-identical shared trades); there is NO high-threshold
+        corner (0.10-0.22 are all significant_positive on this corpus); and event
+        correlation was NOT the main risk (design effect 1.11-1.15) — single-observation
+        dominance is (dropping ONE trade of 141 kills the cell).
+      edge_source: "price-reversal after hype-driven intraday spikes (EXP-006 family), tested at the high-threshold corner the robustness surface named"
+      reaches_revenue_field: false
+      notes: >
+        A third defect is disclosed but NOT fixed because it is not a code bug: the corpus
+        prices are CLOB MIDPOINTS, so the engine never pays a spread (0.5% assumed vs
+        measured real half-spreads of 2.5-16.7% at the prices carrying the PnL, a 5x-33x
+        understatement). Breakeven cost multiple 5.93x/8.33x; F11 significance lost at
+        1.7x/2.9x. Filed as ROADMAP C8 and now the binding METHODOLOGICAL constraint,
+        ahead of any new alpha. Prior negative results are unaffected: leakage of this
+        shape inflates PnL upward, so EXP-006's and the frozen corpus's refutations stand
+        a fortiori.
     - id: EXP-010
       name: "Cost-Model Realism Recalibration — Price-Dependent Fee Formula vs. Flat Rate"
       status: shipped-null
