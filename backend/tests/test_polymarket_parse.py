@@ -171,6 +171,46 @@ def test_order_book_valid_two_sided_preserved():
     assert abs(book.spread - 0.04) < 1e-9
 
 
+def test_order_book_touch_is_read_from_a_worst_first_ladder():
+    """REGRESSION: the CLOB serves the ladder WORST-FIRST, so the touch is the LAST level.
+
+    Verified live 2026-07-26 against market 703258: bids ran 0.001 -> 0.019 ASCENDING and
+    asks ran 0.999 -> 0.020 DESCENDING, i.e. the real quote was 0.019/0.020 while index 0
+    held 0.001 and 0.999. Reading index 0 as the touch reported best_bid 0.001 / best_ask
+    0.999 / spread 0.998 — a fabricated ~100%-wide market, which is exactly what the
+    one-sided-book guard above exists to prevent, reached from the other end of the ladder.
+
+    Every pre-existing book test used a single level per side, so none could catch this.
+    This payload mirrors the real multi-level shape.
+    """
+    c = _client_with_book({
+        # ascending (worst bid first), as the venue actually serves it
+        "bids": [
+            {"price": "0.001", "size": "3962246.3"},
+            {"price": "0.010", "size": "5000"},
+            {"price": "0.019", "size": "4292.13"},
+        ],
+        # descending (worst ask first), as the venue actually serves it
+        "asks": [
+            {"price": "0.999", "size": "2100288.89"},
+            {"price": "0.030", "size": "9000"},
+            {"price": "0.020", "size": "138067.5"},
+        ],
+    })
+    book = c.get_order_book("tok")
+    assert book is not None
+    assert book.best_bid == 0.019, "best bid must be the HIGHEST bid, not the first served"
+    assert book.best_ask == 0.020, "best ask must be the LOWEST ask, not the first served"
+    assert abs(book.spread - 0.001) < 1e-9, (
+        "a 0.1-cent spread must not be reported as a 99.8-cent one"
+    )
+    # Levels are normalized best-first, so `bids[:n]` / `asks[:n]` mean executable depth
+    # near the touch rather than the deepest resting orders far from it — which is how
+    # MarketMakingStrategy computes book_depth.
+    assert [b["price"] for b in book.bids] == [0.019, 0.010, 0.001]
+    assert [a["price"] for a in book.asks] == [0.020, 0.030, 0.999]
+
+
 def test_get_market_by_id_queries_the_id_filter_not_slug():
     # Resolution stores the numeric Gamma id; get_market_by_id must query the ``id``
     # filter (the field positions carry), not the slug filter.

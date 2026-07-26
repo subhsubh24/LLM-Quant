@@ -513,6 +513,22 @@ class PolymarketClient:
         bids = _clean_levels(data.get("bids"))
         asks = _clean_levels(data.get("asks"))
 
+        # NORMALIZE LEVEL ORDER — best-first on both sides. The CLOB serves the ladder
+        # WORST-FIRST: bids ascending (cheapest bid first) and asks descending (dearest ask
+        # first), so the touch is the LAST element on each side. Verified live 2026-07-26 on
+        # market 703258: bids ran 0.001 -> 0.019 and asks ran 0.999 -> 0.020, i.e. the real
+        # quote was 0.019/0.020 while index 0 held 0.001/0.999.
+        #
+        # Reading index 0 as the touch therefore produced a FABRICATED quote — best_bid
+        # 0.001, best_ask 0.999, spread 0.998 — the same "a strategy reads a real
+        # 100%-wide market" failure this method's one-sided-book guard above exists to
+        # prevent, arrived at from the other end of the ladder. Sorting here fixes it at the
+        # root, for every consumer, and additionally makes `bids[:5]` / `asks[:5]` mean the
+        # top five levels (executable depth near the touch) rather than the five deepest
+        # resting orders far from it.
+        bids.sort(key=lambda lvl: lvl["price"], reverse=True)  # best (highest) bid first
+        asks.sort(key=lambda lvl: lvl["price"])                # best (lowest) ask first
+
         # A real two-sided spread needs BOTH sides. An empty or one-sided book is not a
         # tradeable quote — return None rather than fabricate best_bid=0 / best_ask=1.
         if not bids or not asks:
