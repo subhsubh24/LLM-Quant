@@ -49,6 +49,12 @@ from .cost_model import DEFAULT_COST_MODEL, CostModel
 # question anyone would ask of it, and the loop is hard-bounded (never `while True`).
 _SEARCH_ITERS = 60
 
+# Multiple of DEPTH used to price a deliberately SATURATING order when measuring where the
+# impact model's cost asymptotes. The impact fraction clamps at DEFAULT_MAX_IMPACT_FRACTION,
+# so any size far above depth lands on the clamp; 1e6x depth is unambiguously there while
+# staying finite (an inf size would make the arithmetic NaN rather than saturated).
+_SATURATING_SIZE_CONTRACTS = 1e6
+
 
 @dataclass(frozen=True)
 class CapacityPoint:
@@ -322,8 +328,27 @@ def floor_feasibility(
     #
     # Reporting a fabricated unbounded capacity is the precise failure this module exists to
     # prevent, so we detect it and say so instead.
+    # The saturated slope must come from the COST MODEL, not from assuming the impacted
+    # price asymptotes to the $1.00 breakeven cap. That assumption only holds when
+    # `flat >= 0.5`; below it the impacted cost saturates at roughly `2 * flat`, which is
+    # UNDER $1, so the true slope is far smaller than `(1-flat)/flat` and an edge in between
+    # slips past the guard while profit is genuinely unbounded. A re-review found 444 such
+    # combinations, all in the sub-0.49 price band — squarely inside this repo's own
+    # longshot-heavy corpus (median price ~0.04), where a modest mispricing (true 0.10 vs
+    # market 0.04) already implies an edge fraction above 1.0.
+    #
+    # So: price a deliberately saturating order through the real cost model and measure the
+    # asymptote instead of predicting it. That is correct for any price, any cost model, and
+    # any impact clamp, and it cannot drift if those change.
     _flat = cost_model.effective_buy_price(market_price, category)
-    _saturated_slope = (1.0 - _flat) / _flat if _flat > 0.0 else float("inf")
+    if _flat > 0.0:
+        _c_sat = cost_model.effective_buy_price_with_impact(
+            market_price, _SATURATING_SIZE_CONTRACTS * max(depth_contracts, 1.0),
+            depth_contracts, impact_coeff, category,
+        )
+        _saturated_slope = (_c_sat - _flat) / _flat
+    else:
+        _saturated_slope = float("inf")
     if edge_fraction_per_trade > _saturated_slope and net_at(peak_b * 10.0) > peak_net:
         return FloorFeasibility(
             weekly_target_usd=weekly_target_usd,
@@ -458,6 +483,14 @@ def walk_book(levels: Sequence[dict], contracts: float) -> BookWalk:
     # to wire it into the live impact path, where a future caller with a hand-built or
     # third-venue ladder would otherwise introduce a silent pricing bug.
     prices = [float(lvl["price"]) for lvl in levels]
+    # Reject NON-FINITE values FIRST. Every ordering comparison below is False against NaN,
+    # so a NaN (or inf) price or size slips silently past the shape and size guards and
+    # yields a BookWalk whose average_fill_price and realized_impact_fraction are NaN/inf —
+    # a nonsensical result that would propagate straight into a capacity number.
+    if not all(math.isfinite(p) for p in prices):
+        raise ValueError(f"ladder prices must all be finite; got {prices[:5]}...")
+    if not all(math.isfinite(float(lvl["size"])) for lvl in levels):
+        raise ValueError("ladder sizes must all be finite")
     if any(b < a for a, b in zip(prices, prices[1:])):
         raise ValueError(
             "ask ladder must be best-first (non-decreasing price); got "

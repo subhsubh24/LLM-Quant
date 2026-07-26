@@ -363,3 +363,52 @@ def test_walk_book_rejects_non_positive_level_sizes():
     partial-fill invariant."""
     with pytest.raises(ValueError, match="positive size"):
         walk_book([{"price": 0.50, "size": -10.0}], 5.0)
+
+
+def test_saturation_guard_fires_in_the_LOW_PRICE_regime_too():
+    """Re-review finding: the first version of the guard derived the saturated slope as
+    `(1-flat)/flat`, which assumes the impacted price asymptotes to the $1.00 breakeven cap.
+    That only holds for `flat >= 0.5`. Below it the impacted cost saturates around `2*flat`
+    — under $1 — so the true slope is far smaller, and an edge between the two slipped past
+    the guard while profit was genuinely unbounded.
+
+    This is not exotic: this repo's own corpus is longshot-heavy (median price ~0.04), where
+    a true-0.10-vs-market-0.04 mispricing already implies an edge fraction above 1.0. The
+    reviewer found 444 such combinations, all below price 0.49.
+
+    Reproduces their exact case, at the artifact's own median measured depth.
+    """
+    r = floor_feasibility(
+        weekly_target_usd=100.0, trades_per_week=10, edge_fraction_per_trade=1.2,
+        market_price=0.04, depth_contracts=71_687.725,
+    )
+    assert r.feasible is False, (
+        "an unbounded model artifact at a longshot price must not read as feasible"
+    )
+    assert "NO CAPACITY CEILING EXISTS" in r.binding_reason
+    # And it must not hand back a plausible-looking finite headroom figure.
+    assert r.max_achievable_weekly_usd == float("inf")
+
+
+def test_saturated_slope_is_derived_from_the_cost_model_not_assumed():
+    """The slope must track the ACTUAL cost model. At a low price the saturated impacted
+    cost is ~2x flat, so the slope is ~1.0 — nowhere near the ~23 that `(1-flat)/flat`
+    would give at price 0.04. Pinned so the derivation cannot regress to the assumption."""
+    r = floor_feasibility(
+        weekly_target_usd=100.0, trades_per_week=10, edge_fraction_per_trade=1.2,
+        market_price=0.04, depth_contracts=71_687.725,
+    )
+    assert "saturated-impact slope (1.0000)" in r.binding_reason
+
+
+def test_walk_book_rejects_non_finite_prices_and_sizes():
+    """Every ordering comparison is False against NaN, so NaN/inf slipped past the
+    shape and size guards and produced a BookWalk with NaN average_fill_price — a
+    nonsensical number that would flow straight into a capacity figure."""
+    nan, inf = float("nan"), float("inf")
+    with pytest.raises(ValueError, match="finite"):
+        walk_book([{"price": 0.10, "size": 100.0}, {"price": nan, "size": 100.0}], 150.0)
+    with pytest.raises(ValueError, match="finite"):
+        walk_book([{"price": 0.10, "size": 100.0}, {"price": inf, "size": 100.0}], 150.0)
+    with pytest.raises(ValueError, match="finite"):
+        walk_book([{"price": 0.10, "size": nan}], 50.0)
