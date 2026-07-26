@@ -1,0 +1,58 @@
+{
+  "source": "data/spike_corpus_politics_b.json",
+  "n_markets_scanned": 439,
+  "n_spikes_detected": 277,
+  "n_spikes_unlabelable": 0,
+  "n_trades": 152,
+  "n_markets_traded": 152,
+  "total_pnl_usd": 4268.78579,
+  "hit_rate": 0.572368,
+  "f11_verdict": "significant_positive",
+  "f11_total_ci": [
+    512.6805,
+    9763.1019
+  ],
+  "f10_fragile_raw": true,
+  "f10_fragile_reasons_raw": [
+    "category: 94% of net PnL from a single bucket ('Politics') > 70% threshold",
+    "horizon: 100% of net PnL from a single bucket ('<=1d') > 70% threshold",
+    "confidence: 78% of net PnL from a single bucket ('0-10%') > 70% threshold"
+  ],
+  "size_robustness": "assessed: large-spike set (|move| >= 0.25, N=104, net $1,110.17, hit 45%) not significantly negative (indistinguishable_from_zero)",
+  "magnitude_strata": [
+    {
+      "band": "0.00-0.15",
+      "n_trades": 0,
+      "total_pnl_usd": 0.0,
+      "hit_rate": null,
+      "mean_reversal_fraction": null,
+      "mean_magnitude": null
+    },
+    {
+      "band": "0.15-0.25",
+      "n_trades": 48,
+      "total_pnl_usd": 3158.611619,
+      "hit_rate": 0.833333,
+      "mean_reversal_fraction": 0.669403,
+      "mean_magnitude": 0.198969
+    },
+    {
+      "band": "0.25-0.40",
+      "n_trades": 59,
+      "total_pnl_usd": 1397.978155,
+      "hit_rate": 0.542373,
+      "mean_reversal_fraction": 0.276236,
+      "mean_magnitude": 0.31628
+    },
+    {
+      "band": ">=0.40",
+      "n_trades": 45,
+      "total_pnl_usd": -287.803984,
+      "hit_rate": 0.333333,
+      "mean_reversal_fraction": -0.374491,
+      "mean_magnitude": 0.547067
+    }
+  ],
+  "is_validated_edge": false,
+  "verdict": "EDGE-NOT-PROVEN: fade-the-spike net $4,268.79 over 152 trades \u2014 F10 fragile (horizon dim excluded \u2014 single-horizon strategy): confidence-band: 78% of net PnL in one band > 70%; category: 94% of net PnL in one category > 70%. [size-robustness: assessed: large-spike set (|move| >= 0.25, N=104, net $1,110.17, hit 45%) not significantly negative (indistinguishable_from_zero)]. Honest null / not-yet \u2014 NOT go-live evidence."
+}
