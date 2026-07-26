@@ -115,8 +115,11 @@ leaked ticks removed **0.32% of the data** — and 43% of the result.
   Under-powered is neither positive nor negative; it is reported as under-powered.
 - **th=0.15 remains F10-fragile** (82% of net PnL in one category) — and, per Defect 3, is not
   significant under any realistic execution model.
-- Dropping the **single largest trade** takes th=0.15 to indistinguishable. Ten trades of ~150
-  carry the whole result.
+- Dropping the **two largest trades** takes th=0.15 to `indistinguishable_from_zero`
+  (measured on the corrected corpus: drop-1 is still `significant_positive` but with a CI
+  floor of just **+$21.28**; drop-2 gives CI [−289.60, +2955.27]). An earlier draft said
+  "the single largest trade" — that was carried over from an auditor's measurement on the
+  PRE-fix corpus and is corrected here to the post-fix number.
 
 The "after" column applies **both** fixes (settlement anchor + horizon coverage). Applying
 only the anchor fix — which is what two auditors independently measured — gives N=148 /
@@ -138,14 +141,16 @@ size at which this is a business.
 Several of these correct claims **I** made. They are listed as corrections, not as
 observations I happened to agree with.
 
-- **"Both cells" was ~one test, not two.** The 0.20 cell's markets are a 100% subset of the
-  0.15 cell's, and **90 trades are byte-identical across both**, carrying 99.8% of the 0.15
-  total. The pre-registration's "if both cells validate → CANDIDATE" rule implicitly treated
+- **"Both cells" was ~one test, not two.** On the corrected corpus, **83 of the 0.15 cell's
+  141 trades are identical in the 0.20 cell** (same market, same confirm instant, same PnL to
+  1e-9), carrying **96.0%** of the 0.15 total. (An earlier draft said "90 trades / 99.8%",
+  measured on the PRE-fix corpus; corrected to the post-fix figures.) The pre-registration's "if both cells validate → CANDIDATE" rule implicitly treated
   them as independent confirmations. They are one result reported twice, and any future
   pre-registration in this family must pick non-nested cells.
 - **There is no "high-threshold corner."** A threshold sweep on this corpus returns
-  `significant_positive` at 0.10, 0.12, 0.13, 0.14, 0.16, 0.17, 0.18 and 0.22 — including
-  the 0.10 default that was *refuted* on the old corpus. So the pre-registered mechanism
+  `significant_positive` at 0.10, 0.12, 0.13, 0.14, 0.16, 0.17, 0.18 and 0.19 — including
+  the 0.10 default that was *refuted* on the old corpus. (0.22 is **`insufficient_data`**,
+  N=93 — an earlier draft listed it as significant_positive, measured pre-fix; corrected.) So the pre-registered mechanism
   (that the high-threshold corner is special) is **not** what is going on; whatever differs,
   differs at the corpus level.
 - **Single-observation dominance is the real statistical fragility — not event correlation.**

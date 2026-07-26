@@ -122,18 +122,24 @@ def _build_series(
     raw = _chunked_price_history(fetcher, rm.yes_token_id, start_ts, cutoff_ts)
     # Hard leakage guard: drop anything at/after the cutoff (belt-and-suspenders — the
     # fetch already ends at cutoff_ts, but a boundary tick could equal it).
-    series = [tick for tick in raw if tick["t"] < cutoff_ts]
-    # POST-CONDITION, asserted rather than assumed. The guard above is only as good as
-    # `rm.resolution_time`, and it was silently wrong for 22% of markets when that resolved
-    # to the SCHEDULED `endDate` instead of actual settlement — the series then ran to the
-    # settlement pin while the corpus metadata claimed a 24h margin. A false disclosure is
-    # worse than a missing one, so the invariant is now checked, not documented.
-    if series and series[-1]["t"] >= cutoff_ts:
+    # PRE-CONDITION on the CUTOFF DERIVATION — the part that was actually wrong.
+    #
+    # An earlier version of this check re-tested `series[-1]["t"] < cutoff_ts` immediately
+    # after the list comprehension that guarantees exactly that: mathematically unreachable
+    # dead code that looked like a safety net (a re-reviewer correctly called it vacuous).
+    # The filter was never the weak link — `cutoff_ts` was, because it derives from
+    # `rm.resolution_time`, which used to resolve to the SCHEDULED `endDate` rather than
+    # actual settlement and so sat days late for 22% of markets. So check the DERIVATION:
+    # the cutoff must genuinely precede the recorded resolution by the full margin. This
+    # fires on a margin misconfiguration or a resolution timestamp that arrives non-finite
+    # or reversed — none of which the filter can catch.
+    if cutoff_ts != resolution_ts - leakage_margin_seconds or cutoff_ts >= resolution_ts:
         raise AssertionError(
-            f"leakage-margin violation for market {rm.market_id}: last tick "
-            f"{series[-1]['t']} >= cutoff {cutoff_ts} (resolution {resolution_ts})"
+            f"leakage-margin derivation invalid for market {rm.market_id}: cutoff "
+            f"{cutoff_ts} is not {leakage_margin_seconds}s before resolution "
+            f"{resolution_ts}"
         )
-    return series
+    return [tick for tick in raw if tick["t"] < cutoff_ts]
 
 
 def _load_exclusions(path: Optional[str], ap: argparse.ArgumentParser) -> set[str]:
