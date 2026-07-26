@@ -1,0 +1,7736 @@
+{
+  "probed_utc": "2026-07-26",
+  "source": "Polymarket Gamma (open markets) + CLOB /book (public, no credentials)",
+  "universe": {
+    "limit": 60,
+    "tag_id": null,
+    "open_markets_only": true
+  },
+  "tokens_probed": 62,
+  "tokens_without_real_two_sided_book": 36,
+  "summary": {
+    "depth_at_touch_contracts": {
+      "n": 62,
+      "min": 6.17,
+      "p25": 349.0,
+      "median": 5388.985,
+      "p75": 40164.06,
+      "max": 2983038.91
+    },
+    "depth_within_2c_contracts": {
+      "n": 62,
+      "min": 486.97,
+      "p25": 18850.86,
+      "median": 71687.725,
+      "p75": 558072.47,
+      "max": 9830234.57
+    },
+    "depth_within_5c_contracts": {
+      "n": 62,
+      "min": 2664.06,
+      "p25": 25368.66,
+      "median": 125915.58,
+      "p75": 637787.49,
+      "max": 9830234.57
+    },
+    "total_ask_contracts": {
+      "n": 62,
+      "min": 2711.46,
+      "p25": 247915.34,
+      "median": 1172898.645,
+      "p75": 2983038.91,
+      "max": 32480108.39
+    },
+    "spread": {
+      "n": 62,
+      "min": 0.001,
+      "p25": 0.001,
+      "median": 0.003,
+      "p75": 0.01,
+      "max": 0.038
+    }
+  },
+  "rows": [
+    {
+      "token_id": "55115078421062885512539156303747803058407616201213034911037320915726138659123",
+      "best_bid": 0.19,
+      "best_ask": 0.2,
+      "spread": 0.01,
+      "n_ask_levels": 75,
+      "depth_at_touch_contracts": 23776.26,
+      "total_ask_contracts": 696426.97,
+      "depth_within_2c_contracts": 71726.33,
+      "depth_within_5c_contracts": 149283.02,
+      "ask_ladder": [
+        {
+          "price": 0.2,
+          "size": 23776.26
+        },
+        {
+          "price": 0.21,
+          "size": 34827.96
+        },
+        {
+          "price": 0.22,
+          "size": 13122.11
+        },
+        {
+          "price": 0.23,
+          "size": 13310.92
+        },
+        {
+          "price": 0.24,
+          "size": 47799.31
+        },
+        {
+          "price": 0.25,
+          "size": 16446.46
+        },
+        {
+          "price": 0.26,
+          "size": 20175.81
+        },
+        {
+          "price": 0.27,
+          "size": 24810.72
+        },
+        {
+          "price": 0.28,
+          "size": 3567.58
+        },
+        {
+          "price": 0.29,
+          "size": 39065.63
+        },
+        {
+          "price": 0.3,
+          "size": 4259.94
+        },
+        {
+          "price": 0.31,
+          "size": 15223.35
+        },
+        {
+          "price": 0.32,
+          "size": 3197.09
+        },
+        {
+          "price": 0.33,
+          "size": 9110.97
+        },
+        {
+          "price": 0.34,
+          "size": 3746.67
+        },
+        {
+          "price": 0.35,
+          "size": 2011.51
+        },
+        {
+          "price": 0.36,
+          "size": 17496.19
+        },
+        {
+          "price": 0.37,
+          "size": 2100.0
+        },
+        {
+          "price": 0.38,
+          "size": 6607.58
+        },
+        {
+          "price": 0.39,
+          "size": 200.0
+        },
+        {
+          "price": 0.4,
+          "size": 763.56
+        },
+        {
+          "price": 0.42,
+          "size": 9642.5
+        },
+        {
+          "price": 0.44,
+          "size": 1499.98
+        },
+        {
+          "price": 0.45,
+          "size": 1629.56
+        },
+        {
+          "price": 0.46,
+          "size": 882.35
+        },
+        {
+          "price": 0.47,
+          "size": 188.67
+        },
+        {
+          "price": 0.48,
+          "size": 106.24
+        },
+        {
+          "price": 0.49,
+          "size": 785.0
+        },
+        {
+          "price": 0.5,
+          "size": 8074.79
+        },
+        {
+          "price": 0.51,
+          "size": 2701.92
+        },
+        {
+          "price": 0.52,
+          "size": 412.0
+        },
+        {
+          "price": 0.53,
+          "size": 80.0
+        },
+        {
+          "price": 0.55,
+          "size": 4414.5
+        },
+        {
+          "price": 0.56,
+          "size": 34260.41
+        },
+        {
+          "price": 0.57,
+          "size": 50.69
+        },
+        {
+          "price": 0.58,
+          "size": 6021.63
+        },
+        {
+          "price": 0.59,
+          "size": 3128.0
+        },
+        {
+          "price": 0.6,
+          "size": 1660.72
+        },
+        {
+          "price": 0.61,
+          "size": 1659.36
+        },
+        {
+          "price": 0.62,
+          "size": 214.21
+        }
+      ],
+      "market_id": "665374",
+      "gamma_liquidity_usd": 760664.1705
+    },
+    {
+      "token_id": "1910830010387565971650098373488592514702818137344973088263643820608151819241",
+      "best_bid": 0.8,
+      "best_ask": 0.81,
+      "spread": 0.01,
+      "n_ask_levels": 19,
+      "depth_at_touch_contracts": 272494.21,
+      "total_ask_contracts": 5268362.22,
+      "depth_within_2c_contracts": 1844956.13,
+      "depth_within_5c_contracts": 2058617.07,
+      "ask_ladder": [
+        {
+          "price": 0.81,
+          "size": 272494.21
+        },
+        {
+          "price": 0.82,
+          "size": 1245136.05
+        },
+        {
+          "price": 0.83,
+          "size": 327325.87
+        },
+        {
+          "price": 0.84,
+          "size": 131746.21
+        },
+        {
+          "price": 0.85,
+          "size": 46675.72
+        },
+        {
+          "price": 0.86,
+          "size": 35239.01
+        },
+        {
+          "price": 0.87,
+          "size": 235487.3
+        },
+        {
+          "price": 0.88,
+          "size": 138642.7
+        },
+        {
+          "price": 0.89,
+          "size": 51714.63
+        },
+        {
+          "price": 0.9,
+          "size": 44605.89
+        },
+        {
+          "price": 0.91,
+          "size": 11151.99
+        },
+        {
+          "price": 0.92,
+          "size": 48373.49
+        },
+        {
+          "price": 0.93,
+          "size": 27401.86
+        },
+        {
+          "price": 0.94,
+          "size": 78210.86
+        },
+        {
+          "price": 0.95,
+          "size": 13907.46
+        },
+        {
+          "price": 0.96,
+          "size": 31901.99
+        },
+        {
+          "price": 0.97,
+          "size": 63501.5
+        },
+        {
+          "price": 0.98,
+          "size": 190298.01
+        },
+        {
+          "price": 0.99,
+          "size": 2274547.47
+        }
+      ],
+      "market_id": "665374",
+      "gamma_liquidity_usd": 760664.1705
+    },
+    {
+      "token_id": "105426373826369935595603860663411604941599130211176020843036778867927711117332",
+      "best_bid": 0.15,
+      "best_ask": 0.16,
+      "spread": 0.01,
+      "n_ask_levels": 62,
+      "depth_at_touch_contracts": 9499.14,
+      "total_ask_contracts": 307523.79,
+      "depth_within_2c_contracts": 62509.55,
+      "depth_within_5c_contracts": 83594.43,
+      "ask_ladder": [
+        {
+          "price": 0.16,
+          "size": 9499.14
+        },
+        {
+          "price": 0.17,
+          "size": 26917.89
+        },
+        {
+          "price": 0.18,
+          "size": 26092.52
+        },
+        {
+          "price": 0.19,
+          "size": 4143.79
+        },
+        {
+          "price": 0.2,
+          "size": 15541.09
+        },
+        {
+          "price": 0.21,
+          "size": 1400.0
+        },
+        {
+          "price": 0.23,
+          "size": 150.0
+        },
+        {
+          "price": 0.24,
+          "size": 109.21
+        },
+        {
+          "price": 0.25,
+          "size": 930.9
+        },
+        {
+          "price": 0.26,
+          "size": 300.0
+        },
+        {
+          "price": 0.28,
+          "size": 1829.93
+        },
+        {
+          "price": 0.29,
+          "size": 1516.0
+        },
+        {
+          "price": 0.3,
+          "size": 5698.16
+        },
+        {
+          "price": 0.32,
+          "size": 10.0
+        },
+        {
+          "price": 0.33,
+          "size": 1611.0
+        },
+        {
+          "price": 0.34,
+          "size": 4221.99
+        },
+        {
+          "price": 0.35,
+          "size": 4042.59
+        },
+        {
+          "price": 0.36,
+          "size": 41.89
+        },
+        {
+          "price": 0.38,
+          "size": 200.0
+        },
+        {
+          "price": 0.39,
+          "size": 2222.0
+        },
+        {
+          "price": 0.4,
+          "size": 1476.52
+        },
+        {
+          "price": 0.42,
+          "size": 2222.0
+        },
+        {
+          "price": 0.43,
+          "size": 1499.95
+        },
+        {
+          "price": 0.44,
+          "size": 2249.98
+        },
+        {
+          "price": 0.45,
+          "size": 754.54
+        },
+        {
+          "price": 0.47,
+          "size": 1117.25
+        },
+        {
+          "price": 0.48,
+          "size": 1200.0
+        },
+        {
+          "price": 0.49,
+          "size": 5032.23
+        },
+        {
+          "price": 0.5,
+          "size": 3093.33
+        },
+        {
+          "price": 0.53,
+          "size": 1851.06
+        },
+        {
+          "price": 0.54,
+          "size": 500.0
+        },
+        {
+          "price": 0.55,
+          "size": 180.0
+        },
+        {
+          "price": 0.57,
+          "size": 55.67
+        },
+        {
+          "price": 0.58,
+          "size": 3570.47
+        },
+        {
+          "price": 0.59,
+          "size": 9978.17
+        },
+        {
+          "price": 0.6,
+          "size": 10599.99
+        },
+        {
+          "price": 0.61,
+          "size": 134.61
+        },
+        {
+          "price": 0.62,
+          "size": 1578.94
+        },
+        {
+          "price": 0.65,
+          "size": 5000.0
+        },
+        {
+          "price": 0.66,
+          "size": 2058.82
+        }
+      ],
+      "market_id": "2774056",
+      "gamma_liquidity_usd": 322901.4999
+    },
+    {
+      "token_id": "90869494087977018607792751230236923002303032923064138180950209430688758061828",
+      "best_bid": 0.84,
+      "best_ask": 0.85,
+      "spread": 0.01,
+      "n_ask_levels": 15,
+      "depth_at_touch_contracts": 14446.68,
+      "total_ask_contracts": 4126600.38,
+      "depth_within_2c_contracts": 892789.26,
+      "depth_within_5c_contracts": 970068.96,
+      "ask_ladder": [
+        {
+          "price": 0.85,
+          "size": 14446.68
+        },
+        {
+          "price": 0.86,
+          "size": 19330.09
+        },
+        {
+          "price": 0.87,
+          "size": 859012.49
+        },
+        {
+          "price": 0.88,
+          "size": 10582.6
+        },
+        {
+          "price": 0.89,
+          "size": 9630.36
+        },
+        {
+          "price": 0.9,
+          "size": 57066.74
+        },
+        {
+          "price": 0.91,
+          "size": 263693.87
+        },
+        {
+          "price": 0.92,
+          "size": 22960.99
+        },
+        {
+          "price": 0.93,
+          "size": 29190.73
+        },
+        {
+          "price": 0.94,
+          "size": 22929.16
+        },
+        {
+          "price": 0.95,
+          "size": 41472.85
+        },
+        {
+          "price": 0.96,
+          "size": 60200.49
+        },
+        {
+          "price": 0.97,
+          "size": 81004.59
+        },
+        {
+          "price": 0.98,
+          "size": 241617.39
+        },
+        {
+          "price": 0.99,
+          "size": 2393461.35
+        }
+      ],
+      "market_id": "2774056",
+      "gamma_liquidity_usd": 322901.4999
+    },
+    {
+      "token_id": "34352156398446436078106018571351437965469399998092625112032289774684767742814",
+      "best_bid": 0.001,
+      "best_ask": 0.002,
+      "spread": 0.001,
+      "n_ask_levels": 97,
+      "depth_at_touch_contracts": 1787943.05,
+      "total_ask_contracts": 24504739.49,
+      "depth_within_2c_contracts": 2261767.69,
+      "depth_within_5c_contracts": 2276847.69,
+      "ask_ladder": [
+        {
+          "price": 0.002,
+          "size": 1787943.05
+        },
+        {
+          "price": 0.003,
+          "size": 73101.07
+        },
+        {
+          "price": 0.004,
+          "size": 56851.07
+        },
+        {
+          "price": 0.005,
+          "size": 54851.07
+        },
+        {
+          "price": 0.006,
+          "size": 64850.99
+        },
+        {
+          "price": 0.007,
+          "size": 52168.58
+        },
+        {
+          "price": 0.008,
+          "size": 55119.01
+        },
+        {
+          "price": 0.009,
+          "size": 23017.48
+        },
+        {
+          "price": 0.01,
+          "size": 32958.37
+        },
+        {
+          "price": 0.011,
+          "size": 11000.0
+        },
+        {
+          "price": 0.012,
+          "size": 25162.0
+        },
+        {
+          "price": 0.013,
+          "size": 500.0
+        },
+        {
+          "price": 0.016,
+          "size": 10000.0
+        },
+        {
+          "price": 0.017,
+          "size": 45.0
+        },
+        {
+          "price": 0.018,
+          "size": 80.0
+        },
+        {
+          "price": 0.019,
+          "size": 4000.0
+        },
+        {
+          "price": 0.02,
+          "size": 10120.0
+        },
+        {
+          "price": 0.027,
+          "size": 5050.0
+        },
+        {
+          "price": 0.03,
+          "size": 30.0
+        },
+        {
+          "price": 0.031,
+          "size": 1000.0
+        },
+        {
+          "price": 0.037,
+          "size": 5000.0
+        },
+        {
+          "price": 0.049,
+          "size": 4000.0
+        },
+        {
+          "price": 0.055,
+          "size": 80.0
+        },
+        {
+          "price": 0.059,
+          "size": 100.0
+        },
+        {
+          "price": 0.06,
+          "size": 5000.0
+        },
+        {
+          "price": 0.069,
+          "size": 200.0
+        },
+        {
+          "price": 0.07,
+          "size": 5000.0
+        },
+        {
+          "price": 0.079,
+          "size": 80.0
+        },
+        {
+          "price": 0.08,
+          "size": 9000.0
+        },
+        {
+          "price": 0.09,
+          "size": 5000.0
+        },
+        {
+          "price": 0.103,
+          "size": 3020.47
+        },
+        {
+          "price": 0.114,
+          "size": 400.0
+        },
+        {
+          "price": 0.115,
+          "size": 100.0
+        },
+        {
+          "price": 0.149,
+          "size": 800.0
+        },
+        {
+          "price": 0.15,
+          "size": 20.0
+        },
+        {
+          "price": 0.199,
+          "size": 100.0
+        },
+        {
+          "price": 0.2,
+          "size": 20.0
+        },
+        {
+          "price": 0.229,
+          "size": 800.0
+        },
+        {
+          "price": 0.23,
+          "size": 5.0
+        },
+        {
+          "price": 0.299,
+          "size": 40.0
+        }
+      ],
+      "market_id": "1654956",
+      "gamma_liquidity_usd": 2347133.02528
+    },
+    {
+      "token_id": "81718924566344342339932153243056822500865643754622838691875214933560980686588",
+      "best_bid": 0.998,
+      "best_ask": 0.999,
+      "spread": 0.001,
+      "n_ask_levels": 1,
+      "depth_at_touch_contracts": 2983038.91,
+      "total_ask_contracts": 2983038.91,
+      "depth_within_2c_contracts": 2983038.91,
+      "depth_within_5c_contracts": 2983038.91,
+      "ask_ladder": [
+        {
+          "price": 0.999,
+          "size": 2983038.91
+        }
+      ],
+      "market_id": "1654956",
+      "gamma_liquidity_usd": 2347133.02528
+    },
+    {
+      "token_id": "55547507942649396203839937021705347989082320770224485499197798791654376614809",
+      "best_bid": 0.006,
+      "best_ask": 0.007,
+      "spread": 0.001,
+      "n_ask_levels": 110,
+      "depth_at_touch_contracts": 25052.82,
+      "total_ask_contracts": 24028004.69,
+      "depth_within_2c_contracts": 558072.47,
+      "depth_within_5c_contracts": 598797.55,
+      "ask_ladder": [
+        {
+          "price": 0.007,
+          "size": 25052.82
+        },
+        {
+          "price": 0.008,
+          "size": 122901.74
+        },
+        {
+          "price": 0.009,
+          "size": 251100.0
+        },
+        {
+          "price": 0.01,
+          "size": 149072.91
+        },
+        {
+          "price": 0.011,
+          "size": 1623.0
+        },
+        {
+          "price": 0.012,
+          "size": 1396.0
+        },
+        {
+          "price": 0.013,
+          "size": 1580.0
+        },
+        {
+          "price": 0.014,
+          "size": 1740.0
+        },
+        {
+          "price": 0.018,
+          "size": 80.0
+        },
+        {
+          "price": 0.019,
+          "size": 40.0
+        },
+        {
+          "price": 0.02,
+          "size": 30.0
+        },
+        {
+          "price": 0.021,
+          "size": 125.0
+        },
+        {
+          "price": 0.022,
+          "size": 3331.0
+        },
+        {
+          "price": 0.029,
+          "size": 120.0
+        },
+        {
+          "price": 0.03,
+          "size": 30.0
+        },
+        {
+          "price": 0.031,
+          "size": 1000.0
+        },
+        {
+          "price": 0.032,
+          "size": 5050.0
+        },
+        {
+          "price": 0.033,
+          "size": 3000.0
+        },
+        {
+          "price": 0.039,
+          "size": 25.0
+        },
+        {
+          "price": 0.041,
+          "size": 5000.0
+        },
+        {
+          "price": 0.044,
+          "size": 2500.0
+        },
+        {
+          "price": 0.046,
+          "size": 12.63
+        },
+        {
+          "price": 0.047,
+          "size": 8967.44
+        },
+        {
+          "price": 0.05,
+          "size": 10000.0
+        },
+        {
+          "price": 0.051,
+          "size": 5000.0
+        },
+        {
+          "price": 0.053,
+          "size": 15.0
+        },
+        {
+          "price": 0.057,
+          "size": 5.01
+        },
+        {
+          "price": 0.061,
+          "size": 80.0
+        },
+        {
+          "price": 0.062,
+          "size": 300.0
+        },
+        {
+          "price": 0.064,
+          "size": 5000.0
+        },
+        {
+          "price": 0.074,
+          "size": 5000.0
+        },
+        {
+          "price": 0.075,
+          "size": 8000.0
+        },
+        {
+          "price": 0.083,
+          "size": 80.0
+        },
+        {
+          "price": 0.084,
+          "size": 5000.0
+        },
+        {
+          "price": 0.093,
+          "size": 15.0
+        },
+        {
+          "price": 0.099,
+          "size": 2500.0
+        },
+        {
+          "price": 0.122,
+          "size": 50.0
+        },
+        {
+          "price": 0.123,
+          "size": 400.0
+        },
+        {
+          "price": 0.124,
+          "size": 1300.0
+        },
+        {
+          "price": 0.125,
+          "size": 10000.0
+        }
+      ],
+      "market_id": "1654960",
+      "gamma_liquidity_usd": 720131.6756
+    },
+    {
+      "token_id": "82752177927542167404038816431416174971863195141383694610771473564093425601859",
+      "best_bid": 0.993,
+      "best_ask": 0.994,
+      "spread": 0.001,
+      "n_ask_levels": 6,
+      "depth_at_touch_contracts": 171190.79,
+      "total_ask_contracts": 5948268.09,
+      "depth_within_2c_contracts": 5948268.09,
+      "depth_within_5c_contracts": 5948268.09,
+      "ask_ladder": [
+        {
+          "price": 0.994,
+          "size": 171190.79
+        },
+        {
+          "price": 0.995,
+          "size": 354941.77
+        },
+        {
+          "price": 0.996,
+          "size": 104526.97
+        },
+        {
+          "price": 0.997,
+          "size": 480412.65
+        },
+        {
+          "price": 0.998,
+          "size": 356936.16
+        },
+        {
+          "price": 0.999,
+          "size": 4480259.75
+        }
+      ],
+      "market_id": "1654960",
+      "gamma_liquidity_usd": 720131.6756
+    },
+    {
+      "token_id": "106929013576622300718402895513457875547556389240247806666273814836599548721421",
+      "best_bid": 0.006,
+      "best_ask": 0.007,
+      "spread": 0.001,
+      "n_ask_levels": 151,
+      "depth_at_touch_contracts": 5389.84,
+      "total_ask_contracts": 955867.92,
+      "depth_within_2c_contracts": 326634.45,
+      "depth_within_5c_contracts": 355615.74,
+      "ask_ladder": [
+        {
+          "price": 0.007,
+          "size": 5389.84
+        },
+        {
+          "price": 0.008,
+          "size": 141627.13
+        },
+        {
+          "price": 0.009,
+          "size": 32144.69
+        },
+        {
+          "price": 0.01,
+          "size": 15732.67
+        },
+        {
+          "price": 0.011,
+          "size": 1259.99
+        },
+        {
+          "price": 0.012,
+          "size": 79215.0
+        },
+        {
+          "price": 0.013,
+          "size": 11000.0
+        },
+        {
+          "price": 0.014,
+          "size": 1516.47
+        },
+        {
+          "price": 0.015,
+          "size": 15000.0
+        },
+        {
+          "price": 0.016,
+          "size": 2000.0
+        },
+        {
+          "price": 0.017,
+          "size": 1000.0
+        },
+        {
+          "price": 0.019,
+          "size": 17199.93
+        },
+        {
+          "price": 0.02,
+          "size": 1828.73
+        },
+        {
+          "price": 0.022,
+          "size": 520.0
+        },
+        {
+          "price": 0.024,
+          "size": 1000.0
+        },
+        {
+          "price": 0.025,
+          "size": 200.0
+        },
+        {
+          "price": 0.028,
+          "size": 25.6
+        },
+        {
+          "price": 0.029,
+          "size": 1200.0
+        },
+        {
+          "price": 0.03,
+          "size": 824.96
+        },
+        {
+          "price": 0.031,
+          "size": 276.38
+        },
+        {
+          "price": 0.033,
+          "size": 25.0
+        },
+        {
+          "price": 0.037,
+          "size": 3500.0
+        },
+        {
+          "price": 0.039,
+          "size": 2100.0
+        },
+        {
+          "price": 0.04,
+          "size": 5422.54
+        },
+        {
+          "price": 0.048,
+          "size": 996.95
+        },
+        {
+          "price": 0.049,
+          "size": 5500.0
+        },
+        {
+          "price": 0.05,
+          "size": 7599.86
+        },
+        {
+          "price": 0.057,
+          "size": 1510.0
+        },
+        {
+          "price": 0.058,
+          "size": 43.5
+        },
+        {
+          "price": 0.06,
+          "size": 521.0
+        },
+        {
+          "price": 0.067,
+          "size": 12.92
+        },
+        {
+          "price": 0.07,
+          "size": 2844.5
+        },
+        {
+          "price": 0.08,
+          "size": 1200.0
+        },
+        {
+          "price": 0.087,
+          "size": 2000.0
+        },
+        {
+          "price": 0.09,
+          "size": 3310.45
+        },
+        {
+          "price": 0.098,
+          "size": 1500.0
+        },
+        {
+          "price": 0.1,
+          "size": 5919.99
+        },
+        {
+          "price": 0.11,
+          "size": 45.45
+        },
+        {
+          "price": 0.112,
+          "size": 44.64
+        },
+        {
+          "price": 0.114,
+          "size": 10.05
+        }
+      ],
+      "market_id": "2176262",
+      "gamma_liquidity_usd": 534184.94786
+    },
+    {
+      "token_id": "35600405023007026690792769618276046675588493623969149550929635257490271313011",
+      "best_bid": 0.993,
+      "best_ask": 0.994,
+      "spread": 0.001,
+      "n_ask_levels": 6,
+      "depth_at_touch_contracts": 7289.31,
+      "total_ask_contracts": 2240761.55,
+      "depth_within_2c_contracts": 2240761.55,
+      "depth_within_5c_contracts": 2240761.55,
+      "ask_ladder": [
+        {
+          "price": 0.994,
+          "size": 7289.31
+        },
+        {
+          "price": 0.995,
+          "size": 110245.36
+        },
+        {
+          "price": 0.996,
+          "size": 118882.09
+        },
+        {
+          "price": 0.997,
+          "size": 886769.63
+        },
+        {
+          "price": 0.998,
+          "size": 463610.84
+        },
+        {
+          "price": 0.999,
+          "size": 653964.32
+        }
+      ],
+      "market_id": "2176262",
+      "gamma_liquidity_usd": 534184.94786
+    },
+    {
+      "token_id": "111604417349377875799825956621596386269673370070912696668140891647145772186047",
+      "best_bid": 0.826,
+      "best_ask": 0.827,
+      "spread": 0.001,
+      "n_ask_levels": 92,
+      "depth_at_touch_contracts": 3446.0,
+      "total_ask_contracts": 2767538.29,
+      "depth_within_2c_contracts": 1327619.53,
+      "depth_within_5c_contracts": 1528033.94,
+      "ask_ladder": [
+        {
+          "price": 0.827,
+          "size": 3446.0
+        },
+        {
+          "price": 0.828,
+          "size": 8056.21
+        },
+        {
+          "price": 0.829,
+          "size": 3000.0
+        },
+        {
+          "price": 0.83,
+          "size": 7508.76
+        },
+        {
+          "price": 0.831,
+          "size": 25.0
+        },
+        {
+          "price": 0.832,
+          "size": 200.0
+        },
+        {
+          "price": 0.833,
+          "size": 9950.0
+        },
+        {
+          "price": 0.834,
+          "size": 510.59
+        },
+        {
+          "price": 0.835,
+          "size": 40931.6
+        },
+        {
+          "price": 0.836,
+          "size": 493749.0
+        },
+        {
+          "price": 0.837,
+          "size": 140497.6
+        },
+        {
+          "price": 0.838,
+          "size": 751.26
+        },
+        {
+          "price": 0.839,
+          "size": 1241.59
+        },
+        {
+          "price": 0.84,
+          "size": 25469.89
+        },
+        {
+          "price": 0.841,
+          "size": 582171.36
+        },
+        {
+          "price": 0.842,
+          "size": 40.0
+        },
+        {
+          "price": 0.844,
+          "size": 333.0
+        },
+        {
+          "price": 0.845,
+          "size": 50.0
+        },
+        {
+          "price": 0.846,
+          "size": 5766.67
+        },
+        {
+          "price": 0.847,
+          "size": 3921.0
+        },
+        {
+          "price": 0.849,
+          "size": 2000.0
+        },
+        {
+          "price": 0.85,
+          "size": 151400.29
+        },
+        {
+          "price": 0.852,
+          "size": 12563.31
+        },
+        {
+          "price": 0.855,
+          "size": 10130.0
+        },
+        {
+          "price": 0.856,
+          "size": 5052.0
+        },
+        {
+          "price": 0.857,
+          "size": 15.0
+        },
+        {
+          "price": 0.858,
+          "size": 29.0
+        },
+        {
+          "price": 0.86,
+          "size": 3205.0
+        },
+        {
+          "price": 0.861,
+          "size": 200.0
+        },
+        {
+          "price": 0.862,
+          "size": 100.0
+        },
+        {
+          "price": 0.863,
+          "size": 100.0
+        },
+        {
+          "price": 0.864,
+          "size": 300.0
+        },
+        {
+          "price": 0.865,
+          "size": 100.0
+        },
+        {
+          "price": 0.866,
+          "size": 5000.0
+        },
+        {
+          "price": 0.869,
+          "size": 2000.0
+        },
+        {
+          "price": 0.87,
+          "size": 2897.0
+        },
+        {
+          "price": 0.874,
+          "size": 200.0
+        },
+        {
+          "price": 0.875,
+          "size": 100.0
+        },
+        {
+          "price": 0.876,
+          "size": 5000.0
+        },
+        {
+          "price": 0.877,
+          "size": 22.81
+        }
+      ],
+      "market_id": "1654958",
+      "gamma_liquidity_usd": 542861.57657
+    },
+    {
+      "token_id": "36015050921127306245266044699797268780268172446856063291868548314968920497494",
+      "best_bid": 0.173,
+      "best_ask": 0.174,
+      "spread": 0.001,
+      "n_ask_levels": 143,
+      "depth_at_touch_contracts": 2333.38,
+      "total_ask_contracts": 22196880.08,
+      "depth_within_2c_contracts": 111056.82,
+      "depth_within_5c_contracts": 228981.44,
+      "ask_ladder": [
+        {
+          "price": 0.174,
+          "size": 2333.38
+        },
+        {
+          "price": 0.175,
+          "size": 74559.36
+        },
+        {
+          "price": 0.179,
+          "size": 5.0
+        },
+        {
+          "price": 0.18,
+          "size": 213.47
+        },
+        {
+          "price": 0.182,
+          "size": 3260.0
+        },
+        {
+          "price": 0.186,
+          "size": 7371.0
+        },
+        {
+          "price": 0.188,
+          "size": 2869.3
+        },
+        {
+          "price": 0.19,
+          "size": 1200.0
+        },
+        {
+          "price": 0.191,
+          "size": 200.0
+        },
+        {
+          "price": 0.192,
+          "size": 18545.31
+        },
+        {
+          "price": 0.193,
+          "size": 500.0
+        },
+        {
+          "price": 0.194,
+          "size": 744.0
+        },
+        {
+          "price": 0.197,
+          "size": 178.0
+        },
+        {
+          "price": 0.198,
+          "size": 1246.88
+        },
+        {
+          "price": 0.199,
+          "size": 5000.0
+        },
+        {
+          "price": 0.2,
+          "size": 5000.0
+        },
+        {
+          "price": 0.201,
+          "size": 30.0
+        },
+        {
+          "price": 0.202,
+          "size": 140.0
+        },
+        {
+          "price": 0.203,
+          "size": 829.29
+        },
+        {
+          "price": 0.204,
+          "size": 200.0
+        },
+        {
+          "price": 0.208,
+          "size": 200.0
+        },
+        {
+          "price": 0.209,
+          "size": 2995.03
+        },
+        {
+          "price": 0.21,
+          "size": 3800.0
+        },
+        {
+          "price": 0.212,
+          "size": 4200.0
+        },
+        {
+          "price": 0.213,
+          "size": 444.0
+        },
+        {
+          "price": 0.214,
+          "size": 4684.43
+        },
+        {
+          "price": 0.215,
+          "size": 9797.31
+        },
+        {
+          "price": 0.216,
+          "size": 15358.05
+        },
+        {
+          "price": 0.217,
+          "size": 15000.0
+        },
+        {
+          "price": 0.218,
+          "size": 8105.01
+        },
+        {
+          "price": 0.219,
+          "size": 4744.99
+        },
+        {
+          "price": 0.22,
+          "size": 28206.9
+        },
+        {
+          "price": 0.221,
+          "size": 1114.94
+        },
+        {
+          "price": 0.222,
+          "size": 705.79
+        },
+        {
+          "price": 0.223,
+          "size": 5200.0
+        },
+        {
+          "price": 0.227,
+          "size": 1000.0
+        },
+        {
+          "price": 0.23,
+          "size": 200.0
+        },
+        {
+          "price": 0.231,
+          "size": 200.0
+        },
+        {
+          "price": 0.232,
+          "size": 5.6
+        },
+        {
+          "price": 0.233,
+          "size": 500.0
+        }
+      ],
+      "market_id": "1654958",
+      "gamma_liquidity_usd": 542861.57657
+    },
+    {
+      "token_id": "95970203500150390696017820790991771432553030593132347633957312670362563399618",
+      "best_bid": 0.99,
+      "best_ask": 0.992,
+      "spread": 0.002,
+      "n_ask_levels": 8,
+      "depth_at_touch_contracts": 349.0,
+      "total_ask_contracts": 97667.93,
+      "depth_within_2c_contracts": 97667.93,
+      "depth_within_5c_contracts": 97667.93,
+      "ask_ladder": [
+        {
+          "price": 0.992,
+          "size": 349.0
+        },
+        {
+          "price": 0.993,
+          "size": 2805.0
+        },
+        {
+          "price": 0.994,
+          "size": 2000.0
+        },
+        {
+          "price": 0.995,
+          "size": 1311.0
+        },
+        {
+          "price": 0.996,
+          "size": 1752.58
+        },
+        {
+          "price": 0.997,
+          "size": 17100.0
+        },
+        {
+          "price": 0.998,
+          "size": 59020.79
+        },
+        {
+          "price": 0.999,
+          "size": 13329.56
+        }
+      ],
+      "market_id": "3044546",
+      "gamma_liquidity_usd": 173855.28377
+    },
+    {
+      "token_id": "52258090062694356689942461866619000657013852314797878048826790928772337787389",
+      "best_bid": 0.008,
+      "best_ask": 0.01,
+      "spread": 0.002,
+      "n_ask_levels": 92,
+      "depth_at_touch_contracts": 293.1,
+      "total_ask_contracts": 420717.8,
+      "depth_within_2c_contracts": 95019.3,
+      "depth_within_5c_contracts": 115384.69,
+      "ask_ladder": [
+        {
+          "price": 0.01,
+          "size": 293.1
+        },
+        {
+          "price": 0.011,
+          "size": 3585.0
+        },
+        {
+          "price": 0.013,
+          "size": 1439.06
+        },
+        {
+          "price": 0.014,
+          "size": 2069.66
+        },
+        {
+          "price": 0.015,
+          "size": 2003.0
+        },
+        {
+          "price": 0.018,
+          "size": 9451.27
+        },
+        {
+          "price": 0.019,
+          "size": 460.0
+        },
+        {
+          "price": 0.02,
+          "size": 10500.0
+        },
+        {
+          "price": 0.022,
+          "size": 2910.01
+        },
+        {
+          "price": 0.023,
+          "size": 20000.0
+        },
+        {
+          "price": 0.025,
+          "size": 801.87
+        },
+        {
+          "price": 0.026,
+          "size": 4000.0
+        },
+        {
+          "price": 0.027,
+          "size": 7806.33
+        },
+        {
+          "price": 0.028,
+          "size": 25200.0
+        },
+        {
+          "price": 0.029,
+          "size": 2000.0
+        },
+        {
+          "price": 0.03,
+          "size": 2500.0
+        },
+        {
+          "price": 0.033,
+          "size": 1941.63
+        },
+        {
+          "price": 0.034,
+          "size": 2500.0
+        },
+        {
+          "price": 0.035,
+          "size": 2000.0
+        },
+        {
+          "price": 0.036,
+          "size": 200.0
+        },
+        {
+          "price": 0.044,
+          "size": 1000.0
+        },
+        {
+          "price": 0.048,
+          "size": 1629.41
+        },
+        {
+          "price": 0.049,
+          "size": 400.0
+        },
+        {
+          "price": 0.059,
+          "size": 694.35
+        },
+        {
+          "price": 0.06,
+          "size": 10000.0
+        },
+        {
+          "price": 0.07,
+          "size": 13322.19
+        },
+        {
+          "price": 0.08,
+          "size": 200.0
+        },
+        {
+          "price": 0.089,
+          "size": 7.68
+        },
+        {
+          "price": 0.09,
+          "size": 10000.0
+        },
+        {
+          "price": 0.098,
+          "size": 500.0
+        },
+        {
+          "price": 0.1,
+          "size": 8828.5
+        },
+        {
+          "price": 0.15,
+          "size": 20.0
+        },
+        {
+          "price": 0.17,
+          "size": 500.0
+        },
+        {
+          "price": 0.18,
+          "size": 750.0
+        },
+        {
+          "price": 0.188,
+          "size": 250.0
+        },
+        {
+          "price": 0.19,
+          "size": 31.77
+        },
+        {
+          "price": 0.2,
+          "size": 20.0
+        },
+        {
+          "price": 0.24,
+          "size": 20.0
+        },
+        {
+          "price": 0.249,
+          "size": 48.99
+        },
+        {
+          "price": 0.25,
+          "size": 20.0
+        }
+      ],
+      "market_id": "3044546",
+      "gamma_liquidity_usd": 173855.28377
+    },
+    {
+      "token_id": "107961194152792740725727064379230288293910546811577910480987951504293301797282",
+      "best_bid": 0.87,
+      "best_ask": 0.88,
+      "spread": 0.01,
+      "n_ask_levels": 12,
+      "depth_at_touch_contracts": 2273.26,
+      "total_ask_contracts": 195060.97,
+      "depth_within_2c_contracts": 21207.16,
+      "depth_within_5c_contracts": 26581.34,
+      "ask_ladder": [
+        {
+          "price": 0.88,
+          "size": 2273.26
+        },
+        {
+          "price": 0.89,
+          "size": 9994.32
+        },
+        {
+          "price": 0.9,
+          "size": 8939.58
+        },
+        {
+          "price": 0.91,
+          "size": 658.75
+        },
+        {
+          "price": 0.92,
+          "size": 2410.0
+        },
+        {
+          "price": 0.93,
+          "size": 2305.43
+        },
+        {
+          "price": 0.94,
+          "size": 2634.16
+        },
+        {
+          "price": 0.95,
+          "size": 4453.0
+        },
+        {
+          "price": 0.96,
+          "size": 13775.34
+        },
+        {
+          "price": 0.97,
+          "size": 25979.67
+        },
+        {
+          "price": 0.98,
+          "size": 33098.44
+        },
+        {
+          "price": 0.99,
+          "size": 88539.02
+        }
+      ],
+      "market_id": "2952486",
+      "gamma_liquidity_usd": 51959.0833
+    },
+    {
+      "token_id": "86567202803696185629704724961398129231892610051254319801824623009047556217191",
+      "best_bid": 0.12,
+      "best_ask": 0.13,
+      "spread": 0.01,
+      "n_ask_levels": 59,
+      "depth_at_touch_contracts": 7924.27,
+      "total_ask_contracts": 140026.73,
+      "depth_within_2c_contracts": 18132.46,
+      "depth_within_5c_contracts": 25368.66,
+      "ask_ladder": [
+        {
+          "price": 0.13,
+          "size": 7924.27
+        },
+        {
+          "price": 0.14,
+          "size": 3816.83
+        },
+        {
+          "price": 0.15,
+          "size": 6391.36
+        },
+        {
+          "price": 0.16,
+          "size": 4855.29
+        },
+        {
+          "price": 0.17,
+          "size": 214.45
+        },
+        {
+          "price": 0.18,
+          "size": 2166.46
+        },
+        {
+          "price": 0.19,
+          "size": 248.55
+        },
+        {
+          "price": 0.2,
+          "size": 500.0
+        },
+        {
+          "price": 0.21,
+          "size": 200.0
+        },
+        {
+          "price": 0.22,
+          "size": 34.97
+        },
+        {
+          "price": 0.23,
+          "size": 600.0
+        },
+        {
+          "price": 0.24,
+          "size": 200.0
+        },
+        {
+          "price": 0.25,
+          "size": 703.25
+        },
+        {
+          "price": 0.27,
+          "size": 2998.18
+        },
+        {
+          "price": 0.29,
+          "size": 130.0
+        },
+        {
+          "price": 0.3,
+          "size": 30.0
+        },
+        {
+          "price": 0.31,
+          "size": 220.0
+        },
+        {
+          "price": 0.32,
+          "size": 683.0
+        },
+        {
+          "price": 0.33,
+          "size": 1000.0
+        },
+        {
+          "price": 0.35,
+          "size": 430.76
+        },
+        {
+          "price": 0.39,
+          "size": 1000.0
+        },
+        {
+          "price": 0.4,
+          "size": 10.0
+        },
+        {
+          "price": 0.44,
+          "size": 200.0
+        },
+        {
+          "price": 0.45,
+          "size": 5.0
+        },
+        {
+          "price": 0.47,
+          "size": 566.03
+        },
+        {
+          "price": 0.49,
+          "size": 44.3
+        },
+        {
+          "price": 0.51,
+          "size": 816.32
+        },
+        {
+          "price": 0.55,
+          "size": 1297.28
+        },
+        {
+          "price": 0.57,
+          "size": 1000.0
+        },
+        {
+          "price": 0.58,
+          "size": 1000.0
+        },
+        {
+          "price": 0.6,
+          "size": 4500.0
+        },
+        {
+          "price": 0.63,
+          "size": 200.0
+        },
+        {
+          "price": 0.64,
+          "size": 1944.44
+        },
+        {
+          "price": 0.67,
+          "size": 3030.0
+        },
+        {
+          "price": 0.68,
+          "size": 1285.0
+        },
+        {
+          "price": 0.69,
+          "size": 3387.09
+        },
+        {
+          "price": 0.7,
+          "size": 5000.0
+        },
+        {
+          "price": 0.71,
+          "size": 20.0
+        },
+        {
+          "price": 0.72,
+          "size": 20.0
+        },
+        {
+          "price": 0.73,
+          "size": 3703.7
+        }
+      ],
+      "market_id": "2952486",
+      "gamma_liquidity_usd": 51959.0833
+    },
+    {
+      "token_id": "44947747425847133487860471873598677861984466353452314896689185384502572842157",
+      "best_bid": 0.38,
+      "best_ask": 0.39,
+      "spread": 0.01,
+      "n_ask_levels": 45,
+      "depth_at_touch_contracts": 83848.3,
+      "total_ask_contracts": 1299886.25,
+      "depth_within_2c_contracts": 160024.08,
+      "depth_within_5c_contracts": 170189.08,
+      "ask_ladder": [
+        {
+          "price": 0.39,
+          "size": 83848.3
+        },
+        {
+          "price": 0.4,
+          "size": 67214.73
+        },
+        {
+          "price": 0.41,
+          "size": 8961.05
+        },
+        {
+          "price": 0.42,
+          "size": 5885.0
+        },
+        {
+          "price": 0.43,
+          "size": 4275.0
+        },
+        {
+          "price": 0.44,
+          "size": 5.0
+        },
+        {
+          "price": 0.45,
+          "size": 200.0
+        },
+        {
+          "price": 0.46,
+          "size": 5.0
+        },
+        {
+          "price": 0.47,
+          "size": 205.0
+        },
+        {
+          "price": 0.48,
+          "size": 5.0
+        },
+        {
+          "price": 0.49,
+          "size": 817.0
+        },
+        {
+          "price": 0.5,
+          "size": 205.0
+        },
+        {
+          "price": 0.51,
+          "size": 250.0
+        },
+        {
+          "price": 0.52,
+          "size": 6.0
+        },
+        {
+          "price": 0.53,
+          "size": 200.0
+        },
+        {
+          "price": 0.55,
+          "size": 200.0
+        },
+        {
+          "price": 0.56,
+          "size": 11.0
+        },
+        {
+          "price": 0.57,
+          "size": 200.0
+        },
+        {
+          "price": 0.59,
+          "size": 1237.33
+        },
+        {
+          "price": 0.6,
+          "size": 12.0
+        },
+        {
+          "price": 0.61,
+          "size": 200.0
+        },
+        {
+          "price": 0.62,
+          "size": 42.64
+        },
+        {
+          "price": 0.63,
+          "size": 208.0
+        },
+        {
+          "price": 0.64,
+          "size": 6.0
+        },
+        {
+          "price": 0.65,
+          "size": 712.0
+        },
+        {
+          "price": 0.66,
+          "size": 8.82
+        },
+        {
+          "price": 0.67,
+          "size": 1522.77
+        },
+        {
+          "price": 0.69,
+          "size": 200.0
+        },
+        {
+          "price": 0.7,
+          "size": 14.47
+        },
+        {
+          "price": 0.72,
+          "size": 6945.08
+        },
+        {
+          "price": 0.75,
+          "size": 256.0
+        },
+        {
+          "price": 0.77,
+          "size": 869.56
+        },
+        {
+          "price": 0.78,
+          "size": 7499.99
+        },
+        {
+          "price": 0.79,
+          "size": 20557.5
+        },
+        {
+          "price": 0.83,
+          "size": 5352.94
+        },
+        {
+          "price": 0.84,
+          "size": 47859.48
+        },
+        {
+          "price": 0.88,
+          "size": 2833.33
+        },
+        {
+          "price": 0.89,
+          "size": 96192.94
+        },
+        {
+          "price": 0.92,
+          "size": 8.1
+        },
+        {
+          "price": 0.93,
+          "size": 40714.21
+        }
+      ],
+      "market_id": "3092817",
+      "gamma_liquidity_usd": 236429.1083
+    },
+    {
+      "token_id": "72788758025110958460573959431760474832363519283015323226596163188680348490710",
+      "best_bid": 0.61,
+      "best_ask": 0.62,
+      "spread": 0.01,
+      "n_ask_levels": 32,
+      "depth_at_touch_contracts": 13471.76,
+      "total_ask_contracts": 1012306.69,
+      "depth_within_2c_contracts": 51499.79,
+      "depth_within_5c_contracts": 126583.97,
+      "ask_ladder": [
+        {
+          "price": 0.62,
+          "size": 13471.76
+        },
+        {
+          "price": 0.63,
+          "size": 19899.25
+        },
+        {
+          "price": 0.64,
+          "size": 18128.78
+        },
+        {
+          "price": 0.65,
+          "size": 17138.93
+        },
+        {
+          "price": 0.66,
+          "size": 19275.06
+        },
+        {
+          "price": 0.67,
+          "size": 38670.19
+        },
+        {
+          "price": 0.68,
+          "size": 65875.0
+        },
+        {
+          "price": 0.69,
+          "size": 1952.89
+        },
+        {
+          "price": 0.7,
+          "size": 1505.0
+        },
+        {
+          "price": 0.72,
+          "size": 350.0
+        },
+        {
+          "price": 0.73,
+          "size": 40.0
+        },
+        {
+          "price": 0.74,
+          "size": 227.43
+        },
+        {
+          "price": 0.75,
+          "size": 55.71
+        },
+        {
+          "price": 0.76,
+          "size": 220.0
+        },
+        {
+          "price": 0.77,
+          "size": 5.0
+        },
+        {
+          "price": 0.78,
+          "size": 218.0
+        },
+        {
+          "price": 0.79,
+          "size": 5.0
+        },
+        {
+          "price": 0.8,
+          "size": 200.0
+        },
+        {
+          "price": 0.81,
+          "size": 54.64
+        },
+        {
+          "price": 0.82,
+          "size": 220.9
+        },
+        {
+          "price": 0.83,
+          "size": 782.31
+        },
+        {
+          "price": 0.84,
+          "size": 200.0
+        },
+        {
+          "price": 0.86,
+          "size": 200.0
+        },
+        {
+          "price": 0.88,
+          "size": 7517.27
+        },
+        {
+          "price": 0.9,
+          "size": 1200.0
+        },
+        {
+          "price": 0.91,
+          "size": 6.64
+        },
+        {
+          "price": 0.92,
+          "size": 67897.92
+        },
+        {
+          "price": 0.94,
+          "size": 118386.45
+        },
+        {
+          "price": 0.96,
+          "size": 200.0
+        },
+        {
+          "price": 0.97,
+          "size": 59341.9
+        },
+        {
+          "price": 0.98,
+          "size": 12000.0
+        },
+        {
+          "price": 0.99,
+          "size": 547060.66
+        }
+      ],
+      "market_id": "3092817",
+      "gamma_liquidity_usd": 236429.1083
+    },
+    {
+      "token_id": "111696390093542777743372253154770633634026024336928078383991970477589503016483",
+      "best_bid": 0.005,
+      "best_ask": 0.006,
+      "spread": 0.001,
+      "n_ask_levels": 104,
+      "depth_at_touch_contracts": 2966.55,
+      "total_ask_contracts": 500345.27,
+      "depth_within_2c_contracts": 48651.54,
+      "depth_within_5c_contracts": 114105.93,
+      "ask_ladder": [
+        {
+          "price": 0.006,
+          "size": 2966.55
+        },
+        {
+          "price": 0.007,
+          "size": 12803.89
+        },
+        {
+          "price": 0.008,
+          "size": 16050.57
+        },
+        {
+          "price": 0.009,
+          "size": 9095.6
+        },
+        {
+          "price": 0.01,
+          "size": 1000.0
+        },
+        {
+          "price": 0.012,
+          "size": 1000.0
+        },
+        {
+          "price": 0.013,
+          "size": 1000.0
+        },
+        {
+          "price": 0.022,
+          "size": 2217.81
+        },
+        {
+          "price": 0.024,
+          "size": 1995.52
+        },
+        {
+          "price": 0.025,
+          "size": 521.6
+        },
+        {
+          "price": 0.03,
+          "size": 28.64
+        },
+        {
+          "price": 0.032,
+          "size": 10000.0
+        },
+        {
+          "price": 0.033,
+          "size": 41391.03
+        },
+        {
+          "price": 0.034,
+          "size": 2100.0
+        },
+        {
+          "price": 0.035,
+          "size": 10000.0
+        },
+        {
+          "price": 0.04,
+          "size": 600.0
+        },
+        {
+          "price": 0.045,
+          "size": 50.0
+        },
+        {
+          "price": 0.05,
+          "size": 1284.72
+        },
+        {
+          "price": 0.061,
+          "size": 49.98
+        },
+        {
+          "price": 0.065,
+          "size": 50.0
+        },
+        {
+          "price": 0.068,
+          "size": 25.0
+        },
+        {
+          "price": 0.071,
+          "size": 100.0
+        },
+        {
+          "price": 0.072,
+          "size": 261.31
+        },
+        {
+          "price": 0.075,
+          "size": 400.0
+        },
+        {
+          "price": 0.077,
+          "size": 54.28
+        },
+        {
+          "price": 0.08,
+          "size": 3200.0
+        },
+        {
+          "price": 0.082,
+          "size": 50.0
+        },
+        {
+          "price": 0.085,
+          "size": 175.0
+        },
+        {
+          "price": 0.089,
+          "size": 43.12
+        },
+        {
+          "price": 0.09,
+          "size": 475.0
+        },
+        {
+          "price": 0.095,
+          "size": 1050.0
+        },
+        {
+          "price": 0.096,
+          "size": 151.37
+        },
+        {
+          "price": 0.1,
+          "size": 243.57
+        },
+        {
+          "price": 0.105,
+          "size": 50.0
+        },
+        {
+          "price": 0.109,
+          "size": 19.6
+        },
+        {
+          "price": 0.11,
+          "size": 50.0
+        },
+        {
+          "price": 0.114,
+          "size": 25.0
+        },
+        {
+          "price": 0.122,
+          "size": 25.0
+        },
+        {
+          "price": 0.128,
+          "size": 25.0
+        },
+        {
+          "price": 0.149,
+          "size": 25.0
+        }
+      ],
+      "market_id": "2911873",
+      "gamma_liquidity_usd": 159901.3878
+    },
+    {
+      "token_id": "33752982532314842955867034258985568949958761450943043689987049583448528253590",
+      "best_bid": 0.994,
+      "best_ask": 0.995,
+      "spread": 0.001,
+      "n_ask_levels": 5,
+      "depth_at_touch_contracts": 2796.73,
+      "total_ask_contracts": 71649.12,
+      "depth_within_2c_contracts": 71649.12,
+      "depth_within_5c_contracts": 71649.12,
+      "ask_ladder": [
+        {
+          "price": 0.995,
+          "size": 2796.73
+        },
+        {
+          "price": 0.996,
+          "size": 987.95
+        },
+        {
+          "price": 0.997,
+          "size": 13386.44
+        },
+        {
+          "price": 0.998,
+          "size": 8758.0
+        },
+        {
+          "price": 0.999,
+          "size": 45720.0
+        }
+      ],
+      "market_id": "2911873",
+      "gamma_liquidity_usd": 159901.3878
+    },
+    {
+      "token_id": "35019878675696902444730611385908114488958639217305639231975258218416576501435",
+      "best_bid": 0.006,
+      "best_ask": 0.007,
+      "spread": 0.001,
+      "n_ask_levels": 85,
+      "depth_at_touch_contracts": 1459201.28,
+      "total_ask_contracts": 15311467.37,
+      "depth_within_2c_contracts": 1880487.56,
+      "depth_within_5c_contracts": 1880487.56,
+      "ask_ladder": [
+        {
+          "price": 0.007,
+          "size": 1459201.28
+        },
+        {
+          "price": 0.008,
+          "size": 322306.61
+        },
+        {
+          "price": 0.009,
+          "size": 76885.01
+        },
+        {
+          "price": 0.01,
+          "size": 14864.66
+        },
+        {
+          "price": 0.012,
+          "size": 400.0
+        },
+        {
+          "price": 0.013,
+          "size": 5000.0
+        },
+        {
+          "price": 0.014,
+          "size": 1830.0
+        },
+        {
+          "price": 0.08,
+          "size": 150.0
+        },
+        {
+          "price": 0.089,
+          "size": 60.7
+        },
+        {
+          "price": 0.09,
+          "size": 4300.0
+        },
+        {
+          "price": 0.104,
+          "size": 40.0
+        },
+        {
+          "price": 0.105,
+          "size": 243.67
+        },
+        {
+          "price": 0.111,
+          "size": 25.0
+        },
+        {
+          "price": 0.112,
+          "size": 576.0
+        },
+        {
+          "price": 0.121,
+          "size": 100.0
+        },
+        {
+          "price": 0.122,
+          "size": 581.0
+        },
+        {
+          "price": 0.132,
+          "size": 531.0
+        },
+        {
+          "price": 0.141,
+          "size": 100.0
+        },
+        {
+          "price": 0.142,
+          "size": 531.0
+        },
+        {
+          "price": 0.15,
+          "size": 20.0
+        },
+        {
+          "price": 0.152,
+          "size": 631.0
+        },
+        {
+          "price": 0.162,
+          "size": 531.0
+        },
+        {
+          "price": 0.171,
+          "size": 100.0
+        },
+        {
+          "price": 0.172,
+          "size": 531.0
+        },
+        {
+          "price": 0.192,
+          "size": 531.0
+        },
+        {
+          "price": 0.2,
+          "size": 20.0
+        },
+        {
+          "price": 0.221,
+          "size": 400.0
+        },
+        {
+          "price": 0.222,
+          "size": 531.0
+        },
+        {
+          "price": 0.252,
+          "size": 531.0
+        },
+        {
+          "price": 0.282,
+          "size": 531.0
+        },
+        {
+          "price": 0.3,
+          "size": 40.0
+        },
+        {
+          "price": 0.312,
+          "size": 531.0
+        },
+        {
+          "price": 0.342,
+          "size": 531.0
+        },
+        {
+          "price": 0.399,
+          "size": 52.79
+        },
+        {
+          "price": 0.4,
+          "size": 500.0
+        },
+        {
+          "price": 0.41,
+          "size": 7500.0
+        },
+        {
+          "price": 0.44,
+          "size": 713.0
+        },
+        {
+          "price": 0.45,
+          "size": 10784.09
+        },
+        {
+          "price": 0.489,
+          "size": 3000.0
+        },
+        {
+          "price": 0.49,
+          "size": 10845.59
+        }
+      ],
+      "market_id": "561982",
+      "gamma_liquidity_usd": 2013363.22292
+    },
+    {
+      "token_id": "56675537260019219223601219755487607959534973218119249587935401577859164512735",
+      "best_bid": 0.993,
+      "best_ask": 0.994,
+      "spread": 0.001,
+      "n_ask_levels": 6,
+      "depth_at_touch_contracts": 285499.7,
+      "total_ask_contracts": 9830234.57,
+      "depth_within_2c_contracts": 9830234.57,
+      "depth_within_5c_contracts": 9830234.57,
+      "ask_ladder": [
+        {
+          "price": 0.994,
+          "size": 285499.7
+        },
+        {
+          "price": 0.995,
+          "size": 328696.13
+        },
+        {
+          "price": 0.996,
+          "size": 850422.38
+        },
+        {
+          "price": 0.997,
+          "size": 3387835.36
+        },
+        {
+          "price": 0.998,
+          "size": 2571140.0
+        },
+        {
+          "price": 0.999,
+          "size": 2406641.0
+        }
+      ],
+      "market_id": "561982",
+      "gamma_liquidity_usd": 2013363.22292
+    },
+    {
+      "token_id": "10547381015916960267379463101229159185405356924982461726471550099674011526491",
+      "best_bid": 0.172,
+      "best_ask": 0.173,
+      "spread": 0.001,
+      "n_ask_levels": 116,
+      "depth_at_touch_contracts": 23183.39,
+      "total_ask_contracts": 22466779.48,
+      "depth_within_2c_contracts": 40915.46,
+      "depth_within_5c_contracts": 112682.6,
+      "ask_ladder": [
+        {
+          "price": 0.173,
+          "size": 23183.39
+        },
+        {
+          "price": 0.174,
+          "size": 1269.0
+        },
+        {
+          "price": 0.175,
+          "size": 170.45
+        },
+        {
+          "price": 0.176,
+          "size": 376.23
+        },
+        {
+          "price": 0.177,
+          "size": 6112.0
+        },
+        {
+          "price": 0.178,
+          "size": 25.0
+        },
+        {
+          "price": 0.179,
+          "size": 260.0
+        },
+        {
+          "price": 0.18,
+          "size": 665.6
+        },
+        {
+          "price": 0.181,
+          "size": 4232.6
+        },
+        {
+          "price": 0.182,
+          "size": 300.6
+        },
+        {
+          "price": 0.183,
+          "size": 1020.6
+        },
+        {
+          "price": 0.188,
+          "size": 1250.0
+        },
+        {
+          "price": 0.189,
+          "size": 1999.99
+        },
+        {
+          "price": 0.192,
+          "size": 50.0
+        },
+        {
+          "price": 0.193,
+          "size": 823.0
+        },
+        {
+          "price": 0.196,
+          "size": 1243.78
+        },
+        {
+          "price": 0.197,
+          "size": 5029.99
+        },
+        {
+          "price": 0.198,
+          "size": 6.0
+        },
+        {
+          "price": 0.199,
+          "size": 3131.2
+        },
+        {
+          "price": 0.2,
+          "size": 5700.0
+        },
+        {
+          "price": 0.203,
+          "size": 6.27
+        },
+        {
+          "price": 0.206,
+          "size": 75.0
+        },
+        {
+          "price": 0.207,
+          "size": 12500.0
+        },
+        {
+          "price": 0.208,
+          "size": 10000.0
+        },
+        {
+          "price": 0.209,
+          "size": 10000.0
+        },
+        {
+          "price": 0.21,
+          "size": 1205.0
+        },
+        {
+          "price": 0.211,
+          "size": 7000.0
+        },
+        {
+          "price": 0.214,
+          "size": 10000.0
+        },
+        {
+          "price": 0.219,
+          "size": 5000.0
+        },
+        {
+          "price": 0.22,
+          "size": 46.9
+        },
+        {
+          "price": 0.226,
+          "size": 100.0
+        },
+        {
+          "price": 0.227,
+          "size": 200.0
+        },
+        {
+          "price": 0.229,
+          "size": 1000.0
+        },
+        {
+          "price": 0.23,
+          "size": 3606.0
+        },
+        {
+          "price": 0.235,
+          "size": 80.0
+        },
+        {
+          "price": 0.236,
+          "size": 24.39
+        },
+        {
+          "price": 0.239,
+          "size": 80.0
+        },
+        {
+          "price": 0.24,
+          "size": 3000.0
+        },
+        {
+          "price": 0.241,
+          "size": 15.0
+        },
+        {
+          "price": 0.247,
+          "size": 5000.0
+        }
+      ],
+      "market_id": "1654959",
+      "gamma_liquidity_usd": 361660.97422
+    },
+    {
+      "token_id": "102979714187432523726496609637889951679226430871494531752837414533106422105296",
+      "best_bid": 0.827,
+      "best_ask": 0.828,
+      "spread": 0.001,
+      "n_ask_levels": 135,
+      "depth_at_touch_contracts": 34766.48,
+      "total_ask_contracts": 4730562.16,
+      "depth_within_2c_contracts": 156914.37,
+      "depth_within_5c_contracts": 1161523.86,
+      "ask_ladder": [
+        {
+          "price": 0.828,
+          "size": 34766.48
+        },
+        {
+          "price": 0.829,
+          "size": 16600.0
+        },
+        {
+          "price": 0.83,
+          "size": 16035.0
+        },
+        {
+          "price": 0.831,
+          "size": 200.0
+        },
+        {
+          "price": 0.832,
+          "size": 100.0
+        },
+        {
+          "price": 0.833,
+          "size": 500.0
+        },
+        {
+          "price": 0.835,
+          "size": 229.9
+        },
+        {
+          "price": 0.837,
+          "size": 10010.0
+        },
+        {
+          "price": 0.838,
+          "size": 419.99
+        },
+        {
+          "price": 0.839,
+          "size": 37267.0
+        },
+        {
+          "price": 0.842,
+          "size": 15000.0
+        },
+        {
+          "price": 0.844,
+          "size": 5912.0
+        },
+        {
+          "price": 0.847,
+          "size": 10000.0
+        },
+        {
+          "price": 0.848,
+          "size": 9874.0
+        },
+        {
+          "price": 0.849,
+          "size": 127.0
+        },
+        {
+          "price": 0.85,
+          "size": 1000.0
+        },
+        {
+          "price": 0.852,
+          "size": 2319.33
+        },
+        {
+          "price": 0.853,
+          "size": 10000.0
+        },
+        {
+          "price": 0.854,
+          "size": 8042.5
+        },
+        {
+          "price": 0.855,
+          "size": 113157.5
+        },
+        {
+          "price": 0.856,
+          "size": 800468.16
+        },
+        {
+          "price": 0.857,
+          "size": 61291.0
+        },
+        {
+          "price": 0.859,
+          "size": 7.0
+        },
+        {
+          "price": 0.86,
+          "size": 4551.0
+        },
+        {
+          "price": 0.861,
+          "size": 40.0
+        },
+        {
+          "price": 0.864,
+          "size": 40.0
+        },
+        {
+          "price": 0.87,
+          "size": 3551.0
+        },
+        {
+          "price": 0.878,
+          "size": 15.0
+        },
+        {
+          "price": 0.879,
+          "size": 200.01
+        },
+        {
+          "price": 0.88,
+          "size": 3000.0
+        },
+        {
+          "price": 0.885,
+          "size": 646.44
+        },
+        {
+          "price": 0.887,
+          "size": 400.0
+        },
+        {
+          "price": 0.89,
+          "size": 3000.0
+        },
+        {
+          "price": 0.895,
+          "size": 95.24
+        },
+        {
+          "price": 0.898,
+          "size": 1000.0
+        },
+        {
+          "price": 0.899,
+          "size": 24.47
+        },
+        {
+          "price": 0.9,
+          "size": 3212.0
+        },
+        {
+          "price": 0.901,
+          "size": 55.0
+        },
+        {
+          "price": 0.902,
+          "size": 5.0
+        },
+        {
+          "price": 0.903,
+          "size": 5.0
+        }
+      ],
+      "market_id": "1654959",
+      "gamma_liquidity_usd": 361660.97422
+    },
+    {
+      "token_id": "62029730219379931456678322387324577336061192657540721958870420538662908412781",
+      "best_bid": 0.005,
+      "best_ask": 0.015,
+      "spread": 0.01,
+      "n_ask_levels": 66,
+      "depth_at_touch_contracts": 6796.45,
+      "total_ask_contracts": 2424664.7,
+      "depth_within_2c_contracts": 53591.22,
+      "depth_within_5c_contracts": 69488.25,
+      "ask_ladder": [
+        {
+          "price": 0.015,
+          "size": 6796.45
+        },
+        {
+          "price": 0.016,
+          "size": 100.0
+        },
+        {
+          "price": 0.018,
+          "size": 75.0
+        },
+        {
+          "price": 0.019,
+          "size": 192.62
+        },
+        {
+          "price": 0.02,
+          "size": 6847.96
+        },
+        {
+          "price": 0.025,
+          "size": 6592.82
+        },
+        {
+          "price": 0.03,
+          "size": 6550.52
+        },
+        {
+          "price": 0.032,
+          "size": 20000.0
+        },
+        {
+          "price": 0.033,
+          "size": 240.0
+        },
+        {
+          "price": 0.035,
+          "size": 6195.85
+        },
+        {
+          "price": 0.04,
+          "size": 7486.71
+        },
+        {
+          "price": 0.042,
+          "size": 316.0
+        },
+        {
+          "price": 0.044,
+          "size": 6.0
+        },
+        {
+          "price": 0.045,
+          "size": 26.32
+        },
+        {
+          "price": 0.05,
+          "size": 5096.0
+        },
+        {
+          "price": 0.052,
+          "size": 2666.0
+        },
+        {
+          "price": 0.054,
+          "size": 300.0
+        },
+        {
+          "price": 0.074,
+          "size": 30.0
+        },
+        {
+          "price": 0.075,
+          "size": 255.0
+        },
+        {
+          "price": 0.1,
+          "size": 434.31
+        },
+        {
+          "price": 0.108,
+          "size": 60.0
+        },
+        {
+          "price": 0.109,
+          "size": 325.0
+        },
+        {
+          "price": 0.11,
+          "size": 137.0
+        },
+        {
+          "price": 0.12,
+          "size": 13.0
+        },
+        {
+          "price": 0.15,
+          "size": 230.0
+        },
+        {
+          "price": 0.189,
+          "size": 80.0
+        },
+        {
+          "price": 0.19,
+          "size": 9.0
+        },
+        {
+          "price": 0.249,
+          "size": 400.0
+        },
+        {
+          "price": 0.25,
+          "size": 1205.58
+        },
+        {
+          "price": 0.3,
+          "size": 826.65
+        },
+        {
+          "price": 0.37,
+          "size": 20.0
+        },
+        {
+          "price": 0.4,
+          "size": 120.0
+        },
+        {
+          "price": 0.42,
+          "size": 80.0
+        },
+        {
+          "price": 0.43,
+          "size": 1093.68
+        },
+        {
+          "price": 0.45,
+          "size": 9.56
+        },
+        {
+          "price": 0.49,
+          "size": 19.99
+        },
+        {
+          "price": 0.5,
+          "size": 1346.3
+        },
+        {
+          "price": 0.52,
+          "size": 1040.0
+        },
+        {
+          "price": 0.59,
+          "size": 121.95
+        },
+        {
+          "price": 0.6,
+          "size": 2101.87
+        }
+      ],
+      "market_id": "3101591",
+      "gamma_liquidity_usd": 179451.85237
+    },
+    {
+      "token_id": "101474356248389795616137609175419661521438160493764195700735401100735012423631",
+      "best_bid": 0.985,
+      "best_ask": 0.995,
+      "spread": 0.01,
+      "n_ask_levels": 5,
+      "depth_at_touch_contracts": 125.0,
+      "total_ask_contracts": 13244.14,
+      "depth_within_2c_contracts": 13244.14,
+      "depth_within_5c_contracts": 13244.14,
+      "ask_ladder": [
+        {
+          "price": 0.995,
+          "size": 125.0
+        },
+        {
+          "price": 0.996,
+          "size": 2896.61
+        },
+        {
+          "price": 0.997,
+          "size": 7316.32
+        },
+        {
+          "price": 0.998,
+          "size": 300.0
+        },
+        {
+          "price": 0.999,
+          "size": 2606.21
+        }
+      ],
+      "market_id": "3101591",
+      "gamma_liquidity_usd": 179451.85237
+    },
+    {
+      "token_id": "93769061977658124297948646738673850091239147487693120851578133813074198945613",
+      "best_bid": 0.41,
+      "best_ask": 0.42,
+      "spread": 0.01,
+      "n_ask_levels": 44,
+      "depth_at_touch_contracts": 2633.02,
+      "total_ask_contracts": 1798084.94,
+      "depth_within_2c_contracts": 41176.71,
+      "depth_within_5c_contracts": 48444.28,
+      "ask_ladder": [
+        {
+          "price": 0.42,
+          "size": 2633.02
+        },
+        {
+          "price": 0.43,
+          "size": 27876.84
+        },
+        {
+          "price": 0.44,
+          "size": 10666.85
+        },
+        {
+          "price": 0.45,
+          "size": 2200.66
+        },
+        {
+          "price": 0.46,
+          "size": 2017.48
+        },
+        {
+          "price": 0.47,
+          "size": 3049.43
+        },
+        {
+          "price": 0.48,
+          "size": 349.4
+        },
+        {
+          "price": 0.49,
+          "size": 678.08
+        },
+        {
+          "price": 0.5,
+          "size": 1372.2
+        },
+        {
+          "price": 0.51,
+          "size": 6572.01
+        },
+        {
+          "price": 0.52,
+          "size": 1390.0
+        },
+        {
+          "price": 0.53,
+          "size": 6400.0
+        },
+        {
+          "price": 0.54,
+          "size": 10489.29
+        },
+        {
+          "price": 0.55,
+          "size": 18.0
+        },
+        {
+          "price": 0.56,
+          "size": 200.0
+        },
+        {
+          "price": 0.59,
+          "size": 12.0
+        },
+        {
+          "price": 0.6,
+          "size": 1437.0
+        },
+        {
+          "price": 0.63,
+          "size": 11.0
+        },
+        {
+          "price": 0.64,
+          "size": 3000.0
+        },
+        {
+          "price": 0.65,
+          "size": 30611.01
+        },
+        {
+          "price": 0.66,
+          "size": 19492.76
+        },
+        {
+          "price": 0.67,
+          "size": 8.0
+        },
+        {
+          "price": 0.7,
+          "size": 23.23
+        },
+        {
+          "price": 0.71,
+          "size": 5.0
+        },
+        {
+          "price": 0.72,
+          "size": 3584.56
+        },
+        {
+          "price": 0.73,
+          "size": 94.8
+        },
+        {
+          "price": 0.76,
+          "size": 2000.0
+        },
+        {
+          "price": 0.77,
+          "size": 62527.63
+        },
+        {
+          "price": 0.8,
+          "size": 1000.0
+        },
+        {
+          "price": 0.81,
+          "size": 21.04
+        },
+        {
+          "price": 0.82,
+          "size": 4722.21
+        },
+        {
+          "price": 0.84,
+          "size": 69482.91
+        },
+        {
+          "price": 0.85,
+          "size": 31.39
+        },
+        {
+          "price": 0.86,
+          "size": 28.56
+        },
+        {
+          "price": 0.87,
+          "size": 3000.0
+        },
+        {
+          "price": 0.88,
+          "size": 122348.27
+        },
+        {
+          "price": 0.89,
+          "size": 6690.81
+        },
+        {
+          "price": 0.92,
+          "size": 3125.0
+        },
+        {
+          "price": 0.93,
+          "size": 226879.12
+        },
+        {
+          "price": 0.94,
+          "size": 66.66
+        }
+      ],
+      "market_id": "3109468",
+      "gamma_liquidity_usd": 293907.229
+    },
+    {
+      "token_id": "105705146593079427899854594843045508411314128451212670601047685021873657742796",
+      "best_bid": 0.58,
+      "best_ask": 0.59,
+      "spread": 0.01,
+      "n_ask_levels": 34,
+      "depth_at_touch_contracts": 40088.3,
+      "total_ask_contracts": 1719621.16,
+      "depth_within_2c_contracts": 149435.79,
+      "depth_within_5c_contracts": 288445.18,
+      "ask_ladder": [
+        {
+          "price": 0.59,
+          "size": 40088.3
+        },
+        {
+          "price": 0.6,
+          "size": 31678.14
+        },
+        {
+          "price": 0.61,
+          "size": 77669.35
+        },
+        {
+          "price": 0.62,
+          "size": 103108.32
+        },
+        {
+          "price": 0.63,
+          "size": 25434.37
+        },
+        {
+          "price": 0.64,
+          "size": 10466.7
+        },
+        {
+          "price": 0.65,
+          "size": 4536.87
+        },
+        {
+          "price": 0.66,
+          "size": 3549.14
+        },
+        {
+          "price": 0.67,
+          "size": 3476.44
+        },
+        {
+          "price": 0.68,
+          "size": 3431.0
+        },
+        {
+          "price": 0.69,
+          "size": 6960.0
+        },
+        {
+          "price": 0.71,
+          "size": 11.0
+        },
+        {
+          "price": 0.72,
+          "size": 71.76
+        },
+        {
+          "price": 0.74,
+          "size": 7.0
+        },
+        {
+          "price": 0.75,
+          "size": 8.0
+        },
+        {
+          "price": 0.77,
+          "size": 359.59
+        },
+        {
+          "price": 0.78,
+          "size": 29.18
+        },
+        {
+          "price": 0.79,
+          "size": 6131.61
+        },
+        {
+          "price": 0.81,
+          "size": 5.0
+        },
+        {
+          "price": 0.82,
+          "size": 5.0
+        },
+        {
+          "price": 0.83,
+          "size": 31467.9
+        },
+        {
+          "price": 0.84,
+          "size": 25.0
+        },
+        {
+          "price": 0.85,
+          "size": 7.0
+        },
+        {
+          "price": 0.86,
+          "size": 1428.57
+        },
+        {
+          "price": 0.88,
+          "size": 41669.98
+        },
+        {
+          "price": 0.89,
+          "size": 2009.0
+        },
+        {
+          "price": 0.9,
+          "size": 122320.94
+        },
+        {
+          "price": 0.92,
+          "size": 50.0
+        },
+        {
+          "price": 0.93,
+          "size": 5857.12
+        },
+        {
+          "price": 0.94,
+          "size": 55601.52
+        },
+        {
+          "price": 0.95,
+          "size": 80.0
+        },
+        {
+          "price": 0.96,
+          "size": 312717.36
+        },
+        {
+          "price": 0.98,
+          "size": 103500.0
+        },
+        {
+          "price": 0.99,
+          "size": 725860.0
+        }
+      ],
+      "market_id": "3109468",
+      "gamma_liquidity_usd": 293907.229
+    },
+    {
+      "token_id": "350977769852917329387037893294763093471844346281449484439085576212613048126",
+      "best_bid": 0.08,
+      "best_ask": 0.09,
+      "spread": 0.01,
+      "n_ask_levels": 68,
+      "depth_at_touch_contracts": 105270.98,
+      "total_ask_contracts": 1082142.84,
+      "depth_within_2c_contracts": 372878.07,
+      "depth_within_5c_contracts": 422719.97,
+      "ask_ladder": [
+        {
+          "price": 0.09,
+          "size": 105270.98
+        },
+        {
+          "price": 0.1,
+          "size": 172349.36
+        },
+        {
+          "price": 0.11,
+          "size": 95257.73
+        },
+        {
+          "price": 0.12,
+          "size": 14067.21
+        },
+        {
+          "price": 0.13,
+          "size": 7063.69
+        },
+        {
+          "price": 0.14,
+          "size": 28711.0
+        },
+        {
+          "price": 0.15,
+          "size": 5121.23
+        },
+        {
+          "price": 0.16,
+          "size": 10450.45
+        },
+        {
+          "price": 0.17,
+          "size": 10557.82
+        },
+        {
+          "price": 0.18,
+          "size": 4385.6
+        },
+        {
+          "price": 0.19,
+          "size": 852.0
+        },
+        {
+          "price": 0.2,
+          "size": 6257.29
+        },
+        {
+          "price": 0.21,
+          "size": 2120.0
+        },
+        {
+          "price": 0.22,
+          "size": 120.0
+        },
+        {
+          "price": 0.23,
+          "size": 900.0
+        },
+        {
+          "price": 0.24,
+          "size": 10450.0
+        },
+        {
+          "price": 0.27,
+          "size": 200.0
+        },
+        {
+          "price": 0.28,
+          "size": 9194.96
+        },
+        {
+          "price": 0.29,
+          "size": 200.0
+        },
+        {
+          "price": 0.3,
+          "size": 270.36
+        },
+        {
+          "price": 0.31,
+          "size": 1000.0
+        },
+        {
+          "price": 0.32,
+          "size": 499.99
+        },
+        {
+          "price": 0.34,
+          "size": 516.66
+        },
+        {
+          "price": 0.36,
+          "size": 3499.81
+        },
+        {
+          "price": 0.37,
+          "size": 687.5
+        },
+        {
+          "price": 0.38,
+          "size": 441.0
+        },
+        {
+          "price": 0.39,
+          "size": 13000.01
+        },
+        {
+          "price": 0.4,
+          "size": 103895.18
+        },
+        {
+          "price": 0.42,
+          "size": 5000.0
+        },
+        {
+          "price": 0.44,
+          "size": 3802.37
+        },
+        {
+          "price": 0.45,
+          "size": 545.45
+        },
+        {
+          "price": 0.47,
+          "size": 2000.0
+        },
+        {
+          "price": 0.48,
+          "size": 500.0
+        },
+        {
+          "price": 0.49,
+          "size": 14183.06
+        },
+        {
+          "price": 0.5,
+          "size": 2099.63
+        },
+        {
+          "price": 0.52,
+          "size": 63.02
+        },
+        {
+          "price": 0.53,
+          "size": 2000.0
+        },
+        {
+          "price": 0.54,
+          "size": 1586.95
+        },
+        {
+          "price": 0.55,
+          "size": 9544.95
+        },
+        {
+          "price": 0.56,
+          "size": 999.99
+        }
+      ],
+      "market_id": "560317",
+      "gamma_liquidity_usd": 714800.5334
+    },
+    {
+      "token_id": "87073899845581463485186346288398658568334162612963837182986759797304993556208",
+      "best_bid": 0.91,
+      "best_ask": 0.92,
+      "spread": 0.01,
+      "n_ask_levels": 8,
+      "depth_at_touch_contracts": 546614.6,
+      "total_ask_contracts": 4883908.23,
+      "depth_within_2c_contracts": 1457813.73,
+      "depth_within_5c_contracts": 1616853.97,
+      "ask_ladder": [
+        {
+          "price": 0.92,
+          "size": 546614.6
+        },
+        {
+          "price": 0.93,
+          "size": 383320.17
+        },
+        {
+          "price": 0.94,
+          "size": 527878.96
+        },
+        {
+          "price": 0.95,
+          "size": 88059.81
+        },
+        {
+          "price": 0.96,
+          "size": 25321.83
+        },
+        {
+          "price": 0.97,
+          "size": 45658.6
+        },
+        {
+          "price": 0.98,
+          "size": 82917.1
+        },
+        {
+          "price": 0.99,
+          "size": 3184137.16
+        }
+      ],
+      "market_id": "560317",
+      "gamma_liquidity_usd": 714800.5334
+    },
+    {
+      "token_id": "107111506004559425167535337910569809007100298896139468418632748246491535011700",
+      "best_bid": 0.004,
+      "best_ask": 0.005,
+      "spread": 0.001,
+      "n_ask_levels": 113,
+      "depth_at_touch_contracts": 137726.62,
+      "total_ask_contracts": 32480108.39,
+      "depth_within_2c_contracts": 537338.54,
+      "depth_within_5c_contracts": 600888.51,
+      "ask_ladder": [
+        {
+          "price": 0.005,
+          "size": 137726.62
+        },
+        {
+          "price": 0.006,
+          "size": 42464.0
+        },
+        {
+          "price": 0.007,
+          "size": 39970.0
+        },
+        {
+          "price": 0.008,
+          "size": 41163.93
+        },
+        {
+          "price": 0.009,
+          "size": 48963.96
+        },
+        {
+          "price": 0.01,
+          "size": 96312.98
+        },
+        {
+          "price": 0.011,
+          "size": 18498.98
+        },
+        {
+          "price": 0.012,
+          "size": 20070.6
+        },
+        {
+          "price": 0.013,
+          "size": 21787.29
+        },
+        {
+          "price": 0.014,
+          "size": 12212.0
+        },
+        {
+          "price": 0.015,
+          "size": 14211.98
+        },
+        {
+          "price": 0.016,
+          "size": 11618.0
+        },
+        {
+          "price": 0.017,
+          "size": 6150.2
+        },
+        {
+          "price": 0.018,
+          "size": 2127.0
+        },
+        {
+          "price": 0.019,
+          "size": 4827.0
+        },
+        {
+          "price": 0.02,
+          "size": 7579.0
+        },
+        {
+          "price": 0.021,
+          "size": 5827.0
+        },
+        {
+          "price": 0.022,
+          "size": 5828.0
+        },
+        {
+          "price": 0.026,
+          "size": 3000.0
+        },
+        {
+          "price": 0.028,
+          "size": 5999.99
+        },
+        {
+          "price": 0.029,
+          "size": 4000.0
+        },
+        {
+          "price": 0.03,
+          "size": 4050.0
+        },
+        {
+          "price": 0.031,
+          "size": 1000.0
+        },
+        {
+          "price": 0.032,
+          "size": 4000.0
+        },
+        {
+          "price": 0.034,
+          "size": 4000.0
+        },
+        {
+          "price": 0.035,
+          "size": 2500.0
+        },
+        {
+          "price": 0.038,
+          "size": 2500.0
+        },
+        {
+          "price": 0.039,
+          "size": 7500.0
+        },
+        {
+          "price": 0.04,
+          "size": 2500.0
+        },
+        {
+          "price": 0.041,
+          "size": 2500.0
+        },
+        {
+          "price": 0.045,
+          "size": 3000.0
+        },
+        {
+          "price": 0.046,
+          "size": 3000.0
+        },
+        {
+          "price": 0.048,
+          "size": 6499.98
+        },
+        {
+          "price": 0.049,
+          "size": 5000.0
+        },
+        {
+          "price": 0.052,
+          "size": 2500.0
+        },
+        {
+          "price": 0.059,
+          "size": 80.0
+        },
+        {
+          "price": 0.06,
+          "size": 2100.0
+        },
+        {
+          "price": 0.061,
+          "size": 2500.0
+        },
+        {
+          "price": 0.062,
+          "size": 5200.0
+        },
+        {
+          "price": 0.072,
+          "size": 5000.0
+        }
+      ],
+      "market_id": "1654957",
+      "gamma_liquidity_usd": 682972.46415
+    },
+    {
+      "token_id": "90713175285238837229141362456380660699457701142142655731293716395090014512187",
+      "best_bid": 0.995,
+      "best_ask": 0.996,
+      "spread": 0.001,
+      "n_ask_levels": 4,
+      "depth_at_touch_contracts": 38625.37,
+      "total_ask_contracts": 5633700.31,
+      "depth_within_2c_contracts": 5633700.31,
+      "depth_within_5c_contracts": 5633700.31,
+      "ask_ladder": [
+        {
+          "price": 0.996,
+          "size": 38625.37
+        },
+        {
+          "price": 0.997,
+          "size": 928967.89
+        },
+        {
+          "price": 0.998,
+          "size": 2805974.23
+        },
+        {
+          "price": 0.999,
+          "size": 1860132.82
+        }
+      ],
+      "market_id": "1654957",
+      "gamma_liquidity_usd": 682972.46415
+    },
+    {
+      "token_id": "95577979648711137561778638101766617213130581085760544385254830392377913395624",
+      "best_bid": 0.47,
+      "best_ask": 0.48,
+      "spread": 0.01,
+      "n_ask_levels": 40,
+      "depth_at_touch_contracts": 326.63,
+      "total_ask_contracts": 239923.82,
+      "depth_within_2c_contracts": 1522.43,
+      "depth_within_5c_contracts": 19211.04,
+      "ask_ladder": [
+        {
+          "price": 0.48,
+          "size": 326.63
+        },
+        {
+          "price": 0.49,
+          "size": 8.0
+        },
+        {
+          "price": 0.5,
+          "size": 1187.8
+        },
+        {
+          "price": 0.51,
+          "size": 6127.51
+        },
+        {
+          "price": 0.52,
+          "size": 6536.1
+        },
+        {
+          "price": 0.53,
+          "size": 5025.0
+        },
+        {
+          "price": 0.54,
+          "size": 425.0
+        },
+        {
+          "price": 0.55,
+          "size": 1161.0
+        },
+        {
+          "price": 0.56,
+          "size": 50.0
+        },
+        {
+          "price": 0.57,
+          "size": 77.9
+        },
+        {
+          "price": 0.58,
+          "size": 30.0
+        },
+        {
+          "price": 0.59,
+          "size": 30.0
+        },
+        {
+          "price": 0.6,
+          "size": 30.0
+        },
+        {
+          "price": 0.61,
+          "size": 30.0
+        },
+        {
+          "price": 0.62,
+          "size": 72.64
+        },
+        {
+          "price": 0.63,
+          "size": 430.0
+        },
+        {
+          "price": 0.64,
+          "size": 3222.0
+        },
+        {
+          "price": 0.67,
+          "size": 1909.09
+        },
+        {
+          "price": 0.7,
+          "size": 1333.33
+        },
+        {
+          "price": 0.71,
+          "size": 1999.98
+        },
+        {
+          "price": 0.72,
+          "size": 1785.71
+        },
+        {
+          "price": 0.75,
+          "size": 2680.0
+        },
+        {
+          "price": 0.76,
+          "size": 1000.0
+        },
+        {
+          "price": 0.78,
+          "size": 3181.81
+        },
+        {
+          "price": 0.79,
+          "size": 15.0
+        },
+        {
+          "price": 0.8,
+          "size": 5380.0
+        },
+        {
+          "price": 0.81,
+          "size": 4225.52
+        },
+        {
+          "price": 0.83,
+          "size": 6344.4
+        },
+        {
+          "price": 0.84,
+          "size": 1000.0
+        },
+        {
+          "price": 0.85,
+          "size": 15.0
+        },
+        {
+          "price": 0.86,
+          "size": 8571.42
+        },
+        {
+          "price": 0.87,
+          "size": 3615.0
+        },
+        {
+          "price": 0.88,
+          "size": 10433.33
+        },
+        {
+          "price": 0.89,
+          "size": 12752.27
+        },
+        {
+          "price": 0.91,
+          "size": 5.67
+        },
+        {
+          "price": 0.92,
+          "size": 16250.0
+        },
+        {
+          "price": 0.95,
+          "size": 23300.0
+        },
+        {
+          "price": 0.97,
+          "size": 28421.13
+        },
+        {
+          "price": 0.98,
+          "size": 75000.0
+        },
+        {
+          "price": 0.99,
+          "size": 5935.58
+        }
+      ],
+      "market_id": "2937525",
+      "gamma_liquidity_usd": 52112.9347
+    },
+    {
+      "token_id": "34707224416470630443022501916513884846577205082389077639001965749737041106571",
+      "best_bid": 0.52,
+      "best_ask": 0.53,
+      "spread": 0.01,
+      "n_ask_levels": 37,
+      "depth_at_touch_contracts": 210.8,
+      "total_ask_contracts": 470348.16,
+      "depth_within_2c_contracts": 1611.26,
+      "depth_within_5c_contracts": 5666.15,
+      "ask_ladder": [
+        {
+          "price": 0.53,
+          "size": 210.8
+        },
+        {
+          "price": 0.54,
+          "size": 720.0
+        },
+        {
+          "price": 0.55,
+          "size": 680.46
+        },
+        {
+          "price": 0.56,
+          "size": 40.0
+        },
+        {
+          "price": 0.57,
+          "size": 1419.66
+        },
+        {
+          "price": 0.58,
+          "size": 2595.23
+        },
+        {
+          "price": 0.59,
+          "size": 165.07
+        },
+        {
+          "price": 0.6,
+          "size": 455.0
+        },
+        {
+          "price": 0.61,
+          "size": 1476.89
+        },
+        {
+          "price": 0.62,
+          "size": 2110.84
+        },
+        {
+          "price": 0.63,
+          "size": 225.0
+        },
+        {
+          "price": 0.64,
+          "size": 93.9
+        },
+        {
+          "price": 0.65,
+          "size": 1065.0
+        },
+        {
+          "price": 0.68,
+          "size": 972.0
+        },
+        {
+          "price": 0.73,
+          "size": 925.0
+        },
+        {
+          "price": 0.75,
+          "size": 1000.0
+        },
+        {
+          "price": 0.76,
+          "size": 3055.82
+        },
+        {
+          "price": 0.77,
+          "size": 3739.13
+        },
+        {
+          "price": 0.79,
+          "size": 2380.95
+        },
+        {
+          "price": 0.8,
+          "size": 42.64
+        },
+        {
+          "price": 0.81,
+          "size": 3357.89
+        },
+        {
+          "price": 0.82,
+          "size": 3850.0
+        },
+        {
+          "price": 0.84,
+          "size": 4375.0
+        },
+        {
+          "price": 0.86,
+          "size": 6813.55
+        },
+        {
+          "price": 0.87,
+          "size": 1475.0
+        },
+        {
+          "price": 0.88,
+          "size": 9082.31
+        },
+        {
+          "price": 0.89,
+          "size": 3360.0
+        },
+        {
+          "price": 0.9,
+          "size": 3416.66
+        },
+        {
+          "price": 0.91,
+          "size": 13888.98
+        },
+        {
+          "price": 0.92,
+          "size": 5449.15
+        },
+        {
+          "price": 0.93,
+          "size": 28763.72
+        },
+        {
+          "price": 0.94,
+          "size": 10318.07
+        },
+        {
+          "price": 0.95,
+          "size": 39212.64
+        },
+        {
+          "price": 0.96,
+          "size": 5343.75
+        },
+        {
+          "price": 0.97,
+          "size": 19844.44
+        },
+        {
+          "price": 0.98,
+          "size": 138985.01
+        },
+        {
+          "price": 0.99,
+          "size": 149438.6
+        }
+      ],
+      "market_id": "2937525",
+      "gamma_liquidity_usd": 52112.9347
+    },
+    {
+      "token_id": "29182557482930894926551444457441091281627059242568302863019387202603296788240",
+      "best_bid": 0.01,
+      "best_ask": 0.013,
+      "spread": 0.003,
+      "n_ask_levels": 44,
+      "depth_at_touch_contracts": 87.02,
+      "total_ask_contracts": 1899359.91,
+      "depth_within_2c_contracts": 31360.92,
+      "depth_within_5c_contracts": 36546.92,
+      "ask_ladder": [
+        {
+          "price": 0.013,
+          "size": 87.02
+        },
+        {
+          "price": 0.017,
+          "size": 65.0
+        },
+        {
+          "price": 0.019,
+          "size": 274.02
+        },
+        {
+          "price": 0.02,
+          "size": 16632.14
+        },
+        {
+          "price": 0.028,
+          "size": 37.52
+        },
+        {
+          "price": 0.029,
+          "size": 1755.22
+        },
+        {
+          "price": 0.03,
+          "size": 12510.0
+        },
+        {
+          "price": 0.04,
+          "size": 4205.0
+        },
+        {
+          "price": 0.041,
+          "size": 111.0
+        },
+        {
+          "price": 0.05,
+          "size": 470.0
+        },
+        {
+          "price": 0.06,
+          "size": 400.0
+        },
+        {
+          "price": 0.067,
+          "size": 3000.0
+        },
+        {
+          "price": 0.079,
+          "size": 37.0
+        },
+        {
+          "price": 0.08,
+          "size": 23.0
+        },
+        {
+          "price": 0.2,
+          "size": 19.37
+        },
+        {
+          "price": 0.25,
+          "size": 687.7
+        },
+        {
+          "price": 0.59,
+          "size": 121.95
+        },
+        {
+          "price": 0.65,
+          "size": 142.85
+        },
+        {
+          "price": 0.699,
+          "size": 50.0
+        },
+        {
+          "price": 0.7,
+          "size": 9333.29
+        },
+        {
+          "price": 0.73,
+          "size": 2481.48
+        },
+        {
+          "price": 0.75,
+          "size": 15900.0
+        },
+        {
+          "price": 0.77,
+          "size": 2000.0
+        },
+        {
+          "price": 0.79,
+          "size": 30428.54
+        },
+        {
+          "price": 0.8,
+          "size": 5100.0
+        },
+        {
+          "price": 0.81,
+          "size": 1052.63
+        },
+        {
+          "price": 0.83,
+          "size": 1470.58
+        },
+        {
+          "price": 0.84,
+          "size": 78687.5
+        },
+        {
+          "price": 0.849,
+          "size": 5.05
+        },
+        {
+          "price": 0.85,
+          "size": 3666.66
+        },
+        {
+          "price": 0.86,
+          "size": 2142.85
+        },
+        {
+          "price": 0.87,
+          "size": 13769.22
+        },
+        {
+          "price": 0.88,
+          "size": 2083.33
+        },
+        {
+          "price": 0.89,
+          "size": 142590.73
+        },
+        {
+          "price": 0.92,
+          "size": 56375.0
+        },
+        {
+          "price": 0.94,
+          "size": 210916.5
+        },
+        {
+          "price": 0.959,
+          "size": 5.28
+        },
+        {
+          "price": 0.96,
+          "size": 20000.0
+        },
+        {
+          "price": 0.97,
+          "size": 250666.57
+        },
+        {
+          "price": 0.98,
+          "size": 71005.0
+        }
+      ],
+      "market_id": "2708531",
+      "gamma_liquidity_usd": 101554.00689
+    },
+    {
+      "token_id": "70868428807799974542797798784606518761183340277832328307810243583401632874361",
+      "best_bid": 0.987,
+      "best_ask": 0.99,
+      "spread": 0.003,
+      "n_ask_levels": 3,
+      "depth_at_touch_contracts": 6.17,
+      "total_ask_contracts": 21234.03,
+      "depth_within_2c_contracts": 21234.03,
+      "depth_within_5c_contracts": 21234.03,
+      "ask_ladder": [
+        {
+          "price": 0.99,
+          "size": 6.17
+        },
+        {
+          "price": 0.998,
+          "size": 83.05
+        },
+        {
+          "price": 0.999,
+          "size": 21144.81
+        }
+      ],
+      "market_id": "2708531",
+      "gamma_liquidity_usd": 101554.00689
+    },
+    {
+      "token_id": "54396481367166889461688610308196414708048744650531608611896677718305493951217",
+      "best_bid": 0.921,
+      "best_ask": 0.939,
+      "spread": 0.018,
+      "n_ask_levels": 20,
+      "depth_at_touch_contracts": 10.0,
+      "total_ask_contracts": 26007.13,
+      "depth_within_2c_contracts": 1480.66,
+      "depth_within_5c_contracts": 2664.06,
+      "ask_ladder": [
+        {
+          "price": 0.939,
+          "size": 10.0
+        },
+        {
+          "price": 0.94,
+          "size": 327.42
+        },
+        {
+          "price": 0.95,
+          "size": 42.13
+        },
+        {
+          "price": 0.951,
+          "size": 10.71
+        },
+        {
+          "price": 0.953,
+          "size": 104.0
+        },
+        {
+          "price": 0.954,
+          "size": 819.0
+        },
+        {
+          "price": 0.955,
+          "size": 162.11
+        },
+        {
+          "price": 0.957,
+          "size": 5.29
+        },
+        {
+          "price": 0.96,
+          "size": 137.0
+        },
+        {
+          "price": 0.963,
+          "size": 15.0
+        },
+        {
+          "price": 0.964,
+          "size": 534.0
+        },
+        {
+          "price": 0.97,
+          "size": 178.0
+        },
+        {
+          "price": 0.978,
+          "size": 12.35
+        },
+        {
+          "price": 0.979,
+          "size": 50.0
+        },
+        {
+          "price": 0.98,
+          "size": 243.69
+        },
+        {
+          "price": 0.989,
+          "size": 13.36
+        },
+        {
+          "price": 0.99,
+          "size": 15020.0
+        },
+        {
+          "price": 0.995,
+          "size": 3000.0
+        },
+        {
+          "price": 0.998,
+          "size": 62.81
+        },
+        {
+          "price": 0.999,
+          "size": 5260.26
+        }
+      ],
+      "market_id": "2708524",
+      "gamma_liquidity_usd": 81114.09148
+    },
+    {
+      "token_id": "51544390988559398272971193176488931813820946689565383879206789859150413198935",
+      "best_bid": 0.061,
+      "best_ask": 0.079,
+      "spread": 0.018,
+      "n_ask_levels": 59,
+      "depth_at_touch_contracts": 70.42,
+      "total_ask_contracts": 1993189.96,
+      "depth_within_2c_contracts": 16167.57,
+      "depth_within_5c_contracts": 19263.57,
+      "ask_ladder": [
+        {
+          "price": 0.079,
+          "size": 70.42
+        },
+        {
+          "price": 0.08,
+          "size": 3000.0
+        },
+        {
+          "price": 0.084,
+          "size": 1926.99
+        },
+        {
+          "price": 0.085,
+          "size": 1035.0
+        },
+        {
+          "price": 0.086,
+          "size": 120.0
+        },
+        {
+          "price": 0.088,
+          "size": 751.16
+        },
+        {
+          "price": 0.09,
+          "size": 121.0
+        },
+        {
+          "price": 0.096,
+          "size": 9143.0
+        },
+        {
+          "price": 0.1,
+          "size": 3056.0
+        },
+        {
+          "price": 0.11,
+          "size": 20.0
+        },
+        {
+          "price": 0.12,
+          "size": 20.0
+        },
+        {
+          "price": 0.13,
+          "size": 366.0
+        },
+        {
+          "price": 0.14,
+          "size": 366.0
+        },
+        {
+          "price": 0.15,
+          "size": 366.0
+        },
+        {
+          "price": 0.156,
+          "size": 163.0
+        },
+        {
+          "price": 0.16,
+          "size": 366.0
+        },
+        {
+          "price": 0.17,
+          "size": 366.0
+        },
+        {
+          "price": 0.18,
+          "size": 366.0
+        },
+        {
+          "price": 0.19,
+          "size": 366.0
+        },
+        {
+          "price": 0.2,
+          "size": 366.0
+        },
+        {
+          "price": 0.21,
+          "size": 366.0
+        },
+        {
+          "price": 0.22,
+          "size": 366.0
+        },
+        {
+          "price": 0.23,
+          "size": 366.0
+        },
+        {
+          "price": 0.24,
+          "size": 366.0
+        },
+        {
+          "price": 0.25,
+          "size": 366.0
+        },
+        {
+          "price": 0.26,
+          "size": 366.0
+        },
+        {
+          "price": 0.27,
+          "size": 375.38
+        },
+        {
+          "price": 0.32,
+          "size": 255.0
+        },
+        {
+          "price": 0.323,
+          "size": 113.21
+        },
+        {
+          "price": 0.333,
+          "size": 50.0
+        },
+        {
+          "price": 0.38,
+          "size": 5.0
+        },
+        {
+          "price": 0.59,
+          "size": 121.95
+        },
+        {
+          "price": 0.64,
+          "size": 8.0
+        },
+        {
+          "price": 0.65,
+          "size": 142.85
+        },
+        {
+          "price": 0.699,
+          "size": 50.0
+        },
+        {
+          "price": 0.7,
+          "size": 1166.66
+        },
+        {
+          "price": 0.719,
+          "size": 50.0
+        },
+        {
+          "price": 0.72,
+          "size": 12499.9
+        },
+        {
+          "price": 0.75,
+          "size": 2010.0
+        },
+        {
+          "price": 0.77,
+          "size": 2000.0
+        }
+      ],
+      "market_id": "2708524",
+      "gamma_liquidity_usd": 81114.09148
+    },
+    {
+      "token_id": "102660424653109859340616006357573031328176974787584496279344677004442246184158",
+      "best_bid": 0.003,
+      "best_ask": 0.004,
+      "spread": 0.001,
+      "n_ask_levels": 72,
+      "depth_at_touch_contracts": 13788.76,
+      "total_ask_contracts": 986513.6,
+      "depth_within_2c_contracts": 151864.6,
+      "depth_within_5c_contracts": 152753.6,
+      "ask_ladder": [
+        {
+          "price": 0.004,
+          "size": 13788.76
+        },
+        {
+          "price": 0.005,
+          "size": 34212.99
+        },
+        {
+          "price": 0.006,
+          "size": 32163.23
+        },
+        {
+          "price": 0.007,
+          "size": 33883.39
+        },
+        {
+          "price": 0.008,
+          "size": 3400.0
+        },
+        {
+          "price": 0.009,
+          "size": 10020.0
+        },
+        {
+          "price": 0.01,
+          "size": 5825.86
+        },
+        {
+          "price": 0.011,
+          "size": 12151.38
+        },
+        {
+          "price": 0.012,
+          "size": 88.99
+        },
+        {
+          "price": 0.014,
+          "size": 3000.0
+        },
+        {
+          "price": 0.016,
+          "size": 10.0
+        },
+        {
+          "price": 0.018,
+          "size": 3000.0
+        },
+        {
+          "price": 0.02,
+          "size": 310.0
+        },
+        {
+          "price": 0.024,
+          "size": 10.0
+        },
+        {
+          "price": 0.026,
+          "size": 200.0
+        },
+        {
+          "price": 0.028,
+          "size": 179.0
+        },
+        {
+          "price": 0.029,
+          "size": 10.0
+        },
+        {
+          "price": 0.049,
+          "size": 500.0
+        },
+        {
+          "price": 0.075,
+          "size": 50.0
+        },
+        {
+          "price": 0.089,
+          "size": 1000.0
+        },
+        {
+          "price": 0.09,
+          "size": 2000.0
+        },
+        {
+          "price": 0.15,
+          "size": 20.0
+        },
+        {
+          "price": 0.2,
+          "size": 20.0
+        },
+        {
+          "price": 0.289,
+          "size": 63.02
+        },
+        {
+          "price": 0.29,
+          "size": 750.0
+        },
+        {
+          "price": 0.299,
+          "size": 643.5
+        },
+        {
+          "price": 0.3,
+          "size": 2145.0
+        },
+        {
+          "price": 0.33,
+          "size": 993.47
+        },
+        {
+          "price": 0.37,
+          "size": 1056.55
+        },
+        {
+          "price": 0.4,
+          "size": 500.0
+        },
+        {
+          "price": 0.41,
+          "size": 1241.0
+        },
+        {
+          "price": 0.45,
+          "size": 2300.57
+        },
+        {
+          "price": 0.49,
+          "size": 794.0
+        },
+        {
+          "price": 0.498,
+          "size": 884.46
+        },
+        {
+          "price": 0.499,
+          "size": 5472.97
+        },
+        {
+          "price": 0.5,
+          "size": 18243.26
+        },
+        {
+          "price": 0.532,
+          "size": 149.57
+        },
+        {
+          "price": 0.55,
+          "size": 1333.33
+        },
+        {
+          "price": 0.571,
+          "size": 3000.0
+        },
+        {
+          "price": 0.599,
+          "size": 100.0
+        }
+      ],
+      "market_id": "2698591",
+      "gamma_liquidity_usd": 200509.27564
+    },
+    {
+      "token_id": "88485273236264303486903146712332845367736883041568077754122704371096896633245",
+      "best_bid": 0.996,
+      "best_ask": 0.997,
+      "spread": 0.001,
+      "n_ask_levels": 3,
+      "depth_at_touch_contracts": 5388.13,
+      "total_ask_contracts": 182214.9,
+      "depth_within_2c_contracts": 182214.9,
+      "depth_within_5c_contracts": 182214.9,
+      "ask_ladder": [
+        {
+          "price": 0.997,
+          "size": 5388.13
+        },
+        {
+          "price": 0.998,
+          "size": 78690.26
+        },
+        {
+          "price": 0.999,
+          "size": 98136.51
+        }
+      ],
+      "market_id": "2698591",
+      "gamma_liquidity_usd": 200509.27564
+    },
+    {
+      "token_id": "16945214978246453707389583337050601863298473184486852805182227522236591793789",
+      "best_bid": 0.86,
+      "best_ask": 0.87,
+      "spread": 0.01,
+      "n_ask_levels": 13,
+      "depth_at_touch_contracts": 766.35,
+      "total_ask_contracts": 9929.87,
+      "depth_within_2c_contracts": 1620.29,
+      "depth_within_5c_contracts": 7897.1,
+      "ask_ladder": [
+        {
+          "price": 0.87,
+          "size": 766.35
+        },
+        {
+          "price": 0.88,
+          "size": 250.0
+        },
+        {
+          "price": 0.89,
+          "size": 603.94
+        },
+        {
+          "price": 0.9,
+          "size": 1266.86
+        },
+        {
+          "price": 0.91,
+          "size": 1883.95
+        },
+        {
+          "price": 0.92,
+          "size": 3126.0
+        },
+        {
+          "price": 0.93,
+          "size": 139.0
+        },
+        {
+          "price": 0.94,
+          "size": 642.56
+        },
+        {
+          "price": 0.95,
+          "size": 191.0
+        },
+        {
+          "price": 0.96,
+          "size": 10.48
+        },
+        {
+          "price": 0.97,
+          "size": 280.0
+        },
+        {
+          "price": 0.98,
+          "size": 7.03
+        },
+        {
+          "price": 0.99,
+          "size": 762.7
+        }
+      ],
+      "market_id": "3101196",
+      "gamma_liquidity_usd": 67549.2481
+    },
+    {
+      "token_id": "64412940299893249044988269703372684049158140771888568655388872792612918654124",
+      "best_bid": 0.13,
+      "best_ask": 0.14,
+      "spread": 0.01,
+      "n_ask_levels": 63,
+      "depth_at_touch_contracts": 2885.04,
+      "total_ask_contracts": 1051654.72,
+      "depth_within_2c_contracts": 5014.45,
+      "depth_within_5c_contracts": 6026.95,
+      "ask_ladder": [
+        {
+          "price": 0.14,
+          "size": 2885.04
+        },
+        {
+          "price": 0.15,
+          "size": 2053.12
+        },
+        {
+          "price": 0.16,
+          "size": 76.29
+        },
+        {
+          "price": 0.17,
+          "size": 289.0
+        },
+        {
+          "price": 0.18,
+          "size": 698.5
+        },
+        {
+          "price": 0.19,
+          "size": 25.0
+        },
+        {
+          "price": 0.2,
+          "size": 166.0
+        },
+        {
+          "price": 0.22,
+          "size": 166.0
+        },
+        {
+          "price": 0.23,
+          "size": 80.0
+        },
+        {
+          "price": 0.24,
+          "size": 166.0
+        },
+        {
+          "price": 0.25,
+          "size": 33.33
+        },
+        {
+          "price": 0.26,
+          "size": 166.0
+        },
+        {
+          "price": 0.27,
+          "size": 5.0
+        },
+        {
+          "price": 0.28,
+          "size": 172.0
+        },
+        {
+          "price": 0.3,
+          "size": 166.0
+        },
+        {
+          "price": 0.31,
+          "size": 10.0
+        },
+        {
+          "price": 0.32,
+          "size": 921.0
+        },
+        {
+          "price": 0.33,
+          "size": 1527.0
+        },
+        {
+          "price": 0.34,
+          "size": 928.0
+        },
+        {
+          "price": 0.35,
+          "size": 12422.14
+        },
+        {
+          "price": 0.36,
+          "size": 4397.39
+        },
+        {
+          "price": 0.37,
+          "size": 12.0
+        },
+        {
+          "price": 0.38,
+          "size": 166.0
+        },
+        {
+          "price": 0.39,
+          "size": 14.0
+        },
+        {
+          "price": 0.4,
+          "size": 487.91
+        },
+        {
+          "price": 0.41,
+          "size": 6.0
+        },
+        {
+          "price": 0.42,
+          "size": 166.0
+        },
+        {
+          "price": 0.43,
+          "size": 5.0
+        },
+        {
+          "price": 0.44,
+          "size": 166.0
+        },
+        {
+          "price": 0.45,
+          "size": 10.9
+        },
+        {
+          "price": 0.46,
+          "size": 166.0
+        },
+        {
+          "price": 0.48,
+          "size": 6.0
+        },
+        {
+          "price": 0.51,
+          "size": 492.0
+        },
+        {
+          "price": 0.53,
+          "size": 978.86
+        },
+        {
+          "price": 0.59,
+          "size": 121.95
+        },
+        {
+          "price": 0.6,
+          "size": 499.98
+        },
+        {
+          "price": 0.65,
+          "size": 142.85
+        },
+        {
+          "price": 0.66,
+          "size": 300.0
+        },
+        {
+          "price": 0.67,
+          "size": 1779.23
+        },
+        {
+          "price": 0.72,
+          "size": 13168.19
+        }
+      ],
+      "market_id": "3101196",
+      "gamma_liquidity_usd": 67549.2481
+    },
+    {
+      "token_id": "92887241671185087964287429577538293218015347990316410569680900427719773755690",
+      "best_bid": 0.03,
+      "best_ask": 0.05,
+      "spread": 0.02,
+      "n_ask_levels": 45,
+      "depth_at_touch_contracts": 2039.0,
+      "total_ask_contracts": 1576335.57,
+      "depth_within_2c_contracts": 7749.14,
+      "depth_within_5c_contracts": 12090.38,
+      "ask_ladder": [
+        {
+          "price": 0.05,
+          "size": 2039.0
+        },
+        {
+          "price": 0.06,
+          "size": 5588.0
+        },
+        {
+          "price": 0.07,
+          "size": 122.14
+        },
+        {
+          "price": 0.08,
+          "size": 3433.0
+        },
+        {
+          "price": 0.09,
+          "size": 575.24
+        },
+        {
+          "price": 0.1,
+          "size": 333.0
+        },
+        {
+          "price": 0.11,
+          "size": 333.0
+        },
+        {
+          "price": 0.12,
+          "size": 853.99
+        },
+        {
+          "price": 0.13,
+          "size": 333.0
+        },
+        {
+          "price": 0.14,
+          "size": 193.0
+        },
+        {
+          "price": 0.16,
+          "size": 222.0
+        },
+        {
+          "price": 0.17,
+          "size": 333.0
+        },
+        {
+          "price": 0.18,
+          "size": 384.2
+        },
+        {
+          "price": 0.19,
+          "size": 333.0
+        },
+        {
+          "price": 0.2,
+          "size": 635.58
+        },
+        {
+          "price": 0.21,
+          "size": 333.0
+        },
+        {
+          "price": 0.22,
+          "size": 333.0
+        },
+        {
+          "price": 0.24,
+          "size": 500.0
+        },
+        {
+          "price": 0.45,
+          "size": 10.52
+        },
+        {
+          "price": 0.55,
+          "size": 125.0
+        },
+        {
+          "price": 0.56,
+          "size": 359.95
+        },
+        {
+          "price": 0.59,
+          "size": 121.95
+        },
+        {
+          "price": 0.65,
+          "size": 142.85
+        },
+        {
+          "price": 0.7,
+          "size": 1666.66
+        },
+        {
+          "price": 0.71,
+          "size": 50.0
+        },
+        {
+          "price": 0.72,
+          "size": 12509.9
+        },
+        {
+          "price": 0.73,
+          "size": 1000.0
+        },
+        {
+          "price": 0.75,
+          "size": 3500.0
+        },
+        {
+          "price": 0.77,
+          "size": 11999.94
+        },
+        {
+          "price": 0.79,
+          "size": 30428.54
+        },
+        {
+          "price": 0.8,
+          "size": 5100.0
+        },
+        {
+          "price": 0.81,
+          "size": 1052.63
+        },
+        {
+          "price": 0.83,
+          "size": 1470.58
+        },
+        {
+          "price": 0.84,
+          "size": 78687.5
+        },
+        {
+          "price": 0.85,
+          "size": 3666.66
+        },
+        {
+          "price": 0.86,
+          "size": 2148.36
+        },
+        {
+          "price": 0.87,
+          "size": 13769.22
+        },
+        {
+          "price": 0.88,
+          "size": 2083.33
+        },
+        {
+          "price": 0.89,
+          "size": 142590.73
+        },
+        {
+          "price": 0.92,
+          "size": 56375.0
+        }
+      ],
+      "market_id": "2708525",
+      "gamma_liquidity_usd": 89554.3337
+    },
+    {
+      "token_id": "66109789114392102264899653264985978177219041757245980031200339468116884682598",
+      "best_bid": 0.95,
+      "best_ask": 0.97,
+      "spread": 0.02,
+      "n_ask_levels": 3,
+      "depth_at_touch_contracts": 620.0,
+      "total_ask_contracts": 2711.46,
+      "depth_within_2c_contracts": 2711.46,
+      "depth_within_5c_contracts": 2711.46,
+      "ask_ladder": [
+        {
+          "price": 0.97,
+          "size": 620.0
+        },
+        {
+          "price": 0.98,
+          "size": 860.0
+        },
+        {
+          "price": 0.99,
+          "size": 1231.46
+        }
+      ],
+      "market_id": "2708525",
+      "gamma_liquidity_usd": 89554.3337
+    },
+    {
+      "token_id": "103583503429104930194497628126914667755033911422951268976034178026550261878964",
+      "best_bid": 0.002,
+      "best_ask": 0.003,
+      "spread": 0.001,
+      "n_ask_levels": 80,
+      "depth_at_touch_contracts": 499848.59,
+      "total_ask_contracts": 5905242.95,
+      "depth_within_2c_contracts": 584115.55,
+      "depth_within_5c_contracts": 594615.53,
+      "ask_ladder": [
+        {
+          "price": 0.003,
+          "size": 499848.59
+        },
+        {
+          "price": 0.004,
+          "size": 30360.93
+        },
+        {
+          "price": 0.005,
+          "size": 14029.88
+        },
+        {
+          "price": 0.006,
+          "size": 5000.0
+        },
+        {
+          "price": 0.007,
+          "size": 7459.52
+        },
+        {
+          "price": 0.008,
+          "size": 25975.02
+        },
+        {
+          "price": 0.01,
+          "size": 1246.01
+        },
+        {
+          "price": 0.021,
+          "size": 195.6
+        },
+        {
+          "price": 0.029,
+          "size": 499.98
+        },
+        {
+          "price": 0.046,
+          "size": 1000.0
+        },
+        {
+          "price": 0.048,
+          "size": 4000.0
+        },
+        {
+          "price": 0.049,
+          "size": 5000.0
+        },
+        {
+          "price": 0.096,
+          "size": 25.0
+        },
+        {
+          "price": 0.098,
+          "size": 760.0
+        },
+        {
+          "price": 0.1,
+          "size": 30.0
+        },
+        {
+          "price": 0.101,
+          "size": 238.09
+        },
+        {
+          "price": 0.108,
+          "size": 45.0
+        },
+        {
+          "price": 0.109,
+          "size": 471.0
+        },
+        {
+          "price": 0.118,
+          "size": 50.0
+        },
+        {
+          "price": 0.119,
+          "size": 471.0
+        },
+        {
+          "price": 0.129,
+          "size": 471.0
+        },
+        {
+          "price": 0.135,
+          "size": 102.0
+        },
+        {
+          "price": 0.136,
+          "size": 102.0
+        },
+        {
+          "price": 0.139,
+          "size": 471.0
+        },
+        {
+          "price": 0.148,
+          "size": 100.0
+        },
+        {
+          "price": 0.149,
+          "size": 471.0
+        },
+        {
+          "price": 0.15,
+          "size": 20.0
+        },
+        {
+          "price": 0.159,
+          "size": 471.0
+        },
+        {
+          "price": 0.166,
+          "size": 102.0
+        },
+        {
+          "price": 0.167,
+          "size": 900.0
+        },
+        {
+          "price": 0.169,
+          "size": 1503.0
+        },
+        {
+          "price": 0.189,
+          "size": 1503.0
+        },
+        {
+          "price": 0.199,
+          "size": 400.0
+        },
+        {
+          "price": 0.2,
+          "size": 20.0
+        },
+        {
+          "price": 0.219,
+          "size": 1503.0
+        },
+        {
+          "price": 0.249,
+          "size": 1503.0
+        },
+        {
+          "price": 0.279,
+          "size": 1503.0
+        },
+        {
+          "price": 0.287,
+          "size": 900.0
+        },
+        {
+          "price": 0.288,
+          "size": 250.0
+        },
+        {
+          "price": 0.3,
+          "size": 40.0
+        }
+      ],
+      "market_id": "562009",
+      "gamma_liquidity_usd": 652860.41778
+    },
+    {
+      "token_id": "104506727636149041299659366434997071904261219660415251973928167233993662044749",
+      "best_bid": 0.997,
+      "best_ask": 0.998,
+      "spread": 0.001,
+      "n_ask_levels": 2,
+      "depth_at_touch_contracts": 855749.24,
+      "total_ask_contracts": 2059456.56,
+      "depth_within_2c_contracts": 2059456.56,
+      "depth_within_5c_contracts": 2059456.56,
+      "ask_ladder": [
+        {
+          "price": 0.998,
+          "size": 855749.24
+        },
+        {
+          "price": 0.999,
+          "size": 1203707.32
+        }
+      ],
+      "market_id": "562009",
+      "gamma_liquidity_usd": 652860.41778
+    },
+    {
+      "token_id": "83949391398129766321449386019175318571490128024347049307900487790711865604735",
+      "best_bid": 0.07,
+      "best_ask": 0.08,
+      "spread": 0.01,
+      "n_ask_levels": 64,
+      "depth_at_touch_contracts": 68.84,
+      "total_ask_contracts": 247915.34,
+      "depth_within_2c_contracts": 19504.51,
+      "depth_within_5c_contracts": 21553.07,
+      "ask_ladder": [
+        {
+          "price": 0.08,
+          "size": 68.84
+        },
+        {
+          "price": 0.09,
+          "size": 7368.31
+        },
+        {
+          "price": 0.1,
+          "size": 12067.36
+        },
+        {
+          "price": 0.11,
+          "size": 1600.0
+        },
+        {
+          "price": 0.12,
+          "size": 448.56
+        },
+        {
+          "price": 0.15,
+          "size": 55.45
+        },
+        {
+          "price": 0.17,
+          "size": 350.0
+        },
+        {
+          "price": 0.18,
+          "size": 600.0
+        },
+        {
+          "price": 0.2,
+          "size": 665.0
+        },
+        {
+          "price": 0.21,
+          "size": 664.61
+        },
+        {
+          "price": 0.22,
+          "size": 1200.0
+        },
+        {
+          "price": 0.23,
+          "size": 800.0
+        },
+        {
+          "price": 0.27,
+          "size": 31.52
+        },
+        {
+          "price": 0.28,
+          "size": 42.64
+        },
+        {
+          "price": 0.29,
+          "size": 300.0
+        },
+        {
+          "price": 0.3,
+          "size": 1048.5
+        },
+        {
+          "price": 0.35,
+          "size": 256.0
+        },
+        {
+          "price": 0.36,
+          "size": 47.0
+        },
+        {
+          "price": 0.37,
+          "size": 900.0
+        },
+        {
+          "price": 0.39,
+          "size": 100.0
+        },
+        {
+          "price": 0.4,
+          "size": 679.15
+        },
+        {
+          "price": 0.43,
+          "size": 526.31
+        },
+        {
+          "price": 0.45,
+          "size": 156.25
+        },
+        {
+          "price": 0.46,
+          "size": 19.12
+        },
+        {
+          "price": 0.48,
+          "size": 1169.23
+        },
+        {
+          "price": 0.49,
+          "size": 537.28
+        },
+        {
+          "price": 0.5,
+          "size": 507.62
+        },
+        {
+          "price": 0.53,
+          "size": 1063.82
+        },
+        {
+          "price": 0.55,
+          "size": 1000.0
+        },
+        {
+          "price": 0.57,
+          "size": 1395.34
+        },
+        {
+          "price": 0.59,
+          "size": 15.63
+        },
+        {
+          "price": 0.6,
+          "size": 3182.33
+        },
+        {
+          "price": 0.62,
+          "size": 1842.1
+        },
+        {
+          "price": 0.64,
+          "size": 50.0
+        },
+        {
+          "price": 0.66,
+          "size": 90.91
+        },
+        {
+          "price": 0.67,
+          "size": 2424.24
+        },
+        {
+          "price": 0.68,
+          "size": 8.0
+        },
+        {
+          "price": 0.69,
+          "size": 2270.15
+        },
+        {
+          "price": 0.7,
+          "size": 12999.0
+        },
+        {
+          "price": 0.71,
+          "size": 3448.27
+        }
+      ],
+      "market_id": "2555351",
+      "gamma_liquidity_usd": 56794.0738
+    },
+    {
+      "token_id": "17973586937761078448873484917108971852340583833844287573538816307502825884858",
+      "best_bid": 0.92,
+      "best_ask": 0.93,
+      "spread": 0.01,
+      "n_ask_levels": 7,
+      "depth_at_touch_contracts": 720.09,
+      "total_ask_contracts": 143520.74,
+      "depth_within_2c_contracts": 18850.86,
+      "depth_within_5c_contracts": 125247.19,
+      "ask_ladder": [
+        {
+          "price": 0.93,
+          "size": 720.09
+        },
+        {
+          "price": 0.94,
+          "size": 6188.81
+        },
+        {
+          "price": 0.95,
+          "size": 11941.96
+        },
+        {
+          "price": 0.96,
+          "size": 70386.64
+        },
+        {
+          "price": 0.97,
+          "size": 17609.31
+        },
+        {
+          "price": 0.98,
+          "size": 18400.38
+        },
+        {
+          "price": 0.99,
+          "size": 18273.55
+        }
+      ],
+      "market_id": "2555351",
+      "gamma_liquidity_usd": 56794.0738
+    },
+    {
+      "token_id": "71113005321543345953148982401714344852983979956921740107184770476905149747949",
+      "best_bid": 0.002,
+      "best_ask": 0.003,
+      "spread": 0.001,
+      "n_ask_levels": 93,
+      "depth_at_touch_contracts": 189304.56,
+      "total_ask_contracts": 28411199.47,
+      "depth_within_2c_contracts": 436521.03,
+      "depth_within_5c_contracts": 439315.33,
+      "ask_ladder": [
+        {
+          "price": 0.003,
+          "size": 189304.56
+        },
+        {
+          "price": 0.004,
+          "size": 8523.16
+        },
+        {
+          "price": 0.005,
+          "size": 25761.5
+        },
+        {
+          "price": 0.006,
+          "size": 1250.0
+        },
+        {
+          "price": 0.007,
+          "size": 1250.0
+        },
+        {
+          "price": 0.008,
+          "size": 1250.0
+        },
+        {
+          "price": 0.01,
+          "size": 199999.72
+        },
+        {
+          "price": 0.017,
+          "size": 6120.81
+        },
+        {
+          "price": 0.018,
+          "size": 1945.2
+        },
+        {
+          "price": 0.019,
+          "size": 1116.08
+        },
+        {
+          "price": 0.028,
+          "size": 300.0
+        },
+        {
+          "price": 0.03,
+          "size": 1494.3
+        },
+        {
+          "price": 0.05,
+          "size": 1000.0
+        },
+        {
+          "price": 0.054,
+          "size": 281.21
+        },
+        {
+          "price": 0.064,
+          "size": 75.0
+        },
+        {
+          "price": 0.065,
+          "size": 333.33
+        },
+        {
+          "price": 0.067,
+          "size": 8888.0
+        },
+        {
+          "price": 0.068,
+          "size": 1870.26
+        },
+        {
+          "price": 0.071,
+          "size": 5000.0
+        },
+        {
+          "price": 0.08,
+          "size": 50.0
+        },
+        {
+          "price": 0.081,
+          "size": 5000.0
+        },
+        {
+          "price": 0.086,
+          "size": 225.0
+        },
+        {
+          "price": 0.088,
+          "size": 1402.7
+        },
+        {
+          "price": 0.09,
+          "size": 950.0
+        },
+        {
+          "price": 0.091,
+          "size": 5000.0
+        },
+        {
+          "price": 0.099,
+          "size": 2000.0
+        },
+        {
+          "price": 0.101,
+          "size": 5005.56
+        },
+        {
+          "price": 0.109,
+          "size": 100.0
+        },
+        {
+          "price": 0.11,
+          "size": 8988.0
+        },
+        {
+          "price": 0.111,
+          "size": 5000.0
+        },
+        {
+          "price": 0.12,
+          "size": 100.0
+        },
+        {
+          "price": 0.13,
+          "size": 3600.0
+        },
+        {
+          "price": 0.14,
+          "size": 100.0
+        },
+        {
+          "price": 0.15,
+          "size": 100.0
+        },
+        {
+          "price": 0.155,
+          "size": 400.0
+        },
+        {
+          "price": 0.156,
+          "size": 20.0
+        },
+        {
+          "price": 0.16,
+          "size": 100.0
+        },
+        {
+          "price": 0.166,
+          "size": 30.0
+        },
+        {
+          "price": 0.17,
+          "size": 100.0
+        },
+        {
+          "price": 0.179,
+          "size": 100.0
+        }
+      ],
+      "market_id": "2243317",
+      "gamma_liquidity_usd": 578542.29165
+    },
+    {
+      "token_id": "98979455846135640562992462724958394209541566509722385614849584482088364579941",
+      "best_bid": 0.997,
+      "best_ask": 0.998,
+      "spread": 0.001,
+      "n_ask_levels": 2,
+      "depth_at_touch_contracts": 66680.0,
+      "total_ask_contracts": 637787.49,
+      "depth_within_2c_contracts": 637787.49,
+      "depth_within_5c_contracts": 637787.49,
+      "ask_ladder": [
+        {
+          "price": 0.998,
+          "size": 66680.0
+        },
+        {
+          "price": 0.999,
+          "size": 571107.49
+        }
+      ],
+      "market_id": "2243317",
+      "gamma_liquidity_usd": 578542.29165
+    },
+    {
+      "token_id": "22270442014124172071574687491587908452277672308239989045465442906971789179734",
+      "best_bid": 0.46,
+      "best_ask": 0.47,
+      "spread": 0.01,
+      "n_ask_levels": 37,
+      "depth_at_touch_contracts": 40164.06,
+      "total_ask_contracts": 1828673.86,
+      "depth_within_2c_contracts": 195574.04,
+      "depth_within_5c_contracts": 235297.09,
+      "ask_ladder": [
+        {
+          "price": 0.47,
+          "size": 40164.06
+        },
+        {
+          "price": 0.48,
+          "size": 111083.76
+        },
+        {
+          "price": 0.49,
+          "size": 44326.22
+        },
+        {
+          "price": 0.5,
+          "size": 34098.05
+        },
+        {
+          "price": 0.51,
+          "size": 2390.0
+        },
+        {
+          "price": 0.52,
+          "size": 3235.0
+        },
+        {
+          "price": 0.53,
+          "size": 950.0
+        },
+        {
+          "price": 0.54,
+          "size": 1250.0
+        },
+        {
+          "price": 0.57,
+          "size": 2949.0
+        },
+        {
+          "price": 0.58,
+          "size": 86.0
+        },
+        {
+          "price": 0.63,
+          "size": 168.27
+        },
+        {
+          "price": 0.64,
+          "size": 100.67
+        },
+        {
+          "price": 0.67,
+          "size": 4360.0
+        },
+        {
+          "price": 0.69,
+          "size": 54.08
+        },
+        {
+          "price": 0.7,
+          "size": 213.69
+        },
+        {
+          "price": 0.72,
+          "size": 32.75
+        },
+        {
+          "price": 0.73,
+          "size": 32.63
+        },
+        {
+          "price": 0.75,
+          "size": 11850.0
+        },
+        {
+          "price": 0.76,
+          "size": 100.0
+        },
+        {
+          "price": 0.77,
+          "size": 322.98
+        },
+        {
+          "price": 0.78,
+          "size": 33.35
+        },
+        {
+          "price": 0.79,
+          "size": 33.56
+        },
+        {
+          "price": 0.8,
+          "size": 1000.0
+        },
+        {
+          "price": 0.82,
+          "size": 6504.21
+        },
+        {
+          "price": 0.84,
+          "size": 25437.5
+        },
+        {
+          "price": 0.85,
+          "size": 72128.2
+        },
+        {
+          "price": 0.88,
+          "size": 933.33
+        },
+        {
+          "price": 0.89,
+          "size": 12641.48
+        },
+        {
+          "price": 0.9,
+          "size": 148107.0
+        },
+        {
+          "price": 0.92,
+          "size": 410.45
+        },
+        {
+          "price": 0.93,
+          "size": 5857.12
+        },
+        {
+          "price": 0.94,
+          "size": 70166.6
+        },
+        {
+          "price": 0.95,
+          "size": 5.0
+        },
+        {
+          "price": 0.96,
+          "size": 20005.59
+        },
+        {
+          "price": 0.97,
+          "size": 451651.15
+        },
+        {
+          "price": 0.98,
+          "size": 47200.0
+        },
+        {
+          "price": 0.99,
+          "size": 708792.16
+        }
+      ],
+      "market_id": "3000533",
+      "gamma_liquidity_usd": 443233.0217
+    },
+    {
+      "token_id": "98487292420245422581144154349813053745293019116220147623888212796688064126172",
+      "best_bid": 0.53,
+      "best_ask": 0.54,
+      "spread": 0.01,
+      "n_ask_levels": 33,
+      "depth_at_touch_contracts": 193183.01,
+      "total_ask_contracts": 1948507.56,
+      "depth_within_2c_contracts": 402967.5,
+      "depth_within_5c_contracts": 430706.48,
+      "ask_ladder": [
+        {
+          "price": 0.54,
+          "size": 193183.01
+        },
+        {
+          "price": 0.55,
+          "size": 95694.85
+        },
+        {
+          "price": 0.56,
+          "size": 114089.64
+        },
+        {
+          "price": 0.57,
+          "size": 13128.77
+        },
+        {
+          "price": 0.58,
+          "size": 11940.21
+        },
+        {
+          "price": 0.59,
+          "size": 2670.0
+        },
+        {
+          "price": 0.6,
+          "size": 1180.0
+        },
+        {
+          "price": 0.61,
+          "size": 700.0
+        },
+        {
+          "price": 0.62,
+          "size": 615.79
+        },
+        {
+          "price": 0.63,
+          "size": 700.0
+        },
+        {
+          "price": 0.64,
+          "size": 2949.0
+        },
+        {
+          "price": 0.72,
+          "size": 77.06
+        },
+        {
+          "price": 0.73,
+          "size": 150.69
+        },
+        {
+          "price": 0.74,
+          "size": 4725.39
+        },
+        {
+          "price": 0.76,
+          "size": 74.92
+        },
+        {
+          "price": 0.77,
+          "size": 278.73
+        },
+        {
+          "price": 0.79,
+          "size": 100.0
+        },
+        {
+          "price": 0.8,
+          "size": 2002.0
+        },
+        {
+          "price": 0.81,
+          "size": 14939.81
+        },
+        {
+          "price": 0.82,
+          "size": 464.83
+        },
+        {
+          "price": 0.84,
+          "size": 42.64
+        },
+        {
+          "price": 0.85,
+          "size": 2666.66
+        },
+        {
+          "price": 0.86,
+          "size": 27142.79
+        },
+        {
+          "price": 0.88,
+          "size": 106645.71
+        },
+        {
+          "price": 0.89,
+          "size": 5.13
+        },
+        {
+          "price": 0.9,
+          "size": 1005.0
+        },
+        {
+          "price": 0.92,
+          "size": 100625.0
+        },
+        {
+          "price": 0.94,
+          "size": 22345.89
+        },
+        {
+          "price": 0.95,
+          "size": 246.62
+        },
+        {
+          "price": 0.96,
+          "size": 12006.03
+        },
+        {
+          "price": 0.97,
+          "size": 438389.15
+        },
+        {
+          "price": 0.98,
+          "size": 51705.13
+        },
+        {
+          "price": 0.99,
+          "size": 726017.11
+        }
+      ],
+      "market_id": "3000533",
+      "gamma_liquidity_usd": 443233.0217
+    },
+    {
+      "token_id": "37910314808687856421951866224173525033563279695882860774807281555802376500406",
+      "best_bid": 0.993,
+      "best_ask": 0.996,
+      "spread": 0.003,
+      "n_ask_levels": 4,
+      "depth_at_touch_contracts": 5563.0,
+      "total_ask_contracts": 35094.44,
+      "depth_within_2c_contracts": 35094.44,
+      "depth_within_5c_contracts": 35094.44,
+      "ask_ladder": [
+        {
+          "price": 0.996,
+          "size": 5563.0
+        },
+        {
+          "price": 0.997,
+          "size": 2050.0
+        },
+        {
+          "price": 0.998,
+          "size": 2449.33
+        },
+        {
+          "price": 0.999,
+          "size": 25032.11
+        }
+      ],
+      "market_id": "2989107",
+      "gamma_liquidity_usd": 29332.83376
+    },
+    {
+      "token_id": "97324298593350423638284686253294970794915647942910914585757313589465858272285",
+      "best_bid": 0.004,
+      "best_ask": 0.007,
+      "spread": 0.003,
+      "n_ask_levels": 61,
+      "depth_at_touch_contracts": 1000.0,
+      "total_ask_contracts": 145448.34,
+      "depth_within_2c_contracts": 8309.45,
+      "depth_within_5c_contracts": 8419.45,
+      "ask_ladder": [
+        {
+          "price": 0.007,
+          "size": 1000.0
+        },
+        {
+          "price": 0.008,
+          "size": 500.0
+        },
+        {
+          "price": 0.01,
+          "size": 10.0
+        },
+        {
+          "price": 0.012,
+          "size": 4875.0
+        },
+        {
+          "price": 0.013,
+          "size": 31.0
+        },
+        {
+          "price": 0.014,
+          "size": 793.45
+        },
+        {
+          "price": 0.015,
+          "size": 900.0
+        },
+        {
+          "price": 0.02,
+          "size": 200.0
+        },
+        {
+          "price": 0.031,
+          "size": 50.0
+        },
+        {
+          "price": 0.038,
+          "size": 10.0
+        },
+        {
+          "price": 0.048,
+          "size": 50.0
+        },
+        {
+          "price": 0.058,
+          "size": 110.0
+        },
+        {
+          "price": 0.059,
+          "size": 173.53
+        },
+        {
+          "price": 0.06,
+          "size": 5000.0
+        },
+        {
+          "price": 0.11,
+          "size": 100.0
+        },
+        {
+          "price": 0.12,
+          "size": 103.97
+        },
+        {
+          "price": 0.13,
+          "size": 43.0
+        },
+        {
+          "price": 0.14,
+          "size": 38.0
+        },
+        {
+          "price": 0.15,
+          "size": 33.0
+        },
+        {
+          "price": 0.16,
+          "size": 29.0
+        },
+        {
+          "price": 0.17,
+          "size": 26.0
+        },
+        {
+          "price": 0.189,
+          "size": 20.0
+        },
+        {
+          "price": 0.19,
+          "size": 12.34
+        },
+        {
+          "price": 0.2,
+          "size": 40.0
+        },
+        {
+          "price": 0.34,
+          "size": 20.0
+        },
+        {
+          "price": 0.39,
+          "size": 5.0
+        },
+        {
+          "price": 0.45,
+          "size": 840.0
+        },
+        {
+          "price": 0.49,
+          "size": 39.57
+        },
+        {
+          "price": 0.5,
+          "size": 6.0
+        },
+        {
+          "price": 0.53,
+          "size": 22.49
+        },
+        {
+          "price": 0.54,
+          "size": 50.0
+        },
+        {
+          "price": 0.629,
+          "size": 50.0
+        },
+        {
+          "price": 0.63,
+          "size": 600.0
+        },
+        {
+          "price": 0.64,
+          "size": 650.0
+        },
+        {
+          "price": 0.649,
+          "size": 50.0
+        },
+        {
+          "price": 0.65,
+          "size": 12800.05
+        },
+        {
+          "price": 0.67,
+          "size": 39.09
+        },
+        {
+          "price": 0.68,
+          "size": 9.38
+        },
+        {
+          "price": 0.69,
+          "size": 17.88
+        },
+        {
+          "price": 0.75,
+          "size": 8.0
+        }
+      ],
+      "market_id": "2989107",
+      "gamma_liquidity_usd": 29332.83376
+    },
+    {
+      "token_id": "90664643079633325229069388592013287463357580070351448429341061965362517324082",
+      "best_bid": 0.975,
+      "best_ask": 0.976,
+      "spread": 0.001,
+      "n_ask_levels": 22,
+      "depth_at_touch_contracts": 272.0,
+      "total_ask_contracts": 1682951.96,
+      "depth_within_2c_contracts": 51071.13,
+      "depth_within_5c_contracts": 1682951.96,
+      "ask_ladder": [
+        {
+          "price": 0.976,
+          "size": 272.0
+        },
+        {
+          "price": 0.979,
+          "size": 621.16
+        },
+        {
+          "price": 0.98,
+          "size": 308.0
+        },
+        {
+          "price": 0.981,
+          "size": 32.0
+        },
+        {
+          "price": 0.982,
+          "size": 500.0
+        },
+        {
+          "price": 0.983,
+          "size": 758.4
+        },
+        {
+          "price": 0.984,
+          "size": 1550.0
+        },
+        {
+          "price": 0.985,
+          "size": 2530.0
+        },
+        {
+          "price": 0.986,
+          "size": 3250.0
+        },
+        {
+          "price": 0.987,
+          "size": 7300.0
+        },
+        {
+          "price": 0.988,
+          "size": 1045.04
+        },
+        {
+          "price": 0.989,
+          "size": 3909.0
+        },
+        {
+          "price": 0.99,
+          "size": 4360.0
+        },
+        {
+          "price": 0.991,
+          "size": 1111.09
+        },
+        {
+          "price": 0.992,
+          "size": 2050.0
+        },
+        {
+          "price": 0.993,
+          "size": 1428.5
+        },
+        {
+          "price": 0.994,
+          "size": 2466.6
+        },
+        {
+          "price": 0.995,
+          "size": 9000.0
+        },
+        {
+          "price": 0.996,
+          "size": 8579.34
+        },
+        {
+          "price": 0.997,
+          "size": 21309.58
+        },
+        {
+          "price": 0.998,
+          "size": 43993.93
+        },
+        {
+          "price": 0.999,
+          "size": 1566577.32
+        }
+      ],
+      "market_id": "3083664",
+      "gamma_liquidity_usd": 112981.79093
+    },
+    {
+      "token_id": "45511554797827298307186215296063312563946760191758271326442863721031696659723",
+      "best_bid": 0.024,
+      "best_ask": 0.025,
+      "spread": 0.001,
+      "n_ask_levels": 86,
+      "depth_at_touch_contracts": 55.0,
+      "total_ask_contracts": 331938.94,
+      "depth_within_2c_contracts": 37326.79,
+      "depth_within_5c_contracts": 67331.7,
+      "ask_ladder": [
+        {
+          "price": 0.025,
+          "size": 55.0
+        },
+        {
+          "price": 0.027,
+          "size": 730.2
+        },
+        {
+          "price": 0.028,
+          "size": 10150.4
+        },
+        {
+          "price": 0.03,
+          "size": 458.83
+        },
+        {
+          "price": 0.032,
+          "size": 1000.0
+        },
+        {
+          "price": 0.033,
+          "size": 1351.0
+        },
+        {
+          "price": 0.035,
+          "size": 300.0
+        },
+        {
+          "price": 0.036,
+          "size": 88.79
+        },
+        {
+          "price": 0.039,
+          "size": 1200.0
+        },
+        {
+          "price": 0.04,
+          "size": 2900.0
+        },
+        {
+          "price": 0.041,
+          "size": 7000.0
+        },
+        {
+          "price": 0.042,
+          "size": 400.0
+        },
+        {
+          "price": 0.043,
+          "size": 100.0
+        },
+        {
+          "price": 0.044,
+          "size": 3989.74
+        },
+        {
+          "price": 0.045,
+          "size": 7602.83
+        },
+        {
+          "price": 0.046,
+          "size": 2000.0
+        },
+        {
+          "price": 0.048,
+          "size": 5347.92
+        },
+        {
+          "price": 0.049,
+          "size": 15052.0
+        },
+        {
+          "price": 0.05,
+          "size": 2800.0
+        },
+        {
+          "price": 0.056,
+          "size": 605.0
+        },
+        {
+          "price": 0.057,
+          "size": 1200.0
+        },
+        {
+          "price": 0.058,
+          "size": 999.99
+        },
+        {
+          "price": 0.06,
+          "size": 2000.0
+        },
+        {
+          "price": 0.078,
+          "size": 50.0
+        },
+        {
+          "price": 0.08,
+          "size": 2217.4
+        },
+        {
+          "price": 0.085,
+          "size": 200.0
+        },
+        {
+          "price": 0.089,
+          "size": 13.17
+        },
+        {
+          "price": 0.09,
+          "size": 1000.0
+        },
+        {
+          "price": 0.099,
+          "size": 3720.0
+        },
+        {
+          "price": 0.1,
+          "size": 12400.0
+        },
+        {
+          "price": 0.119,
+          "size": 7.94
+        },
+        {
+          "price": 0.12,
+          "size": 1000.07
+        },
+        {
+          "price": 0.134,
+          "size": 100.0
+        },
+        {
+          "price": 0.18,
+          "size": 250.0
+        },
+        {
+          "price": 0.2,
+          "size": 20.0
+        },
+        {
+          "price": 0.22,
+          "size": 300.0
+        },
+        {
+          "price": 0.25,
+          "size": 20.0
+        },
+        {
+          "price": 0.288,
+          "size": 150.0
+        },
+        {
+          "price": 0.29,
+          "size": 100.0
+        },
+        {
+          "price": 0.3,
+          "size": 50.0
+        }
+      ],
+      "market_id": "3083664",
+      "gamma_liquidity_usd": 112981.79093
+    },
+    {
+      "token_id": "6077633070230470776652108532581280898684441958087418509077540637819937906663",
+      "best_bid": 0.016,
+      "best_ask": 0.018,
+      "spread": 0.002,
+      "n_ask_levels": 101,
+      "depth_at_touch_contracts": 3400.46,
+      "total_ask_contracts": 370637.23,
+      "depth_within_2c_contracts": 27037.42,
+      "depth_within_5c_contracts": 49483.01,
+      "ask_ladder": [
+        {
+          "price": 0.018,
+          "size": 3400.46
+        },
+        {
+          "price": 0.019,
+          "size": 1534.36
+        },
+        {
+          "price": 0.02,
+          "size": 2100.25
+        },
+        {
+          "price": 0.021,
+          "size": 200.0
+        },
+        {
+          "price": 0.022,
+          "size": 1188.45
+        },
+        {
+          "price": 0.023,
+          "size": 800.0
+        },
+        {
+          "price": 0.024,
+          "size": 1188.95
+        },
+        {
+          "price": 0.026,
+          "size": 200.1
+        },
+        {
+          "price": 0.027,
+          "size": 28.41
+        },
+        {
+          "price": 0.028,
+          "size": 600.0
+        },
+        {
+          "price": 0.029,
+          "size": 2326.5
+        },
+        {
+          "price": 0.03,
+          "size": 7755.0
+        },
+        {
+          "price": 0.031,
+          "size": 200.0
+        },
+        {
+          "price": 0.032,
+          "size": 1525.98
+        },
+        {
+          "price": 0.033,
+          "size": 1288.96
+        },
+        {
+          "price": 0.035,
+          "size": 2200.0
+        },
+        {
+          "price": 0.037,
+          "size": 300.0
+        },
+        {
+          "price": 0.038,
+          "size": 200.0
+        },
+        {
+          "price": 0.039,
+          "size": 2000.0
+        },
+        {
+          "price": 0.04,
+          "size": 1290.58
+        },
+        {
+          "price": 0.042,
+          "size": 100.0
+        },
+        {
+          "price": 0.043,
+          "size": 2500.0
+        },
+        {
+          "price": 0.044,
+          "size": 4900.0
+        },
+        {
+          "price": 0.045,
+          "size": 8000.01
+        },
+        {
+          "price": 0.047,
+          "size": 155.0
+        },
+        {
+          "price": 0.048,
+          "size": 1000.0
+        },
+        {
+          "price": 0.052,
+          "size": 2500.0
+        },
+        {
+          "price": 0.07,
+          "size": 805.0
+        },
+        {
+          "price": 0.08,
+          "size": 1419.78
+        },
+        {
+          "price": 0.082,
+          "size": 801.0
+        },
+        {
+          "price": 0.088,
+          "size": 7.67
+        },
+        {
+          "price": 0.089,
+          "size": 660.0
+        },
+        {
+          "price": 0.09,
+          "size": 400.0
+        },
+        {
+          "price": 0.1,
+          "size": 500.0
+        },
+        {
+          "price": 0.11,
+          "size": 2200.0
+        },
+        {
+          "price": 0.12,
+          "size": 181.82
+        },
+        {
+          "price": 0.14,
+          "size": 181.83
+        },
+        {
+          "price": 0.15,
+          "size": 500.0
+        },
+        {
+          "price": 0.16,
+          "size": 121.22
+        },
+        {
+          "price": 0.17,
+          "size": 3073.67
+        }
+      ],
+      "market_id": "2643400",
+      "gamma_liquidity_usd": 103125.43977
+    },
+    {
+      "token_id": "5936953867461627005928331168675590531068630483393393529667483486782789092014",
+      "best_bid": 0.982,
+      "best_ask": 0.984,
+      "spread": 0.002,
+      "n_ask_levels": 16,
+      "depth_at_touch_contracts": 480.0,
+      "total_ask_contracts": 1263654.45,
+      "depth_within_2c_contracts": 1263654.45,
+      "depth_within_5c_contracts": 1263654.45,
+      "ask_ladder": [
+        {
+          "price": 0.984,
+          "size": 480.0
+        },
+        {
+          "price": 0.985,
+          "size": 2967.0
+        },
+        {
+          "price": 0.986,
+          "size": 339.0
+        },
+        {
+          "price": 0.987,
+          "size": 2789.0
+        },
+        {
+          "price": 0.988,
+          "size": 2000.0
+        },
+        {
+          "price": 0.989,
+          "size": 2000.0
+        },
+        {
+          "price": 0.99,
+          "size": 11571.64
+        },
+        {
+          "price": 0.991,
+          "size": 8801.09
+        },
+        {
+          "price": 0.992,
+          "size": 5944.53
+        },
+        {
+          "price": 0.993,
+          "size": 8928.5
+        },
+        {
+          "price": 0.994,
+          "size": 10900.6
+        },
+        {
+          "price": 0.995,
+          "size": 10900.0
+        },
+        {
+          "price": 0.996,
+          "size": 14316.09
+        },
+        {
+          "price": 0.997,
+          "size": 36533.3
+        },
+        {
+          "price": 0.998,
+          "size": 30478.12
+        },
+        {
+          "price": 0.999,
+          "size": 1114705.58
+        }
+      ],
+      "market_id": "2643400",
+      "gamma_liquidity_usd": 103125.43977
+    },
+    {
+      "token_id": "55689044028128278672494108251217443782536678376777545334307559186551480418539",
+      "best_bid": 0.151,
+      "best_ask": 0.189,
+      "spread": 0.038,
+      "n_ask_levels": 100,
+      "depth_at_touch_contracts": 52.34,
+      "total_ask_contracts": 263718.14,
+      "depth_within_2c_contracts": 486.97,
+      "depth_within_5c_contracts": 31521.17,
+      "ask_ladder": [
+        {
+          "price": 0.189,
+          "size": 52.34
+        },
+        {
+          "price": 0.19,
+          "size": 86.8
+        },
+        {
+          "price": 0.194,
+          "size": 15.0
+        },
+        {
+          "price": 0.199,
+          "size": 111.0
+        },
+        {
+          "price": 0.207,
+          "size": 203.0
+        },
+        {
+          "price": 0.209,
+          "size": 18.83
+        },
+        {
+          "price": 0.21,
+          "size": 1700.0
+        },
+        {
+          "price": 0.211,
+          "size": 2000.0
+        },
+        {
+          "price": 0.212,
+          "size": 1200.0
+        },
+        {
+          "price": 0.213,
+          "size": 22124.6
+        },
+        {
+          "price": 0.215,
+          "size": 500.0
+        },
+        {
+          "price": 0.217,
+          "size": 1979.8
+        },
+        {
+          "price": 0.221,
+          "size": 100.0
+        },
+        {
+          "price": 0.224,
+          "size": 128.8
+        },
+        {
+          "price": 0.225,
+          "size": 101.0
+        },
+        {
+          "price": 0.233,
+          "size": 1000.0
+        },
+        {
+          "price": 0.234,
+          "size": 100.0
+        },
+        {
+          "price": 0.237,
+          "size": 100.0
+        },
+        {
+          "price": 0.24,
+          "size": 100.0
+        },
+        {
+          "price": 0.245,
+          "size": 1400.0
+        },
+        {
+          "price": 0.256,
+          "size": 100.0
+        },
+        {
+          "price": 0.262,
+          "size": 16.26
+        },
+        {
+          "price": 0.263,
+          "size": 50.0
+        },
+        {
+          "price": 0.272,
+          "size": 47.48
+        },
+        {
+          "price": 0.273,
+          "size": 50.0
+        },
+        {
+          "price": 0.278,
+          "size": 9.69
+        },
+        {
+          "price": 0.28,
+          "size": 21.12
+        },
+        {
+          "price": 0.291,
+          "size": 25.0
+        },
+        {
+          "price": 0.294,
+          "size": 110.0
+        },
+        {
+          "price": 0.295,
+          "size": 500.0
+        },
+        {
+          "price": 0.296,
+          "size": 500.0
+        },
+        {
+          "price": 0.297,
+          "size": 500.0
+        },
+        {
+          "price": 0.298,
+          "size": 500.0
+        },
+        {
+          "price": 0.299,
+          "size": 19999.0
+        },
+        {
+          "price": 0.3,
+          "size": 1150.38
+        },
+        {
+          "price": 0.319,
+          "size": 17.61
+        },
+        {
+          "price": 0.32,
+          "size": 100.0
+        },
+        {
+          "price": 0.348,
+          "size": 25.0
+        },
+        {
+          "price": 0.371,
+          "size": 200.0
+        },
+        {
+          "price": 0.38,
+          "size": 5.0
+        }
+      ],
+      "market_id": "2730117",
+      "gamma_liquidity_usd": 102520.9195
+    },
+    {
+      "token_id": "22380582002052839082465005899114395003938630732672759582910297636521820401881",
+      "best_bid": 0.811,
+      "best_ask": 0.849,
+      "spread": 0.038,
+      "n_ask_levels": 48,
+      "depth_at_touch_contracts": 23.97,
+      "total_ask_contracts": 530041.38,
+      "depth_within_2c_contracts": 2044.08,
+      "depth_within_5c_contracts": 6583.62,
+      "ask_ladder": [
+        {
+          "price": 0.849,
+          "size": 23.97
+        },
+        {
+          "price": 0.85,
+          "size": 504.54
+        },
+        {
+          "price": 0.858,
+          "size": 100.0
+        },
+        {
+          "price": 0.859,
+          "size": 1000.0
+        },
+        {
+          "price": 0.86,
+          "size": 150.0
+        },
+        {
+          "price": 0.864,
+          "size": 50.0
+        },
+        {
+          "price": 0.865,
+          "size": 0.57
+        },
+        {
+          "price": 0.866,
+          "size": 100.0
+        },
+        {
+          "price": 0.867,
+          "size": 100.0
+        },
+        {
+          "price": 0.869,
+          "size": 15.0
+        },
+        {
+          "price": 0.87,
+          "size": 200.0
+        },
+        {
+          "price": 0.871,
+          "size": 3054.26
+        },
+        {
+          "price": 0.872,
+          "size": 600.0
+        },
+        {
+          "price": 0.873,
+          "size": 100.0
+        },
+        {
+          "price": 0.877,
+          "size": 500.0
+        },
+        {
+          "price": 0.888,
+          "size": 85.28
+        },
+        {
+          "price": 0.904,
+          "size": 200.0
+        },
+        {
+          "price": 0.914,
+          "size": 69.76
+        },
+        {
+          "price": 0.915,
+          "size": 110.0
+        },
+        {
+          "price": 0.92,
+          "size": 300.0
+        },
+        {
+          "price": 0.945,
+          "size": 200.0
+        },
+        {
+          "price": 0.946,
+          "size": 500.0
+        },
+        {
+          "price": 0.947,
+          "size": 47.95
+        },
+        {
+          "price": 0.948,
+          "size": 500.0
+        },
+        {
+          "price": 0.95,
+          "size": 200.0
+        },
+        {
+          "price": 0.955,
+          "size": 500.0
+        },
+        {
+          "price": 0.959,
+          "size": 100.0
+        },
+        {
+          "price": 0.96,
+          "size": 5523.3
+        },
+        {
+          "price": 0.961,
+          "size": 1168.06
+        },
+        {
+          "price": 0.962,
+          "size": 2983.02
+        },
+        {
+          "price": 0.968,
+          "size": 68.37
+        },
+        {
+          "price": 0.969,
+          "size": 500.0
+        },
+        {
+          "price": 0.978,
+          "size": 100.0
+        },
+        {
+          "price": 0.979,
+          "size": 10.32
+        },
+        {
+          "price": 0.98,
+          "size": 42.31
+        },
+        {
+          "price": 0.983,
+          "size": 900.0
+        },
+        {
+          "price": 0.984,
+          "size": 625.0
+        },
+        {
+          "price": 0.988,
+          "size": 11.69
+        },
+        {
+          "price": 0.989,
+          "size": 1111.0
+        },
+        {
+          "price": 0.99,
+          "size": 431.04
+        }
+      ],
+      "market_id": "2730117",
+      "gamma_liquidity_usd": 102520.9195
+    },
+    {
+      "token_id": "47661325742680339397689993484717514781417824472586299267255052250797111797474",
+      "best_bid": 0.003,
+      "best_ask": 0.009,
+      "spread": 0.006,
+      "n_ask_levels": 63,
+      "depth_at_touch_contracts": 257.86,
+      "total_ask_contracts": 1908126.21,
+      "depth_within_2c_contracts": 10734.5,
+      "depth_within_5c_contracts": 23010.48,
+      "ask_ladder": [
+        {
+          "price": 0.009,
+          "size": 257.86
+        },
+        {
+          "price": 0.01,
+          "size": 5.0
+        },
+        {
+          "price": 0.016,
+          "size": 89.0
+        },
+        {
+          "price": 0.017,
+          "size": 11.0
+        },
+        {
+          "price": 0.021,
+          "size": 10314.0
+        },
+        {
+          "price": 0.022,
+          "size": 57.64
+        },
+        {
+          "price": 0.029,
+          "size": 112.25
+        },
+        {
+          "price": 0.03,
+          "size": 1627.0
+        },
+        {
+          "price": 0.031,
+          "size": 900.0
+        },
+        {
+          "price": 0.032,
+          "size": 3046.0
+        },
+        {
+          "price": 0.033,
+          "size": 700.0
+        },
+        {
+          "price": 0.035,
+          "size": 500.0
+        },
+        {
+          "price": 0.036,
+          "size": 3000.0
+        },
+        {
+          "price": 0.04,
+          "size": 1308.55
+        },
+        {
+          "price": 0.041,
+          "size": 50.0
+        },
+        {
+          "price": 0.042,
+          "size": 211.0
+        },
+        {
+          "price": 0.043,
+          "size": 49.74
+        },
+        {
+          "price": 0.05,
+          "size": 453.0
+        },
+        {
+          "price": 0.051,
+          "size": 318.44
+        },
+        {
+          "price": 0.06,
+          "size": 432.0
+        },
+        {
+          "price": 0.062,
+          "size": 611.64
+        },
+        {
+          "price": 0.07,
+          "size": 40.0
+        },
+        {
+          "price": 0.09,
+          "size": 12.0
+        },
+        {
+          "price": 0.1,
+          "size": 200.0
+        },
+        {
+          "price": 0.125,
+          "size": 100.0
+        },
+        {
+          "price": 0.13,
+          "size": 356.69
+        },
+        {
+          "price": 0.15,
+          "size": 300.0
+        },
+        {
+          "price": 0.19,
+          "size": 400.0
+        },
+        {
+          "price": 0.3,
+          "size": 650.0
+        },
+        {
+          "price": 0.35,
+          "size": 55.0
+        },
+        {
+          "price": 0.4,
+          "size": 170.0
+        },
+        {
+          "price": 0.46,
+          "size": 1900.0
+        },
+        {
+          "price": 0.5,
+          "size": 600.0
+        },
+        {
+          "price": 0.55,
+          "size": 100.0
+        },
+        {
+          "price": 0.59,
+          "size": 121.95
+        },
+        {
+          "price": 0.6,
+          "size": 1125.0
+        },
+        {
+          "price": 0.699,
+          "size": 50.0
+        },
+        {
+          "price": 0.7,
+          "size": 9333.29
+        },
+        {
+          "price": 0.73,
+          "size": 2481.48
+        },
+        {
+          "price": 0.75,
+          "size": 33700.0
+        }
+      ],
+      "market_id": "2708526",
+      "gamma_liquidity_usd": 91238.25322
+    },
+    {
+      "token_id": "10198326064363028552326969646475225481139703095790544666189064756304351723581",
+      "best_bid": 0.991,
+      "best_ask": 0.997,
+      "spread": 0.006,
+      "n_ask_levels": 3,
+      "depth_at_touch_contracts": 87.84,
+      "total_ask_contracts": 18009.05,
+      "depth_within_2c_contracts": 18009.05,
+      "depth_within_5c_contracts": 18009.05,
+      "ask_ladder": [
+        {
+          "price": 0.997,
+          "size": 87.84
+        },
+        {
+          "price": 0.998,
+          "size": 4665.97
+        },
+        {
+          "price": 0.999,
+          "size": 13255.24
+        }
+      ],
+      "market_id": "2708526",
+      "gamma_liquidity_usd": 91238.25322
+    }
+  ],
+  "disclosures": [
+    "OPEN markets only \u2014 depth at a PAST decision instant is unobtainable (Gamma serves liquidity:null on resolved markets; CLOB /book 404s on a settled token, both verified live 2026-07-26)",
+    "volume-ordered sample = the LIQUID end; depth here OVERSTATES a random market",
+    "a single instant \u2014 depth varies with time of day, news and time-to-resolution",
+    "open markets are a DIFFERENT population from the resolved markets in the OOS corpora, so this bounds the capacity sweep and does NOT measure those corpora",
+    "total_ask_contracts includes penny-priced tail levels and is reported for context only \u2014 it is NOT tradeable capacity"
+  ]
+}
