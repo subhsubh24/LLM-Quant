@@ -81,10 +81,11 @@ class HistoricalMarket:
     # OPTIONAL coarse correlation category (Crypto / Politics / Sports / …, via
     # market_category.derive_market_category), carried from the resolved-history fetcher so
     # the F10 regime-slice report can assess CATEGORY concentration on real OOS trades (an
-    # aggregate edge concentrated in one category is NOT robust). It is pure METADATA — it
-    # never enters the decision (leakage-neutral) NOR the PnL, so it is deliberately EXCLUDED
-    # from _seed_hash (reproducibility invariant: category=None vs a value → identical hash).
-    # Defaulted to None so every existing construction is byte-unchanged.
+    # aggregate edge concentrated in one category is NOT robust). It is leakage-neutral (it
+    # never enters the DECISION), but it is NOT PnL-neutral: the per-category caps size trades
+    # down by category and a per-category fee schedule prices fills by category. So it IS
+    # fingerprinted by _seed_hash, unconditionally (ROADMAP C6).
+    # Defaulted to None so every existing construction is source-unchanged.
     category: Optional[str] = None
     # RESEARCH-ONLY provenance flag. TRUE marks a record sourced from a PLAY-MONEY venue
     # (e.g. Manifold, A8) — usable for METHOD validation only, and which must NEVER count
@@ -93,10 +94,12 @@ class HistoricalMarket:
     # (scripts/validate_real_oos.evaluate) REFUSES any record with this set, so a play-money
     # corpus can never inflate the floor even by an accidental copy-paste — replacing the
     # prior convention-only (module-name + comment) marker (named A8 follow-up). Pure
-    # METADATA: it never enters the decision (leakage-neutral) NOR the PnL, so — like
-    # `category` — it is EXCLUDED from _seed_hash (reproducibility invariant: the flag never
-    # changes a hash or a number). Defaulted to False so every existing construction is
-    # byte-unchanged and real-money records are unaffected.
+    # METADATA: it never enters the decision (leakage-neutral) NOR the PnL — it gates whether
+    # a record is ADMITTED to the real-money lane at all, and an admitted corpus prices
+    # identically whatever the flag says — so it is EXCLUDED from _seed_hash (the flag never
+    # changes a hash or a number). It is NOT analogous to `category`, which IS PnL-determining
+    # and IS fingerprinted (ROADMAP C6). Defaulted to False so every existing construction is
+    # source-unchanged and real-money records are unaffected.
     research_only: bool = False
 
     def __post_init__(self) -> None:
@@ -166,7 +169,10 @@ class BacktestTrade:
     pnl_usd: float               # payout - budget
     is_win: bool
     # Coarse correlation category carried from the traded market (None when unlabeled), so
-    # per-category realized-PnL concentration (F10) can be attributed. Metadata only.
+    # per-category realized-PnL concentration (F10) can be attributed. Reporting-only ON THE
+    # TRADE RECORD — but do NOT read that as "category does not affect PnL": on the INPUT
+    # market it is PnL-determining (per-category caps + per-category fees) and is fingerprinted
+    # by _seed_hash (ROADMAP C6).
     category: Optional[str] = None
 
 
@@ -367,9 +373,11 @@ def walk_forward_backtest(
     control. Total CONCURRENTLY-committed cost basis in any one ``market.category`` may not
     exceed ``category_exposure_cap`` × current equity at the instant a position opens; a trade
     that would breach it is SIZED DOWN to the remaining room (skipped if room ≤ a tiny dust
-    floor). ``None`` (default) disables it — behaviour and ``seed_hash`` are then byte-identical
-    to before, so every pinned reproduction hash holds; a set cap enters the fingerprint
-    (results legitimately differ). Unlabeled markets share one ``__uncategorized__`` bucket.
+    floor). ``None`` (default) disables it — behaviour is then identical to before; a set cap
+    enters the fingerprint (results legitimately differ). Unlabeled markets share one
+    ``__uncategorized__`` bucket. NOTE: because this cap makes ``category`` PnL-determining,
+    ``category`` is fingerprinted UNCONDITIONALLY (ROADMAP C6) — a cap-free run is NOT
+    hash-identical to the pre-C6 engine. See ``_seed_hash``.
 
     SCOPE — READ THIS (what it does and does NOT address). Research Run 22 diagnosed the
     REFUTED bucket family's F10 concentration as "many small CORRELATED trades in one category,
@@ -397,7 +405,9 @@ def walk_forward_backtest(
     manufacture PnL. It is a NO-OP when the book has <2 distinct categories (a share cap has
     nowhere to reallocate on a single-category / all-uncategorized book — mirroring F10's own
     categories-known exclusion) or when the cap is >=1.0 (no constraint); a no-op hashes
-    identically to no cap. ``None`` (default) leaves ``seed_hash`` byte-identical to before.
+    identically to no cap. ``None`` (default) disables it. NOTE: like the concurrent cap, this
+    makes ``category`` PnL-determining, which is why ``category`` is fingerprinted
+    UNCONDITIONALLY (ROADMAP C6) rather than only when a cap is set — see ``_seed_hash``.
 
     Determinism: events are processed in a stable ``(time, market_id, seq)`` order;
     settlement is pure arithmetic; ``market_id`` is required unique. ``seed_hash``
@@ -456,7 +466,9 @@ def walk_forward_backtest(
     # to no cap (no phantom hash change), and a binding cap enters the fingerprint. The decision
     # is a pure function of the DATA (category set), never of strategy_fn, so the hash stays
     # data+config-only.
-    _distinct_cats = {(m.category if m.category is not None else "__uncategorized__") for m in markets}
+    _distinct_cats = {
+        (m.category if m.category is not None else "__uncategorized__") for m in markets
+    }
     effective_cumulative_cap: Optional[float] = (
         cumulative_category_budget_cap
         if (cumulative_category_budget_cap is not None
@@ -563,14 +575,15 @@ def walk_forward_backtest(
             # ``top_category_budget_share`` = Σ per-cat budget ÷ Σ total budget. THIS cap does:
             # it sizes each trade DOWN so the running post-trade share
             # (cum_cat + b) / (cum_total + b) never exceeds the cap. Solving that equality for
-            # the admissible budget b gives room = (cap·cum_total − cum_cat) / (1 − cap); a trade
+            # the admissible budget b gives room = (cap·cum_total − cum_cat) / (1 − cap); a
+            # trade
             # sized to exactly that room lands the category's cumulative share ON the cap line.
             # BOOTSTRAP: the share of the FIRST deployed trade in the whole book is 1.0 by
             # definition (it is the entire book), so no share cap < 1.0 can admit it — the first
             # trade (``cum_deployed_total == 0``) is therefore exempt. Its fixed budget is diluted
             # by later turnover, so the realized top share converges to the cap as total turnover
-            # grows (residual slack ≤ first_trade_budget ÷ total_budget — asserted in the tests,
-            # not hidden). This is a RISK CONTROL: it can only REDUCE a category's cumulative
+            # grows (residual slack ≤ first_trade_budget ÷ total_budget — asserted in the
+            # tests, not hidden). This is a RISK CONTROL: it can only REDUCE a cumulative
             # share, never manufacture PnL — on a net-NEGATIVE corpus it cannot create an edge.
             capc = effective_cumulative_cap
             ccat = _cat_key(m.category)
@@ -666,20 +679,43 @@ def _seed_hash(
             # liquidity is included so determinism/fingerprint covers the depth signal
             # that now affects fill cost. Existing markets have liquidity=None → stored as
             # JSON null, a stable representation, so same-data runs keep consistent hashes
-            # and the cost-rate-change hash test still holds. NOTE: m.category is
-            # deliberately NOT fingerprinted — it is regime-slice metadata that never affects
-            # a decision or PnL, so including it would needlessly break the pinned real-data
-            # reproduction hash (8dc358439ffb5746). Same-data runs must hash identically
-            # whether or not categories are labeled (test_walk_forward_category pins this).
+            # and the cost-rate-change hash test still holds.
             [m.market_id, m.decision_time.isoformat(), m.resolution_time.isoformat(),
              round(m.market_price, 12), round(m.model_prob, 12), m.outcome,
              None if m.liquidity is None else round(m.liquidity, 12)]
             for m in sorted(markets, key=lambda x: (x.decision_time, x.market_id))
         ],
+        # `category` is DATA, and it is PnL-determining: the per-category caps size trades
+        # DOWN by category (`category_exposure_cap` / `cumulative_category_budget_cap`) and a
+        # per-category `cost_model.fee_schedule` prices each fill by category. So it is
+        # fingerprinted UNCONDITIONALLY, exactly like every other HistoricalMarket field.
+        #
+        # It used to be conditional (added only when a cap was set). That was the defect
+        # ROADMAP C6 closes: conditioning a DATA field on ENGINE CONFIG. Two successive
+        # attempts to widen the condition were each broken by a fresh adversarial auditor at
+        # the next boundary (first `cost_model.fee_schedule`; then the fact that
+        # `make_calibration_bucket_strategy` carries its OWN cost model, uncoupled from the
+        # engine's) — two datasets identical in every fingerprinted field and differing ONLY
+        # in category labels produced ONE hash with up to 3.9x different PnL, and the
+        # published headline `79a4cca4b966138f` provably covered four distinct (trades, PnL)
+        # pairs. Byte-identity of a hash that COLLIDES is not worth keeping, so this key moved
+        # every pinned hash once, deliberately. Migration table + the re-derivation procedure:
+        # docs/autonomous-loop/SEED_HASH_CATEGORY_MIGRATION.md.
+        #
+        # Kept as its own aligned list rather than an 8th column in the market rows so the
+        # market-row shape (and every reader of it) is unchanged; the sort key is identical,
+        # so the two lists are positionally aligned and the fingerprint stays
+        # input-order-invariant.
+        "market_categories": [
+            m.category
+            for m in sorted(markets, key=lambda x: (x.decision_time, x.market_id))
+        ],
     }
     # Added ONLY when set: an enabled cap changes PnL, so it MUST enter the fingerprint;
-    # but omitting the key entirely when None keeps the payload — and therefore the pinned
-    # reproduction hashes — byte-identical for every existing (cap-free) run.
+    # omitting the key entirely when None keeps a cap-free payload free of it, so the capped
+    # and cap-free lanes stay distinguishable. This added-only-when-set discipline is correct
+    # for ENGINE CONFIG (the value is genuinely absent). It is NOT correct for DATA — applying
+    # it to `category` is exactly the ROADMAP C6 defect, see the `market_categories` note.
     if category_exposure_cap is not None:
         payload["category_exposure_cap"] = round(category_exposure_cap, 12)
     # Same byte-identical-when-None discipline: an enabled cumulative cap changes PnL so it
@@ -691,9 +727,12 @@ def _seed_hash(
     # fee_schedule changes the per-fill fee (feeRate·p·(1-p) instead of the flat fee_rate) and
     # therefore PnL, so it MUST enter the fingerprint or two runs with identical data/seed but
     # different fee models would share a hash yet diverge in PnL. Omitting the key when None
-    # (the default) keeps every pinned flat-model reproduction hash (b3a8d5e0e9579853 / …)
-    # byte-identical. The schedule's PnL-affecting identity = its default fallback rate + the
-    # per-category rate map. Covered by test_seed_hash_covers_fee_schedule.
+    # (the default) keeps a flat-model run's payload free of the key, so the flat and
+    # scheduled lanes are distinguishable. (Pre-C6 this comment also claimed it preserved the
+    # then-pinned hash b3a8d5e0e9579853 — that hash moved when `market_categories` became
+    # unconditional; see docs/autonomous-loop/SEED_HASH_CATEGORY_MIGRATION.md.) The schedule's
+    # PnL-affecting identity = its default fallback rate + the per-category rate map. Covered
+    # by test_seed_hash_covers_fee_schedule.
     if cost_model.fee_schedule is not None:
         payload["fee_schedule"] = {
             "default_fee_rate": round(cost_model.fee_schedule.default_fee_rate, 12),

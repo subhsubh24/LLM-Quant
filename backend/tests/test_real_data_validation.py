@@ -16,7 +16,7 @@ BASELINE. A real edge requires a real model (ROADMAP track B); see data/README.m
 docs/autonomous-loop/OA11_REAL_DATA_VALIDATION.md for full context and known biases.
 
 PINNED EXPECTED VALUES (as of 2026-06-28 run on real data, seed=42, default config):
-  EXPECTED_SEED_HASH  = "8dc358439ffb5746"
+  EXPECTED_SEED_HASH  = "44cc4fd8dd1aefc7"   (was "8dc358439ffb5746" before ROADMAP C6)
   EXPECTED_N_RECORDS  = 54
   EXPECTED_N_TRADES   = 0      (model_prob == market_price → no net edge → no bet)
   EXPECTED_CROWD_BRIER ≈ 0.0933  (crowd is very sharp; ~70% of markets pinned 2d before resolution)
@@ -43,7 +43,15 @@ from scripts.validate_real_history import load_fixture, run_report, crowd_baseli
 # Committed expected values — pin these explicitly so any drift fails loud.
 # Discovered by running the real fixture through the engine on 2026-06-28.
 # ---------------------------------------------------------------------------
-EXPECTED_SEED_HASH = "8dc358439ffb5746"
+#
+# MIGRATION (2026-07-26, ROADMAP C6): this hash moved ONCE, deliberately, from
+# "8dc358439ffb5746" to "44cc4fd8dd1aefc7". `_seed_hash` now fingerprints `market_categories`
+# UNCONDITIONALLY, closing a reproducibility hole where two datasets identical in every
+# fingerprinted field but differing only in category labels shared ONE hash with up to 3.9x
+# different PnL. The DATA and the RESULT are unchanged — same 54 records, same 0 trades, same
+# crowd Brier; only the fingerprint's input set widened. See
+# docs/autonomous-loop/SEED_HASH_CATEGORY_MIGRATION.md.
+EXPECTED_SEED_HASH = "44cc4fd8dd1aefc7"
 EXPECTED_N_RECORDS = 54
 EXPECTED_N_TRADES = 0          # model_prob == market_price → engine correctly makes 0 trades
 EXPECTED_CROWD_BRIER = 0.09330668518518523   # crowd Brier on the 54-record fixture

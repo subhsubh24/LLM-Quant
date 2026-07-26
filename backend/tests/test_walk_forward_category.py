@@ -8,11 +8,19 @@ The resolved-history fetchers now derive a coarse correlation CATEGORY
 (an aggregate edge concentrated in one category is NOT robust). Previously the category
 was dropped, so the F10 category dimension was never assessed on real corpora.
 
-The load-bearing safety property tested here: ``category`` is METADATA — it never enters
-a decision or PnL, so it is EXCLUDED from ``_seed_hash``. A dataset labeled with
-categories MUST reproduce bit-for-bit identically to the same dataset unlabeled (the
-pinned real-data reproduction hash 8dc358439ffb5746 must not move because we added a
-category field). All offline + deterministic.
+The load-bearing safety property tested here (CORRECTED 2026-07-26, ROADMAP C6): ``category``
+is leakage-neutral — it never enters a DECISION — but it is **NOT** PnL-neutral. Both
+per-category caps size trades down by category, and a per-category ``fee_schedule`` prices
+fills by category. So ``category`` is fingerprinted by ``_seed_hash`` UNCONDITIONALLY, and two
+datasets that differ ONLY in their category labels MUST hash differently.
+
+This file previously asserted the OPPOSITE ("category is METADATA … EXCLUDED from
+``_seed_hash``") and pinned that invariant with a test that only ever exercised the cap-free
+case. The invariant was false: on the shipped frozen corpus the published headline hash
+``79a4cca4b966138f`` provably covered four distinct (trades, PnL) pairs. A test that documents
+and pins a false safety property is worse than a missing test, so it is inverted here and
+backed by a cap-ACTIVE collision-closure test that fails loud on the pre-fix engine.
+All offline + deterministic.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -45,12 +53,14 @@ def _mkt(mid, price, prob, outcome, day, *, category=None, res_offset_days=10):
 
 
 # --------------------------------------------------------------------------- #
-# 1. seed_hash INVARIANCE — the reproducibility guarantee.                     #
+# 1. seed_hash COVERS category — the reproducibility guarantee (ROADMAP C6).   #
 # --------------------------------------------------------------------------- #
-def test_category_is_excluded_from_seed_hash():
-    """The SAME dataset, once unlabeled and once fully category-labeled, must produce the
-    IDENTICAL seed_hash (category is regime-slice metadata, never a PnL input). If this
-    fails, adding categories would silently break the pinned real-data reproduction hash."""
+def test_category_is_fingerprinted_in_seed_hash():
+    """The SAME dataset, once unlabeled and once category-labeled, must produce DIFFERENT
+    seed_hashes — `category` is a PnL-determining DATA field, so the reproducibility
+    fingerprint has to cover it. (Cap-free, these two runs happen to price identically; the
+    hash must still distinguish them, because the engine CONFIG under which they are replayed
+    is not part of the data and a capped replay would diverge.)"""
     base = [
         _mkt("a", 0.80, 0.95, 1, 0),
         _mkt("b", 0.30, 0.10, 0, 5),
@@ -63,10 +73,85 @@ def test_category_is_excluded_from_seed_hash():
     ]
     r_unlabeled = wf.walk_forward_backtest(base, seed=42)
     r_labeled = wf.walk_forward_backtest(labeled, seed=42)
-    assert r_unlabeled.seed_hash == r_labeled.seed_hash
-    # ... and the realized PnL series must be identical too (categories change nothing).
+    assert r_unlabeled.seed_hash != r_labeled.seed_hash, (
+        "labeling the SAME data with categories must move the fingerprint — category is a "
+        "PnL-determining input under the per-category caps and the per-category fee schedule"
+    )
+    # Cap-free the two price identically; the fingerprint difference is about COVERAGE of the
+    # input, not about this particular run's PnL.
     assert r_unlabeled.total_pnl_usd == r_labeled.total_pnl_usd
     assert r_unlabeled.n_trades == r_labeled.n_trades
+
+
+def test_seed_hash_is_deterministic_for_a_fixed_labeling():
+    """The flip side of the test above: the fingerprint must still be a pure function of the
+    data. The same labeled dataset, hashed twice, must be identical — otherwise 'the hash
+    moved' would stop meaning 'the inputs changed'."""
+    labeled = [
+        _mkt("a", 0.80, 0.95, 1, 0, category=CATEGORY_CRYPTO),
+        _mkt("b", 0.30, 0.10, 0, 5, category=CATEGORY_POLITICS),
+    ]
+    assert (
+        wf.walk_forward_backtest(labeled, seed=42).seed_hash
+        == wf.walk_forward_backtest(list(reversed(labeled)), seed=42).seed_hash
+    ), "the fingerprint must stay input-order-invariant with categories in the payload"
+
+
+def test_different_category_assignment_under_a_cap_moves_the_hash_and_the_pnl():
+    """THE regression the C6 defect needed and did not have.
+
+    Two datasets identical in every other fingerprinted field, differing ONLY in which
+    category each market carries, run under an ACTIVE per-category cap. The cap sizes trades
+    by category, so the two produce DIFFERENT PnL — and therefore MUST produce different
+    hashes. On the pre-C6 engine (category absent from the payload) the two hashes were equal
+    while the PnL differed: a fingerprint collision on a published number.
+
+    Asserting BOTH halves is what makes this non-tautological — a hash difference alone would
+    also pass if the hash were random, and a PnL difference alone would not test the fix.
+    """
+    # The decision days matter: `train_min_days=28` means anything decided before day 28 is
+    # TRAINING and never trades. These six all decide after the training boundary and resolve
+    # 60 days out, so their exposure is CONCURRENT — which is what a concurrent cap acts on.
+    # At `max_fraction_per_trade=0.05` a 0.20 per-category cap admits ~4 before it bites, so
+    # six in one bucket makes it bind and six spread across three buckets leaves room.
+    # A walk-forward needs a TRAINING period before any test window exists (n_windows==0
+    # otherwise, and the fixture would silently pin nothing). These three are identical in
+    # both books, so the ONLY difference between them is the traded markets' labeling.
+    def _train():
+        return [
+            _mkt(f"t{i}", 0.55, 0.60, 1, i, category=CATEGORY_GENERAL, res_offset_days=3)
+            for i in range(3)
+        ]
+
+    def _book(cats):
+        return _train() + [
+            _mkt(mid, 0.60, 0.95, 1, day, category=cat, res_offset_days=60)
+            for mid, day, cat in cats
+        ]
+
+    days = (30, 31, 32, 33, 34, 35)
+    ids = ("a", "b", "c", "d", "e", "f")
+    # A: all six in ONE category — the cap binds hard on the shared bucket.
+    book_a = _book([(i, d, CATEGORY_CRYPTO) for i, d in zip(ids, days)])
+    # B: the SAME six markets spread across three categories — each bucket has room.
+    spread = (CATEGORY_CRYPTO, CATEGORY_POLITICS, CATEGORY_SPORTS,
+              CATEGORY_CRYPTO, CATEGORY_POLITICS, CATEGORY_SPORTS)
+    book_b = _book([(i, d, c) for i, d, c in zip(ids, days, spread)])
+
+    r_a = wf.walk_forward_backtest(book_a, seed=42, category_exposure_cap=0.20)
+    r_b = wf.walk_forward_backtest(book_b, seed=42, category_exposure_cap=0.20)
+
+    assert r_a.n_trades > 0 and r_b.n_trades > 0, (
+        "fixture must actually trade under the cap, else this pins nothing"
+    )
+    assert r_a.total_pnl_usd != r_b.total_pnl_usd, (
+        "fixture must make the cap BIND differently across the two labelings, else the "
+        "collision this test guards against cannot be demonstrated"
+    )
+    assert r_a.seed_hash != r_b.seed_hash, (
+        "REGRESSION: two datasets with different category assignments produced different PnL "
+        "under ONE seed_hash — the reproducibility fingerprint does not cover category"
+    )
 
 
 # --------------------------------------------------------------------------- #
