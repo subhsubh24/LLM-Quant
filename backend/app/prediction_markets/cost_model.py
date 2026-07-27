@@ -28,6 +28,8 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
+from .half_spread import HalfSpreadModel
+
 
 # Canonical paper/most-conservative cost rates. These MATCH execution.py's
 # _simulate_fill (market-order slippage 0.5%; Polymarket-style fee 2% of notional) so
@@ -142,6 +144,40 @@ class CostModel:
     # and the (optional) ``category`` argument selects the per-category feeRate. Only the
     # re-score harness / a caller that explicitly opts in constructs a CostModel with it.
     fee_schedule: Optional[PolymarketFeeSchedule] = None
+    # OPTIONAL MEASURED bid/ask half-spread model (ROADMAP C8). When None (the DEFAULT)
+    # the crossing cost is the flat multiplicative ``slippage_rate`` EXACTLY as before —
+    # byte-identical arithmetic, so ``DEFAULT_COST_MODEL``, frozen-dataclass equality/hash
+    # and every pinned reproduction hash are UNCHANGED. When set, the flat slippage is
+    # REPLACED (not stacked) by the measured half-spread for that price band, because
+    # crossing the spread IS the market-order cost the flat rate was standing in for;
+    # charging both would double-count. Market impact stays a separate ADD-ON on top, since
+    # a half-spread prices the touch and impact prices the walk beyond it.
+    half_spread_model: Optional[HalfSpreadModel] = None
+
+    def _crossed_buy_price(self, market_price: float) -> float:
+        """Quoted price after paying the cost of crossing to the ask, before fees.
+
+        One place, used by both the flat and the impact-aware buy paths, so the two can
+        never disagree about what crossing costs. With no ``half_spread_model`` this is the
+        historical ``price * (1 + slippage_rate)``; with one it is the measured
+        ``price + half_spread_usd(price)``.
+        """
+        if self.half_spread_model is None:
+            return market_price * (1.0 + self.slippage_rate)
+        return market_price + self.half_spread_model.half_spread_usd(market_price)
+
+    def _crossed_sell_price(self, market_price: float) -> float:
+        """Quoted price after paying the cost of crossing to the bid, before fees.
+
+        The symmetric exit leg of ``_crossed_buy_price``. Floored at 0.0: a measured
+        half-spread wider than the price itself (which the sub-cent band genuinely
+        produces — a 16.7% half-spread on a 0.005 quote) would otherwise imply negative
+        proceeds, and proceeds cannot be negative. The floor is the conservative direction
+        (it never overstates what a sale returns).
+        """
+        if self.half_spread_model is None:
+            return market_price * (1.0 - self.slippage_rate)
+        return max(market_price - self.half_spread_model.half_spread_usd(market_price), 0.0)
 
     def effective_buy_price(self, market_price: float, category: Optional[str] = None) -> float:
         """All-in cost per YES contract when buying at ``market_price``.
@@ -153,7 +189,7 @@ class CostModel:
         contract for the given ``category``. The result is the true cost basis used for
         honest EV/Kelly: on a win the contract pays $1, so net odds are ``(1 - c_eff)/c_eff``.
         """
-        slipped = market_price * (1.0 + self.slippage_rate)
+        slipped = self._crossed_buy_price(market_price)
         if self.fee_schedule is None:
             c_eff = slipped * (1.0 + self.fee_rate)
         else:
@@ -194,7 +230,7 @@ class CostModel:
         at most $1 at resolution, so it can never be sold for more than par). At ``p = 0`` the
         proceeds are 0; the result is continuous and monotone non-decreasing in ``p``.
         """
-        deslipped = market_price * (1.0 - self.slippage_rate)
+        deslipped = self._crossed_sell_price(market_price)
         if self.fee_schedule is None:
             proceeds = deslipped * (1.0 - self.fee_rate)
         else:
@@ -289,7 +325,7 @@ class CostModel:
         impact = self.impact_fraction(order_size_contracts, depth_contracts, impact_coeff)
         if impact <= 0.0:
             return flat
-        slipped = market_price * (1.0 + self.slippage_rate)
+        slipped = self._crossed_buy_price(market_price)
         impacted = slipped * (1.0 + impact)
         if self.fee_schedule is None:
             c_eff = impacted * (1.0 + self.fee_rate)
