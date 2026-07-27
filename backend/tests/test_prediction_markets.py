@@ -513,6 +513,163 @@ class TestExecutor:
         executor.execute(sell)
         assert "t1" not in executor.positions
 
+    def test_market_order_without_price_rejected(self):
+        # run-risk-readiness top_gaps: a MARKET order with price=None used to be submitted
+        # as a FABRICATED $0.50 limit (`req.price or 0.50`, shared by the risk-gate
+        # notional, the venue-submitted limit, and the paper fill). It must instead REJECT
+        # — no position created, no exposure change, nothing recorded as filled.
+        # PROVEN to FAIL pre-fix: pre-fix this order fills at the invented 0.50 (status
+        # FILLED, "test_token" in executor.positions).
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            size=10.0,
+            price=None,
+            strategy="test",
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.REJECTED
+        assert "MARKET order" in (result.error or "")
+        assert result.filled_size == 0.0
+        assert result.filled_price == 0.0
+        # No state mutation of any kind — the rejection happens before the paper fill /
+        # venue call and before any position or exposure bookkeeping runs.
+        assert executor.positions == {}
+        assert executor.total_exposure == 0.0
+        assert executor.total_fees == 0.0
+
+    def test_market_order_without_price_rejected_on_gated_live_path_too(self):
+        # The guard lives in _check_risk, which execute() calls BEFORE branching on
+        # dry_run/live_enabled — so the same rejection applies whether the executor is in
+        # paper mode or the (still gated-off) live branch. dry_run=False + live_enabled=False
+        # here only proves the order never even reaches the live-gate check; it does NOT
+        # flip LIVE_TRADING_ENABLED or place any real order.
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=False, live_enabled=False)
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            size=10.0,
+            price=None,
+            strategy="test",
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.REJECTED
+        assert "MARKET order" in (result.error or "")
+        assert executor.positions == {}
+
+    def test_market_order_with_real_price_still_fills(self):
+        # A MARKET order that DOES carry a real price must behave exactly as before — the
+        # price=None guard must never touch an order that already has a usable price.
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            size=10.0,
+            price=0.42,
+            strategy="test",
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.FILLED
+        assert result.filled_size == 10.0
+        assert "test_token" in executor.positions
+
+    def test_priceless_order_rejected_for_every_order_type(self):
+        # The guard is keyed on the MISSING PRICE, not the order type. A first cut checked
+        # MARKET only; a reviewer showed the DEFAULT body POSTed to /prediction-markets/execute
+        # (`order_type` defaults to "LIMIT", `price` defaults to None in PlaceOrderRequest)
+        # reproduced the identical fabricated $0.50 FILL and a real position — i.e. the narrow
+        # guard closed the variant the orchestrator never emits and left open the one the app's
+        # own HTTP surface emits by default. Every order type must reject.
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        for order_type in (OrderType.MARKET, OrderType.LIMIT, OrderType.GTC, OrderType.FOK):
+            executor = PredictionMarketExecutor(dry_run=True)
+            req = OrderRequest(
+                exchange=Exchange.POLYMARKET,
+                market_id="test_market",
+                token_id="test_token",
+                side=OrderSide.BUY,
+                order_type=order_type,
+                size=10.0,
+                price=None,
+                strategy="test",
+            )
+            result = executor.execute(req)
+            assert result.status == OrderStatus.REJECTED, order_type
+            assert "no usable price" in (result.error or ""), (order_type, result.error)
+            # Nothing was fabricated on the way out: no position, no exposure, no fee.
+            assert executor.positions == {}, order_type
+            assert executor.total_exposure == 0.0, order_type
+            assert executor.total_fees == 0.0, order_type
+
+    def test_zero_price_is_rejected_not_treated_as_a_real_price(self):
+        # 0.0 is not a tradeable prediction-market price, and all seven `or 0.50` fallback
+        # sites already tested falsiness rather than `is None` — so rejecting it is the
+        # pre-existing semantics made explicit, not a new rule.
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            size=10.0,
+            price=0.0,
+            strategy="test",
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.REJECTED
+        assert executor.positions == {}
+
+    def test_priced_limit_order_still_fills_exactly_as_before(self):
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            size=10.0,
+            price=0.42,
+            strategy="test",
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.FILLED
+        assert result.filled_size == 10.0
+        assert "test_token" in executor.positions
+
 
 # ============================================================
 # Risk Manager Tests
@@ -1098,3 +1255,52 @@ class TestRiskManagerRecordExecution:
         assert sum(rm._strategy_trades.values()) == 0
 
 
+
+
+class TestPricelessOrderGuardEdgeCases:
+    """NaN and out-of-range prices — the hole an adversarial auditor found in the first cut.
+
+    `not float("nan")` is False and `nan <= 0.0` is False, so a NaN price slipped a falsy/<=0
+    guard — and then every downstream cap comparison (`nan > 50.0`) is also False, so it
+    slipped the notional cap, the per-trade cap and the max-position cap, booking a position
+    with exposure=nan and fees=nan. That manufactures unbounded risk headroom from one bad
+    float, which is worse than the fabricated $0.50 this guard was written to stop.
+    """
+
+    def _order(self, price):
+        from app.prediction_markets.execution import (
+            OrderRequest, OrderSide, OrderType, Exchange,
+        )
+        return OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            size=10.0,
+            price=price,
+            strategy="test",
+        )
+
+    @pytest.mark.parametrize(
+        "price",
+        [float("nan"), float("inf"), float("-inf"), -0.5, -1e-12, 0.0, 1.5, 5.0],
+    )
+    def test_unusable_prices_are_rejected_with_no_state_touched(self, price):
+        from app.prediction_markets.execution import PredictionMarketExecutor, OrderStatus
+
+        executor = PredictionMarketExecutor(dry_run=True)
+        result = executor.execute(self._order(price))
+        assert result.status == OrderStatus.REJECTED, price
+        assert executor.positions == {}, price
+        assert executor.total_exposure == 0.0, price
+        assert executor.total_fees == 0.0, price
+
+    @pytest.mark.parametrize("price", [0.001, 0.42, 0.99, 1.0])
+    def test_every_price_a_contract_can_really_trade_at_still_fills(self, price):
+        from app.prediction_markets.execution import PredictionMarketExecutor, OrderStatus
+
+        executor = PredictionMarketExecutor(dry_run=True)
+        result = executor.execute(self._order(price))
+        assert result.status == OrderStatus.FILLED, price
+        assert "test_token" in executor.positions

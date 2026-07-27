@@ -127,7 +127,12 @@ class OrderRequest:
     side: OrderSide
     order_type: OrderType
     size: float              # Number of contracts
-    price: Optional[float]   # Limit price (0.01 - 0.99). None for market orders
+    # Limit price (0.01 - 0.99). Still Optional in the SCHEMA — but no longer accepted by the
+    # executor for ANY order type: `_check_risk` rejects a missing/non-positive price before
+    # anything is sized, submitted or filled. The `or 0.50` fallbacks further down are the
+    # unreachable remains of the old behaviour, kept only as null-safety on the venue-response
+    # reconstruction path. See the guard in `_check_risk` for the reasoning.
+    price: Optional[float]
     strategy: str = ""       # Strategy that generated this order
     scan_result_id: str = "" # Link back to the scan result
     market_question: str = "" # Human-readable market title
@@ -1147,6 +1152,52 @@ class PredictionMarketExecutor:
         # meaningless empty-key position.
         if not req.token_id:
             return "empty token_id — no tradeable token (multi-leg basket not executable here)"
+
+        # SIDE-EFFECT INTEGRITY (run-risk-readiness top_gaps): seven separate sites below —
+        # `OrderRequest.notional`, `_place_via_clob_client`, `_place_via_rest`, their two fill/
+        # fee reconstructions each, and `_simulate_fill` — independently substituted the SAME
+        # fabricated $0.50 (`req.price or 0.50`) whenever price was falsy. Because they all
+        # invented the identical number, the risk-gate notional, the submitted venue limit and
+        # the paper fill stayed consistent with EACH OTHER — and all of them consistent with a
+        # made-up price rather than a real one. A FILLED result and a real position came out
+        # the far end.
+        #
+        # The guard is keyed on the MISSING PRICE, not on the order type. A first cut checked
+        # `order_type == MARKET` only, on the reasoning that LIMIT/GTC/FOK "always carry an
+        # explicit price". A reviewer disproved that: `PlaceOrderRequest` (api/routes.py) has
+        # `order_type` defaulting to "LIMIT" and `price` defaulting to None, so the DEFAULT body
+        # POSTed to /prediction-markets/execute reproduced the identical fabricated $0.50 fill —
+        # the narrow guard closed the variant the orchestrator never emits and left open the one
+        # its own HTTP surface emits by default. A limit order without a limit price is exactly
+        # as meaningless as a market order without a book price, so both are rejected.
+        #
+        # Rejecting here means before `req.notional` is ever computed and before any position /
+        # exposure / fee state is touched, on the paper and the (gated-off) live path alike —
+        # `execute()` calls `_check_risk` ahead of the dry_run/live_enabled branch.
+        #
+        # A non-positive price is rejected on the same grounds: 0.0 is not a tradeable
+        # prediction-market price, and every one of the seven fallback sites already treated it
+        # identically to None (they test falsiness, not `is None`), so this is the existing
+        # semantics made explicit rather than a new rule.
+        # NaN and out-of-range are checked EXPLICITLY, not left to the falsy/<=0 test above.
+        # An adversarial auditor found the reason: `not float("nan")` is False and
+        # `nan <= 0.0` is False, so a NaN price slips this guard — and then EVERY downstream
+        # cap comparison (`nan > 50.0`) is also False, so it slips the notional cap, the
+        # per-trade cap and the max-position cap too, and books a position with `exposure=nan`
+        # and `fees=nan`. That is worse than a fabricated price: it manufactures unbounded
+        # risk headroom out of a single bad float. The same auditor showed a base-code
+        # `price=-inf` booking NEGATIVE exposure and NEGATIVE fees, which the `<= 0.0` test
+        # already closes. This hole is PRE-EXISTING and unreachable from the HTTP surface
+        # (`PlaceOrderRequest` pins `ge=0.0, le=1.0, allow_inf_nan=False`), so it is latent —
+        # but a guard whose whole job is "no order transacts against a price we cannot trust"
+        # should not have a value it silently trusts, and the fix is one line.
+        if req.price is None or not math.isfinite(req.price) or not (0.0 < req.price <= 1.0):
+            return (
+                f"{req.order_type.value} order rejected: no usable price "
+                f"(price={req.price!r}) — refusing to fabricate, or transact against, a price "
+                "that is missing, non-finite, or outside the (0, 1] range a prediction-market "
+                "contract can trade in (a real price is required for every order)"
+            )
 
         # SIDE-EFFECT INTEGRITY: on a prediction market you CANNOT open a short by
         # selling tokens you do not hold — a CTF/YES token can only be sold if it is
