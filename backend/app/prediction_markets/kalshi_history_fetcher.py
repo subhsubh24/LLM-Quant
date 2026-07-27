@@ -82,10 +82,15 @@ SETTLE_TOL = 0.02
 
 # Market ``status`` values we have actually OBSERVED on the live wire (census run
 # 2026-07-27 over 150 settled political/economic events, both the live and the
-# ``/historical`` tier): {"finalized": 828, "active": 198} — and NOTHING else. The
+# ``/historical`` tier): {"finalized": 828, "active": 198} dominate. An independent
+# reviewer's own live census over 40 settled Politics events also turned up a single
+# ``"closed"`` — rarer than the two above but real, so the earlier "and NOTHING else"
+# claim here was an overstatement of one sample and is corrected rather than kept.
+# (It was already in the set below as a documented lifecycle state, so nothing behaved
+# wrongly; the comment was simply describing a stronger observation than we made.) The
 # older docs (and this module's original comments) named "settled"/"determined";
-# those never appeared, so they are kept here as ACCEPTED-BUT-UNSEEN rather than
-# dropped — a status we cannot vouch for must not be silently discarded.
+# those never appeared in either census, so they are kept here as ACCEPTED-BUT-UNSEEN
+# rather than dropped — a status we cannot vouch for must not be silently discarded.
 #
 # WHY A SET AND NOT A SILENT PASS-THROUGH: the co-listed universe is discovered by
 # fanning out over events, so a Kalshi contract change (a new status token) would
