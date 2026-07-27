@@ -856,3 +856,48 @@ def test_an_unrelated_write_failure_is_not_misdiagnosed_as_a_missing_column():
     assert not any("ALTER TABLE" in m for m in msgs), msgs
     assert any("failed to persist" in m for m in msgs), msgs
     assert all(r.levelname != "ERROR" for r in records), msgs
+
+
+def test_band_depth_is_computed_over_the_FULL_ladder_not_the_truncated_one():
+    """The docstring claims the band scalars do not quietly depend on BOOK_LADDER_LEVELS.
+
+    An auditor's mutation moved the band sums onto the truncated ladder and every test stayed
+    green — because no fixture exceeded 40 levels, so the property was claimed but never
+    checked. It matters: a capacity reading built from forward rows would silently understate
+    depth for exactly the deep books where capacity is not the binding constraint.
+    """
+    levels = 120
+    snap = snapshot_order_book(
+        _book(best_bid=0.19, best_ask=0.20, n_levels=levels, level_size=10.0, tick=0.001)
+    )
+    assert snap is not None
+    # Stored ladder is bounded...
+    assert len(snap["ask_ladder"]) == BOOK_LADDER_LEVELS
+    # ...but the depth scalars saw every level.
+    assert snap["total_ask_contracts"] == pytest.approx(levels * 10.0)
+    stored = sum(lvl["size"] for lvl in snap["ask_ladder"])
+    assert snap["total_ask_contracts"] > stored, (
+        "total depth must exceed what the truncated ladder holds, or the scalar is being "
+        "computed over the stored slice"
+    )
+    # The 5c band spans 51 levels here (0.20..0.25 inclusive), past the 40-level cut.
+    assert snap["depth_within_5c_contracts"] == pytest.approx(51 * 10.0)
+    assert snap["depth_within_5c_contracts"] > stored
+
+
+def test_the_stored_ladder_is_BEST_FIRST():
+    """A mutation removing the best-first ordering survived the original suite. Order is not
+    cosmetic: `capacity.walk_book()` consumes levels in sequence and computes the average fill
+    price by walking them, so a mis-ordered ladder silently produces a cheaper-than-real walk —
+    wrong in the dangerous direction."""
+    import dataclasses
+
+    ordered = _book(best_bid=0.19, best_ask=0.20, n_levels=3, level_size=7.0, tick=0.04)
+    # Hand the snapshotter a book whose asks arrive WORST-first — the shape the CLOB actually
+    # served before #434 fixed the touch read, so this is a real wire shape, not a strawman.
+    shuffled = dataclasses.replace(ordered, asks=list(reversed(ordered.asks)))
+    snap = snapshot_order_book(shuffled)
+    assert snap is not None
+    prices = [lvl["price"] for lvl in snap["ask_ladder"]]
+    assert prices == sorted(prices), prices
+    assert prices[0] == 0.20, "the touch must be first — it is what a walk fills against"
