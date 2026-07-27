@@ -64,7 +64,9 @@ _EXTREME_CONFIDENCE_LABELS = ("0-10%", "90-100%")
 # SINGLE-OBSERVATION dominance (ROADMAP C9, filed by the EXP-006b audit). Every check above
 # slices by a REGIME (category / horizon / confidence / time) or by MARKET — none of them
 # catches "a handful of individual TRADES carry the whole result". On corrected EXP-006b the
-# top-market check PASSED at 0.4715 (and passed *because of* a leaked trade) while dropping the
+# top-market check PASSED (ROADMAP C9 filed it as 0.4715 from the PRE-leakage-fix corpus; on the
+# CORRECTED corpus it is 0.2374 — the fix removed the trades that inflated it, so the blind spot
+# is WIDER than filed, not narrower) while dropping the
 # TWO largest trades moved the cell from `significant_positive` to `indistinguishable_from_zero`
 # and the top 10 of ~140 trades carried the entire result. A per-market share cannot see that:
 # the dominant trades were spread over distinct markets. So this axis is computed on the
@@ -471,9 +473,15 @@ def analyze_regime_slices(
             reasons.append(_msg)
             trade_conc_disclosures.append(_msg)
 
-        # C9 — drop-top-2 survival. The single check that would have caught EXP-006b outright:
-        # its 0.15 cell fell from `significant_positive` to `indistinguishable_from_zero` once
-        # the two largest trades were removed. Needs a survivor to be meaningful.
+        # C9 — drop-top-2 survival. NOTE what this does and does not catch, because an earlier
+        # version of this comment claimed more than the code delivers. It tests only whether
+        # the remaining PnL is still POSITIVE. On EXP-006b it is (+$1,306.30), so this flag
+        # does NOT fire there — what catches that cell is the top-5 share above (83%). The
+        # thing that actually broke on EXP-006b was F11 SIGNIFICANCE after the drop, and a
+        # significance test is not something this pure, bootstrap-free module can run. So the
+        # honest reading is: drop-top-2 catches the severe case (the edge is entirely two
+        # observations), the top-5 share catches the graded one, and a
+        # significance-after-drop check remains unbuilt. Needs a survivor to be meaningful.
         if n >= _MIN_TRADES_FOR_DROP_TOP2:
             if pnl_drop2 <= 0:
                 fragile = True
