@@ -22,8 +22,8 @@ changes:
               cell this project owns, so it is the one place the spread question actually
               decides something rather than merely deepening a loss.
 
-Each is scored under FOUR cost models — flat (the status quo ante) and the three measured
-half-spread models from ``prediction_markets.half_spread`` — so the output reports the
+Each is scored under FIVE lanes — flat (the status quo ante), the three measured
+half-spread models from ``prediction_markets.half_spread``, and a labelled half-tick BOUND — so the output reports the
 verdict across the plausible SPAN of the cost estimate. That is deliberate: picking one
 number would be picking the answer.
 
@@ -187,7 +187,34 @@ def score_bucket(markets, wf_mod, cal_mod, sig_mod, rs_mod, cost_model, *, seed:
     }
 
 
-def score_fade(ticks, cats, srb_mod, cost_model, *, threshold: float) -> dict:
+def _exit_leg_delta_vs_flat(trades, cost_model, flat_model) -> dict:
+    """How much the measured model changes the SELL leg, split at the band where it inverts.
+
+    Emitted rather than hand-computed because an auditor caught a figure in the doc that no
+    harness produced and that four natural attributions all disagreed with. A number quoted to
+    the cent has to come from code, so this returns it.
+
+    Above 0.98 the measured half-spread is smaller than the flat rate, so the model is a
+    DISCOUNT there and the delta is positive (more proceeds). Between 0.90 and 0.98 it is
+    larger, so those legs pull the other way — which is why the >=0.90 total is smaller than
+    the >=0.98 subtotal rather than larger.
+    """
+    out = {"n_legs_ge_090": 0, "delta_ge_090_usd": 0.0, "n_legs_ge_098": 0, "delta_ge_098_usd": 0.0}
+    for t in trades:
+        p = t.exit_basis
+        d = (cost_model.effective_sell_price(p) - flat_model.effective_sell_price(p)) * t.contracts
+        if p >= 0.90:
+            out["n_legs_ge_090"] += 1
+            out["delta_ge_090_usd"] += d
+        if p >= 0.98:
+            out["n_legs_ge_098"] += 1
+            out["delta_ge_098_usd"] += d
+    out["delta_ge_090_usd"] = round(out["delta_ge_090_usd"], 2)
+    out["delta_ge_098_usd"] = round(out["delta_ge_098_usd"], 2)
+    return out
+
+
+def score_fade(ticks, cats, srb_mod, cost_model, *, threshold: float, flat_model=None) -> dict:
     """One pre-registered fade-the-spike cell under ``cost_model``.
 
     Only ``threshold`` and ``cost_model`` vary; every other knob stays at the engine default
@@ -196,7 +223,13 @@ def score_fade(ticks, cats, srb_mod, cost_model, *, threshold: float) -> dict:
     cfg = srb_mod.FadeSpikeConfig(threshold=threshold, cost_model=cost_model)
     res = srb_mod.backtest_fade_the_spike(ticks, config=cfg, category_by_market=cats)
     sig = res.significance
+    exit_delta = (
+        _exit_leg_delta_vs_flat(res.trades, cost_model, flat_model)
+        if flat_model is not None
+        else None
+    )
     return {
+        "exit_leg_delta_vs_flat": exit_delta,
         "threshold": threshold,
         "n_trades": res.n_trades,
         "net_pnl_usd": round(float(res.total_pnl_usd), 2),
@@ -301,7 +334,12 @@ def run(
             "corpus": spike_corpus,
             "n_markets": len(ticks),
             "by_cost_model": {
-                name: [score_fade(ticks, cats, srb_mod, cm, threshold=t) for t in FADE_THRESHOLDS]
+                name: [
+                    score_fade(
+                        ticks, cats, srb_mod, cm, threshold=t, flat_model=cm_mod.CostModel()
+                    )
+                    for t in FADE_THRESHOLDS
+                ]
                 for name, cm in models
             },
         }

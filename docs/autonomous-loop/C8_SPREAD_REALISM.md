@@ -48,6 +48,13 @@ carries its own `n` so that weakness is visible in the artifact rather than buri
 The 747-book source published only an aggregate sample size, so its bands carry `n: null` — an
 invented per-band count would have been the exact fabrication this work exists to remove.
 
+**The "—" in the 747-book column is a gap in the SOURCE, not in the model.** That measurement
+covers only prices below 0.30. The model *named* `747book` fills the five bands above 0.30 from
+the depth probe (each such band keeps `SOURCE_DEPTH_PROBE` as its provenance, so it is visible
+in the JSON). The practical consequence, which an auditor rightly wanted stated here rather
+than only in the module: above 0.30 the `747book` and `depth_probe` lanes are the *same
+numbers*, so they are not two independent readings across the whole range — only below 0.30.
+
 **The two tables are not banded identically, and that matters most where it hurts most.** This
 module defines half-spread as `((ask − bid) / 2) / mid` and bands by `mid`; the 747-book table
 was banded by *best ask*. At these spreads the two choices only reclassify quotes sitting on a
@@ -109,14 +116,24 @@ to see where the result survives, not only where it dies.
 | 747book | 39 | −$3,204.42 | $5,668.90 | 1,640,241 | 5 | significant_negative | `da0afc9be685b2f4` |
 | depth_probe | 39 | −$3,197.83 | $5,661.67 | 1,698,917 | 5 | significant_negative | `d7085adf18b00c39` |
 | conservative | 39 | −$3,192.62 | $5,657.10 | 1,639,640 | 5 | significant_negative | `4e973dcce4a4b42b` |
+| *tick_floor (a bound, not a model)* | **41** | −$3,176.11 | $6,635.79 | 1,904,760 | **7** | significant_negative | `cd11f84e82eb08f5` |
 
 Still refuted under every model, and the flat lane still reproduces the pinned C6 headline
 `77ce67d0eacc552e` / −$3,228.02 exactly.
 
 **The loss gets slightly SMALLER under a higher cost, and that is not a bug.** This family holds
 to resolution, so a costlier entry does not simply subtract: it shrinks the cost-net edge, which
-shrinks the Kelly fraction, which shrinks the position. Same 39 trades, same 5 winners, $34 less
-capital deployed and 270,000 fewer contracts held. On a net-losing signal, anything that shrinks
+shrinks the Kelly fraction, which shrinks the position. Across the four *measured* lanes the
+trade set is identical — same 39 trades, same 5 winners — with $34 less capital deployed and
+269,981 fewer contracts held.
+
+**The tick-floor row shows why that "same 39 trades" caveat matters.** Make the cost *cheaper*
+than flat and the strategy's own `min_edge` screen admits two trades it previously refused:
+41 trades, 7 winners, a different `seed_hash`. So the cost model is **trade-selecting, not just
+trade-pricing** — a fact none of the four measured lanes reveals, because they all move cost in
+the same direction. An auditor flagged that the original write-up leaned on "same trade set" as
+the reason the shrinking-loss mechanism is benign without disclosing that the property is a
+coincidence of those four lanes rather than a guarantee. On a net-losing signal, anything that shrinks
 the position shrinks the loss — the same effect ROADMAP E8 already records for the per-category
 caps. The harness emits `budget_deployed_usd` and `contracts_held` on every cell so the mechanism
 is visible in the artifact rather than left to a reader's charity.
@@ -140,9 +157,13 @@ in the spread dimension as EXP-010 showed they were in the fee dimension.
 It **does not** establish that the measured model is uniformly harsher. Above 0.98 the real
 book is very tight — a measured half-spread fraction of 0.000503 against the flat 0.5% — so
 there the model is a *discount*, visible on the exit leg (the buy leg is pinned at the $1.00
-breakeven cap under both). The fade family exits 11 legs above 0.90, worth +$1.29 against a
-−$887.89 total correction: immaterial, and asserted by a test anyway, because a cost model
-whose claim to trust is "it errs in the safe direction" has to name where it does not.
+breakeven cap under both). The harness now emits the number rather than leaving it to be hand-computed: at th=0.15 the
+fade family exits **11 legs at or above 0.90**, of which **2 are at or above 0.98**. Those two
+gain **+$0.63 net across all 11** (the nine legs between 0.90 and 0.98 pull the other way,
+where the measured model is still costlier) and **+$1.28 taken alone** — against a total
+correction of hundreds of dollars. Immaterial, emitted by code, and asserted by a test anyway,
+because a cost model whose claim to trust is "it errs in the safe direction" has to name where
+it does not.
 
 It **does not** establish an upper bound on the correction. Both measurements are drawn from
 open, volume-ordered — i.e. liquid — markets, so they understate a random market's spread. Every
@@ -181,5 +202,7 @@ python scripts/rescore_with_spread.py --json     # machine-readable, with the ba
 python -m pytest backend/tests/test_half_spread.py
 ```
 
-No network, no credentials, no money. The verdict line is `EDGE-NOT-PROVEN`, 12 cells scored,
-zero survivors under any measured spread model.
+No network, no credentials, no money. The verdict line is `EDGE-NOT-PROVEN`, **15** cells
+scored, zero survivors under any measured spread model. Note what "measured" excludes: the
+tick-floor lane is a bound and is deliberately kept out of the survivor test, and a cell *does*
+keep F11 significance under it.

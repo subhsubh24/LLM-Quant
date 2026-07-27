@@ -203,10 +203,32 @@ def test_the_inversion_does_not_reach_below_098(name: str, price: float) -> None
 
 def test_sell_proceeds_never_go_negative_in_the_sub_cent_band() -> None:
     """A 16.7% half-spread on a 0.003 quote is a real measurement; proceeds still cannot be
-    negative, and the floor must not leak into a negative price."""
+    negative, and the floor must not leak into a negative price.
+
+    Asserts on ``_crossed_sell_price`` DIRECTLY, not on ``effective_sell_price``. An auditor's
+    mutation testing showed the outer version was a tautology: deleting the floor inside
+    ``_crossed_sell_price`` left the whole suite green, because ``effective_sell_price`` has
+    its own pre-existing outer clamp that masks it. A test that passes with the feature removed
+    is not coverage.
+    """
     cm = CostModel(half_spread_model=hs.POLYMARKET_HALF_SPREAD_CONSERVATIVE)
     for p in (0.0, 0.0005, 0.003, 0.009):
+        assert cm._crossed_sell_price(p) >= 0.0, p
         assert 0.0 <= cm.effective_sell_price(p) <= 1.0
+
+    # ...and a case where the floor actually BINDS. No committed band has a fraction above
+    # 1.0, so with the real models the raw subtraction never goes negative and the floor is
+    # never exercised — which is why a mutation deleting it survived the first version of this
+    # test. It is a guard against a FUTURE band (a genuinely wider-than-price spread is
+    # possible on a sub-tick quote), so it is tested with a model that reaches that regime.
+    wide = hs.HalfSpreadModel(
+        name="wider_than_price",
+        bands=(hs.SpreadBand(0.0, 1.0, 1.5, 1, "synthetic — exercises the floor"),),
+    )
+    cm_wide = CostModel(half_spread_model=wide)
+    assert wide.half_spread_usd(0.2) > 0.2, "fixture must actually reach the negative regime"
+    assert cm_wide._crossed_sell_price(0.2) == 0.0
+    assert cm_wide.effective_sell_price(0.2) == 0.0
 
 
 def test_round_trip_is_a_loss_at_an_unchanged_price() -> None:
@@ -299,3 +321,29 @@ def test_half_spread_run_is_deterministic() -> None:
     assert a.seed_hash == b.seed_hash
     assert a.total_pnl_usd == b.total_pnl_usd
     assert [t.pnl_usd for t in a.trades] == [t.pnl_usd for t in b.trades]
+
+
+# ---------------------------------------------------------------------------
+# 6. The 747-book table must not drift from the document it transcribes
+# ---------------------------------------------------------------------------
+def test_747book_table_matches_the_document_it_was_transcribed_from() -> None:
+    """The depth-probe table regenerates from committed bytes; this one is transcribed BY HAND
+    from a markdown table, so nothing stopped it drifting. An auditor pointed out that the
+    doc's "a gate test asserts the two agree" sentence invited a reader to think both tables
+    were guarded when only one was. Parse the source table and compare."""
+    import re
+
+    doc = (REPO_ROOT / "docs" / "autonomous-loop" / "EXP006B_RESULT.md").read_text()
+    # Rows look like: | < 0.01 | **16.7%** | 0.5% |   (the middle cell is the measurement)
+    found: dict[str, float] = {}
+    for line in doc.splitlines():
+        m = re.match(r"\|\s*([<0-9][^|]*?)\s*\|\s*\**([0-9.]+)%\**\s*\|\s*0\.5%\s*\|", line)
+        if m:
+            found[m.group(1).strip()] = round(float(m.group(2)) / 100.0, 6)
+    assert found, "could not parse the half-spread table out of EXP006B_RESULT.md"
+
+    pinned = {f"{lo}-{hi}": frac for lo, hi, frac in hs._747BOOK_MEASURED}
+    # Compare as a SET of fractions: the doc labels bands with prose ("< 0.01", "0.02-0.05")
+    # while the code uses numeric bounds, so matching values is the honest comparison and
+    # still catches a transcription error in any single band.
+    assert set(pinned.values()) == set(found.values()), (sorted(pinned.values()), sorted(found.values()))
