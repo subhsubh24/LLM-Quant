@@ -595,10 +595,41 @@ class TestExecutor:
         assert result.filled_size == 10.0
         assert "test_token" in executor.positions
 
-    def test_limit_order_without_price_unaffected_by_market_guard(self):
-        # The new guard checks `order_type == MARKET` specifically. A LIMIT order with
-        # price=None (Optional[float] is schema-valid) must be completely unaffected —
-        # same `req.price or 0.50` fallback fill behavior as before this fix.
+    def test_priceless_order_rejected_for_every_order_type(self):
+        # The guard is keyed on the MISSING PRICE, not the order type. A first cut checked
+        # MARKET only; a reviewer showed the DEFAULT body POSTed to /prediction-markets/execute
+        # (`order_type` defaults to "LIMIT", `price` defaults to None in PlaceOrderRequest)
+        # reproduced the identical fabricated $0.50 FILL and a real position — i.e. the narrow
+        # guard closed the variant the orchestrator never emits and left open the one the app's
+        # own HTTP surface emits by default. Every order type must reject.
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        for order_type in (OrderType.MARKET, OrderType.LIMIT, OrderType.GTC, OrderType.FOK):
+            executor = PredictionMarketExecutor(dry_run=True)
+            req = OrderRequest(
+                exchange=Exchange.POLYMARKET,
+                market_id="test_market",
+                token_id="test_token",
+                side=OrderSide.BUY,
+                order_type=order_type,
+                size=10.0,
+                price=None,
+                strategy="test",
+            )
+            result = executor.execute(req)
+            assert result.status == OrderStatus.REJECTED, order_type
+            assert "no usable price" in (result.error or ""), (order_type, result.error)
+            # Nothing was fabricated on the way out: no position, no exposure, no fee.
+            assert executor.positions == {}, order_type
+            assert executor.total_exposure == 0.0, order_type
+            assert executor.total_fees == 0.0, order_type
+
+    def test_zero_price_is_rejected_not_treated_as_a_real_price(self):
+        # 0.0 is not a tradeable prediction-market price, and all seven `or 0.50` fallback
+        # sites already tested falsiness rather than `is None` — so rejecting it is the
+        # pre-existing semantics made explicit, not a new rule.
         from app.prediction_markets.execution import (
             PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
             OrderStatus, Exchange,
@@ -611,12 +642,32 @@ class TestExecutor:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             size=10.0,
-            price=None,
+            price=0.0,
+            strategy="test",
+        )
+        result = executor.execute(req)
+        assert result.status == OrderStatus.REJECTED
+        assert executor.positions == {}
+
+    def test_priced_limit_order_still_fills_exactly_as_before(self):
+        from app.prediction_markets.execution import (
+            PredictionMarketExecutor, OrderRequest, OrderSide, OrderType,
+            OrderStatus, Exchange,
+        )
+        executor = PredictionMarketExecutor(dry_run=True)
+        req = OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            size=10.0,
+            price=0.42,
             strategy="test",
         )
         result = executor.execute(req)
         assert result.status == OrderStatus.FILLED
-        assert result.filled_price == pytest.approx(0.50)
+        assert result.filled_size == 10.0
         assert "test_token" in executor.positions
 
 

@@ -127,7 +127,12 @@ class OrderRequest:
     side: OrderSide
     order_type: OrderType
     size: float              # Number of contracts
-    price: Optional[float]   # Limit price (0.01 - 0.99). None for market orders
+    # Limit price (0.01 - 0.99). Still Optional in the SCHEMA — but no longer accepted by the
+    # executor for ANY order type: `_check_risk` rejects a missing/non-positive price before
+    # anything is sized, submitted or filled. The `or 0.50` fallbacks further down are the
+    # unreachable remains of the old behaviour, kept only as null-safety on the venue-response
+    # reconstruction path. See the guard in `_check_risk` for the reasoning.
+    price: Optional[float]
     strategy: str = ""       # Strategy that generated this order
     scan_result_id: str = "" # Link back to the scan result
     market_question: str = "" # Human-readable market title
@@ -1148,26 +1153,37 @@ class PredictionMarketExecutor:
         if not req.token_id:
             return "empty token_id — no tradeable token (multi-leg basket not executable here)"
 
-        # SIDE-EFFECT INTEGRITY (run-risk-readiness top_gaps): a MARKET order carries no
-        # price by design (see OrderRequest.price: "None for market orders") — the caller
-        # is trusting the venue's live book to set the fill. Every downstream site that
-        # used to see that None (OrderRequest.notional, `_place_via_clob_client`,
-        # `_place_via_rest`, and `_simulate_fill`) independently substituted the SAME
-        # fabricated $0.50 (`req.price or 0.50`) whenever price was falsy, so the risk-gate
-        # notional, the submitted venue limit, and the paper fill stayed internally
-        # consistent with each other — but all of them were consistent with an INVENTED
-        # number, not a real market price. A missing/zero price on a MARKET order means we
-        # have no basis to size the risk gate or fill the paper trade, so REJECT here —
-        # before `req.notional` is ever computed (line ~1210) and before any position/
-        # exposure state is touched — rather than betting real dollar-equivalents on a
-        # made-up price. LIMIT/GTC/FOK orders are untouched by this guard: those order
-        # types are expected to (and, per the orchestrator, always do) carry an explicit
-        # submitted price, so this check never fires for them.
-        if req.order_type == OrderType.MARKET and not req.price:
+        # SIDE-EFFECT INTEGRITY (run-risk-readiness top_gaps): seven separate sites below —
+        # `OrderRequest.notional`, `_place_via_clob_client`, `_place_via_rest`, their two fill/
+        # fee reconstructions each, and `_simulate_fill` — independently substituted the SAME
+        # fabricated $0.50 (`req.price or 0.50`) whenever price was falsy. Because they all
+        # invented the identical number, the risk-gate notional, the submitted venue limit and
+        # the paper fill stayed consistent with EACH OTHER — and all of them consistent with a
+        # made-up price rather than a real one. A FILLED result and a real position came out
+        # the far end.
+        #
+        # The guard is keyed on the MISSING PRICE, not on the order type. A first cut checked
+        # `order_type == MARKET` only, on the reasoning that LIMIT/GTC/FOK "always carry an
+        # explicit price". A reviewer disproved that: `PlaceOrderRequest` (api/routes.py) has
+        # `order_type` defaulting to "LIMIT" and `price` defaulting to None, so the DEFAULT body
+        # POSTed to /prediction-markets/execute reproduced the identical fabricated $0.50 fill —
+        # the narrow guard closed the variant the orchestrator never emits and left open the one
+        # its own HTTP surface emits by default. A limit order without a limit price is exactly
+        # as meaningless as a market order without a book price, so both are rejected.
+        #
+        # Rejecting here means before `req.notional` is ever computed and before any position /
+        # exposure / fee state is touched, on the paper and the (gated-off) live path alike —
+        # `execute()` calls `_check_risk` ahead of the dry_run/live_enabled branch.
+        #
+        # A non-positive price is rejected on the same grounds: 0.0 is not a tradeable
+        # prediction-market price, and every one of the seven fallback sites already treated it
+        # identically to None (they test falsiness, not `is None`), so this is the existing
+        # semantics made explicit rather than a new rule.
+        if not req.price or req.price <= 0.0:
             return (
-                "MARKET order rejected: no price available to execute against — "
-                "refusing to fabricate a stand-in price for risk sizing or fill "
-                "(a real book price is required for a MARKET order)"
+                f"{req.order_type.value} order rejected: no usable price "
+                f"(price={req.price!r}) — refusing to fabricate a stand-in price for risk "
+                "sizing, venue submission or fill (a real price is required for every order)"
             )
 
         # SIDE-EFFECT INTEGRITY: on a prediction market you CANNOT open a short by

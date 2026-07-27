@@ -118,11 +118,15 @@ def test_filled_result_carries_entry_price():
 
 
 def test_filled_result_none_price_does_not_produce_none_fill():
-    # req.price is Optional[float] and None is schema-valid for GTC/FOK — the order is then
-    # submitted at the `req.price or 0.50` default (execution.py order-build). A FILLED result
-    # must reflect that effective submitted price, NEVER None: a None filled_price would build
-    # a Position with avg_entry_price=None and crash the downstream market_value / PnL math
-    # (float * None) AFTER a real order was placed. (Reviewer-A catch.)
+    # NOTE (post-guard): `_check_risk` now REJECTS a priceless order of ANY type before it can
+    # reach this function, so a caller going through `execute()` can no longer produce this
+    # case at all. This test calls `_place_via_rest` DIRECTLY, deliberately bypassing the risk
+    # gate, to keep pinning the null-safety property of the venue-response reconstruction: a
+    # FILLED result must never carry filled_price=None, which would build a Position with
+    # avg_entry_price=None and crash the downstream market_value / PnL math (float * None)
+    # AFTER a real order was placed. The 0.50 here is the unreachable legacy fallback, pinned
+    # so it stays null-SAFE — it is no longer a price any order path can actually transact at.
+    # (Original Reviewer-A catch; scope re-stated after the priceless-order guard landed.)
     ex = _executor({"success": True, "orderID": "abc", "status": "matched", "matchedAmount": 5})
     req = OrderRequest(
         exchange=Exchange.POLYMARKET, market_id="0xmkt", token_id="tok",
