@@ -870,3 +870,576 @@ def test_historical_volume_fp_fallback():
     raw2["volume"] = None
     rm2 = f._parse_resolved(raw2)
     assert rm2.volume == 0.0
+
+
+# ===========================================================================
+# EVENTS-BY-CATEGORY discovery (ROADMAP B8 / A3)
+#
+# EVERY fixture below encodes a response shape OBSERVED ON THE LIVE KALSHI API
+# on 2026-07-27, not a documented one. That distinction is the whole reason this
+# block exists: this module was previously burned by fixtures that encoded
+# request-side filter words as if they were response values, so the adapter would
+# have dropped every live market. The shapes pinned here are:
+#   * /events              -> {"cursor": str, "events": [...], "milestones": []}
+#                             and an EVENT carries NO "status" field of its own.
+#   * /events/{ticker}     -> markets at the TOP LEVEL by default, but moved under
+#                             {"event": {"markets": [...]}} when
+#                             with_nested_markets=true is passed. Both are real.
+#   * an event's MARKET    -> carries NO "category" field (the taxonomy is on the
+#                             event) and its status is "finalized"/"active" —
+#                             NOT the "settled"/"determined" the docs name.
+#   * /series?category=X   -> {"series": [...]}, and an UNKNOWN category returns
+#                             {"series": null} — null, not [] and not an error.
+#   * /historical/markets  -> {"cursor": "", "markets": [...]}
+# ===========================================================================
+import logging  # noqa: E402  (kept with the block it serves)
+
+from app.prediction_markets.kalshi_history_fetcher import (  # noqa: E402
+    KNOWN_MARKET_STATUSES,
+    POLITICAL_ECONOMIC_CATEGORIES,
+    KalshiEvent,
+    _parse_event,
+)
+
+
+def _kalshi_event(event_ticker, category="Politics", series_ticker=None, title=None):
+    """A raw /events listing item in the LIVE shape (no `status` key — status is a
+    request-side filter only, it is never echoed back on the event)."""
+    return {
+        "available_on_brokers": True,
+        "category": category,
+        "collateral_return_type": "MECNET",
+        "event_ticker": event_ticker,
+        "mutually_exclusive": True,
+        "series_ticker": series_ticker or event_ticker.split("-")[0],
+        "strike_period": "",
+        "sub_title": "Before Jan 1, 2030",
+        "title": title or f"Question for {event_ticker}?",
+    }
+
+
+def _event_market(ticker, result, status="finalized", close_time=None):
+    """A raw market as returned UNDER AN EVENT: note the deliberate ABSENCE of a
+    "category" key (live-observed) — that is what the event-category stamping in
+    fetch_resolved_markets_by_category exists to supply."""
+    return {
+        "ticker": ticker,
+        "title": f"Will {ticker} happen?",
+        "status": status,
+        "result": result,
+        "close_time": close_time or RESOLUTION.isoformat().replace("+00:00", "Z"),
+        "volume_fp": "14446.67",
+        "yes_bid_dollars": "0.0000",
+        "yes_ask_dollars": "1.0000",
+    }
+
+
+# ---------------------------------------------------------------------------
+# /events paging: cursor termination and the max_pages bound
+# ---------------------------------------------------------------------------
+def test_events_paging_follows_cursor_then_terminates():
+    """Two full pages then a short final page: the cursor must be forwarded on
+    each subsequent request and the loop must STOP on the short page."""
+    pages = [
+        {"cursor": "CUR1", "events": [_kalshi_event(f"KXA{i}-30") for i in range(2)],
+         "milestones": []},
+        {"cursor": "CUR2", "events": [_kalshi_event(f"KXB{i}-30") for i in range(2)],
+         "milestones": []},
+        # Short page (1 < limit=2) — terminates even though a cursor is present.
+        {"cursor": "CUR3", "events": [_kalshi_event("KXC0-30")], "milestones": []},
+    ]
+    seen_cursors = []
+
+    def router(url, params):
+        seen_cursors.append(params.get("cursor"))
+        return pages[len(seen_cursors) - 1]
+
+    session = FakeSession(router)
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        limit=2, max_pages=10
+    )
+    assert len(out) == 5
+    assert seen_cursors == [None, "CUR1", "CUR2"]
+    assert [e.event_ticker for e in out][:2] == ["KXA0-30", "KXA1-30"]
+
+
+def test_events_paging_terminates_on_empty_cursor_string():
+    """Kalshi returns "" (falsy, not None) for the LAST page's cursor — a truthiness
+    test is required; an `is not None` test would loop until max_pages."""
+    def router(url, params):
+        return {"cursor": "", "events": [_kalshi_event(f"KX{i}-30") for i in range(3)],
+                "milestones": []}
+
+    session = FakeSession(router)
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        limit=3, max_pages=10
+    )
+    assert len(out) == 3
+    assert len(session.calls) == 1  # stopped immediately on the empty cursor
+
+
+def test_events_paging_respects_max_pages_bound():
+    """A server that ALWAYS returns a full page + a fresh cursor must still stop at
+    max_pages — the loop is bounded, never unbounded."""
+    def router(url, params):
+        return {"cursor": "ALWAYS-MORE",
+                "events": [_kalshi_event(f"KX{i}-30") for i in range(2)],
+                "milestones": []}
+
+    session = FakeSession(router)
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        limit=2, max_pages=3
+    )
+    assert len(session.calls) == 3
+    assert len(out) == 6
+
+
+def test_every_events_request_uses_timeout_15():
+    """The per-request deadline must be SHORTER than any run budget on every new
+    endpoint too — events, series, event-detail and the historical join."""
+    def router(url, params):
+        if "/series" in url:
+            return {"series": [{"ticker": "KXPOL", "category": "Politics"}]}
+        if "/events/" in url:
+            return {"event": {"markets": []}}
+        if "/historical/markets" in url:
+            return {"cursor": "", "markets": []}
+        return {"cursor": "", "events": [_kalshi_event("KXA-30")], "milestones": []}
+
+    session = FakeSession(router)
+    f = KalshiHistoryFetcher(session=session)
+    f.fetch_series_tickers("Politics")
+    f.fetch_resolved_events(limit=5, max_pages=1)
+    f.fetch_event_markets("KXA-30")
+    f.fetch_event_markets("KXA-30", historical=True)
+    assert session.calls, "no request was made"
+    assert all(c["timeout"] == 15 for c in session.calls)
+
+
+# ---------------------------------------------------------------------------
+# Category filtering: forwarded server-side AND re-checked on the response
+# ---------------------------------------------------------------------------
+def test_category_is_forwarded_server_side_on_events_request():
+    """The documented `category` parameter is FORWARDED on the /events request.
+    (LIVE FINDING: Kalshi currently ACCEPTS and IGNORES it — a nonsense category
+    returns the identical page — which is exactly why the response-side backstop in
+    the next test is load-bearing. We still send it so the day Kalshi honours it the
+    filtering moves server-side for free.)"""
+    session = FakeSession(
+        lambda url, params: {"cursor": "", "events": [], "milestones": []}
+    )
+    KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        categories=["Politics", "Economics"], limit=5, max_pages=1
+    )
+    params = session.calls[0]["params"]
+    assert params["status"] == "settled"
+    assert params["category"] == "Economics,Politics"  # sorted → deterministic
+    assert params["limit"] == 5
+
+
+def test_series_ticker_is_forwarded_server_side_on_events_request():
+    """`series_ticker` IS a genuinely server-side filter on /events (live-verified: a
+    nonsense series returns []), so it must reach the wire."""
+    session = FakeSession(
+        lambda url, params: {"cursor": "", "events": [], "milestones": []}
+    )
+    KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        series_ticker="KXNEXTUKPM", limit=5, max_pages=1
+    )
+    assert session.calls[0]["params"]["series_ticker"] == "KXNEXTUKPM"
+    assert "/events" in session.calls[0]["url"]
+
+
+def test_response_side_category_backstop_filters_the_ignored_server_filter():
+    """Because Kalshi IGNORES ?category=, the server hands back a MIXED page. The
+    response-side re-check on the category each event actually carries is what really
+    selects — without it the 'political' universe would still be full of sport."""
+    mixed = [
+        _kalshi_event("KXPOL-30", category="Politics"),
+        _kalshi_event("KXSPORT-30", category="Sports"),
+        _kalshi_event("KXELEC-30", category="Elections"),
+        _kalshi_event("KXENT-30", category="Entertainment"),
+    ]
+    session = FakeSession(
+        lambda url, params: {"cursor": "", "events": mixed, "milestones": []}
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        categories=["Politics", "Elections"], limit=10, max_pages=1
+    )
+    assert [e.event_ticker for e in out] == ["KXPOL-30", "KXELEC-30"]
+
+
+def test_category_match_is_case_insensitive():
+    session = FakeSession(
+        lambda url, params: {"cursor": "",
+                             "events": [_kalshi_event("KXPOL-30", category="Politics")],
+                             "milestones": []}
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        categories=["politics"], limit=10, max_pages=1
+    )
+    assert len(out) == 1
+
+
+def test_series_by_category_is_a_real_server_side_filter():
+    """/series?category= is the ONE endpoint whose category parameter genuinely
+    filters (live-verified). It must be forwarded, and an UNKNOWN category returns
+    {"series": null} — null, not [] — which must degrade to an empty list, not crash."""
+    def router(url, params):
+        if params.get("category") == "Politics":
+            return {"series": [{"ticker": "KXHOUSEBILLS", "category": "Politics"},
+                               {"ticker": "KXFTC", "category": "Politics"}]}
+        return {"series": None}  # LIVE shape for an unknown category
+
+    session = FakeSession(router)
+    f = KalshiHistoryFetcher(session=session)
+    assert f.fetch_series_tickers("Politics") == ["KXHOUSEBILLS", "KXFTC"]
+    assert session.calls[0]["params"]["category"] == "Politics"
+    assert "/series" in session.calls[0]["url"]
+    assert f.fetch_series_tickers("Bogus") == []
+
+
+def test_series_by_category_max_series_bound():
+    session = FakeSession(
+        lambda url, params: {"series": [{"ticker": f"KX{i}"} for i in range(50)]}
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_series_tickers(
+        "Politics", max_series=5
+    )
+    assert out == [f"KX{i}" for i in range(5)]
+
+
+# ---------------------------------------------------------------------------
+# The events -> markets JOIN (both real response placements)
+# ---------------------------------------------------------------------------
+def test_event_markets_read_from_nested_placement():
+    """With with_nested_markets=true the markets move UNDER "event" — reading only the
+    top level would silently yield ZERO markets (this cost a live probe iteration)."""
+    session = FakeSession(
+        lambda url, params: {
+            "event": {"event_ticker": "KXA-30",
+                      "markets": [_event_market("KXA-30-X", "no")]},
+            "markets": [],
+        }
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_event_markets("KXA-30")
+    assert [m["ticker"] for m in out] == ["KXA-30-X"]
+    assert session.calls[0]["params"]["with_nested_markets"] == "true"
+    assert session.calls[0]["url"].endswith("/events/KXA-30")
+
+
+def test_event_markets_read_from_top_level_placement():
+    """/events/{t} returns markets at the TOP LEVEL in the default shape — the other
+    real placement, which must parse identically."""
+    session = FakeSession(
+        lambda url, params: {
+            "event": {"event_ticker": "KXA-30"},
+            "markets": [_event_market("KXA-30-X", "yes"),
+                        _event_market("KXA-30-Y", "no")],
+        }
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_event_markets("KXA-30")
+    assert [m["ticker"] for m in out] == ["KXA-30-X", "KXA-30-Y"]
+
+
+def test_event_markets_historical_route_hits_historical_endpoint():
+    """The live and historical tiers are COMPLEMENTARY (live-probed over the same 60
+    settled political events: 17 vs 18 events yielded markets), so the historical route
+    must query /historical/markets?event_ticker=, not the event detail."""
+    session = FakeSession(
+        lambda url, params: {"cursor": "", "markets": [_event_market("KXA-30-X", "no")]}
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_event_markets(
+        "KXA-30", historical=True
+    )
+    assert [m["ticker"] for m in out] == ["KXA-30-X"]
+    assert session.calls[0]["url"].endswith("/historical/markets")
+    assert session.calls[0]["params"]["event_ticker"] == "KXA-30"
+
+
+def test_event_markets_tolerates_missing_and_malformed_shapes():
+    """A missing/None markets list must degrade to [] (never None, never a crash), and
+    non-dict entries are dropped rather than fed to the parser."""
+    f = KalshiHistoryFetcher(session=FakeSession(lambda url, params: {"event": {}}))
+    assert f.fetch_event_markets("KXA-30") == []
+    f2 = KalshiHistoryFetcher(session=FakeSession(lambda url, params: {"markets": None}))
+    assert f2.fetch_event_markets("KXA-30") == []
+    f3 = KalshiHistoryFetcher(
+        session=FakeSession(lambda url, params: {"markets": ["junk", {"ticker": "KXA-30-X"}]})
+    )
+    assert f3.fetch_event_markets("KXA-30") == [{"ticker": "KXA-30-X"}]
+
+
+def test_events_by_category_joins_events_to_resolved_markets():
+    """The full discovery path: page /events, keep only the wanted categories, expand
+    each surviving event to its markets, and parse ONLY unambiguous yes/no results."""
+    def router(url, params):
+        if "/events/" in url:
+            ticker = url.rsplit("/", 1)[1]
+            return {"event": {"markets": [
+                _event_market(f"{ticker}-A", "yes"),
+                _event_market(f"{ticker}-B", "no"),
+                # An `active` market inside a status=settled EVENT is real and common
+                # (live: 198 of 1026 markets across 150 settled political events).
+                _event_market(f"{ticker}-C", "", status="active"),
+            ]}}
+        return {"cursor": "", "milestones": [], "events": [
+            _kalshi_event("KXPOL-30", category="Politics"),
+            _kalshi_event("KXSPORT-30", category="Sports"),
+        ]}
+
+    out = KalshiHistoryFetcher(session=FakeSession(router)).fetch_resolved_markets_by_category(
+        ["Politics"], limit=10, max_pages=1, max_events=10
+    )
+    assert [m.ticker for m in out] == ["KXPOL-30-A", "KXPOL-30-B"]
+    assert [m.outcome for m in out] == [1, 0]
+    # The SPORTS event was never even expanded to markets.
+    assert all(not m.ticker.startswith("KXSPORT") for m in out)
+
+
+def test_events_by_category_stamps_event_category_onto_markets():
+    """A market under an event carries NO category of its own (live-observed), so the
+    event's category must be stamped on so the shared correlation-bucket deriver gets a
+    real input instead of falling through to "General"."""
+    def router(url, params):
+        if "/events/" in url:
+            return {"event": {"markets": [_event_market("KXPOL-30-A", "yes")]}}
+        return {"cursor": "", "events": [_kalshi_event("KXPOL-30", category="Politics")],
+                "milestones": []}
+
+    out = KalshiHistoryFetcher(session=FakeSession(router)).fetch_resolved_markets_by_category(
+        ["Politics"], limit=10, max_pages=1, max_events=10
+    )
+    assert out[0].category == "Politics"
+
+
+def test_events_by_category_does_not_mutate_the_api_payload():
+    """The category stamp must land on a COPY — mutating the response dict a caller may
+    still be holding is a silent action-at-a-distance bug."""
+    raw = _event_market("KXPOL-30-A", "yes")
+
+    def router(url, params):
+        if "/events/" in url:
+            return {"event": {"markets": [raw]}}
+        return {"cursor": "", "events": [_kalshi_event("KXPOL-30", category="Politics")],
+                "milestones": []}
+
+    KalshiHistoryFetcher(session=FakeSession(router)).fetch_resolved_markets_by_category(
+        ["Politics"], limit=10, max_pages=1, max_events=10
+    )
+    assert "category" not in raw
+
+
+def test_events_by_category_respects_max_events_bound():
+    """max_events HARD-BOUNDS the per-event fan-out (one request per event) so the
+    worst case stays max_pages + max_events requests."""
+    def router(url, params):
+        if "/events/" in url:
+            ticker = url.rsplit("/", 1)[1]
+            return {"event": {"markets": [_event_market(f"{ticker}-A", "yes")]}}
+        return {"cursor": "", "milestones": [],
+                "events": [_kalshi_event(f"KXP{i}-30") for i in range(20)]}
+
+    session = FakeSession(router)
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_markets_by_category(
+        ["Politics"], limit=100, max_pages=1, max_events=4
+    )
+    event_detail_calls = [c for c in session.calls if "/events/" in c["url"]]
+    assert len(event_detail_calls) == 4
+    assert len(out) == 4
+
+
+def test_events_by_category_deduplicates_by_ticker():
+    """The same market can be reachable from more than one event query in a multi-series
+    build; the corpus must not double-count it."""
+    def router(url, params):
+        if "/events/" in url:
+            return {"event": {"markets": [_event_market("SHARED-A", "yes")]}}
+        return {"cursor": "", "milestones": [],
+                "events": [_kalshi_event("KXP1-30"), _kalshi_event("KXP2-30")]}
+
+    out = KalshiHistoryFetcher(session=FakeSession(router)).fetch_resolved_markets_by_category(
+        ["Politics"], limit=100, max_pages=1, max_events=10
+    )
+    assert [m.ticker for m in out] == ["SHARED-A"]
+
+
+def test_events_by_category_default_is_the_preregistered_constant():
+    """The default category set is the NAMED constant, so the common case is a declared
+    pre-registration rather than an ad-hoc post-hoc subset (p-hacking caveat)."""
+    assert POLITICAL_ECONOMIC_CATEGORIES == (
+        "Politics", "Elections", "Economics", "Financials"
+    )
+    session = FakeSession(
+        lambda url, params: {"cursor": "", "events": [], "milestones": []}
+    )
+    KalshiHistoryFetcher(session=session).fetch_resolved_markets_by_category(
+        limit=5, max_pages=1
+    )
+    assert session.calls[0]["params"]["category"] == (
+        "Economics,Elections,Financials,Politics"
+    )
+
+
+# ---------------------------------------------------------------------------
+# LOUD failure: an unrecognized status/result is never silently dropped
+# ---------------------------------------------------------------------------
+def test_unrecognized_market_status_logs_loudly_and_market_survives(caplog):
+    """An UNKNOWN status is a real contract surprise the owner must SEE — it logs at
+    WARNING. It is NOT a reason to drop the market: the YES/NO outcome has only ever
+    come from `result`, so dropping on a cosmetic status change would silently shrink
+    the corpus (the BUILDS≠WORKS class of failure this module has already hit)."""
+    def router(url, params):
+        if "/events/" in url:
+            return {"event": {"markets": [
+                _event_market("KXPOL-30-A", "yes", status="quantum_superposition"),
+            ]}}
+        return {"cursor": "", "events": [_kalshi_event("KXPOL-30")], "milestones": []}
+
+    f = KalshiHistoryFetcher(session=FakeSession(router))
+    with caplog.at_level(logging.WARNING):
+        out = f.fetch_resolved_markets_by_category(["Politics"], limit=5, max_pages=1)
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("UNRECOGNIZED status" in r.getMessage() for r in warnings)
+    assert any("quantum_superposition" in r.getMessage() for r in warnings)
+    assert [m.ticker for m in out] == ["KXPOL-30-A"]  # loud, NOT dropped
+
+
+def test_known_statuses_do_not_log_and_absent_status_is_silent(caplog):
+    """The live-observed statuses must stay quiet, and so must an ABSENT status —
+    nothing surprising happened, and a WARNING per market would drown the real one."""
+    def router(url, params):
+        if "/events/" in url:
+            markets = [_event_market(f"KXPOL-30-{i}", "yes", status=s)
+                       for i, s in enumerate(sorted(KNOWN_MARKET_STATUSES))]
+            no_status = _event_market("KXPOL-30-NS", "no")
+            del no_status["status"]
+            markets.append(no_status)
+            return {"event": {"markets": markets}}
+        return {"cursor": "", "events": [_kalshi_event("KXPOL-30")], "milestones": []}
+
+    f = KalshiHistoryFetcher(session=FakeSession(router))
+    with caplog.at_level(logging.WARNING):
+        f.fetch_resolved_markets_by_category(["Politics"], limit=5, max_pages=1)
+    assert not [r for r in caplog.records
+                if r.levelno >= logging.WARNING and "status" in r.getMessage()]
+
+
+def test_unrecognized_result_scalar_logs_loudly_through_the_events_path(caplog):
+    """`scalar` is a REAL result value observed live on the /historical tier (3 markets
+    in a 150-event census). It is not yes/no, so it must be skipped — but LOUDLY."""
+    def router(url, params):
+        if "/historical/markets" in url:
+            return {"cursor": "", "markets": [_event_market("KXUHCCONVICT-30", "scalar")]}
+        return {"cursor": "", "events": [_kalshi_event("KXUHCCONVICT-30")],
+                "milestones": []}
+
+    f = KalshiHistoryFetcher(session=FakeSession(router))
+    with caplog.at_level(logging.WARNING):
+        out = f.fetch_resolved_markets_by_category(
+            ["Politics"], limit=5, max_pages=1, historical=True
+        )
+    assert out == []
+    assert any("UNRECOGNIZED result" in r.getMessage() and "scalar" in r.getMessage()
+               for r in caplog.records if r.levelno >= logging.WARNING)
+
+
+# ---------------------------------------------------------------------------
+# The anti-leakage guarantee is UNCHANGED through the new discovery path
+# ---------------------------------------------------------------------------
+def test_events_path_records_use_pre_resolution_tick_not_settled_result():
+    """END-TO-END on the new path with the REAL candlestick shape: discovery →
+    events→markets join → the SAME leakage-safe assembly. The market resolved YES but
+    the pre-decision crowd price was $0.62, so market_price MUST be 0.62 — never 1.0."""
+    decision_lead = timedelta(days=3)
+    decision_time = RESOLUTION - decision_lead
+    pre = int((decision_time - timedelta(hours=1)).timestamp())
+
+    def router(url, params):
+        if "candlesticks" in url:
+            return {"candlesticks": [
+                {"end_period_ts": pre,
+                 "price": {"previous_dollars": "0.6200"},
+                 "yes_ask": {"close_dollars": "0.6200"},
+                 "yes_bid": {"close_dollars": "0.6100"}},
+                # Tick AT resolution carrying the settled answer — must be excluded.
+                {"end_period_ts": int(RESOLUTION.timestamp()),
+                 "yes_ask": {"close_dollars": "1.0000"}},
+            ]}
+        if "/events/" in url:
+            return {"event": {"markets": [_event_market("KXPOL-30-A", "yes")]}}
+        return {"cursor": "", "events": [_kalshi_event("KXPOL-30")], "milestones": []}
+
+    f = KalshiHistoryFetcher(session=FakeSession(router))
+    resolved = f.fetch_resolved_markets_by_category(["Politics"], limit=5, max_pages=1)
+    records = f.build_historical_markets(resolved, decision_lead)
+
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.market_id == "KXPOL-30-A"
+    assert rec.market_price == 0.62          # pre-resolution crowd price
+    assert rec.outcome == 1                  # settled answer, NEVER the price
+    assert rec.decision_time < rec.resolution_time
+    assert rec.category == "Politics"
+
+
+def test_events_path_refuses_a_post_resolution_tick_and_skips_loudly(caplog):
+    """The leakage guard is untouched by the new discovery path: when the ONLY tick is
+    at/after resolution there is no honest decision price, so the record is SKIPPED with
+    a loud warning — never fabricated from the settled result."""
+    decision_lead = timedelta(days=3)
+
+    def router(url, params):
+        if "candlesticks" in url:
+            return {"candlesticks": [
+                # At resolution (excluded) and after it (excluded) — nothing else.
+                {"end_period_ts": int(RESOLUTION.timestamp()),
+                 "yes_ask": {"close_dollars": "1.0000"}},
+                {"end_period_ts": int((RESOLUTION + timedelta(hours=2)).timestamp()),
+                 "yes_ask": {"close_dollars": "1.0000"}},
+            ]}
+        if "/events/" in url:
+            return {"event": {"markets": [_event_market("KXPOL-30-A", "yes")]}}
+        return {"cursor": "", "events": [_kalshi_event("KXPOL-30")], "milestones": []}
+
+    f = KalshiHistoryFetcher(session=FakeSession(router))
+    resolved = f.fetch_resolved_markets_by_category(["Politics"], limit=5, max_pages=1)
+    assert len(resolved) == 1
+
+    with caplog.at_level(logging.WARNING):
+        records = f.build_historical_markets(resolved, decision_lead)
+    assert records == []
+    assert any("no leakage-safe price" in r.getMessage()
+               for r in caplog.records if r.levelno >= logging.WARNING)
+
+    # And the single-record path RAISES rather than fabricating.
+    with pytest.raises(ValueError, match="refusing to fabricate"):
+        f.to_historical_market(resolved[0], decision_lead)
+
+
+# ---------------------------------------------------------------------------
+# _parse_event: honest degradation, never invention
+# ---------------------------------------------------------------------------
+def test_parse_event_requires_event_ticker_only():
+    assert _parse_event({"event_ticker": "KXA-30"}) == KalshiEvent(
+        event_ticker="KXA-30", series_ticker="", category="", title=""
+    )
+    assert _parse_event({"category": "Politics"}) is None
+    assert _parse_event("not-a-dict") is None
+
+
+def test_parse_event_null_category_degrades_rather_than_being_guessed():
+    """LIVE-OBSERVED: one event in a 1600-event census had a null category. It must
+    become "" (and therefore fail any allowlist) — never be guessed into a bucket."""
+    ev = _parse_event({"event_ticker": "KXA-30", "category": None, "title": None})
+    assert ev.category == ""
+    session = FakeSession(
+        lambda url, params: {"cursor": "",
+                             "events": [{"event_ticker": "KXA-30", "category": None}],
+                             "milestones": []}
+    )
+    out = KalshiHistoryFetcher(session=session).fetch_resolved_events(
+        categories=["Politics"], limit=5, max_pages=1
+    )
+    assert out == []

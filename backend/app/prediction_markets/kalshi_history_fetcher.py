@@ -29,6 +29,18 @@ RESEARCH-INTEGRITY CAVEATS (read before trusting any eval built on this data)
   PRE-REGISTERED before seeing results. Post-hoc category selection is textbook
   p-hacking and requires multiple-comparison correction.
 
+TWO DISCOVERY PATHS (they reach DIFFERENT universes — pick deliberately)
+* ``fetch_resolved_markets`` pages ``/markets?status=settled``. Live-probed, that feed
+  is ~100% high-frequency sports; its ``categories`` argument is a POST-FETCH LOCAL
+  filter and therefore cannot surface a political or economic market.
+* ``fetch_resolved_markets_by_category`` pages ``/events?status=settled`` (the listing
+  that actually carries Kalshi's ``category``, and which is ~70% political/economic)
+  and then joins each event to its markets. This is the only path that reaches the
+  political/economic universe. It produces the SAME ``KalshiResolvedMarket`` type and
+  feeds the SAME leakage-safe assembly — it changes DISCOVERY only, never pricing.
+  See the "EVENTS-BY-CATEGORY discovery" section for the live-vs-documented findings
+  (notably: ``/events?category=`` is accepted and IGNORED by Kalshi today).
+
 THE ANTI-LEAKAGE GUARANTEE (the whole point — an auditor WILL attack this)
 A resolved market's ``result`` (YES/NO) is the final answer. Using that answer as
 the decision-time crowd price is 100% look-ahead leakage. ``market_price`` is NEVER
@@ -68,6 +80,40 @@ REQUEST_TIMEOUT = 15
 # For price-based settlement detection we keep the same SETTLE_TOL as Polymarket.
 SETTLE_TOL = 0.02
 
+# Market ``status`` values we have actually OBSERVED on the live wire (census run
+# 2026-07-27 over 150 settled political/economic events, both the live and the
+# ``/historical`` tier): {"finalized": 828, "active": 198} — and NOTHING else. The
+# older docs (and this module's original comments) named "settled"/"determined";
+# those never appeared, so they are kept here as ACCEPTED-BUT-UNSEEN rather than
+# dropped — a status we cannot vouch for must not be silently discarded.
+#
+# WHY A SET AND NOT A SILENT PASS-THROUGH: the co-listed universe is discovered by
+# fanning out over events, so a Kalshi contract change (a new status token) would
+# show up as a quiet shortfall in record count — the exact BUILDS≠WORKS failure this
+# file has already been burned by. An unrecognised status therefore logs at WARNING
+# (once per market) and the market is STILL parsed on its ``result`` field, which is
+# the only thing the YES/NO outcome has ever been derived from. Loud, never dropped.
+KNOWN_MARKET_STATUSES = frozenset(
+    {
+        "active",       # LIVE-OBSERVED — open, not yet resolved
+        "finalized",    # LIVE-OBSERVED — resolved and settled; carries result yes/no
+        "settled",      # documented; not observed in the 2026-07-27 census
+        "determined",   # documented; not observed in the 2026-07-27 census
+        "closed",       # documented lifecycle state
+        "initialized",  # documented lifecycle state
+        "unopened",     # documented lifecycle state
+    }
+)
+
+# Kalshi event ``category`` values that carry the political/economic universe the
+# cross-venue (B8) work needs. Exposed as a NAMED constant so any use of it is a
+# PRE-REGISTERED choice rather than a post-hoc subset (see the module docstring's
+# p-hacking caveat). LIVE census over 1600 settled events (2026-07-27):
+# Elections 751, Politics 263, Economics 57, Financials 41 — vs Sports 125. The
+# ``/markets?status=settled`` feed this module already had is, by contrast, ~100%
+# high-frequency sports, which is precisely why an events-first path is needed.
+POLITICAL_ECONOMIC_CATEGORIES = ("Politics", "Elections", "Economics", "Financials")
+
 
 @dataclass(frozen=True)
 class KalshiResolvedMarket:
@@ -95,6 +141,29 @@ class KalshiResolvedMarket:
     floor_strike: Optional[float] = None
     cap_strike: Optional[float] = None
     strike_type: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class KalshiEvent:
+    """One Kalshi EVENT from the ``/events`` listing — the discovery unit that carries
+    a ``category``.
+
+    WHY THIS TYPE EXISTS AT ALL: an individual Kalshi MARKET returned by
+    ``/events/{event_ticker}`` carries no ``category`` field — the taxonomy lives one
+    level up, on the event. So the events listing is both the only place the category
+    is legible AND the only listing whose settled feed is not swamped by
+    high-frequency sports. Keeping the event as a first-class record (rather than a
+    bare ticker string) is what lets the events→markets join stamp the real category
+    onto each resolved market without a second lookup.
+
+    Fields are the ones the LIVE ``/events`` payload actually carries (verified
+    2026-07-27); anything missing degrades to "" rather than being invented.
+    """
+
+    event_ticker: str
+    series_ticker: str
+    category: str
+    title: str
 
 
 class KalshiHistoryFetcher:
@@ -298,6 +367,348 @@ class KalshiHistoryFetcher:
             cap_strike=cap_strike,
             strike_type=strike_type,
         )
+
+    # ------------------------------------------------------------------
+    # EVENTS-BY-CATEGORY discovery (ROADMAP B8 / A3)
+    #
+    # WHY THIS PATH EXISTS — READ BEFORE CHANGING ANYTHING BELOW.
+    # ``fetch_resolved_markets`` above pages ``/markets?status=settled``. That feed was
+    # live-probed and is ~100% high-frequency sports (1200 markets scanned, 0 political
+    # — dominated by KXMVESPORTS*/KXMVECROSSCATEGORY). The ``categories`` argument on
+    # that method is a POST-FETCH LOCAL filter: it can only subset a page that is
+    # already sports-only, so it can never surface a political or economic market. That
+    # is the entire reason every prior B8 co-listed-universe probe found 0 matches.
+    #
+    # Kalshi's taxonomy lives on the EVENT, not the market, and the ``/events`` listing
+    # is category-diverse where ``/markets`` is not. LIVE census 2026-07-27, 1600
+    # settled events paged from ``/events?status=settled``:
+    #     Elections 751 · Politics 263 · Entertainment 241 · Sports 125 · Economics 57
+    #     · Financials 41 · Science and Technology 32 · Mentions 31 · Crypto 24 · …
+    # i.e. 1112 / 1600 political-or-economic. So: discover EVENTS, then resolve each
+    # event to its markets, then hand those markets to the SAME ``_parse_resolved`` and
+    # the SAME leakage-safe assembly the rest of this module already uses.
+    #
+    # WHAT THE LIVE API ACTUALLY DOES vs. WHAT IS DOCUMENTED (probed 2026-07-27; this
+    # module has been burned before by encoding a documented contract that differed
+    # from the live response, so every claim here is a real observation):
+    #   * ``GET /events?status=settled`` — WORKS. Cursor-paginated, response shape
+    #     ``{"cursor": str, "events": [...], "milestones": [...]}``. Each event carries
+    #     ``event_ticker``/``series_ticker``/``category``/``title``. An event carries NO
+    #     ``status`` field of its own in the response — ``status`` is request-side only.
+    #   * ``GET /events?category=…`` — **DOES NOT FILTER.** Passing ``Politics``,
+    #     ``Economics``, ``Financials`` or the deliberate nonsense ``NOTAREALCATEGORY``
+    #     all returned the BYTE-IDENTICAL first page (same cursor, same 50 tickers, same
+    #     mixed category histogram). The parameter is accepted (HTTP 200) and ignored.
+    #     We still FORWARD it (harmless, and it starts working the day Kalshi implements
+    #     it) but we MUST NOT trust it: ``_event_matches_category`` re-checks the
+    #     ``category`` the response actually carries. That backstop is not belt-and-
+    #     braces, it is the only thing doing the filtering today.
+    #   * ``GET /events?series_ticker=…&status=settled`` — WORKS server-side (a real
+    #     series returned only its own events; a nonsense series returned ``[]``).
+    #   * ``GET /series?category=Politics`` — WORKS server-side, and is the ONE genuine
+    #     server-side category filter on this API: 2120 series returned, 2046 of them
+    #     ``Politics``; ``category=Bogus`` returns ``{"series": null}``. Exposed as
+    #     ``fetch_series_tickers`` so a caller can narrow the event query to a
+    #     server-side-selected series set instead of relying on the response backstop.
+    #   * ``GET /markets?ticker=…`` and ``GET /markets?category=…`` — DO NOT FILTER
+    #     either (``?ticker=`` returns the unfiltered firehose). Not used here.
+    # ------------------------------------------------------------------
+    def fetch_series_tickers(
+        self,
+        category: str,
+        *,
+        max_series: Optional[int] = None,
+    ) -> List[str]:
+        """Series tickers in ``category``, filtered SERVER-SIDE by ``/series?category=``.
+
+        This is the only endpoint on the public Kalshi API whose ``category`` parameter
+        was observed to actually filter (live 2026-07-27: ``Politics`` → 2120 series,
+        2046 of them categorised ``Politics``; ``Bogus`` → ``{"series": null}``). Use it
+        when you want the category narrowing to happen on Kalshi's side — feed the
+        returned tickers to ``fetch_resolved_events(series_ticker=…)``, whose
+        ``series_ticker`` filter is also genuinely server-side.
+
+        ``/series`` is NOT cursor-paginated in the observed response (no ``cursor`` key),
+        so this is a single bounded request — there is no loop to run away. ``max_series``
+        truncates the returned list purely to bound a caller's downstream fan-out.
+
+        Args:
+            category: Kalshi category string, e.g. "Politics" (case as Kalshi returns it).
+            max_series: Optional cap on how many tickers are returned.
+
+        Returns:
+            List of series ticker strings (possibly empty — never None).
+        """
+        data = self._get(f"{self.base_url}/series", params={"category": category})
+        if not isinstance(data, dict):
+            return []
+        # A rejected/unknown category comes back as {"series": null}, NOT as an error and
+        # NOT as [] — hence the explicit isinstance check rather than a truthiness test.
+        raw_series = data.get("series")
+        if not isinstance(raw_series, list):
+            logger.info(
+                "Kalshi /series?category=%r returned no series list (category unknown "
+                "to Kalshi, or an empty category)",
+                category,
+            )
+            return []
+
+        tickers: List[str] = []
+        for item in raw_series:
+            if not isinstance(item, dict):
+                continue
+            ticker = item.get("ticker")
+            if ticker:
+                tickers.append(str(ticker))
+        if max_series is not None:
+            tickers = tickers[:max_series]
+        logger.info(
+            "fetched %d Kalshi series for category=%r (server-side filter)",
+            len(tickers),
+            category,
+        )
+        return tickers
+
+    def fetch_resolved_events(
+        self,
+        *,
+        categories: Optional[Sequence[str]] = None,
+        series_ticker: Optional[str] = None,
+        status: str = "settled",
+        limit: int = 200,
+        max_pages: int = 10,
+    ) -> List[KalshiEvent]:
+        """Page ``/events`` for events whose markets are resolved, optionally by category.
+
+        ``status`` is forwarded server-side and defaults to ``"settled"`` — the same
+        request-side filter word ``fetch_resolved_markets`` uses, and the reason the
+        returned events are ones whose markets have (mostly) resolved. Note that an
+        event under ``status=settled`` can still contain individual ``active`` markets
+        (LIVE-OBSERVED: 198 of 1026 markets across 150 settled political events); those
+        are skipped by ``_parse_resolved`` on their empty ``result``, which is correct —
+        the event-level filter is a coarse discovery hint, not a per-market guarantee.
+
+        ``categories`` is forwarded as the documented ``category`` query parameter AND
+        re-applied against the ``category`` each event actually carries. The forwarding
+        is currently a no-op on Kalshi's side (see the section comment above: a nonsense
+        category returns the identical page), so the response-side check is what really
+        selects. Unlike ``fetch_resolved_markets(categories=…)`` — which subsets an
+        already-sports-only page and is therefore useless — this filters a feed that is
+        genuinely ~70% political/economic, so it reaches the universe B8 needs.
+
+        ``max_pages`` HARD-BOUNDS the cursor loop; it must never run unbounded. Every
+        request goes through ``_get``, i.e. carries the module-wide ``timeout=15``.
+
+        Args:
+            categories: Optional allowlist of Kalshi category strings (case-insensitive).
+            series_ticker: Optional Kalshi series filter (genuinely server-side).
+            status: Kalshi event status filter, forwarded server-side.
+            limit: Events per page.
+            max_pages: Hard upper bound on page requests (safety: never unbounded).
+
+        Returns:
+            List of ``KalshiEvent`` records.
+        """
+        cats = {c.lower() for c in categories} if categories else None
+        out: List[KalshiEvent] = []
+        cursor: Optional[str] = None
+
+        for _page in range(max_pages):
+            params: dict = {"limit": limit}
+            if status:
+                params["status"] = status
+            if series_ticker:
+                params["series_ticker"] = series_ticker
+            if cats:
+                # Forwarded for the day Kalshi honours it; NOT relied upon (see above).
+                # Deterministic ordering so a fixture/assertion can pin the exact value.
+                params["category"] = ",".join(sorted(categories or ()))
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._get(f"{self.base_url}/events", params=params)
+            if not isinstance(data, dict):
+                break
+
+            raw_events = data.get("events")
+            if not raw_events or not isinstance(raw_events, list):
+                break
+
+            for raw in raw_events:
+                ev = _parse_event(raw)
+                if ev is None:
+                    continue
+                if cats is not None and ev.category.lower() not in cats:
+                    continue
+                out.append(ev)
+
+            # Same cursor discipline as fetch_resolved_markets: stop on a missing cursor
+            # or a short page. Kalshi returns "" (falsy) for the final page's cursor.
+            cursor = data.get("cursor") or None
+            if not cursor or len(raw_events) < limit:
+                break
+
+        logger.info(
+            "discovered %d Kalshi events (status=%r, categories=%s) across <=%d pages",
+            len(out),
+            status,
+            sorted(cats) if cats else None,
+            max_pages,
+        )
+        return out
+
+    def fetch_event_markets(
+        self,
+        event_ticker: str,
+        *,
+        historical: bool = False,
+    ) -> List[dict]:
+        """Raw market dicts belonging to one event — the events→markets JOIN.
+
+        WHICH ENDPOINT, AND WHY (all three candidates were probed live over the SAME 60
+        settled political/economic events, 2026-07-27):
+          * ``GET /events/{event_ticker}``            → markets for 17 / 60 events  ← used
+          * ``GET /markets?event_ticker=…``           → markets for  8 / 60 events
+          * ``GET /historical/markets?event_ticker=…``→ markets for 18 / 60 events  ← used
+        So the documented ``/markets?event_ticker=`` route is strictly WORSE than reading
+        the event detail and is not used. The live and historical routes are
+        COMPLEMENTARY, not redundant (Kalshi's live tier only serves a rolling window —
+        ``/historical/cutoff`` reported ``market_settled_ts = 2026-05-28`` on this run),
+        so ``historical`` selects which tier to read and a corpus build runs both.
+
+        RESPONSE-SHAPE TRAP (cost a probe iteration): ``/events/{t}`` returns its markets
+        at the TOP LEVEL as ``{"event": {...}, "markets": [...]}`` by DEFAULT, but moves
+        them to ``{"event": {"markets": [...]}}`` when ``with_nested_markets=true`` is
+        passed. Reading only one of the two silently yields zero markets. We pass the
+        documented ``with_nested_markets=true`` and accept BOTH placements.
+
+        Returns raw dicts (not parsed) so the caller can stamp the event's category on
+        them before handing them to the shared ``_parse_resolved``.
+
+        Args:
+            event_ticker: e.g. "KXNEXTUKPM-30".
+            historical: Read the deep ``/historical/markets`` tier instead of the live one.
+
+        Returns:
+            List of raw market dicts (possibly empty — never None).
+        """
+        if historical:
+            data = self._get(
+                f"{self.base_url}/historical/markets",
+                params={"event_ticker": event_ticker, "limit": 200},
+            )
+        else:
+            data = self._get(
+                f"{self.base_url}/events/{event_ticker}",
+                params={"with_nested_markets": "true"},
+            )
+        if not isinstance(data, dict):
+            return []
+
+        # Accept both observed placements (see RESPONSE-SHAPE TRAP above). Presence, not
+        # truthiness, is irrelevant here — an empty list at one key legitimately means
+        # "look at the other key", which is exactly what the `or` chain does.
+        markets = data.get("markets")
+        if not markets:
+            event_obj = data.get("event")
+            if isinstance(event_obj, dict):
+                markets = event_obj.get("markets")
+        if not isinstance(markets, list):
+            return []
+        return [m for m in markets if isinstance(m, dict)]
+
+    def fetch_resolved_markets_by_category(
+        self,
+        categories: Sequence[str] = POLITICAL_ECONOMIC_CATEGORIES,
+        *,
+        limit: int = 200,
+        max_pages: int = 10,
+        max_events: int = 200,
+        series_ticker: Optional[str] = None,
+        status: str = "settled",
+        historical: bool = False,
+    ) -> List[KalshiResolvedMarket]:
+        """Resolved markets reached via EVENTS-BY-CATEGORY → MARKETS-BY-EVENT.
+
+        This is the discovery path ``fetch_resolved_markets`` cannot provide: it selects
+        on the EVENT taxonomy (where Kalshi's category actually lives, and whose settled
+        feed is ~70% political/economic) instead of subsetting the sports-only
+        ``/markets?status=settled`` page. The OUTPUT type is unchanged —
+        ``KalshiResolvedMarket`` — so the existing leakage-safe assembly
+        (``to_historical_market`` / ``build_historical_markets``) consumes it verbatim,
+        with the identical anti-leakage guarantee. Nothing about pricing is re-implemented
+        here; this method does discovery only.
+
+        SELECTION BIAS + P-HACKING (the module docstring's caveats apply with FULL force):
+        ``categories`` is a pre-registration obligation, not a tuning knob. It defaults to
+        the named ``POLITICAL_ECONOMIC_CATEGORIES`` constant so the common case is a
+        declared choice rather than an ad-hoc one. Only markets with an unambiguous
+        yes/no ``result`` survive, so contested/voided markets — the ones where the crowd
+        was most wrong — are excluded, exactly as in ``fetch_resolved_markets``.
+
+        EVERY LOOP IS BOUNDED: ``max_pages`` bounds the ``/events`` cursor paging and
+        ``max_events`` bounds the per-event fan-out (one request per event), so the worst
+        case is ``max_pages + max_events`` requests, each with ``timeout=15``.
+
+        ``historical`` selects the market tier for the join AND must be passed through to
+        ``build_historical_markets(historical=…)`` for the matching candlestick tier — the
+        live candlesticks 404 for a market past Kalshi's rolling cutoff, and vice versa.
+
+        Args:
+            categories: Kalshi event categories to keep (PRE-REGISTER these).
+            limit: Events per ``/events`` page.
+            max_pages: Hard bound on ``/events`` page requests.
+            max_events: Hard bound on how many events are expanded to markets.
+            series_ticker: Optional server-side series narrowing for the event query.
+            status: Event status filter forwarded to ``/events``.
+            historical: Use the deep ``/historical`` market tier for the join.
+
+        Returns:
+            List of ``KalshiResolvedMarket``, deduplicated by ticker (an event's markets
+            can be reachable from more than one query in a multi-series build).
+        """
+        events = self.fetch_resolved_events(
+            categories=categories,
+            series_ticker=series_ticker,
+            status=status,
+            limit=limit,
+            max_pages=max_pages,
+        )
+
+        out: List[KalshiResolvedMarket] = []
+        seen: set = set()
+        for event in events[:max_events]:
+            for raw in self.fetch_event_markets(event.event_ticker, historical=historical):
+                _warn_unknown_status(raw)
+                # A market returned under an event carries NO category of its own — the
+                # taxonomy is on the event. Stamp the event's category on a COPY (never
+                # mutate the API payload, which a caller may still be holding) so the
+                # shared _parse_resolved derives a real correlation bucket instead of
+                # falling through to "General". An explicit category on the market wins.
+                if not raw.get("category") and event.category:
+                    raw = {**raw, "category": event.category}
+                try:
+                    rm = self._parse_resolved(raw)
+                except Exception as e:
+                    logger.debug("skipping unparseable Kalshi market: %s", e)
+                    continue
+                if rm is None:
+                    continue
+                if rm.ticker in seen:
+                    continue
+                seen.add(rm.ticker)
+                out.append(rm)
+
+        logger.info(
+            "events-by-category discovery: %d resolved Kalshi markets from %d/%d events "
+            "(categories=%s, historical=%s)",
+            len(out),
+            min(len(events), max_events),
+            len(events),
+            list(categories),
+            historical,
+        )
+        return out
 
     # ------------------------------------------------------------------
     # Price history (candlestick/history endpoint)
@@ -521,6 +932,52 @@ def _first_present(d: dict, keys: Sequence[str]) -> Any:
     return None
 
 
+def _parse_event(raw: Any) -> Optional[KalshiEvent]:
+    """Parse one raw ``/events`` item into a ``KalshiEvent``; None if it has no ticker.
+
+    Only ``event_ticker`` is load-bearing (it is the join key for
+    ``fetch_event_markets``) so it is the only hard requirement. ``series_ticker``,
+    ``category`` and ``title`` degrade to "" rather than being invented — an event with
+    a missing category simply fails the category allowlist instead of being guessed into
+    one. LIVE-OBSERVED: one event in a 1600-event census had a null ``category``."""
+    if not isinstance(raw, dict):
+        return None
+    event_ticker = raw.get("event_ticker")
+    if not event_ticker:
+        logger.debug("skip Kalshi event missing event_ticker")
+        return None
+    return KalshiEvent(
+        event_ticker=str(event_ticker),
+        series_ticker=str(raw.get("series_ticker") or ""),
+        category=str(raw.get("category") or ""),
+        title=str(raw.get("title") or ""),
+    )
+
+
+def _warn_unknown_status(raw: dict) -> None:
+    """Log LOUDLY (WARNING) when a market's ``status`` is one we have never observed
+    and cannot vouch for — and then let the market through anyway.
+
+    This mirrors the convention ``_parse_resolved`` already uses for an unrecognised
+    ``result``: a real CONTRACT surprise the owner must SEE on the first live fetch is a
+    WARNING, while an ordinary absence stays quiet. An unknown status is NEVER a reason
+    to drop a market — the YES/NO outcome has only ever been derived from ``result``, so
+    dropping on status would silently shrink the corpus for a cosmetic field change,
+    which is the exact BUILDS≠WORKS class of failure this module has already hit. An
+    ABSENT status is silent (nothing surprising happened); an unknown non-empty token is
+    loud."""
+    status = str(raw.get("status") or "").lower().strip()
+    if status and status not in KNOWN_MARKET_STATUSES:
+        logger.warning(
+            "Kalshi market ticker=%s has UNRECOGNIZED status=%r (known: %s) — the market "
+            "is still parsed from its `result` field, but verify the Kalshi market "
+            "lifecycle contract",
+            raw.get("ticker"),
+            status,
+            sorted(KNOWN_MARKET_STATUSES),
+        )
+
+
 def _series_ticker(ticker: str) -> str:
     """Derive the Kalshi SERIES ticker from a market ticker: the prefix before the first
     ``-`` (e.g. ``KXBTC`` from ``KXBTC-25DEC-T50000``). A ticker with no ``-`` is its own
@@ -690,6 +1147,9 @@ def _last_pre_decision_price(
 __all__ = [
     "KALSHI_BASE_URL",
     "REQUEST_TIMEOUT",
+    "KNOWN_MARKET_STATUSES",
+    "POLITICAL_ECONOMIC_CATEGORIES",
+    "KalshiEvent",
     "KalshiResolvedMarket",
     "KalshiHistoryFetcher",
 ]
