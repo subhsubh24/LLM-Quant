@@ -80,6 +80,58 @@ logger = logging.getLogger(__name__)
 # with levels no capacity analysis is allowed to count as depth.
 BOOK_LADDER_LEVELS = 40
 
+# The column set `prediction_audit_log` had BEFORE E11 added `book_json`. Used only by the
+# degraded write path in `AuditLogger._write`, which retries a rejected insert naming exactly
+# these columns so an un-migrated database keeps its ROADMAP G3 audit trail. Kept as an
+# explicit tuple rather than derived from the model at runtime: deriving it would silently
+# start including whatever column a FUTURE change adds, which is the same trap again — a new
+# column would break the fallback that exists precisely to survive a new column. A test pins
+# it against the model so it cannot fall behind unnoticed.
+_PRE_E11_AUDIT_COLUMNS = (
+    "ts",
+    "event_type",
+    "strategy",
+    "market_id",
+    "market_question",
+    "side",
+    "size",
+    "price",
+    "edge",
+    "confidence",
+    "reason",
+    "order_id",
+    "is_dry_run",
+    "live_enabled",
+    "payload_json",
+)
+
+
+def _is_missing_book_column(exc: Exception) -> bool:
+    """True ONLY for "this table has no ``book_json`` column", not for any write failure.
+
+    Matches the DBAPI error (``exc.orig``), never ``str(exc)``. SQLAlchemy embeds the whole
+    INSERT statement in the outer message, and that statement ALWAYS names ``book_json``
+    among its columns — so a substring test on ``str(exc)`` reports a missing column for
+    every failure the table can produce. A reviewer proved exactly that: they renamed an
+    unrelated column on a schema where ``book_json`` genuinely existed, and the naive test
+    misdiagnosed it and printed the wrong ALTER. On Postgres that would blame a lock
+    timeout or a dropped connection on a schema problem the operator does not have.
+
+    Requiring BOTH the column name and a real missing-column signal from the driver keeps
+    the degraded path scoped to the one condition it was written for; anything else falls
+    through to the ordinary best-effort warning, which is the honest outcome.
+    """
+    orig = str(getattr(exc, "orig", "") or "")
+    if "book_json" not in orig:
+        return False
+    lowered = orig.lower()
+    return (
+        "no column named" in lowered      # SQLite
+        or "does not exist" in lowered    # PostgreSQL
+        or "unknown column" in lowered    # MySQL / MariaDB
+    )
+
+
 # Slippage bands the executable-depth scalars use, in dollars. Pre-registered to match
 # ``capacity_probe.BAND_CENTS`` so a forward row and a probe row mean the same thing.
 BOOK_BAND_CENTS = (0.02, 0.05)
@@ -370,6 +422,10 @@ class AuditLogger:
                 logger.warning("AuditLogger: could not resolve default session factory: %s", e)
                 session_factory = None
         self._session_factory = session_factory
+        # Latch so the "this database predates E11" ERROR is emitted ONCE, not on every
+        # audit row. A per-row ERROR on a busy scan loop is noise an operator learns to
+        # ignore, which defeats the point of raising it loudly at all.
+        self._book_column_warned = False
 
     # -- session plumbing ---------------------------------------------------
 
@@ -395,31 +451,71 @@ class AuditLogger:
                 yield session
 
     def _write(self, row: PredictionAuditLog) -> None:
-        """Persist one row, swallowing any error (best-effort, never raises)."""
+        """Persist one row, swallowing any error (best-effort, never raises).
+
+        DEGRADES rather than blacks out when the database predates E11. This repo has no
+        migration tool — ``create_all()`` creates missing TABLES but never ALTERs an existing
+        one — so a database that already contains ``prediction_audit_log`` (the deployed
+        Postgres does) never gains the ``book_json`` column. Because that column is mapped
+        unconditionally on the model, EVERY insert would then fail on the unknown column,
+        including rows that carry no book at all and including runs with capture switched
+        OFF. That is not a degraded new feature, it is a total outage of the ROADMAP G3
+        audit trail — "an audit log of every decision + every would-be order" — caused by a
+        column nothing in that guarantee depends on.
+
+        A loud ERROR would have made the outage visible without preventing it, so the write
+        instead RETRIES once with ``book_json`` dropped. The pre-E11 guarantee survives
+        untouched on an un-migrated database; only the new depth capture is lost, which is
+        exactly the part that is new. The operator still gets the one-line fix at ERROR
+        level, once, so the missing capture surfaces rather than degrading silently forever.
+        """
         try:
             with self._session() as session:
                 session.add(row)
+            return
         except Exception as e:
-            # FAIL LOUD on the one failure mode that would silently kill the ENTIRE audit
-            # trail rather than one row: this repo has no migration tool, so a database
-            # that already contains ``prediction_audit_log`` never gains the E11
-            # ``book_json`` column from ``create_all``, and then EVERY insert fails on the
-            # unknown column while the best-effort swallow hides it. Name the exact
-            # one-line fix at ERROR level so the operator sees a cause, not a mystery.
-            if "book_json" in str(e):
-                logger.error(
-                    "AuditLogger: the audit INSERT references `book_json` but this "
-                    "database's prediction_audit_log table does not have that column, so "
-                    "EVERY audit write is failing (not just this one). This repo has no "
-                    "migration tool — create_all() never ALTERs an existing table. Run "
-                    "once against the database: "
-                    "ALTER TABLE prediction_audit_log ADD COLUMN book_json TEXT; "
-                    "(underlying error: %s)", e,
-                )
-            else:
+            if not _is_missing_book_column(e):
                 logger.warning(
                     "AuditLogger: failed to persist %s event: %s", row.event_type, e
                 )
+                return
+            if not self._book_column_warned:
+                self._book_column_warned = True
+                logger.error(
+                    "AuditLogger: this database's prediction_audit_log table has no "
+                    "`book_json` column, so E11 depth capture cannot be persisted. Audit "
+                    "rows are still being written WITHOUT it (the G3 trail is intact). "
+                    "This repo has no migration tool — create_all() never ALTERs an "
+                    "existing table. Run once against the database to enable capture: "
+                    "ALTER TABLE prediction_audit_log ADD COLUMN book_json TEXT; "
+                    "(underlying error: %s)", e,
+                )
+
+        # Retry WITHOUT the new column, as a RAW parameterized INSERT.
+        #
+        # It has to be raw. Re-adding an ORM instance — even a fresh one built without
+        # book_json — still emits every MAPPED column, so SQLAlchemy names book_json again
+        # and the retry fails identically (verified: the ORM retry reproduced the same
+        # "no column named book_json" error verbatim). Naming the pre-E11 columns explicitly
+        # is the only way to produce a statement an un-migrated table can accept.
+        #
+        # Parameterized, never interpolated — the values are audit content (market
+        # questions, venue error strings) and must not reach SQL as text.
+        try:
+            from sqlalchemy import text as _sql_text
+
+            values = {c: getattr(row, c) for c in _PRE_E11_AUDIT_COLUMNS}
+            cols = ", ".join(_PRE_E11_AUDIT_COLUMNS)
+            binds = ", ".join(f":{c}" for c in _PRE_E11_AUDIT_COLUMNS)
+            stmt = _sql_text(f"INSERT INTO prediction_audit_log ({cols}) VALUES ({binds})")
+            with self._session() as session:
+                session.execute(stmt, values)
+        except Exception as e2:
+            logger.warning(
+                "AuditLogger: failed to persist %s event even without book_json: %s",
+                row.event_type,
+                e2,
+            )
 
     # -- public API ---------------------------------------------------------
 

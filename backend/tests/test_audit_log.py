@@ -691,3 +691,168 @@ def test_capture_does_not_alter_the_decision_size_or_order(engine):
         )
 
     assert [_fields(o) for o in exec_on.orders] == [_fields(o) for o in exec_off.orders]
+
+
+# ---------------------------------------------------------------------------
+# The pre-E11 database — the riskiest path in this change, and the one a reviewer
+# found untested
+# ---------------------------------------------------------------------------
+# `book_json` is mapped UNCONDITIONALLY on PredictionAuditLog, so every insert names it —
+# including rows carrying no book and including runs with capture switched OFF. This repo
+# has no migration tool and `create_all()` never ALTERs an existing table, so the deployed
+# database (which already holds prediction_audit_log) would reject EVERY audit write. That
+# is a total outage of the ROADMAP G3 trail caused by a column nothing in G3 depends on, so
+# the writer must DEGRADE, not merely complain loudly.
+def _pre_e11_engine():
+    """A SQLite database whose prediction_audit_log predates the book_json column."""
+    from sqlalchemy import text
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    init_db(eng)
+    with eng.connect() as conn:
+        conn.execute(text("ALTER TABLE prediction_audit_log DROP COLUMN book_json"))
+        conn.commit()
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(prediction_audit_log)"))}
+    assert "book_json" not in cols, "fixture failed to reproduce a pre-E11 table"
+    assert "event_type" in cols, "fixture dropped more than the one column"
+    return eng
+
+
+def _read_rows_raw(eng):
+    """Read back WITHOUT the ORM.
+
+    Deliberate: on a pre-E11 database an ORM `select(PredictionAuditLog)` also names
+    `book_json` and fails, so using it here would test the harness rather than the code.
+    Nothing in `backend/app` or `scripts` reads this table through the ORM (grep-verified —
+    the audit trail is written by the app and read out-of-band), so the write-side degrade
+    is sufficient to keep the G3 guarantee whole on an un-migrated database.
+    """
+    from sqlalchemy import text
+
+    with eng.connect() as conn:
+        return [
+            dict(r._mapping)
+            for r in conn.execute(
+                text("SELECT event_type, market_id, payload_json FROM prediction_audit_log")
+            )
+        ]
+
+
+def test_audit_rows_still_persist_against_a_database_predating_book_json(caplog):
+    """The G3 guarantee survives an un-migrated database: the row lands, minus the book."""
+    eng = _pre_e11_engine()
+    auditor = AuditLogger(engine=eng)
+
+    with caplog.at_level("ERROR"):
+        auditor.record_decision(
+            "kelly_skip",
+            strategy="test",
+            market_id="mkt-1",
+            market_question="q?",
+            reason="edge too small",
+        )
+
+    rows = _read_rows_raw(eng)
+    assert len(rows) == 1, "the audit row must survive an un-migrated database"
+    assert rows[0]["event_type"] == "kelly_skip"
+    assert rows[0]["market_id"] == "mkt-1"
+    # The operator is told exactly what to run.
+    assert any(
+        "ALTER TABLE prediction_audit_log ADD COLUMN book_json" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_the_missing_column_error_is_logged_once_not_per_row(caplog):
+    eng = _pre_e11_engine()
+    auditor = AuditLogger(engine=eng)
+    with caplog.at_level("ERROR"):
+        for i in range(5):
+            auditor.record_decision("kelly_skip", market_id=f"m{i}", reason="r")
+
+    rows = _read_rows_raw(eng)
+    assert len(rows) == 5, "every row must still land"
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(errors) == 1, [r.getMessage() for r in errors]
+
+
+def test_an_order_row_with_a_captured_book_still_persists_without_the_book(caplog):
+    """Even the rows that DO carry a book must not be lost — only the book itself is."""
+    eng = _pre_e11_engine()
+    auditor = AuditLogger(engine=eng)
+    book = {"best_bid": 0.19, "best_ask": 0.20, "ask_ladder": [{"price": 0.20, "size": 100.0}]}
+
+    with caplog.at_level("ERROR"):
+        auditor.record_would_be_order(_make_result(OrderStatus.FILLED), book=book)
+
+    rows = _read_rows_raw(eng)
+    assert len(rows) == 1
+    assert rows[0]["event_type"]
+    # The row's real content survived; only the book was dropped.
+    assert rows[0]["payload_json"]
+
+
+def test_pre_e11_column_tuple_matches_the_model_minus_book_json():
+    """The degraded-write fallback names columns explicitly, so it must not fall behind the
+    model. If a future change adds a column, this fails and the author has to decide whether
+    the fallback should carry it — rather than silently dropping real audit content."""
+    from app.prediction_markets.audit_log import _PRE_E11_AUDIT_COLUMNS
+
+    model_cols = {c.name for c in PredictionAuditLog.__table__.columns}
+    assert set(_PRE_E11_AUDIT_COLUMNS) == model_cols - {"id", "book_json"}
+
+
+def test_book_ladder_bound_matches_the_capacity_probe_constant():
+    """The must-not-drift claim, enforced across BOTH files rather than pinned to a literal
+    in one of them. A reviewer pointed out the literal-only pin would not notice the probe
+    changing underneath it, which is the exact direction the drift would come from."""
+    import importlib.util
+    from pathlib import Path
+
+    probe_path = Path(__file__).resolve().parents[2] / "scripts" / "capacity_probe.py"
+    spec = importlib.util.spec_from_file_location("capacity_probe_for_test", probe_path)
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    assert BOOK_LADDER_LEVELS == probe.LADDER_LEVELS, (
+        "audit_log.BOOK_LADDER_LEVELS and capacity_probe.LADDER_LEVELS must stay equal so "
+        "forward-captured rows and probe rows feed the same capacity code"
+    )
+
+
+def test_an_unrelated_write_failure_is_not_misdiagnosed_as_a_missing_column():
+    """SQLAlchemy embeds the whole INSERT — which always names book_json — in its outer
+    message, so a substring test on str(exc) blames a schema problem for every failure the
+    table can produce. Reproduce the reviewer's counterexample: break an UNRELATED column
+    on a schema where book_json genuinely exists, and assert the degrade does NOT fire and
+    the operator is NOT told to run an ALTER they do not need."""
+    from sqlalchemy import text
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    init_db(eng)
+    with eng.connect() as conn:
+        conn.execute(text("ALTER TABLE prediction_audit_log RENAME COLUMN event_type TO et2"))
+        conn.commit()
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(prediction_audit_log)"))}
+    assert "book_json" in cols and "event_type" not in cols
+
+    auditor = AuditLogger(engine=eng)
+    import logging as _logging
+
+    records = []
+
+    class _Cap(_logging.Handler):
+        def emit(self, r):
+            records.append(r)
+
+    lg = _logging.getLogger("app.prediction_markets.audit_log")
+    h = _Cap()
+    lg.addHandler(h)
+    try:
+        auditor.record_decision("kelly_skip", market_id="m1", reason="r")
+    finally:
+        lg.removeHandler(h)
+
+    msgs = [r.getMessage() for r in records]
+    assert not any("ALTER TABLE" in m for m in msgs), msgs
+    assert any("failed to persist" in m for m in msgs), msgs
+    assert all(r.levelname != "ERROR" for r in records), msgs
