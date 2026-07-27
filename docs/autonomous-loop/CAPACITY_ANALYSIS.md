@@ -145,13 +145,21 @@ ruinous on the thin tail.
 
 ## Named next steps
 
-1. **Forward depth capture at decision time.** Record the book alongside every paper decision
-   so future corpora are capacity-testable rather than capacity-assumed. This is the only
-   route to a measured historical capacity curve.
+1. ~~**Forward depth capture at decision time.**~~ **BUILT 2026-07-27 (ROADMAP E11, PR #444).**
+   The orchestrator now records the pre-trade book alongside every executed paper decision, on
+   a nullable `book_json` column, bounded to the same 40 ask levels this probe uses so forward
+   rows and probe rows feed the same capacity code. Observation-only — proven not to alter any
+   decision, size or order. Two things still gate a real curve: it accrues only going forward
+   (past depth remains unrecoverable, which is the whole reason this was the named step), and
+   on the already-deployed database an owner `ALTER TABLE` is needed before capture can persist
+   at all (PENDING_OPS OA-20) — until then the writer degrades and records rows without it.
 2. **Replace the parametric impact path with `walk_book` where a ladder is available**, and
    keep the √ model only as a fallback where it is not — with the coefficient documented as
    the crude bound it is.
-3. Bid-side (exit-leg) depth analysis before any fade-strategy sizing claim.
+3. Bid-side (exit-leg) depth analysis before any fade-strategy sizing claim. **Still open, and
+   E11 does not close it:** the capture stores the ASK ladder plus the bid touch, mirroring
+   this probe's artifact, so a SELL-side capacity question cannot be answered from those rows
+   either. That matters most for the one family that exits rather than holding to resolution.
 
 ## Reproduction
 
