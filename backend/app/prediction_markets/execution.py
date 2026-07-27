@@ -1148,6 +1148,28 @@ class PredictionMarketExecutor:
         if not req.token_id:
             return "empty token_id — no tradeable token (multi-leg basket not executable here)"
 
+        # SIDE-EFFECT INTEGRITY (run-risk-readiness top_gaps): a MARKET order carries no
+        # price by design (see OrderRequest.price: "None for market orders") — the caller
+        # is trusting the venue's live book to set the fill. Every downstream site that
+        # used to see that None (OrderRequest.notional, `_place_via_clob_client`,
+        # `_place_via_rest`, and `_simulate_fill`) independently substituted the SAME
+        # fabricated $0.50 (`req.price or 0.50`) whenever price was falsy, so the risk-gate
+        # notional, the submitted venue limit, and the paper fill stayed internally
+        # consistent with each other — but all of them were consistent with an INVENTED
+        # number, not a real market price. A missing/zero price on a MARKET order means we
+        # have no basis to size the risk gate or fill the paper trade, so REJECT here —
+        # before `req.notional` is ever computed (line ~1210) and before any position/
+        # exposure state is touched — rather than betting real dollar-equivalents on a
+        # made-up price. LIMIT/GTC/FOK orders are untouched by this guard: those order
+        # types are expected to (and, per the orchestrator, always do) carry an explicit
+        # submitted price, so this check never fires for them.
+        if req.order_type == OrderType.MARKET and not req.price:
+            return (
+                "MARKET order rejected: no price available to execute against — "
+                "refusing to fabricate a stand-in price for risk sizing or fill "
+                "(a real book price is required for a MARKET order)"
+            )
+
         # SIDE-EFFECT INTEGRITY: on a prediction market you CANNOT open a short by
         # selling tokens you do not hold — a CTF/YES token can only be sold if it is
         # already owned. A SELL may therefore only ever REDUCE an existing long
