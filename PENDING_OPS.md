@@ -168,6 +168,33 @@ OWNER_ACTIONS:
         (`npm run build` green + the flows still wire). No new secret, no backend change, independent of the
         alpha tracks. Until taken, the app runs on 14.2.35 with the residual advisories DOCUMENTED here +
         ROADMAP G6, not silently ignored. No credentials needed.
+    - id: OA-20
+      title: "ALTER TABLE to ENABLE E11 forward depth capture on the existing database"
+      priority: medium
+      status: open
+      why: >
+        Shipped 2026-07-27 (#444, ROADMAP E11). Retrospective depth is UNOBTAINABLE from
+        Polymarket (Gamma serves liquidity:null on resolved markets and CLOB /book 404s on a
+        settled token, both verified live), so no past corpus can ever be capacity-tested and
+        no committed corpus can have its entry price OBSERVED rather than estimated. Depth IS
+        observable going forward, and the capture side now records the pre-trade book on each
+        audit row in a new nullable `book_json` column. This repo has NO migration tool —
+        `init_db` -> `SQLModel.metadata.create_all` creates missing TABLES but never ALTERs an
+        existing one — so a database that already holds `prediction_audit_log` (the deployed
+        Postgres does) will not gain the column on deploy. NOT a blocker and NOT a risk: the
+        writer DEGRADES, retrying the insert naming only the pre-E11 columns, so the ROADMAP
+        G3 audit trail keeps working untouched and a single ERROR log names this fix. The only
+        consequence of NOT running it is that forward depth is silently never accumulated —
+        which, since past depth is unrecoverable, means the measured capacity curve stays
+        permanently unbuildable. That is why this is worth doing rather than deferring
+        indefinitely.
+      how: >
+        Run ONCE against the production database:
+        `ALTER TABLE prediction_audit_log ADD COLUMN book_json TEXT;`
+        Then confirm capture is accumulating: `SELECT count(*) FROM prediction_audit_log WHERE
+        book_json IS NOT NULL;` should start climbing as paper orders execute. Capture is ON by
+        default and can be disabled with `CAPTURE_ORDER_BOOK_AT_DECISION=0`. No credential is
+        involved — the book comes from Polymarket's public, unauthenticated CLOB endpoint.
     - id: OA-19
       title: "Polymarket signature-type wiring for proxy/Gnosis-Safe live funding (D6) — declare wallet type"
       priority: medium

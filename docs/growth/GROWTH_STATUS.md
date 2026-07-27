@@ -60,6 +60,7 @@ GROWTH_STATUS:
       preflight_full_gate_green: false            # scripts/preflight.sh (full) exits 0
     blocking:                       # honest: what's stopping GO right now
       - "No validated out-of-sample edge yet — build the leakage-free, cost-realistic walk-forward backtest + calibration eval (ROADMAP C1-C3, B2)."
+      - "2026-07-27 (C8): the ONE F11 significant_positive cell this project owned (EXP-006b fade th=0.15, N=141, +$2,441.03, CI [+364.93, +4736.05]) loses its significance once entry and exit pay a MEASURED bid/ask half-spread instead of the flat 0.5% stand-in the CLOB-midpoint corpora imply: +$1,735.96, CI [-209.03, +3842.10] under the LEAST punitive of two independent live measurements. Scoped honestly by the adversarial gate: that cell was already is_validated_edge=false under FLAT cost (F10-fragile), and under a theoretical half-tick FLOOR it KEEPS significance (+$2,068.26, CI [+53.80, +4296.84]) with the crossover near 0.7x the 747-book spread — so the margin is ~30%, not a landslide, and C8 removes the cell's last encouraging property rather than changing the pre-registered verdict. What kills it is cost-model-INDEPENDENT: 5 of 141 trades carry 83% of net PnL (C9). Both tested mechanism families remain REFUTED; every model still reports EDGE-NOT-PROVEN, 15 cells, zero survivors."
     owner_decision_required: true   # even at 'eligible', the human makes the final real-money GO call
   experiments:
     - id: EXP-001

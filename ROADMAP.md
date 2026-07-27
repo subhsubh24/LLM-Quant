@@ -126,7 +126,7 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
       warning ("compare hashes only across same-strategy runs"). The honest fix is a
       strategy-supplied `config_fingerprint()` the engine folds in; an arbitrary closure cannot
       be hashed, so the strategy must declare its own identity.
-- [ ] C8. **Backtests price at the CLOB MIDPOINT and never pay a spread — the binding
+- [~] C8. **Backtests price at the CLOB MIDPOINT and never pay a spread — the binding
       methodological constraint (filed 2026-07-26 by the EXP-006b audit).** CLOB
       `/prices-history` returns the book midpoint, not a traded price (verified live:
       `/prices-history` 0.1965 == `/midpoint` 0.1965 against a 0.196/0.197 book; 42.7% of
@@ -138,7 +138,47 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
       Measured breakeven cost multiple on EXP-006b was 5.93x/8.33x with F11 significance lost
       at 1.7x/2.9x. **Until entry and exit pay a measured half-spread at the traded price
       level, no result in this family means much — this ranks AHEAD of any new alpha.**
-- [ ] C9. **F10 has no axis for SINGLE-OBSERVATION dominance (filed 2026-07-26 by the EXP-006b
+      **BUILT + RUN (2026-07-27, #439) — proof attached.** New pure
+      `prediction_markets/half_spread.py` carries the two INDEPENDENT live measurements the
+      repo already owned — 747 political books (`EXP006B_RESULT.md`) and the 62 two-sided
+      books committed at `data/depth_probe_polymarket.json` — as price-banded models, plus a
+      per-band-max `conservative` one; `derive_bands_from_depth_probe` regenerates the
+      committed table FROM the committed bytes and a gate test asserts exact agreement, so
+      the table cannot drift from its source. Every band carries its own `n`; the 747-book
+      bands carry `None` because that source published no per-band count.
+      `CostModel.half_spread_model` REPLACES the flat slippage when set (crossing the spread
+      IS the cost the flat rate stood in for; charging both double-counts), default `None` so
+      every published number stays bit-identical — the frozen corpus still replays to 39
+      trades / −$3,228.02 / `77ce67d0eacc552e`. `scripts/rescore_with_spread.py` re-scores
+      both refuted families under flat + three measured models + a labelled half-tick BOUND.
+      **RESULT:** the EXP-006b fade th=0.15 cell — the only F11 `significant_positive` result
+      this project owns — loses significance under EVERY measured model including the least
+      punitive (+$2,441.03, CI [+364.93, +4736.05] → +$1,735.96, CI [−209.03, +3842.10]); hit
+      rate 58.2%→54.6%. **HONEST SCOPE (gate corrections):** the cell was ALREADY
+      `is_validated_edge=False` under FLAT cost (F10-fragile), so C8 removes its last
+      encouraging property rather than changing the pre-registered verdict; under the
+      theoretical half-tick FLOOR the cell KEEPS significance (+$2,068.26, CI [+53.80,
+      +4296.84]) and the crossover sits near 0.7× the 747-book spread, so the margin is ~30%,
+      not a landslide; and what actually kills the cell is cost-model-INDEPENDENT (C9 flags it
+      at zero cost assumption — 5 of 141 trades carry 83% of net PnL). Caught in itself: the
+      model was PnL-determining but unfingerprinted (four cells, one `seed_hash`, four PnLs —
+      the C6/#413 collision class a third time); `_seed_hash` now covers it. 2 Sonnet
+      reviewers (both REQUEST_CHANGES → fixed: three mis-rounded CIs, a mis-attributed hit
+      rate, two under-disclosed limits) + **3 fresh Opus adversarial auditors**
+      (**EDGE-NOT-PROVEN-CONFIRMED**, **SAFE**, and one **NOT-HONEST** whose every finding is
+      fixed: a "12 cells" figure that was 15, a "+$1.29" quoted to the cent that NO harness
+      produced — the harness now emits it — a "50 tests" that was 69, an undisclosed fact that
+      the 747-book lane is filled from the depth probe above 0.30, an undisclosed fact that the
+      cheaper tick-floor lane ADMITS two extra trades so the cost model is trade-SELECTING not
+      just trade-pricing, plus three surviving mutants now killed — a tautological floor test,
+      an entirely untested re-score harness, and a hand-transcribed table nothing guarded).
+      They also broke a false claim (the measured model is CHEAPER on the exit leg above 0.98),
+      now asserted in both directions. No DoD/floor box ticks; NO edge
+      claimed under any model. Detail: `docs/autonomous-loop/C8_SPREAD_REALISM.md`.
+      **Remaining for `[x]`:** the model is OPT-IN and nothing in the engine sets it, so every
+      other backtest still prices at the midpoint. Making it the research default is one
+      re-pinning migration (C6-style) and is tracked as **C10**.
+- [x] C9. **F10 has no axis for SINGLE-OBSERVATION dominance — DONE 2026-07-27 (PR #440).** (filed 2026-07-26 by the EXP-006b
       audit).** F10 gates category / horizon / confidence / time / top-MARKET concentration,
       but nothing catches "a handful of trades carry the whole result". On corrected EXP-006b,
       dropping the TWO largest trades moved the 0.15 cell from `significant_positive` to
@@ -148,14 +188,108 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
       *because of* a leaked trade). A drop-top-k or winsorized-PnL check would have flagged both
       cells immediately, and would have flagged EXP-006 too. Cheap, offline, and it makes every
       past and future result more honest.
-- [ ] E11. **Forward depth capture at decision time (filed 2026-07-26 by the capacity work).**
+      **DONE — proof attached.** `regime_slice.py` gains `top1/top5/top10_trade_pnl_share`,
+      `pnl_after_drop_top1/2/5_usd` and `survives_drop_top2`, a
+      `TOP_TRADES_PNL_CONCENTRATION = 0.50` trigger, and a drop-top-2 trigger. Shares are
+      `None` (never 0.0) unless net PnL > 0, since a share of a non-positive total is
+      undefined rather than small. Two non-assessment guards, one of them load-bearing and
+      ARITHMETIC not taste: the 5 largest of `p` positives hold ≥ `5/p` of the positive total
+      and the positive total ≥ the net total, so with `p ≤ 9` the top-5 share breaches 0.50
+      however evenly the edge is spread — firing there would be a guaranteed false FRAGILE.
+      Below the floor the share is still REPORTED and the non-assessment is disclosed.
+      **The reviewer gate caught that the axis was a report field, not a gate:**
+      `spike_reversal_backtest._fade_f10_ok` is a hand-rolled parallel F10 gate that reads
+      individual report fields, and on `regime_slice`'s OWN EXP-006b-shaped fixture it
+      returned `ok=True, reasons=[]` while `analyze_regime_slices` said fragile — the exact
+      failure C9 was filed to close. Fixed at the SHAPE: the report now publishes the
+      triggered reasons and the non-assessment disclosures as data, and the fade gate extends
+      from that one source of truth, so the next axis reaches it automatically. On the real
+      corpus the verdict now names it: *"top-trades: 83% of net PnL from the 5 largest trades
+      of 141 > 50% threshold"*. 11 new tests fail on pre-change code; the gate regression fails
+      on the pre-fix gate; a 20-winner broad result still passes with `reasons=[]`. Frozen
+      corpus replay unchanged (39 tr / −$3,228.02 / `77ce67d0eacc552e`). 2 Sonnet reviewers
+      (A APPROVE, B REQUEST_CHANGES on the gate gap → fixed) + 3 Opus auditors, one of which
+      found the 0.50 threshold was NEVER PINNED — loosening it to 0.99 left the whole suite
+      green, and at 0.99 the real EXP-006b cell would stop flagging. It is now bracketed from
+      both sides. **Two figures
+      the filing above carries are stale and are corrected in-code:** the top-market share on
+      the CORRECTED corpus is **0.2374**, not 0.4715 (the leakage fix removed the trades that
+      inflated it, so the blind spot is WIDER than filed); and drop-top-2 does NOT fire on
+      EXP-006b (remaining PnL +$1,306.30 > 0) — the **top-5 share** is what catches it. A
+      significance-after-drop check is what would have caught it outright and remains unbuilt
+      (this module is pure and bootstrap-free) — tracked as **C11**.
+- [ ] C10. **Make the measured half-spread the RESEARCH DEFAULT (filed 2026-07-27 by the C8
+      review).** `CostModel.half_spread_model` defaults to `None` and nothing in the engine
+      sets it, so outside `scripts/rescore_with_spread.py` every backtest still prices at the
+      CLOB midpoint and pays the flat 0.5%. The default is deliberate — flipping it moves
+      every pinned hash at once, and the measurements are a LOWER bound rather than the
+      venue's true cost, so making them *the* cost model would overstate what is established —
+      but it means the correction only applies where an author remembers to ask. The honest
+      fix is one re-pinning migration in the style of the C6 `seed_hash` change: flip the
+      research default, re-pin every hash to its MEASURED value, and record the migration
+      table rather than papering over it. Until then C8 is a capability, not a closed item.
+- [ ] C11. **Significance-after-drop-top-k (filed 2026-07-27 by the C9 gate).** C9's
+      drop-top-2 check tests only whether the remaining PnL is still POSITIVE. On EXP-006b it
+      is (+$1,306.30), so that flag does not fire there — the top-5 share is what catches the
+      cell. What actually broke on EXP-006b was F11 SIGNIFICANCE after the drop
+      (CI [−289.60, +2955.27]), and a bootstrap is not something the pure, dependency-free
+      `regime_slice` module can run. The check belongs where the bootstrap already lives
+      (`bootstrap_oos_significance`), consuming the drop-top-k trade lists F10 now produces.
+      Cheap, offline, and it is the check that would have caught EXP-006b outright.
+- [ ] C12. **`SpikeReversalResult` publishes NO reproduction fingerprint (filed 2026-07-27 by
+      the adversarial gate).** `walk_forward` fingerprints data + engine config into a
+      `seed_hash`; the fade engine — the family that decided the entire C8 verdict — has no
+      equivalent. Two fade runs with different configs or cost models are indistinguishable
+      from their output. The fix mirrors `_seed_hash`: fingerprint the tick corpus, the
+      `FadeSpikeConfig`, and the cost model (including its half-spread model, per C8).
+- [ ] B8a. **Where the co-listed universe actually is (filed 2026-07-27 by the B8 review).**
+      The events-by-category unblock (#442) makes 1203 settled Kalshi political/economic
+      events reachable, but a reviewer's live probe found the match candidates are NOT in the
+      bulk: 1093 of those 1203 (91%) are Politics/Elections horse-race questions with no
+      numeric strike, which the matcher's hard cap correctly refuses to trade. The candidates
+      are in the **Economics/Financials** 9% — 199 of 372 resolved markets there carry a
+      genuine numeric `floor_strike`/`cap_strike` (CPI, US savings rate, WTI, USD/BRL,
+      Nikkei/Nifty/KOSPI ladders), and a live Polymarket Nikkei event parses via this repo's
+      own `extract_threshold` into a directly comparable threshold. The next step is a bounded
+      MATCH-COUNT probe restricted to that slice (the same probe-before-harness discipline
+      RESEARCH_MEMORY used three times on crypto) — a real pair count decides whether the
+      common-instant dual-venue snapshot is worth engineering at all.
+- [ ] A3a. **Kalshi 429 backoff — a corpus built through the new path is not reproducible
+      (filed 2026-07-27 by the B8 gate).** `_get` has no retry/backoff: a 429 logs and returns
+      `None`, so `fetch_resolved_events` treats it as end-of-pagination and truncates
+      discovery early. Observed run-to-run: 42 leakage-safe records one run, 17 another, with
+      43 `429` warnings. Leakage safety holds (a throttled fetch yields no ticks and the market
+      is skipped with the loud refusing-to-fabricate warning, never fabricated), but two runs
+      over the SAME window can sample different subsets — so no corpus built this way may be
+      treated as a frozen eval set until backoff exists. Touches the shared `_get`, which is
+      why it was filed rather than bolted on.
+- [~] E11. **Forward depth capture at decision time — CAPTURE SIDE BUILT 2026-07-27 (PR #444).**
       Retrospective depth is UNOBTAINABLE from Polymarket — Gamma serves `liquidity: null` on
       resolved markets and CLOB `/book` 404s on a settled token (both verified live). So the
       `liquidity: null` on all 187 frozen OOS records is a venue data-availability FACT, not a
       fetcher threading bug, and no past corpus can ever be capacity-tested. Depth IS
       observable going forward: recording the book alongside every paper decision is the only
       route to a MEASURED historical capacity curve. `scripts/capacity_probe.py` is the read
-      side; the capture-at-decision-time wiring is the remaining half.
+      side; the capture-at-decision-time wiring **is now built**. `PredictionAuditLog` gains a
+      nullable `book_json`; the orchestrator captures the pre-trade book at the decision
+      instant (after every gate, before `OrderRequest`), bounded to 40 ask levels to match
+      `capacity_probe.LADDER_LEVELS` — a test now imports BOTH constants and compares them, so
+      the must-not-drift claim is really enforced across files. Observation-only: capture is proven
+      not to change any decision, size or order (identical scan cycles with capture on vs off,
+      field-by-field). Timeout 3.0s (tightened from 15s once a reviewer pointed out it sits
+      between deciding and submitting), enforced outside the client as well as in, run off the
+      event loop; every failure path records `None` and continues, never fabricating a quote.
+      Live read-only smoke captured real ladders and honestly recorded two one-sided books as
+      no-snapshot. **The gate caught a blocking defect:** `book_json` is mapped
+      unconditionally, so on a database that already holds the table (the deployed Postgres —
+      `create_all` never ALTERs) EVERY audit insert failed, including rows carrying no book and
+      including capture switched OFF: a total outage of the G3 trail caused by a column nothing
+      in G3 depends on. `_write` now DEGRADES — a raw parameterized retry naming the pre-E11
+      columns — so the old guarantee survives and only the new capture is lost; the detection
+      reads the DBAPI error rather than `str(e)` after a reviewer proved the naive substring
+      test misdiagnosed an unrelated failure. **Remaining for `[x]`:** an owner `ALTER TABLE`
+      to ENABLE capture on the existing database (PENDING_OPS), bid-side/exit-leg depth (only
+      the ask ladder plus the bid touch is stored), and depth on rejected decisions.
 - [ ] E12. **Replace the parametric impact model with a real book walk where a ladder exists
       (filed 2026-07-26).** `capacity.walk_book()` computes impact from a real ask ladder with
       NO free parameter. Calibrating `DEFAULT_IMPACT_COEFF=0.5` against 62 real ladders showed
@@ -197,7 +331,7 @@ churn-for-its-own-sake (see FACTORY_STANDARD §14):
 - [ ] E7. **Significance-weighted learning:** weight each update by sample size / statistical significance; prefer "insufficient data" over reacting to a single noisy week; lean on calibration (faster-accumulating evidence) as much as PnL.
 
 ### F — QUALITY & INTEGRITY
-- [~] F1. Test suite (91 test files under `backend/tests/`); ensure prediction-market-specific coverage. **Coverage added (2026-07-04, #216):** registered `test_simulation_engine.py` (48 deterministic `seed=42` tests) in the blocking gate — it covers the **LIVE** Monte-Carlo / importance-sampling / variance-reduction pricing modules (`app/simulation/*`) that feed Kelly sizing via `simulation_integration.py` when `config.use_monte_carlo=True` (the default), previously UNGATED (a contract-pricing regression wasn't caught in CI); plus the new `test_short_open_rejected.py` (#215). **Known integrity item:** `test_ignores_far_resolution` is `xfail` — the `NearCertaintyStrategy` docstring says "within 72h" but `max_hours_to_resolution` defaults to `720` (30 days). Decide 72h vs 720h **with the owner** (trading-behavior decision), then fix code+test together and un-xfail. Do not silently change strategy behavior to satisfy the test. **OWNER DECISION (2026-07-18, delegated under "auto-approve"): 72h** — match code to the documented "near-certainty within 72h" contract; 30 days out is not "near", it locks capital longer and widens flip risk for a strategy whose whole thesis is collecting the last few cents on imminently-resolving near-sure outcomes. Low-stakes now (paper-only, no validated edge) and reversible. **Factory: implement code+test together** — set `NearCertaintyStrategy.max_hours_to_resolution` default `720`→`72`, update the strategy so a far-resolution near-certain market is skipped, un-`xfail` `test_ignores_far_resolution`, and add/keep a boundary test at exactly 72h. Owner can flip back to 720h (trade the longer horizon for more volume) with one line if desired. **Coverage added (2026-07-08, #258, §26):** registered the 3 UNGATED significance-net test suites in the blocking preflight gate — `test_bootstrap_oos_significance.py` (F11), `test_per_category_diagnostics.py` (B9), `test_manifold_history_fetcher.py` (A8) — so a leakage / multiple-comparison / bootstrap-CI regression in the net that VETOES false edge claims can no longer ship green (they existed + passed but ran nowhere in CI). Same PR fixed a confirmed RFC-8259 JSON hole (`per_category_diagnostics.aggregate_crowd_brier` `float("nan")`→`None` on an empty corpus, serialized by `per_category_edge_search.py --json`). 2 Sonnet APPROVE (one ran the full gate: 1055 passed). **Coverage added (2026-07-11, #298, §26):** registered two shipped-fix regression suites that ran NOWHERE in the required CI gate — `test_loss_cap_persist_failclosed.py` (#281: a realized loss that cannot be durably persisted trips the kill switch fail-CLOSED so a restart can't reset the loss budget) and `test_confidence_units_gated.py` (#280: Weather+Whale confidence pinned to `gate_confidence(entry,edge)`). **#280's own commit body FALSELY claimed the test was "(registered in the blocking light gate)" — it was not;** this makes the claim true (the same false-coverage class #283 closed for the security headers). Both collect + pass under the light CI dep set (no pandas/sklearn) — gate test count 1107→1115, verified by both reviewers running the exact light-venv invocation. 2 Sonnet APPROVE.
+- [~] F1. Test suite (**98** test files under `backend/tests/`, **80** registered in the blocking gate — counts re-verified 2026-07-27 on the merged default; the figure here has drifted twice and is now stated with the registered count next to it, since the registered one is what the gate actually runs); ensure prediction-market-specific coverage. **Coverage added (2026-07-04, #216):** registered `test_simulation_engine.py` (48 deterministic `seed=42` tests) in the blocking gate — it covers the **LIVE** Monte-Carlo / importance-sampling / variance-reduction pricing modules (`app/simulation/*`) that feed Kelly sizing via `simulation_integration.py` when `config.use_monte_carlo=True` (the default), previously UNGATED (a contract-pricing regression wasn't caught in CI); plus the new `test_short_open_rejected.py` (#215). **Known integrity item:** `test_ignores_far_resolution` is `xfail` — the `NearCertaintyStrategy` docstring says "within 72h" but `max_hours_to_resolution` defaults to `720` (30 days). Decide 72h vs 720h **with the owner** (trading-behavior decision), then fix code+test together and un-xfail. Do not silently change strategy behavior to satisfy the test. **OWNER DECISION (2026-07-18, delegated under "auto-approve"): 72h** — match code to the documented "near-certainty within 72h" contract; 30 days out is not "near", it locks capital longer and widens flip risk for a strategy whose whole thesis is collecting the last few cents on imminently-resolving near-sure outcomes. Low-stakes now (paper-only, no validated edge) and reversible. **Factory: implement code+test together** — set `NearCertaintyStrategy.max_hours_to_resolution` default `720`→`72`, update the strategy so a far-resolution near-certain market is skipped, un-`xfail` `test_ignores_far_resolution`, and add/keep a boundary test at exactly 72h. Owner can flip back to 720h (trade the longer horizon for more volume) with one line if desired. **Coverage added (2026-07-08, #258, §26):** registered the 3 UNGATED significance-net test suites in the blocking preflight gate — `test_bootstrap_oos_significance.py` (F11), `test_per_category_diagnostics.py` (B9), `test_manifold_history_fetcher.py` (A8) — so a leakage / multiple-comparison / bootstrap-CI regression in the net that VETOES false edge claims can no longer ship green (they existed + passed but ran nowhere in CI). Same PR fixed a confirmed RFC-8259 JSON hole (`per_category_diagnostics.aggregate_crowd_brier` `float("nan")`→`None` on an empty corpus, serialized by `per_category_edge_search.py --json`). 2 Sonnet APPROVE (one ran the full gate: 1055 passed). **Coverage added (2026-07-11, #298, §26):** registered two shipped-fix regression suites that ran NOWHERE in the required CI gate — `test_loss_cap_persist_failclosed.py` (#281: a realized loss that cannot be durably persisted trips the kill switch fail-CLOSED so a restart can't reset the loss budget) and `test_confidence_units_gated.py` (#280: Weather+Whale confidence pinned to `gate_confidence(entry,edge)`). **#280's own commit body FALSELY claimed the test was "(registered in the blocking light gate)" — it was not;** this makes the claim true (the same false-coverage class #283 closed for the security headers). Both collect + pass under the light CI dep set (no pandas/sklearn) — gate test count 1107→1115, verified by both reviewers running the exact light-venv invocation. 2 Sonnet APPROVE.
 - [ ] F2. Calibration eval holds; backtest **reproduces** bit-for-bit; **no leakage** eval.
 - [ ] F3. BUILDS ≠ WORKS runtime harness: full pipeline ingest → signal → size → (paper) execute → PnL runs end-to-end producing real reproducible results; live path exercised in mock/paper mode. (UI visual side = F5.)
 - [ ] F4. CI wiring of the gate (workflow scope — owner/maintainer action).

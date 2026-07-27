@@ -18,6 +18,111 @@ Format per entry:
 
 ---
 
+## 2026-07-27 — C8: what the backtests owe the spread (and what actually killed the fade cell)
+
+- **Hypothesis (falsifiable):** the EXP-006b fade th=0.15 cell's F11 significance is an
+  artifact of a cost model that never pays a bid/ask spread, because Polymarket's CLOB
+  `/prices-history` serves the book MIDPOINT rather than a traded price.
+- **Min sample N:** the two pre-registered cells (th=0.15 N=141, th=0.20 N=99) on the
+  committed EXP-006b corpus; plus the frozen 187-record bucket corpus as a control.
+- **Method:** `prediction_markets/half_spread.py` carries two INDEPENDENT live measurements —
+  747 political books (EXP006B_RESULT.md) and the 62 two-sided books committed at
+  `data/depth_probe_polymarket.json` — as price-banded models plus a per-band-max conservative
+  one, with each band's `n` attached. `scripts/rescore_with_spread.py` re-scores both families
+  under flat + all three + a labelled half-tick BOUND. Offline, deterministic, no egress.
+- **OOS result:**
+
+  | cost model | th=0.15 net PnL | hit | F11 | CI |
+  |---|---:|---:|---|---|
+  | flat | +$2,441.03 | 58.2% | significant_positive | [+364.93, +4736.05] |
+  | 747book | +$1,735.96 | 56.0% | indistinguishable_from_zero | [−209.03, +3842.10] |
+  | depth_probe | +$1,590.99 | 54.6% | indistinguishable_from_zero | [−349.49, +3707.54] |
+  | conservative | +$1,553.14 | 54.6% | indistinguishable_from_zero | [−375.26, +3676.51] |
+  | *tick_floor (bound)* | +$2,068.26 | 56.0% | *significant_positive* | [+53.80, +4296.84] |
+
+  Bucket family stays `significant_negative` under every model; the flat lane still replays to
+  the pinned 39 trades / −$3,228.02 / `77ce67d0eacc552e`.
+- **Costs modeled:** measured half-spread REPLACES the flat 0.5% crossing cost (charging both
+  double-counts); fees and the impact add-on unchanged. Both legs pay.
+- **Verdict: edge-not-proven** (unchanged). 15 cells, zero survivors under any measured model.
+- **Why — and this is the part worth carrying forward:** the spread correction is
+  **corroboration, not the case**. The adversarial gate established three things that matter
+  more than the headline:
+  1. The cell was ALREADY `is_validated_edge=false` under FLAT cost (F10-fragile). Under the
+     pre-registration's own rule — *"one of two neighbouring cells passing is what noise looks
+     like"* — C8 changes nothing about the verdict. It removes the cell's last encouraging
+     property. The first framing of this result ("the last positive cell dies") overstated it.
+  2. Under the theoretical half-tick floor the cell KEEPS significance, and the crossover sits
+     near **0.7×** the least-punitive measured spread. The margin is ~30%. Reporting only the
+     models that kill it reported one end of the span; the bound is now reported too.
+  3. What kills the cell is **cost-model-independent**: 5 of 141 trades carry 83% of net PnL
+     and the top ten carry 114% (the other 131 are net negative). Under every model
+     constructed, including the floor, `is_validated_edge` is false.
+- **A defect the work caught in itself:** the half-spread model was PnL-determining but not
+  fingerprinted — four cells, one `seed_hash`, four different PnLs. That is the C6 (`category`)
+  and #413 (`fee_schedule`) collision class arriving a third time. **Reusable lesson: any new
+  field on `CostModel` is PnL-determining by default and must enter `_seed_hash` in the same
+  change.** A residual remains and is stated rather than hidden: band bounds round to 12dp, so
+  a contrived sub-1e-12 edge perturbation still collides.
+- **A claim the gate proved false:** "the measured cost is never cheaper than the flat rate
+  across every traded band" — the test grid stopped at 0.8 and never looked. Above 0.98 the
+  real book is tight (frac 0.000503 vs the flat 0.005), so the model is a DISCOUNT there,
+  visible on the exit leg. Worth +$1.29 against a −$887.89 correction; immaterial, and now
+  asserted in both directions. **Reusable lesson: a parameterized test whose grid stops short
+  of the interesting region asserts a property it never examined.**
+- **Honest scope:** both measurements come from OPEN, volume-ordered (LIQUID) markets, so they
+  UNDER-state a random market's spread — every model is a LOWER bound on crossing cost. The
+  band carrying 61.4% of the fade's flat PnL rests on **n=3** (the two sources agree closely
+  there: 0.058 vs 0.0667); an auditor's sensitivity replacing every n≤3 band with the 1-tick
+  floor still leaves the cell insignificant, but by **$34 on a $4,224-wide CI**. On its own the
+  spread argument is not a durable refutation — which is why (3) above is what the verdict rests
+  on.
+- **Next buildable step:** C10 — make the measured half-spread the RESEARCH DEFAULT via one
+  C6-style re-pinning migration. It is opt-in today, so every other backtest still prices at
+  the midpoint. And C11 — significance-after-drop-top-k, the check that would have caught
+  EXP-006b outright (drop-top-2 as built only tests whether the remainder is still positive,
+  and on EXP-006b it is).
+
+## 2026-07-27 — B8: Kalshi's political universe is reachable; the co-listed candidates are not where we assumed
+
+- **Hypothesis (falsifiable):** the B8 co-listed universe is unreachable because
+  `KalshiHistoryFetcher` pages `status=settled`, a feed that is ~100% high-frequency sports.
+- **Method:** live probe + implementation against `api.elections.kalshi.com`, no credentials.
+- **Findings (all live-verified, reproducible):**
+  * `/events?status=settled` reaches **1203** settled Politics/Elections/Economics/Financials
+    events in 10 pages of 200 (Elections 787, Politics 306, Economics 58, Financials 52),
+    against 125 Sports in the same sweep. 302 resolved markets from 120 events; 42 leakage-safe
+    records assembled end-to-end.
+  * **`/events?category=` is DOCUMENTED AND SILENTLY IGNORED.** `Politics`, `Economics`,
+    `Financials` and a deliberate `NOTAREALCATEGORY` all return the byte-identical first page —
+    same cursor, same 50 tickers. Two independent probes confirmed it. The response-side
+    re-check on each event's own `category` is what does the filtering, and that backstop is
+    load-bearing rather than belt-and-braces.
+  * `/series?category=` IS genuinely server-side (2120 Politics series; a bogus category
+    returns `{"series": null}` — null, not `[]`).
+  * `/events/{ticker}` returns markets at TOP LEVEL by default and under `event.markets` with
+    `with_nested_markets=true`; reading only one silently yields zero.
+  * Live statuses are `finalized`/`active` (plus a rare `closed`); the documented
+    `settled`/`determined` never appeared.
+- **The finding that changes the next step (reviewer's live probe, not the implementation's):**
+  **1093 of the 1203 events (91%) are Politics/Elections horse-race questions with no numeric
+  strike**, which the matcher's hard cap correctly refuses to trade. The candidates are in the
+  **Economics/Financials 9%** — 199 of 372 resolved markets there carry a real numeric
+  `floor_strike`/`cap_strike` (CPI, US savings rate, WTI, USD/BRL, Nikkei/Nifty/KOSPI ladders),
+  and a live Polymarket Nikkei event parses via this repo's own `extract_threshold` into a
+  directly comparable threshold. So "political markets are now reachable" does NOT mean "the
+  co-listed universe is solved".
+- **Verdict: edge-not-proven** (no edge claimed; data engineering only).
+- **Next buildable step:** B8a — a bounded MATCH-COUNT probe restricted to Economics/Financials
+  before any dual-venue harness, the same probe-before-harness discipline that saved three runs
+  on crypto. A path that ends at ~0 matches should be discovered by a probe, not by a harness.
+- **Reproducibility caveat filed as A3a:** `_get` has no 429 backoff, so a throttled run
+  truncates discovery early — 42 records one run, 17 another. Leakage safety holds (a throttled
+  fetch is skipped, never fabricated), but no corpus built this way may be frozen as an eval set
+  until backoff exists.
+
+---
+
 ## 2026-07-05 (3rd probe) — B8 cross-venue coherence: structured-strike + quote-SOURCE probe (one level deeper than the 2nd probe)
 - **Context:** the 2nd probe found Kalshi HAS 254 crypto series with strikes in structured `cap_strike`/`floor_strike` fields but concluded "multi-run data-eng." This probe went one level deeper — directly hit the Kalshi crypto series with their structured fields to pin the exact remaining data path (egress open, HTTP 200 all venues).
 - **Method (reproducible):** `curl`/`httpx` against `api.elections.kalshi.com/trade-api/v2`: `GET /series?category=Crypto` (→ 254 series); `GET /markets?series_ticker=KXBTCD&status=open` etc. (inspect `floor_strike`/`cap_strike`/`strike_type`/`yes_bid`/`yes_ask`/`volume`); `GET /markets/{ticker}/orderbook` for the flagship year-end BTC market; `GET /series/{s}/markets/{t}/candlesticks`.
