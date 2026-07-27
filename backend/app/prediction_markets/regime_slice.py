@@ -145,6 +145,21 @@ class RegimeSliceReport:
     # aggregate is not positive — the question is VACUOUS on a losing signal (there is no edge
     # to survive), the same honesty the caller's `f10_nonfragile_is_vacuous` flag encodes.
     survives_drop_top2: Optional[bool] = None
+    # The C9 reasons that actually TRIGGERED fragility, carried separately so a downstream
+    # gate can INHERIT this axis instead of re-deriving it. That distinction is load-bearing:
+    # `spike_reversal_backtest._fade_f10_ok` is a parallel hand-rolled F10 gate that reads
+    # individual report fields, so a new axis added here does NOT reach it automatically — a
+    # reviewer demonstrated the gap on this module's own EXP-006b-shaped fixture, where
+    # `analyze_regime_slices` said fragile=True on the top-trades axis while the fade gate
+    # returned ok=True, reasons=[]. Publishing the triggered reasons as data means the fade
+    # gate extends its reason list from ONE source of truth, and the same trap does not
+    # reopen the next time an axis is added.
+    trade_concentration_reasons: tuple[str, ...] = ()
+    # The NON-assessment notes (the arithmetic floor below which a top-5 share carries no
+    # information, and the too-few-trades drop-top-2 case). These are disclosures, NOT
+    # fragility: they must never flip a verdict, but they must also never be invisible —
+    # a gate that silently skips a check reads exactly like a gate that passed it.
+    trade_concentration_disclosures: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +374,11 @@ def analyze_regime_slices(
     n_positive_trades = sum(1 for p in sorted_pnls if p > 0)
 
     reasons: list[str] = []
+    # C9 reasons, kept in their own lists as well as in `reasons`, so a downstream gate can
+    # inherit this axis from one source of truth rather than re-deriving it (see the field
+    # comments on RegimeSliceReport.trade_concentration_reasons).
+    trade_conc_reasons: list[str] = []
+    trade_conc_disclosures: list[str] = []
     fragile = False
     if not has_edge:
         reasons.append(
@@ -434,18 +454,22 @@ def analyze_regime_slices(
         if top5_trade_share is not None and n_positive_trades >= _MIN_POSITIVE_TRADES_FOR_TOP_SHARE:
             if top5_trade_share > TOP_TRADES_PNL_CONCENTRATION:
                 fragile = True
-                reasons.append(
+                _msg = (
                     f"top-trades: {top5_trade_share:.0%} of net PnL from the 5 largest trades "
                     f"of {n} > {TOP_TRADES_PNL_CONCENTRATION:.0%} threshold "
                     f"(single-observation dominance)"
                 )
+                reasons.append(_msg)
+                trade_conc_reasons.append(_msg)
         else:
-            reasons.append(
+            _msg = (
                 f"top-trades concentration NOT assessed (only {n_positive_trades} "
                 f"positive-contribution trades; below {_MIN_POSITIVE_TRADES_FOR_TOP_SHARE} the "
                 f"top-5 share exceeds the threshold arithmetically and carries no information) "
                 f"— drop-top-2 and the other checks still apply"
             )
+            reasons.append(_msg)
+            trade_conc_disclosures.append(_msg)
 
         # C9 — drop-top-2 survival. The single check that would have caught EXP-006b outright:
         # its 0.15 cell fell from `significant_positive` to `indistinguishable_from_zero` once
@@ -453,15 +477,19 @@ def analyze_regime_slices(
         if n >= _MIN_TRADES_FOR_DROP_TOP2:
             if pnl_drop2 <= 0:
                 fragile = True
-                reasons.append(
+                _msg = (
                     f"drop-top-2: removing the 2 largest trades leaves net PnL "
                     f"{pnl_drop2:.2f} <= 0 — the entire edge rides on two observations"
                 )
+                reasons.append(_msg)
+                trade_conc_reasons.append(_msg)
         else:
-            reasons.append(
+            _msg = (
                 f"drop-top-2 NOT assessed (only {n} trades — dropping 2 leaves nothing to "
                 f"survive, so the check would be vacuous)"
             )
+            reasons.append(_msg)
+            trade_conc_disclosures.append(_msg)
 
         if not fragile:
             reasons.append("edge is broad across categories, horizons, confidence bands, and time")
@@ -488,6 +516,8 @@ def analyze_regime_slices(
         pnl_after_drop_top2_usd=pnl_drop2,
         pnl_after_drop_top5_usd=pnl_drop5,
         survives_drop_top2=survives_drop2,
+        trade_concentration_reasons=tuple(trade_conc_reasons),
+        trade_concentration_disclosures=tuple(trade_conc_disclosures),
     )
 
 

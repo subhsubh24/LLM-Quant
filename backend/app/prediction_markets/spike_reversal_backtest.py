@@ -616,6 +616,17 @@ def _fade_f10_ok(
         cat_share = _top_pnl_share(regime.by_category)
         if cat_share is not None and cat_share > CATEGORY_PNL_CONCENTRATION:
             reasons.append(f"category: {cat_share:.0%} of net PnL in one category > {CATEGORY_PNL_CONCENTRATION:.0%}")
+    # SINGLE-OBSERVATION dominance (ROADMAP C9) — INHERITED, not re-derived. This function is a
+    # hand-rolled parallel F10 gate: it reads individual RegimeSliceReport fields, so an axis
+    # added to regime_slice does NOT reach it automatically. A reviewer demonstrated exactly that
+    # gap on regime_slice's own EXP-006b-shaped fixture, where analyze_regime_slices returned
+    # fragile=True on the top-trades axis while this function returned ok=True, reasons=[] — the
+    # precise failure mode C9 was filed to close, still open. Reading the triggered reasons off
+    # the report (rather than re-implementing the thresholds here a second time) closes it AND
+    # stops the same trap reopening the next time an axis is added. This is the load-bearing
+    # check for this strategy family: the EXP-006b dominant trades sat in DIFFERENT markets, so
+    # the single-market check above passed while five observations carried the whole result.
+    reasons.extend(regime.trade_concentration_reasons)
     # Size/salience robustness — the Run 21 caution as a load-bearing gate axis: a reversion edge
     # that vanishes (or reverses) for the LARGEST spikes is size-fragile. Config-independent
     # (rank-based) + significance-aware; computed by _size_robustness and passed in as reasons.
@@ -749,13 +760,22 @@ def backtest_fade_the_spike(
         )
     is_validated = bool(enough_n and f11_ok and f10_ok and hit_rate_ok)
 
+    # A check that was SKIPPED must never read as a check that PASSED. The C9 axis withholds
+    # its top-5 flag below an arithmetic floor (below ~10 winners the share breaches by
+    # construction and carries no information) and its drop-top-2 flag below 3 trades. Those
+    # non-assessments do NOT make a result fragile — but leaving them out of the verdict would
+    # let a thin-winner run inherit the words "F10 non-fragile" with one axis never applied.
+    # So they ride along with the verdict text, on the pass branch as much as the fail branch.
+    f10_disclosures: List[str] = list(regime.trade_concentration_disclosures) if regime else []
+    _disc = (" NOT-ASSESSED: " + "; ".join(f10_disclosures) + ".") if f10_disclosures else ""
+
     if is_validated:
         verdict = (
             f"VALIDATED-CANDIDATE: fade-the-spike net +${total_pnl:,.2f} over {n} trades "
             f"({n_markets_traded} markets); F11 significant_positive "
             f"(total CI [{significance.total_ci_low}, {significance.total_ci_high}]); "
-            f"F10 non-fragile; size-robustness [{size_status}]. Advance to a forward paper "
-            f"window before any live claim."
+            f"F10 non-fragile; size-robustness [{size_status}].{_disc} Advance to a forward "
+            f"paper window before any live claim."
         )
     else:
         reasons = []
@@ -773,6 +793,7 @@ def backtest_fade_the_spike(
             f"EDGE-NOT-PROVEN: fade-the-spike net ${total_pnl:,.2f} over {n} trades — "
             + "; ".join(reasons)
             + f". [size-robustness: {size_status}]"
+            + _disc
             + ". Honest null / not-yet — NOT go-live evidence."
         )
 

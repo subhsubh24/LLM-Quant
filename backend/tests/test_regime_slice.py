@@ -524,3 +524,51 @@ def test_budget_concentration_shares_computed():
     assert rep.total_gross_budget_usd == 1000.0
     assert rep.top_category_budget_share == 0.8      # Crypto 800/1000
     assert rep.top2_category_budget_share == 0.9     # Crypto + next 100
+
+
+# ---------------------------------------------------------------------------
+# C9 — the axis must be INHERITABLE by a downstream gate, not just reported
+# ---------------------------------------------------------------------------
+# `spike_reversal_backtest._fade_f10_ok` is a hand-rolled parallel F10 gate that reads
+# individual report fields, so a new axis here does not reach it automatically. A reviewer
+# demonstrated the gap on the fixture below: this module said fragile=True on the top-trades
+# axis while the fade gate returned ok=True, reasons=[] — C9's exact failure mode, still open.
+# These tests pin the contract that closes it: the TRIGGERED reasons and the NON-ASSESSMENT
+# disclosures are published as separate data, so one source of truth feeds both.
+def test_triggered_c9_reasons_are_published_for_a_downstream_gate():
+    trades, cat_map = _exp006b_shaped()
+    rep = analyze_regime_slices(trades, category_by_market_id=cat_map)
+
+    assert rep.fragile is True
+    # Exactly the fragility-triggering C9 reasons, and nothing else.
+    assert len(rep.trade_concentration_reasons) == 2
+    assert any(r.startswith("top-trades:") for r in rep.trade_concentration_reasons)
+    assert any(r.startswith("drop-top-2:") for r in rep.trade_concentration_reasons)
+    # Every published reason must also appear in the headline list — one source of truth.
+    for r in rep.trade_concentration_reasons:
+        assert r in rep.fragile_reasons
+    # A triggered run has nothing to disclose as un-assessed.
+    assert rep.trade_concentration_disclosures == ()
+
+
+def test_non_assessment_is_published_separately_and_never_reads_as_fragility():
+    """Below the arithmetic floor the top-5 flag is withheld. That must be VISIBLE to a
+    downstream gate as a disclosure, and must never leak into the fragility reasons — a
+    skipped check reading as a passed check is the whole hazard."""
+    # 4 evenly-spread winners: below _MIN_POSITIVE_TRADES_FOR_TOP_SHARE, drop-top-2 survives.
+    trades = [_trade(f"m{i}", +100.0, **_spread(i)) for i in range(4)]
+    rep = analyze_regime_slices(trades)
+
+    assert rep.fragile is False
+    assert rep.trade_concentration_reasons == ()
+    assert len(rep.trade_concentration_disclosures) == 1
+    assert rep.trade_concentration_disclosures[0].startswith("top-trades concentration NOT assessed")
+    assert rep.trade_concentration_disclosures[0] in rep.fragile_reasons
+
+
+def test_a_broad_result_publishes_neither_reasons_nor_disclosures():
+    trades = [_trade(f"m{i}", +100.0, **_spread(i)) for i in range(20)]
+    rep = analyze_regime_slices(trades)
+    assert rep.fragile is False
+    assert rep.trade_concentration_reasons == ()
+    assert rep.trade_concentration_disclosures == ()
