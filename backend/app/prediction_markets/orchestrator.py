@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,67 @@ except ImportError:
     LiveProbabilityTracker = None
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Forward depth capture at decision time (ROADMAP E11)
+# ============================================================
+
+# Wall-clock ceiling on the decision-time book fetch, in seconds.
+#
+# 15s MATCHES the timeout every other Polymarket call in this codebase already uses
+# (``PolymarketClient._get`` passes ``timeout=15`` to requests, and the MTM resolution
+# sweep relies on exactly that bound), so the capture introduces no new latency regime.
+# It is far SHORTER than the scan budget: the scan loop's interval is
+# ``scan_interval_sec`` (default 120s), and — importantly — that sleep happens AFTER the
+# cycle rather than on a fixed schedule, so even a worst-case capture stall delays the
+# NEXT cycle's start and can never cause two cycles to overlap or pile up.
+#
+# The bound is enforced OUTSIDE the client (``asyncio.wait_for``) as well as inside it,
+# because the inner timeout is the client's promise and this is ours: a client that hangs
+# for any reason (a stubbed one in a test, a socket that never returns) must still not be
+# able to wedge the scan loop.
+BOOK_CAPTURE_TIMEOUT_SEC = 15.0
+
+# Environment switch for the capture. Read here rather than added to ``Settings`` so the
+# feature owns exactly one on/off surface and adds no boot-validated config; promoting it
+# to ``Settings`` (alongside ``enable_unvalidated_strategies``) is the natural follow-up
+# if it ever needs to interact with the live gate, which it does not — capture is
+# read-only public data and touches no credential and no order.
+BOOK_CAPTURE_ENV_VAR = "CAPTURE_ORDER_BOOK_AT_DECISION"
+_FALSEY = {"0", "false", "no", "off", ""}
+
+
+def _book_capture_default() -> bool:
+    """Default for decision-time book capture: ON unless explicitly switched off.
+
+    DEFAULT-ON is deliberate and is the opposite of this repo's usual default-OFF stance
+    for new scan-path behavior, so the reasoning is stated rather than assumed:
+
+      * The entire VALUE of E11 is that data accrues going forward. Retrospective depth is
+        UNOBTAINABLE (Gamma serves ``liquidity: null`` on resolved markets; CLOB ``/book``
+        404s on a settled token — both verified live), so a capture that is off by default
+        collects nothing, and the measured capacity curve stays permanently unbuildable.
+        A default-OFF switch here would be the appearance of the feature without the
+        feature.
+      * It is OBSERVATION ONLY and provably decision-neutral: it runs AFTER every gate has
+        already decided, its result is written to the audit row and never read back by any
+        sizing, pricing, gating, or order code. The test suite asserts byte-identical
+        decisions, sizes, and orders with capture on and off.
+      * It is bounded and fail-soft: at most ONE public, unauthenticated GET per order that
+        has already cleared every gate (the D8 one-position-per-token dedup keeps that
+        count tiny), capped at ``BOOK_CAPTURE_TIMEOUT_SEC``, run off the event loop so the
+        kill-switch route stays responsive, and any failure records ``None`` and continues.
+      * The default-OFF flags in this codebase (``enable_unvalidated_strategies``,
+        ``use_simulation_pricer``) gate things that CHANGE trades on unvalidated inputs.
+        This changes no trade at all, so that precedent does not apply to it.
+
+    Set ``CAPTURE_ORDER_BOOK_AT_DECISION=0`` (or false/no/off) to switch it off.
+    """
+    raw = os.environ.get(BOOK_CAPTURE_ENV_VAR)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _FALSEY
 
 
 # ============================================================
@@ -727,6 +789,7 @@ class PredictionMarketOrchestrator:
         scan_interval_sec: int = 120,
         mtm_interval_sec: int = 30,
         snapshot_interval_sec: int = 300,
+        capture_book_at_decision: Optional[bool] = None,
     ):
         self.scanner = scanner
         self.executor = executor or get_executor(dry_run=True)
@@ -750,6 +813,15 @@ class PredictionMarketOrchestrator:
         self.scan_interval_sec = scan_interval_sec
         self.mtm_interval_sec = mtm_interval_sec
         self.snapshot_interval_sec = snapshot_interval_sec
+
+        # ROADMAP E11 — forward depth capture. Explicit argument wins; otherwise the
+        # environment switch (default ON — see `_book_capture_default` for why this one
+        # defaults on while the trade-changing flags default off).
+        self.capture_book_at_decision: bool = (
+            _book_capture_default()
+            if capture_book_at_decision is None
+            else bool(capture_book_at_decision)
+        )
 
         # State
         self._running = False
@@ -1000,6 +1072,97 @@ class PredictionMarketOrchestrator:
         async with self._scan_lock:
             return await self._run_scan_cycle()
 
+    async def _capture_book_snapshot(self, token_id: str) -> Optional[dict]:
+        """The order book for ``token_id`` AS IT STANDS RIGHT NOW, or None (ROADMAP E11).
+
+        WHY THIS EXISTS. Depth at a PAST decision instant cannot be recovered from
+        Polymarket — Gamma serves ``liquidity: null`` on resolved markets and CLOB
+        ``/book`` returns 404 for a settled token (both verified live 2026-07-26). So no
+        existing corpus can ever be capacity-tested, and the only way a MEASURED capacity
+        curve can ever exist is to record the book at the moment each decision is made.
+        The same snapshot is the only route to a corpus whose entry price is OBSERVED:
+        today's records price at the CLOB midpoint and therefore never pay a spread.
+
+        CONTRACT — this method is OBSERVATION ONLY.
+          * It is called AFTER every gate (data-quality, risk, Kelly sizing, multi-leg,
+            already-held dedup) has already decided, and after the size and price are
+            fixed. It cannot influence any of them.
+          * Its return value flows ONLY into the audit row. No sizing, pricing, gating, or
+            order-construction code reads it back.
+          * It NEVER raises. A missing/one-sided/malformed book, a timeout, a dead client,
+            a stubbed client that explodes — every one of them returns None and the scan
+            continues with the decision it had already made. This file has a known bug
+            class where one swallowed exception blacks out every FUTURE scan cycle, so the
+            catch here is narrow (this call only), records the honest ``None``, and logs
+            LOUDLY with the exception type instead of passing silently.
+          * It never fabricates. ``get_order_book`` already refuses a one-sided book rather
+            than inventing ``best_bid=0.0``/``best_ask=1.0``, and that refusal is honored
+            here as ``None`` rather than repaired into a quote.
+
+        It runs off the event loop (``asyncio.to_thread``) because the client is
+        synchronous and rate-limited with a blocking sleep — running it on the loop would
+        starve the MTM/snapshot loops and every concurrent HTTP handler INCLUDING
+        ``POST /kill-switch/activate``, which is the exact §6 liveness failure the scan
+        offload exists to prevent.
+        """
+        if not self.capture_book_at_decision or not token_id:
+            return None
+
+        # Reuse the SCANNER's client: it already owns the shared requests.Session and the
+        # rate limiter, so capture costs one more rate-limited GET rather than a fresh
+        # socket per decision (the per-cycle client leak the MTM path was fixed for).
+        client = getattr(self.scanner, "client", None)
+        if client is None or not hasattr(client, "get_order_book"):
+            logger.warning(
+                "[ORCHESTRATOR] E11 book capture skipped for token %s — the scanner "
+                "exposes no Polymarket client with get_order_book; recording None "
+                "(no fabricated quote).", token_id,
+            )
+            return None
+
+        try:
+            book = await asyncio.wait_for(
+                asyncio.to_thread(client.get_order_book, token_id),
+                timeout=BOOK_CAPTURE_TIMEOUT_SEC,
+            )
+        except asyncio.CancelledError:
+            # Re-raised explicitly (it is a BaseException, so `except Exception` would
+            # already let it through — this states the intent): a shutdown must cancel the
+            # scan, not be mistaken for a failed book fetch.
+            raise
+        except Exception as e:
+            logger.warning(
+                "[ORCHESTRATOR] E11 book capture FAILED for token %s (%s: %s) — recording "
+                "None and continuing the scan. The decision is unaffected; only the depth "
+                "measurement for this row is lost.", token_id, type(e).__name__, e,
+            )
+            return None
+
+        try:
+            # Imported lazily, matching the AuditLogger import discipline in __init__:
+            # audit_log declares a `table=True` class, and an eager module-top import here
+            # would register that table under both the `app.*` and `backend.app.*` paths in
+            # mixed test sessions.
+            from .audit_log import snapshot_order_book
+            snapshot = snapshot_order_book(book)
+        except Exception as e:
+            logger.warning(
+                "[ORCHESTRATOR] E11 book snapshot could not be summarized for token %s "
+                "(%s: %s) — recording None and continuing.", token_id, type(e).__name__, e,
+            )
+            return None
+
+        if snapshot is None:
+            # Not an error: the venue served no real two-sided quote. Recording that FACT
+            # is the point of E11 — a fabricated 0/1 quote here would poison the capacity
+            # curve this data exists to build.
+            logger.info(
+                "[ORCHESTRATOR] E11 book capture for token %s produced no real two-sided "
+                "quote — recording None (venue data-availability fact, not an error).",
+                token_id,
+            )
+        return snapshot
+
     async def _run_scan_cycle(self) -> dict:
         """
         Run one scan cycle: scan → filter → size → execute → persist.
@@ -1199,6 +1362,18 @@ class PredictionMarketOrchestrator:
                     pass
                 continue
 
+            # DEPTH AT THE DECISION INSTANT (ROADMAP E11). Captured HERE, at the last
+            # moment before the order exists, for two reasons:
+            #   * BEFORE execution, so the ladder is the PRE-TRADE book. Capturing after
+            #     the executor ran would (on the live path) measure a book our own order
+            #     had already eaten into — contaminating the very depth number this
+            #     exists to measure.
+            #   * AFTER every gate, size, and price is already fixed above, so the capture
+            #     is provably incapable of altering the decision it is describing. The
+            #     snapshot is written to the audit row and read back by nothing.
+            # Failure records None and falls through — see _capture_book_snapshot.
+            book_snapshot = await self._capture_book_snapshot(token_id)
+
             # Build order
             order = OrderRequest(
                 exchange=exchange,
@@ -1218,6 +1393,8 @@ class PredictionMarketOrchestrator:
 
             # Durable audit of the REAL would-be order (filled/rejected/gated).
             # Reflects the actual OrderResult — never fabricates a success.
+            # `book` carries the pre-trade depth captured above, or None when the venue
+            # served no real two-sided quote (an honest NULL, never an invented one).
             try:
                 self._audit.record_would_be_order(
                     result,
@@ -1227,6 +1404,7 @@ class PredictionMarketOrchestrator:
                     confidence=opp.confidence,
                     is_dry_run=getattr(self.executor, "dry_run", None),
                     live_enabled=getattr(self.executor, "live_enabled", None),
+                    book=book_snapshot,
                 )
             except Exception:
                 pass
