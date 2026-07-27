@@ -738,6 +738,25 @@ def _seed_hash(
             "default_fee_rate": round(cost_model.fee_schedule.default_fee_rate, 12),
             "rates": {k: round(v, 12) for k, v in sorted(POLYMARKET_FEE_RATES.items())},
         }
+    # Same byte-identical-when-None discipline for the ROADMAP C8 measured half-spread model:
+    # when set it REPLACES the flat slippage_rate as the crossing cost, so it is PnL-determining
+    # (measured on the frozen 187-record corpus: the identical 39-trade set books -$3,228.02 flat
+    # vs -$3,192.62 under the conservative model, because a costlier entry shrinks the cost-net
+    # edge, shrinks Kelly and shrinks the position). `slippage_rate` is already fingerprinted
+    # unconditionally above, but it is INERT once a half-spread model is set — so without this
+    # key two runs with identical data and seed would publish one hash for four different PnLs.
+    # That is precisely the C6 / #413 collision class, caught here by the C8 harness before it
+    # could ship. The model's PnL-affecting identity is its name plus its full band table
+    # (bounds + fraction); `n` and `source` are provenance metadata and are deliberately
+    # EXCLUDED, since re-stating a band's sample size cannot change a single fill.
+    if cost_model.half_spread_model is not None:
+        payload["half_spread_model"] = {
+            "name": cost_model.half_spread_model.name,
+            "bands": [
+                [round(b.lo, 12), round(b.hi, 12), round(b.half_spread_frac, 12)]
+                for b in cost_model.half_spread_model.bands
+            ],
+        }
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 
