@@ -48,6 +48,16 @@ carries its own `n` so that weakness is visible in the artifact rather than buri
 The 747-book source published only an aggregate sample size, so its bands carry `n: null` — an
 invented per-band count would have been the exact fabrication this work exists to remove.
 
+**The two tables are not banded identically, and that matters most where it hurts most.** This
+module defines half-spread as `((ask − bid) / 2) / mid` and bands by `mid`; the 747-book table
+was banded by *best ask*. At these spreads the two choices only reclassify quotes sitting on a
+band boundary — but the `<0.01` → `0.01–0.02` boundary is a 16.7% → 4.5% cliff, a 3.7x jump,
+and it sits directly under the sub-cent band where the refuted families put most of their
+signal. So a handful of boundary reclassifications in the source measurement have outsized
+leverage on exactly the band that decides the verdict. The conservative model exists partly to
+absorb this: it takes the per-band maximum, so a quote that "should" have been in the harsher
+band is priced at the harsher rate either way.
+
 ## The result
 
 `python scripts/rescore_with_spread.py` — offline, deterministic, no egress.
@@ -57,9 +67,9 @@ invented per-band count would have been the exact fabrication this work exists t
 | cost model | th | N | net PnL | hit | F11 | F11 CI |
 |---|---:|---:|---:|---:|---|---|
 | flat | 0.15 | 141 | **+$2,441.03** | 58.2% | **significant_positive** | [+364.93, +4736.05] |
-| 747book | 0.15 | 141 | +$1,735.96 | 56.0% | indistinguishable_from_zero | [−208.98, +3842.14] |
-| depth_probe | 0.15 | 141 | +$1,590.99 | 54.6% | indistinguishable_from_zero | [−349.46, +3707.53] |
-| conservative | 0.15 | 141 | +$1,553.14 | 54.6% | indistinguishable_from_zero | [−375.28, +3676.50] |
+| 747book | 0.15 | 141 | +$1,735.96 | 56.0% | indistinguishable_from_zero | [−209.03, +3842.10] |
+| depth_probe | 0.15 | 141 | +$1,590.99 | 54.6% | indistinguishable_from_zero | [−349.49, +3707.54] |
+| conservative | 0.15 | 141 | +$1,553.14 | 54.6% | indistinguishable_from_zero | [−375.26, +3676.51] |
 | flat | 0.20 | 99 | +$2,855.43 | 57.6% | insufficient_data | — |
 | 747book | 0.20 | 99 | +$2,263.37 | 56.6% | insufficient_data | — |
 | depth_probe | 0.20 | 99 | +$2,125.19 | 54.5% | insufficient_data | — |
@@ -67,10 +77,11 @@ invented per-band count would have been the exact fabrication this work exists t
 
 **The th=0.15 cell does not survive.** Its significance goes under the *least* punitive of the
 two measurements, not merely the conservative one — the 747-book model alone pushes the CI
-across zero. The cell was already F10-fragile (82% of net PnL from one category, 100% from one
-horizon bucket); it now fails F11 as well. Hit rate falls from 58.2% to 54.6%, which is the
-honest shape of the effect: paying a real spread does not just subtract a constant, it turns
-marginal winners into losers.
+across zero (to [−209.03, +3842.10]). The cell was already F10-fragile (82% of net PnL from one
+category, 100% from one horizon bucket); it now fails F11 as well. Hit rate falls too — 58.2%
+flat, 56.0% under 747-book, 54.6% under both depth-probe models — which is the honest shape of
+the effect: paying a real spread does not just subtract a constant, it turns marginal winners
+into losers.
 
 ### BUCKET family — the frozen 187-record OOS corpus
 
@@ -119,6 +130,16 @@ that pays a *modelled* half-spread on a *midpoint* series is better than one tha
 but it is still not a series of prices anyone traded at. The real fix is forward capture — record
 the book alongside every paper decision (ROADMAP E11) — and that remains the only route to a
 corpus where entry and exit are observed rather than estimated.
+
+**And it is opt-in, which is the biggest thing left undone.** `CostModel.half_spread_model`
+defaults to `None`, and nothing in the engine sets it: outside this harness and its tests, every
+backtest in this repo still prices at the midpoint and pays the flat 0.5%. That default is
+deliberate — flipping it would move every pinned hash and every published number at once, and
+these measurements are a lower bound rather than the venue's true cost, so making them *the*
+cost model would overstate what has been established. But it means the correction only applies
+where an author remembers to ask for it. Making the measured spread the research default (with
+one re-pinning migration, in the style of the C6 `seed_hash` migration) is the concrete next
+step, and until it happens C8 is a capability rather than a closed item.
 
 ## Reproduce
 
