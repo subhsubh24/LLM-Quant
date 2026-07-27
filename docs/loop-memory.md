@@ -2,6 +2,48 @@
 
 Cross-run lessons for the autonomous factory loop. Append; read before each run.
 
+## 2026-07-27 — five gate findings worth carrying (claims, guards, and a silent migration)
+
+Five file-disjoint PRs shipped (C8 spread realism, C9 single-observation axis, B8 Kalshi
+category discovery, E11 forward depth capture, a live-path fabricated-price fix). Every one
+of the five was improved by its reviewers; these are the findings that generalize:
+
+- **A parameterized test whose grid stops short of the interesting region asserts a property
+  it never examined.** `test_measured_spread_is_never_cheaper_than_the_flat_rate_on_the_traded
+  _range` ran prices up to 0.8 and claimed a property "across every traded band". Above 0.98
+  the property is FALSE — the real book is tight there, so the measured model is a discount —
+  and the fade family trades that band on its exit leg. The test name was what made the claim
+  untrue. **Check the grid covers the region the claim covers, especially at the ends.**
+
+- **Any new field on a shared config object is PnL-determining by default.** `CostModel`
+  gained `half_spread_model`; four re-score cells published ONE `seed_hash` and four different
+  PnLs. This is the third time: `category` (C6), `fee_schedule` (#413), now this. The harness
+  caught it before it shipped only because the run printed hashes next to PnLs. **When adding
+  a field to `CostModel` or the engine config, extend `_seed_hash` in the SAME change, and
+  print the hash next to the number so a collision is visible rather than inferred.**
+
+- **A guard keyed on the wrong attribute closes the case that never happens.** The MARKET-order
+  fix rejected `order_type == MARKET and not price`, reasoning that LIMIT/GTC/FOK "always carry
+  an explicit price". A reviewer showed the DEFAULT body POSTed to `/prediction-markets/execute`
+  is `order_type="LIMIT", price=None` — so the narrow guard closed the variant the orchestrator
+  never emits and left open the one the app's own HTTP surface emits by default, and the
+  accompanying test pinned that residual fabrication as expected behaviour. **Key a guard on
+  the CONDITION that is wrong (a missing price), not on the type you noticed it through.**
+
+- **An unconditionally-mapped ORM column is a schema migration whether or not you call it one.**
+  E11 added `book_json`; `create_all` never ALTERs an existing table, so on the deployed
+  database EVERY audit insert failed — including rows carrying no book and including the
+  feature switched OFF. A loud ERROR made the outage visible without preventing it. The fix is
+  to DEGRADE (retry naming the pre-existing columns) so the old guarantee survives and only
+  the new thing is lost. Related: matching `"col" in str(e)` is useless on SQLAlchemy errors,
+  which embed the whole INSERT — read `exc.orig`.
+
+- **Reporting only the models that kill a result reports one end of the span.** The C8 harness
+  showed three measured cost models, all of which killed the fade cell, and none of the bound
+  under which it survives. An auditor supplied it: under a theoretical half-tick floor the cell
+  KEEPS significance and the crossover sits near 0.7x the measured spread — a ~30% margin, not
+  a landslide. **When a result dies under an assumption, also report where it would live.**
+
 ## 2026-07-21 (owner-directed) — filed A9: Robinhood Predict as a gated future venue; NO asset-class expansion
 
 - Owner asked whether Robinhood's new agentic-trading MCP means we should expand beyond prediction
