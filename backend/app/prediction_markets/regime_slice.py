@@ -4,8 +4,9 @@
 WHY THIS EXISTS
 An aggregate out-of-sample PnL that clears the weekly floor can still hide a
 FRAGILE edge — all the profit concentrated in ONE market category, ONE
-resolution-horizon band, ONE lucky time window, or a HANDFUL of correlated
-markets. That is NOT a validated, durable edge even though the headline number
+resolution-horizon band, ONE lucky time window, a HANDFUL of correlated
+markets, or (C9) a HANDFUL of individual TRADES spread across those markets.
+That is NOT a validated, durable edge even though the headline number
 looks good; shipping it would be a textbook overfit. This module slices a
 walk-forward backtest's realized OOS trades along the dimensions where a real
 edge should be BROAD, builds a concentration map, and FLAGS fragility so the
@@ -60,6 +61,29 @@ TOP_MARKET_PNL_CONCENTRATION = 0.50
 EXTREME_CONFIDENCE_PNL_CONCENTRATION = 0.85
 _EXTREME_CONFIDENCE_LABELS = ("0-10%", "90-100%")
 
+# SINGLE-OBSERVATION dominance (ROADMAP C9, filed by the EXP-006b audit). Every check above
+# slices by a REGIME (category / horizon / confidence / time) or by MARKET — none of them
+# catches "a handful of individual TRADES carry the whole result". On corrected EXP-006b the
+# top-market check PASSED at 0.4715 (and passed *because of* a leaked trade) while dropping the
+# TWO largest trades moved the cell from `significant_positive` to `indistinguishable_from_zero`
+# and the top 10 of ~140 trades carried the entire result. A per-market share cannot see that:
+# the dominant trades were spread over distinct markets. So this axis is computed on the
+# per-TRADE PnL list directly. Threshold set at the same 0.50 as the single-market check — half
+# the net PnL riding on five observations is the same few-observations risk, just at trade
+# granularity.
+TOP_TRADES_PNL_CONCENTRATION = 0.50
+# The top-5 check is only INFORMATIVE once there are at least this many positive-contribution
+# trades, and the bound is arithmetic, not a taste call: the 5 largest of p positives hold at
+# least 5/p of the positive total, and the positive total is >= the net total (losers only
+# subtract), so with p <= 9 the top-5 share EXCEEDS 0.50 no matter how evenly spread the edge
+# is. Firing there would be a structurally guaranteed FRAGILE on every small profitable run —
+# the same class of false signal the `categories_known` guard below exists to avoid. Below the
+# floor the report says the check was NOT assessed rather than flagging (or silently passing).
+_MIN_POSITIVE_TRADES_FOR_TOP_SHARE = 10
+# Likewise the drop-top-2 check needs at least one trade to SURVIVE the drop; with n <= 2 the
+# remainder is trivially 0 and the flag would be vacuous rather than evidence of fragility.
+_MIN_TRADES_FOR_DROP_TOP2 = 3
+
 # Bucket edges.
 _HORIZON_EDGES_DAYS = (1.0, 3.0, 7.0, 30.0)          # <=1d, 1-3d, 3-7d, 7-30d, >30d
 _CONFIDENCE_EDGES = (0.1, 0.25, 0.5, 0.75, 0.9)      # by entry_price (bought-side cost)
@@ -101,6 +125,26 @@ class RegimeSliceReport:
     # Verdict.
     fragile: bool
     fragile_reasons: tuple[str, ...]
+    # ---- Single-observation dominance (C9). Appended at the END with defaults so every
+    # existing positional/keyword constructor in the repo keeps working unchanged. ----
+    # Share of net PnL held by the k largest POSITIVE-contribution trades. None (never 0.0,
+    # never a guess) unless total net PnL > 0: a "share" of a zero or negative total is not a
+    # small number, it is an UNDEFINED one, and reporting 0.0 there would read as "no
+    # concentration" — the exact opposite of the truth. May exceed 1.0 when losers offset the
+    # winners; that is real information (the edge is a few winners net of a drag), not an error.
+    top1_trade_pnl_share: Optional[float] = None
+    top5_trade_pnl_share: Optional[float] = None
+    top10_trade_pnl_share: Optional[float] = None
+    # Net PnL with the k largest-PnL trades REMOVED. Always defined (it is a plain subtraction
+    # on real trades, meaningful at any sign) and never rounded away: this is the number that
+    # answers "does the result survive without its luckiest observations?".
+    pnl_after_drop_top1_usd: float = 0.0
+    pnl_after_drop_top2_usd: float = 0.0
+    pnl_after_drop_top5_usd: float = 0.0
+    # True iff the edge is still positive after dropping the two largest trades. None when the
+    # aggregate is not positive — the question is VACUOUS on a losing signal (there is no edge
+    # to survive), the same honesty the caller's `f10_nonfragile_is_vacuous` flag encodes.
+    survives_drop_top2: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +247,40 @@ def _top_pnl_share(slices: Sequence[SlicePnL], total_pnl: float) -> Optional[flo
     return round(max(s.net_pnl_usd for s in slices) / total_pnl, 6)
 
 
+def _top_k_trade_pnl_share(
+    sorted_pnls: Sequence[float], k: int, total_pnl: float
+) -> Optional[float]:
+    """Share of POSITIVE total net PnL held by the k largest positive-contribution trades.
+
+    ``sorted_pnls`` must already be sorted DESCENDING. Only trades that actually ADD PnL are
+    counted: a losing trade is not a "top contributor", and letting one into the numerator
+    would understate concentration. Fewer than k positive trades simply sums the ones that
+    exist — it never pads with zeros, which would also understate.
+
+    Returns None when ``total_pnl <= 0`` (an undefined share, see the field docstring). Ties are
+    irrelevant to the answer: the sum of the k largest values does not depend on how equal
+    values are ordered among themselves, so the result is stable under any input permutation.
+    """
+    if total_pnl <= 0:
+        return None
+    top = [p for p in sorted_pnls[:k] if p > 0]
+    return round(sum(top) / total_pnl, 6)
+
+
+def _pnl_after_drop_top_k(sorted_pnls: Sequence[float], k: int, total_pnl: float) -> float:
+    """Net PnL with the k largest-PnL trades removed (all of them, if there are fewer than k —
+    which honestly leaves 0.0 rather than pretending a remainder exists).
+
+    Unlike the share above this drops by RANK, not by sign: the question is "what does the
+    result look like without its best observations", and the best observations are the largest
+    PnL values whatever their sign. Deterministic under ties for the same reason: equal values
+    contribute the same sum in any order."""
+    # ``+ 0.0`` normalizes IEEE negative zero: when every trade is dropped the remainder is
+    # exactly nothing, and a report that prints "-0.0" invites the reader to see a tiny loss
+    # where there is none. Value-identical (-0.0 == 0.0), presentation-honest.
+    return round(total_pnl - sum(sorted_pnls[:k]), 6) + 0.0
+
+
 def analyze_regime_slices(
     trades: Sequence[BacktestTrade],
     *,
@@ -218,10 +296,14 @@ def analyze_regime_slices(
     ``fragile`` is True (with named reasons) when a positive aggregate edge is
     concentrated in a single category / horizon / confidence / time bucket beyond the
     named thresholds, when removing the top category flips the remaining edge to <= 0
-    (leave-one-out), or when a single market drives more than ``TOP_MARKET_PNL_CONCENTRATION``
-    of net PnL. When the aggregate net PnL is <= 0 there is no positive edge to assess,
-    so ``fragile`` is False with an explicit reason (the aggregate itself already shows
-    no edge — concentration is moot)."""
+    (leave-one-out), when a single market drives more than ``TOP_MARKET_PNL_CONCENTRATION``
+    of net PnL, or (C9) when a handful of individual TRADES carry the result — either the top 5
+    holding more than ``TOP_TRADES_PNL_CONCENTRATION`` of net PnL, or the edge going non-positive
+    once the two largest trades are dropped. When the aggregate net PnL is <= 0 there is no
+    positive edge to assess, so ``fragile`` is False with an explicit reason (the aggregate
+    itself already shows no edge — concentration is moot); the drop-top-k PnL levels are still
+    reported (they are defined at any sign) but ``survives_drop_top2`` and the trade shares are
+    None, because "does the edge survive?" is vacuous when there is no edge."""
     trades = list(trades)
     n = len(trades)
     total_pnl = round(sum(t.pnl_usd for t in trades), 6)
@@ -260,6 +342,21 @@ def analyze_regime_slices(
         for t in trades:
             per_market[t.market_id] = per_market.get(t.market_id, 0.0) + t.pnl_usd
         top_market_pnl = round(max(per_market.values()) / total_pnl, 6)
+
+    # C9 — single-observation dominance, computed straight off the per-trade PnL list. Sorting
+    # plain floats descending is a total, deterministic order (ties are interchangeable and do
+    # not change any sum below), so the whole axis is permutation-stable.
+    sorted_pnls = sorted((t.pnl_usd for t in trades), reverse=True)
+    top1_trade_share = _top_k_trade_pnl_share(sorted_pnls, 1, total_pnl)
+    top5_trade_share = _top_k_trade_pnl_share(sorted_pnls, 5, total_pnl)
+    top10_trade_share = _top_k_trade_pnl_share(sorted_pnls, 10, total_pnl)
+    pnl_drop1 = _pnl_after_drop_top_k(sorted_pnls, 1, total_pnl)
+    pnl_drop2 = _pnl_after_drop_top_k(sorted_pnls, 2, total_pnl)
+    pnl_drop5 = _pnl_after_drop_top_k(sorted_pnls, 5, total_pnl)
+    # Vacuous on a non-positive aggregate — None, not False. False would assert "the edge does
+    # not survive" about an edge that never existed.
+    survives_drop2: Optional[bool] = (pnl_drop2 > 0) if has_edge else None
+    n_positive_trades = sum(1 for p in sorted_pnls if p > 0)
 
     reasons: list[str] = []
     fragile = False
@@ -329,6 +426,43 @@ def analyze_regime_slices(
                 f"> {TOP_MARKET_PNL_CONCENTRATION:.0%} threshold (few-correlated-markets risk)"
             )
 
+        # C9 — top-TRADES concentration. Deliberately separate from single-market: the EXP-006b
+        # dominant trades sat in DIFFERENT markets, so the per-market share passed while five
+        # observations still carried the result. Only assessed above the arithmetic floor (see
+        # _MIN_POSITIVE_TRADES_FOR_TOP_SHARE); below it the share is guaranteed to breach and
+        # would be a false FRAGILE, so the report discloses that instead of flagging.
+        if top5_trade_share is not None and n_positive_trades >= _MIN_POSITIVE_TRADES_FOR_TOP_SHARE:
+            if top5_trade_share > TOP_TRADES_PNL_CONCENTRATION:
+                fragile = True
+                reasons.append(
+                    f"top-trades: {top5_trade_share:.0%} of net PnL from the 5 largest trades "
+                    f"of {n} > {TOP_TRADES_PNL_CONCENTRATION:.0%} threshold "
+                    f"(single-observation dominance)"
+                )
+        else:
+            reasons.append(
+                f"top-trades concentration NOT assessed (only {n_positive_trades} "
+                f"positive-contribution trades; below {_MIN_POSITIVE_TRADES_FOR_TOP_SHARE} the "
+                f"top-5 share exceeds the threshold arithmetically and carries no information) "
+                f"— drop-top-2 and the other checks still apply"
+            )
+
+        # C9 — drop-top-2 survival. The single check that would have caught EXP-006b outright:
+        # its 0.15 cell fell from `significant_positive` to `indistinguishable_from_zero` once
+        # the two largest trades were removed. Needs a survivor to be meaningful.
+        if n >= _MIN_TRADES_FOR_DROP_TOP2:
+            if pnl_drop2 <= 0:
+                fragile = True
+                reasons.append(
+                    f"drop-top-2: removing the 2 largest trades leaves net PnL "
+                    f"{pnl_drop2:.2f} <= 0 — the entire edge rides on two observations"
+                )
+        else:
+            reasons.append(
+                f"drop-top-2 NOT assessed (only {n} trades — dropping 2 leaves nothing to "
+                f"survive, so the check would be vacuous)"
+            )
+
         if not fragile:
             reasons.append("edge is broad across categories, horizons, confidence bands, and time")
 
@@ -347,6 +481,13 @@ def analyze_regime_slices(
         top_market_pnl_share=top_market_pnl,
         fragile=fragile,
         fragile_reasons=tuple(reasons),
+        top1_trade_pnl_share=top1_trade_share,
+        top5_trade_pnl_share=top5_trade_share,
+        top10_trade_pnl_share=top10_trade_share,
+        pnl_after_drop_top1_usd=pnl_drop1,
+        pnl_after_drop_top2_usd=pnl_drop2,
+        pnl_after_drop_top5_usd=pnl_drop5,
+        survives_drop_top2=survives_drop2,
     )
 
 
@@ -359,4 +500,5 @@ __all__ = [
     "TIME_PNL_CONCENTRATION",
     "CONFIDENCE_PNL_CONCENTRATION",
     "TOP_MARKET_PNL_CONCENTRATION",
+    "TOP_TRADES_PNL_CONCENTRATION",
 ]

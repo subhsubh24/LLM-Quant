@@ -163,6 +163,19 @@ def evaluate(
             "n_categories": len(category_by_market_id and set(category_by_market_id.values()) or []),
             "top_category_pnl_share": alpha_regime.top_category_pnl_share,
             "top_category_budget_share": round(alpha_regime.top_category_budget_share, 4),
+            # ROADMAP C9 — single-observation dominance. The regime + single-MARKET shares above
+            # can all pass while a handful of individual TRADES carry the result (EXP-006b: the
+            # top-market check passed at 0.4715 and dropping the two largest trades killed the
+            # cell). Shares are null, not 0.0, when the aggregate is non-positive — an undefined
+            # share is never fabricated. The drop-top-k levels are defined at any sign.
+            "top1_trade_pnl_share": alpha_regime.top1_trade_pnl_share,
+            "top5_trade_pnl_share": alpha_regime.top5_trade_pnl_share,
+            "top10_trade_pnl_share": alpha_regime.top10_trade_pnl_share,
+            "pnl_after_drop_top1_usd": round(alpha_regime.pnl_after_drop_top1_usd, 2),
+            "pnl_after_drop_top2_usd": round(alpha_regime.pnl_after_drop_top2_usd, 2),
+            "pnl_after_drop_top5_usd": round(alpha_regime.pnl_after_drop_top5_usd, 2),
+            # null (not false) when there is no positive edge — the survival question is vacuous.
+            "survives_drop_top2": alpha_regime.survives_drop_top2,
         },
         "significance_alpha_f11": {
             "n_trades": alpha_sig.n_trades,
@@ -232,6 +245,17 @@ def evaluate(
                 "f10_nonfragile_is_vacuous": (not reg.fragile) and res.total_pnl_usd <= 0.0,
                 "top_category_budget_share": round(reg.top_category_budget_share, 4),
                 "max_trade_budget_share": round(max_trade_budget_share, 4),
+                # ROADMAP C9 — single-observation dominance for this variant. A de-concentrated
+                # CATEGORY exposure says nothing about whether a few TRADES still carry the PnL,
+                # so a capped variant needs the same drop-top-k disclosure as the primary alpha.
+                # Same honesty rule: null shares (never 0.0) when the aggregate is non-positive.
+                "top1_trade_pnl_share": reg.top1_trade_pnl_share,
+                "top5_trade_pnl_share": reg.top5_trade_pnl_share,
+                "top10_trade_pnl_share": reg.top10_trade_pnl_share,
+                "pnl_after_drop_top1_usd": round(reg.pnl_after_drop_top1_usd, 2),
+                "pnl_after_drop_top2_usd": round(reg.pnl_after_drop_top2_usd, 2),
+                "pnl_after_drop_top5_usd": round(reg.pnl_after_drop_top5_usd, 2),
+                "survives_drop_top2": reg.survives_drop_top2,
                 "f11_verdict": sig.verdict,
                 "f11_total_ci": [sig.total_ci_low, sig.total_ci_high],
                 "f11_is_significant_edge": sig.is_significant_edge,
