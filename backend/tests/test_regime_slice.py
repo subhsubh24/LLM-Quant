@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from app.prediction_markets.regime_slice import (
+    TOP_TRADES_PNL_CONCENTRATION,
     UNCATEGORIZED,
     analyze_regime_slices,
 )
@@ -572,3 +573,42 @@ def test_a_broad_result_publishes_neither_reasons_nor_disclosures():
     assert rep.fragile is False
     assert rep.trade_concentration_reasons == ()
     assert rep.trade_concentration_disclosures == ()
+
+
+def test_the_top_trades_threshold_is_calibrated_not_merely_declared():
+    """Pin the CALIBRATION, not just the constant.
+
+    An auditor's mutation testing loosened `TOP_TRADES_PNL_CONCENTRATION` from 0.50 to 0.99 and
+    the entire suite stayed green — at 0.99 the real EXP-006b cell (83% of net PnL in its five
+    largest trades) would STOP flagging, which is the one calibration this whole axis exists to
+    establish. A threshold nothing pins is a threshold anyone can quietly move.
+
+    Two bracketing assertions, so the constant is bounded from both sides rather than merely
+    stated: it must be tight enough to catch the real EXP-006b concentration (0.8267), and
+    loose enough not to fire on a genuinely broad result.
+    """
+    assert TOP_TRADES_PNL_CONCENTRATION < 0.8267, (
+        "must be tight enough to flag the real EXP-006b cell, whose 5 largest trades hold "
+        "82.67% of net PnL — the case C9 was filed to catch"
+    )
+
+    # A genuinely broad result must NOT trip it: 20 equal winners put 25% in the top 5.
+    broad = [_trade(f"m{i}", +50.0, **_spread(i)) for i in range(20)]
+    rep = analyze_regime_slices(broad, category_by_market_id={f"m{i}": f"C{i % 6}" for i in range(20)})
+    assert rep.top5_trade_pnl_share == round(5 / 20, 6)
+    assert TOP_TRADES_PNL_CONCENTRATION > rep.top5_trade_pnl_share, (
+        "must be loose enough not to flag an evenly-spread 20-winner result"
+    )
+    assert rep.fragile is False
+    assert rep.trade_concentration_reasons == ()
+
+
+def test_the_real_exp006b_concentration_would_trip_the_shipped_threshold():
+    """The bracket above uses a literal (0.8267); this asserts the literal is the real number,
+    by rebuilding the concentration from the same shape the fixture models. Keeps the
+    calibration test from drifting into an assertion about a number nobody re-derives."""
+    trades, cat_map = _exp006b_shaped()
+    rep = analyze_regime_slices(trades, category_by_market_id=cat_map)
+    assert rep.top5_trade_pnl_share is not None
+    assert rep.top5_trade_pnl_share > TOP_TRADES_PNL_CONCENTRATION
+    assert any(r.startswith("top-trades:") for r in rep.trade_concentration_reasons)
