@@ -148,16 +148,57 @@ def test_out_of_range_prices_clamp_rather_than_extrapolate() -> None:
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("name", sorted(hs.MODELS))
 @pytest.mark.parametrize("price", [0.005, 0.015, 0.035, 0.075, 0.2, 0.5, 0.8])
-def test_measured_spread_is_never_cheaper_than_the_flat_rate_on_the_traded_range(
+def test_measured_spread_is_costlier_than_the_flat_rate_below_the_near_certain_bands(
     name: str, price: float
 ) -> None:
-    """Across every band the corpora actually trade, the measured crossing cost must be at
-    least the flat stand-in — that is the whole premise of C8, and if it inverted anywhere
-    the model would be rescuing a strategy rather than testing it."""
+    """Below 0.90 the measured crossing cost must be at least the flat stand-in.
+
+    An earlier version of this test claimed the property held "across every traded band" and
+    stopped its grid at 0.8, which made the claim true only because it never looked. It is
+    FALSE in the near-certain bands — see the test below — and the fade family does trade
+    there on its exit leg. Scoped honestly rather than quietly asserted.
+    """
     flat = CostModel()
     measured = CostModel(half_spread_model=hs.MODELS[name])
     assert measured.effective_buy_price(price) >= flat.effective_buy_price(price)
     assert measured.effective_sell_price(price) <= flat.effective_sell_price(price)
+
+
+@pytest.mark.parametrize("name", sorted(hs.MODELS))
+@pytest.mark.parametrize("price", [0.985, 0.99, 0.995])
+def test_measured_spread_is_CHEAPER_on_the_exit_leg_above_098(
+    name: str, price: float
+) -> None:
+    """The inversion, asserted rather than hidden.
+
+    Above 0.98 the real book is very tight — the probe measured a median half-spread
+    fraction of 0.000503, ten times cheaper than the flat 0.5%-of-price stand-in. So there
+    the measured model is a DISCOUNT, not a surcharge, and it shows on the SELL leg (the buy
+    leg is pinned at the $1.00 breakeven cap under both models, so the difference is
+    invisible there).
+
+    An adversarial auditor found the original blanket claim — "never cheaper than the flat
+    rate across every traded band" — false here, and it mattered because the EXP-006b fade
+    family exits legs in exactly this range. They quantified it: +$1.29 of extra proceeds
+    across those legs, against a -$887.89 total correction. Immaterial to the verdict, and
+    asserted anyway, because a cost model whose whole claim to trust is "it errs in the safe
+    direction" has to name the place where it does not.
+    """
+    flat = CostModel()
+    measured = CostModel(half_spread_model=hs.MODELS[name])
+    assert measured.effective_sell_price(price) > flat.effective_sell_price(price)
+
+
+@pytest.mark.parametrize("name", sorted(hs.MODELS))
+@pytest.mark.parametrize("price", [0.92, 0.95, 0.97])
+def test_the_inversion_does_not_reach_below_098(name: str, price: float) -> None:
+    """Bound the exception: between 0.90 and 0.98 the measured model is still the costlier
+    one, so the discount above is confined to the top band rather than a general property of
+    the near-certain regime."""
+    flat = CostModel()
+    measured = CostModel(half_spread_model=hs.MODELS[name])
+    assert measured.effective_buy_price(price) > flat.effective_buy_price(price)
+    assert measured.effective_sell_price(price) < flat.effective_sell_price(price)
 
 
 def test_sell_proceeds_never_go_negative_in_the_sub_cent_band() -> None:
@@ -234,13 +275,20 @@ def test_two_different_half_spread_models_do_not_collide() -> None:
 
 
 def test_no_half_spread_model_leaves_the_fingerprint_untouched() -> None:
-    """The added-only-when-set discipline: a run without a half-spread model must produce
-    the SAME hash it produced before the field existed. Pinned against the frozen-corpus
-    headline hash the C6 migration re-pinned, so a regression here is visible immediately."""
+    """The added-only-when-set discipline: with no model set, the payload key is ABSENT.
+
+    An auditor pointed out that an earlier docstring here claimed the test was "pinned
+    against the frozen-corpus headline hash", which it was not — it compared two trivially
+    equivalent constructions and would not have caught a fingerprint regression at all. It
+    now pins a literal, so it would.
+    """
     markets = _toy_markets()
     a = walk_forward_backtest(markets, seed=42)
     b = walk_forward_backtest(markets, seed=42, cost_model=CostModel())
     assert a.seed_hash == b.seed_hash
+    # The literal that makes this test load-bearing: change the no-model payload in any way
+    # and this fails, instead of passing because both sides changed together.
+    assert a.seed_hash == "c65b567902ead7eb", a.seed_hash
 
 
 def test_half_spread_run_is_deterministic() -> None:

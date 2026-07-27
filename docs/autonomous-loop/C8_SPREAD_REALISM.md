@@ -70,18 +70,36 @@ band is priced at the harsher rate either way.
 | 747book | 0.15 | 141 | +$1,735.96 | 56.0% | indistinguishable_from_zero | [−209.03, +3842.10] |
 | depth_probe | 0.15 | 141 | +$1,590.99 | 54.6% | indistinguishable_from_zero | [−349.49, +3707.54] |
 | conservative | 0.15 | 141 | +$1,553.14 | 54.6% | indistinguishable_from_zero | [−375.26, +3676.51] |
+| *tick_floor (a bound, not a model)* | 0.15 | 141 | +$2,068.26 | 56.0% | *significant_positive* | [+53.80, +4296.84] |
 | flat | 0.20 | 99 | +$2,855.43 | 57.6% | insufficient_data | — |
 | 747book | 0.20 | 99 | +$2,263.37 | 56.6% | insufficient_data | — |
 | depth_probe | 0.20 | 99 | +$2,125.19 | 54.5% | insufficient_data | — |
 | conservative | 0.20 | 99 | +$2,086.54 | 54.5% | insufficient_data | — |
 
-**The th=0.15 cell does not survive.** Its significance goes under the *least* punitive of the
-two measurements, not merely the conservative one — the 747-book model alone pushes the CI
-across zero (to [−209.03, +3842.10]). The cell was already F10-fragile (82% of net PnL from one
-category, 100% from one horizon bucket); it now fails F11 as well. Hit rate falls too — 58.2%
-flat, 56.0% under 747-book, 54.6% under both depth-probe models — which is the honest shape of
-the effect: paying a real spread does not just subtract a constant, it turns marginal winners
-into losers.
+**The th=0.15 cell loses its F11 significance under every measured model**, including the
+*least* punitive one — the 747-book model alone pushes the CI across zero (to
+[−209.03, +3842.10]). Hit rate falls too: 58.2% flat, 56.0% under 747-book, 54.6% under both
+depth-probe models. That is the honest shape of the effect — paying a real spread does not
+subtract a constant, it turns marginal winners into losers.
+
+**Two corrections to how that was first written, both from the adversarial gate.**
+
+*The cell was never a validated edge, so "the last positive cell dies" overstated it.* Under
+the pre-registered AND-of-gates the th=0.15 cell was already `is_validated_edge = False` under
+**flat** cost, because F10 flagged it fragile (82% of net PnL in one category, 100% in one
+horizon bucket). What C8 changes is its **F11 significance**, not its gate verdict. Under the
+pre-registration's own rule — *"if one cell validates and the other does not → EDGE-NOT-PROVEN;
+one of two neighbouring cells passing is what noise looks like"* — C8 does not change the
+verdict at all. It removes the last thing about the cell that still looked encouraging.
+
+*The margin is about 30%, not a landslide.* The last row above is the theoretical **half-tick
+floor**: one tick is the tightest spread any marketable order can cross, so nothing beats it.
+Under that floor the cell **keeps** F11 significance (+$2,068.26, CI [+53.80, +4296.84]), and
+scaling the 747-book model finds the crossover at roughly **0.7×** its measured spread. Only
+reporting the models that kill the cell would have reported one end of the span. It is a bound
+and not a rival estimate — 0.001 sits at the *p25* of the probe's own liquid sample, so
+assuming every market trades there is not a defensible central case — but a reader is entitled
+to see where the result survives, not only where it dies.
 
 ### BUCKET family — the frozen 187-record OOS corpus
 
@@ -119,6 +137,13 @@ It **does** establish that the last nominally significant result in this project
 survive a measured crossing cost, and that the two families' refutations are cost-model-robust
 in the spread dimension as EXP-010 showed they were in the fee dimension.
 
+It **does not** establish that the measured model is uniformly harsher. Above 0.98 the real
+book is very tight — a measured half-spread fraction of 0.000503 against the flat 0.5% — so
+there the model is a *discount*, visible on the exit leg (the buy leg is pinned at the $1.00
+breakeven cap under both). The fade family exits 11 legs above 0.90, worth +$1.29 against a
+−$887.89 total correction: immaterial, and asserted by a test anyway, because a cost model
+whose claim to trust is "it errs in the safe direction" has to name where it does not.
+
 It **does not** establish an upper bound on the correction. Both measurements are drawn from
 open, volume-ordered — i.e. liquid — markets, so they understate a random market's spread. Every
 model here is a **lower bound** on real crossing cost. A cell that dies under a lower bound is
@@ -130,6 +155,13 @@ that pays a *modelled* half-spread on a *midpoint* series is better than one tha
 but it is still not a series of prices anyone traded at. The real fix is forward capture — record
 the book alongside every paper decision (ROADMAP E11) — and that remains the only route to a
 corpus where entry and exit are observed rather than estimated.
+
+**What actually kills this cell is not the spread.** Two facts are stronger and both are
+cost-model-independent: the pre-registered gate already returned EDGE-NOT-PROVEN under flat
+cost, and the C9 single-observation axis flags it at *zero* cost assumption — five of 141
+trades carry 83% of net PnL and the top ten carry 114% (the remaining 131 are net negative).
+Under every cost model constructed, including the tick floor, `is_validated_edge` is False.
+That is what makes the verdict durable; the spread correction is corroboration, not the case.
 
 **And it is opt-in, which is the biggest thing left undone.** `CostModel.half_spread_model`
 defaults to `None`, and nothing in the engine sets it: outside this harness and its tests, every

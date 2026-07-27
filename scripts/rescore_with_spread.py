@@ -128,6 +128,16 @@ def _cost_models(cm_mod, hs_mod) -> "list[tuple[str, object]]":
     models: "list[tuple[str, object]]" = [("flat", cm_mod.CostModel())]
     for name in ("747book", "depth_probe", "conservative"):
         models.append((name, cm_mod.CostModel(half_spread_model=hs_mod.MODELS[name])))
+    # The theoretical half-tick FLOOR, reported LAST and labelled as a bound. An adversarial
+    # auditor made the fair point that reporting only the measured models reports one end of
+    # the span: it shows where the result dies and never where it survives, so a reader
+    # cannot tell whether the margin is a landslide or a whisker. Under this floor the fade
+    # cell DOES keep F11 significance, which is the honest other end — and the margin turns
+    # out to be about 30%, not a landslide. It is not a cost estimate and must never be read
+    # as one: it assumes every market trades at the tightest quote seen anywhere, when 0.001
+    # sits at the p25 of the probe's own LIQUID sample.
+    for name, model in hs_mod.BOUNDS.items():
+        models.append((name, cm_mod.CostModel(half_spread_model=model)))
     return models
 
 
@@ -239,6 +249,7 @@ def run(
         "experiment": "C8-spread-realism",
         "claims_edge": False,
         "half_spread_models": _model_table(hs_mod),
+        "bounds_not_models": sorted(hs_mod.BOUNDS),
         "disclosures": [
             "Both half-spread measurements come from OPEN, volume-ordered (LIQUID) markets, "
             "so they UNDER-state a random market's spread — every model here is a LOWER "
@@ -251,6 +262,10 @@ def run(
             "corpora (every frozen record carries liquidity: null).",
             "NO edge is claimed under any cost model. A cell that survives is a CANDIDATE "
             "for a fresh adversarial audit, not a validated edge.",
+            "`tick_floor` is a BOUND, not a measurement: half of one tick is the tightest "
+            "crossing cost any marketable order could achieve. It is reported so the span "
+            "has both ends — under it the fade cell KEEPS F11 significance — but no cost "
+            "claim may rest on it, and it is excluded from the survivor verdict below.",
         ],
     }
 
@@ -310,14 +325,19 @@ def _verdict(result: dict) -> dict:
         for name, rows in result["fade"]["by_cost_model"].items():
             for s in rows:
                 cells.append((f"fade@{s['threshold']}", name, s["is_validated_edge"]))
+    # `flat` is the status quo ante and `tick_floor` is a BOUND, not a measurement — neither
+    # may contribute a survivor to a cost claim. Only the three measured models can.
+    _not_measured = {"flat", "tick_floor"}
     survivors = [f"{fam}/{model}" for fam, model, ok in cells if ok]
-    measured = [f"{fam}/{model}" for fam, model, ok in cells if ok and model != "flat"]
+    measured = [
+        f"{fam}/{model}" for fam, model, ok in cells if ok and model not in _not_measured
+    ]
     return {
         "cells_scored": len(cells),
         "survivors_any_model": survivors,
         "survivors_under_measured_spread": measured,
         "survives_all_measured_models": bool(measured) and len(measured) == len(
-            [c for c in cells if c[1] != "flat"]
+            [c for c in cells if c[1] not in _not_measured]
         ),
         "edge_verdict": "EDGE-NOT-PROVEN" if not measured else "CANDIDATE-REQUIRES-FRESH-AUDIT",
     }

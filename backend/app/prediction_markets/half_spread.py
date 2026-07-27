@@ -62,6 +62,8 @@ from typing import Optional, Sequence
 SOURCE_747BOOK = "747-live-political-books-2026-07-26 (EXP006B_RESULT.md)"
 SOURCE_DEPTH_PROBE = "62-live-two-sided-books-2026-07-26 (data/depth_probe_polymarket.json)"
 SOURCE_CONSERVATIVE = "per-band max(747book, depth_probe)"
+# NOT a measurement: the theoretical tightest-possible crossing cost (half of one tick).
+SOURCE_TICK_FLOOR = "theoretical half-tick FLOOR (a bound, not a measurement)"
 
 
 @dataclass(frozen=True)
@@ -259,6 +261,39 @@ def _conservative_bands() -> tuple[SpreadBand, ...]:
     return tuple(bands)
 
 
+def _tick_floor_bands() -> tuple[SpreadBand, ...]:
+    """The theoretical MINIMUM half-spread: one tick, everywhere.
+
+    This is a BOUND, not a measurement and not a rival model. Polymarket quotes on a $0.01
+    grid over most of the range and a $0.001 grid in the tails, so half of one tick is the
+    tightest spread any marketable order could possibly cross — nothing can beat it. It is
+    exported because an adversarial auditor made the fair point that reporting only the two
+    measured models reports one end of the plausible span: it shows where the result dies
+    but never where it survives, and a reader cannot tell whether the margin is a landslide
+    or a whisker. Under this floor the EXP-006b th=0.15 cell DOES retain F11 significance,
+    which is the honest other end of the range.
+
+    Do NOT read it as a cost estimate. It assumes every market trades at the tightest
+    quote observed anywhere, when the probe's own distribution puts 0.001 at the p25 of the
+    LIQUID end of the market — so it is a floor that no real execution population reaches.
+    """
+    bands: list[SpreadBand] = []
+    for lo, hi, _frac, _n in _DEPTH_PROBE_MEASURED:
+        mid = (lo + hi) / 2.0
+        tick = 0.01 if 0.10 <= mid <= 0.90 else 0.001
+        # Expressed as a fraction of the band midpoint so it plugs into the same lookup.
+        bands.append(
+            SpreadBand(
+                lo=lo,
+                hi=hi,
+                half_spread_frac=(tick / 2.0) / mid,
+                n=None,
+                source=SOURCE_TICK_FLOOR,
+            )
+        )
+    return tuple(bands)
+
+
 POLYMARKET_HALF_SPREAD_747BOOK = HalfSpreadModel(name="747book", bands=_747book_bands())
 POLYMARKET_HALF_SPREAD_DEPTH_PROBE = HalfSpreadModel(
     name="depth_probe", bands=_depth_probe_bands()
@@ -266,12 +301,22 @@ POLYMARKET_HALF_SPREAD_DEPTH_PROBE = HalfSpreadModel(
 POLYMARKET_HALF_SPREAD_CONSERVATIVE = HalfSpreadModel(
     name="conservative", bands=_conservative_bands()
 )
+POLYMARKET_HALF_SPREAD_TICK_FLOOR = HalfSpreadModel(
+    name="tick_floor", bands=_tick_floor_bands()
+)
 
-# Keyed for CLI selection; the ordering is the reporting order in the re-score harness.
+# The two independent MEASUREMENTS plus their conservative combination. These are the models
+# a cost claim may rest on. The tick floor is deliberately NOT in here — it is a bound, and
+# mixing it in would invite someone to quote it as a cost estimate.
 MODELS: "dict[str, HalfSpreadModel]" = {
     "747book": POLYMARKET_HALF_SPREAD_747BOOK,
     "depth_probe": POLYMARKET_HALF_SPREAD_DEPTH_PROBE,
     "conservative": POLYMARKET_HALF_SPREAD_CONSERVATIVE,
+}
+
+# Reported alongside the models so the span has BOTH ends, never treated as one of them.
+BOUNDS: "dict[str, HalfSpreadModel]" = {
+    "tick_floor": POLYMARKET_HALF_SPREAD_TICK_FLOOR,
 }
 
 
