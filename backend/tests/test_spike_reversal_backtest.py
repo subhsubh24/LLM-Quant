@@ -636,3 +636,101 @@ def test_engine_takes_the_trade_once_the_horizon_is_covered():
     }
     res = backtest_fade_the_spike(covered)
     assert res.n_trades == 1
+
+
+# ---------------------------------------------------------------------------
+# ROADMAP C9 — the fade gate must INHERIT the single-observation-dominance axis
+# ---------------------------------------------------------------------------
+# `_fade_f10_ok` is a hand-rolled parallel F10 gate: it reads individual RegimeSliceReport
+# fields, so an axis added to regime_slice does NOT reach it automatically. A reviewer proved
+# the gap on regime_slice's own EXP-006b-shaped fixture — analyze_regime_slices returned
+# fragile=True on the top-trades axis while this gate returned (True, []), i.e. NON-fragile.
+# That is exactly the failure C9 was filed to close: a future result broad across category,
+# horizon, confidence and market but carried by two trades would have reached
+# VALIDATED-CANDIDATE. These tests pin the closure and are proven to fail on the pre-fix gate.
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from backend.app.prediction_markets.regime_slice import analyze_regime_slices  # noqa: E402
+from backend.app.prediction_markets.spike_reversal_backtest import _fade_f10_ok  # noqa: E402
+from backend.app.prediction_markets.walk_forward import BacktestTrade  # noqa: E402
+
+_C9_BASE_RES = datetime(2025, 3, 3, tzinfo=timezone.utc)
+
+
+def _c9_trade(market_id, pnl, *, entry, horizon_days, week):
+    res = _C9_BASE_RES + timedelta(days=7 * week)
+    return BacktestTrade(
+        market_id=market_id,
+        decision_time=res - timedelta(days=horizon_days),
+        resolution_time=res,
+        side="YES",
+        entry_price=entry,
+        effective_cost=entry,
+        contracts=100.0 / entry,
+        budget_usd=100.0,
+        payout_usd=100.0 + pnl,
+        pnl_usd=pnl,
+        is_win=pnl > 0,
+    )
+
+
+def _c9_cell(i):
+    """Place trade i in a DISTINCT category/horizon/confidence/time cell, so no PRE-EXISTING
+    F10 dimension concentrates and any flag can only come from the C9 axis."""
+    entries = [0.05, 0.2, 0.4, 0.6, 0.8, 0.95]
+    horizons = [0.5, 2, 5, 20, 40, 5]
+    return {"entry": entries[i % 6], "horizon_days": horizons[i % 6], "week": i % 7}
+
+
+def _c9_two_trades_carry_everything():
+    """Two huge winners that ARE the result, each paired with an offsetting loser in the SAME
+    market so per-market netting keeps the top market at 40% — under its 0.50 threshold,
+    mirroring the real EXP-006b's 0.4715 — while the two dominant TRADES hold 147% of net."""
+    trades = [
+        _c9_trade("M1", +900.0, **_c9_cell(0)), _c9_trade("M1", -400.0, **_c9_cell(0)),
+        _c9_trade("M2", +850.0, **_c9_cell(1)), _c9_trade("M2", -400.0, **_c9_cell(1)),
+    ] + [_c9_trade(f"s{i}", +30.0, **_c9_cell(i + 2)) for i in range(10)]
+    small = ("Sports", "Weather", "Econ", "Tech", "World")
+    cats = {"M1": "Crypto", "M2": "Politics"}
+    cats.update({f"s{i}": small[i % 5] for i in range(10)})
+    return trades, cats
+
+
+def test_fade_gate_blocks_a_result_carried_by_two_trades():
+    trades, cats = _c9_two_trades_carry_everything()
+    regime = analyze_regime_slices(trades, category_by_market_id=cats)
+
+    # Precondition: EVERY pre-existing axis passes, so this is a blind spot and not a
+    # duplicate signal. If this assertion ever fails the test has stopped proving anything.
+    assert regime.top_market_pnl_share is not None and regime.top_market_pnl_share <= 0.50
+
+    ok, reasons = _fade_f10_ok(regime, categories_known=True, exclude_horizon=True)
+    assert ok is False, "the fade gate must block a result carried by two observations"
+    assert any(r.startswith("top-trades:") for r in reasons), reasons
+    assert any(r.startswith("drop-top-2:") for r in reasons), reasons
+
+
+def test_fade_gate_still_passes_a_genuinely_broad_result():
+    """The closure must not turn into a blanket FRAGILE: 20 evenly-spread winners still pass."""
+    trades = [_c9_trade(f"m{i}", +50.0, **_c9_cell(i)) for i in range(20)]
+    cats = {f"m{i}": f"Cat{i % 6}" for i in range(20)}
+    regime = analyze_regime_slices(trades, category_by_market_id=cats)
+
+    ok, reasons = _fade_f10_ok(regime, categories_known=True, exclude_horizon=True)
+    assert ok is True, reasons
+    assert reasons == []
+
+
+def test_fade_gate_surfaces_a_non_assessed_c9_check_rather_than_silently_skipping_it():
+    """Below the arithmetic floor the top-5 flag is withheld — correctly, since it would breach
+    by construction. That must not make the gate READ as though the axis was applied: the
+    disclosure travels with the report so the verdict text can carry it."""
+    trades = [_c9_trade(f"m{i}", +50.0, **_c9_cell(i)) for i in range(4)]
+    regime = analyze_regime_slices(trades)
+
+    ok, reasons = _fade_f10_ok(regime, categories_known=False, exclude_horizon=True)
+    assert ok is True
+    # A non-assessment is a disclosure, never a fragility reason.
+    assert reasons == []
+    assert len(regime.trade_concentration_disclosures) == 1
+    assert regime.trade_concentration_disclosures[0].startswith("top-trades concentration NOT assessed")
