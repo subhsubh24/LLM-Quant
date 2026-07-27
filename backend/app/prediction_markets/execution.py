@@ -1179,11 +1179,24 @@ class PredictionMarketExecutor:
         # prediction-market price, and every one of the seven fallback sites already treated it
         # identically to None (they test falsiness, not `is None`), so this is the existing
         # semantics made explicit rather than a new rule.
-        if not req.price or req.price <= 0.0:
+        # NaN and out-of-range are checked EXPLICITLY, not left to the falsy/<=0 test above.
+        # An adversarial auditor found the reason: `not float("nan")` is False and
+        # `nan <= 0.0` is False, so a NaN price slips this guard — and then EVERY downstream
+        # cap comparison (`nan > 50.0`) is also False, so it slips the notional cap, the
+        # per-trade cap and the max-position cap too, and books a position with `exposure=nan`
+        # and `fees=nan`. That is worse than a fabricated price: it manufactures unbounded
+        # risk headroom out of a single bad float. The same auditor showed a base-code
+        # `price=-inf` booking NEGATIVE exposure and NEGATIVE fees, which the `<= 0.0` test
+        # already closes. This hole is PRE-EXISTING and unreachable from the HTTP surface
+        # (`PlaceOrderRequest` pins `ge=0.0, le=1.0, allow_inf_nan=False`), so it is latent —
+        # but a guard whose whole job is "no order transacts against a price we cannot trust"
+        # should not have a value it silently trusts, and the fix is one line.
+        if req.price is None or not math.isfinite(req.price) or not (0.0 < req.price <= 1.0):
             return (
                 f"{req.order_type.value} order rejected: no usable price "
-                f"(price={req.price!r}) — refusing to fabricate a stand-in price for risk "
-                "sizing, venue submission or fill (a real price is required for every order)"
+                f"(price={req.price!r}) — refusing to fabricate, or transact against, a price "
+                "that is missing, non-finite, or outside the (0, 1] range a prediction-market "
+                "contract can trade in (a real price is required for every order)"
             )
 
         # SIDE-EFFECT INTEGRITY: on a prediction market you CANNOT open a short by

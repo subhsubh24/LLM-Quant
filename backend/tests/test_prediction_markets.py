@@ -1255,3 +1255,52 @@ class TestRiskManagerRecordExecution:
         assert sum(rm._strategy_trades.values()) == 0
 
 
+
+
+class TestPricelessOrderGuardEdgeCases:
+    """NaN and out-of-range prices — the hole an adversarial auditor found in the first cut.
+
+    `not float("nan")` is False and `nan <= 0.0` is False, so a NaN price slipped a falsy/<=0
+    guard — and then every downstream cap comparison (`nan > 50.0`) is also False, so it
+    slipped the notional cap, the per-trade cap and the max-position cap, booking a position
+    with exposure=nan and fees=nan. That manufactures unbounded risk headroom from one bad
+    float, which is worse than the fabricated $0.50 this guard was written to stop.
+    """
+
+    def _order(self, price):
+        from app.prediction_markets.execution import (
+            OrderRequest, OrderSide, OrderType, Exchange,
+        )
+        return OrderRequest(
+            exchange=Exchange.POLYMARKET,
+            market_id="test_market",
+            token_id="test_token",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            size=10.0,
+            price=price,
+            strategy="test",
+        )
+
+    @pytest.mark.parametrize(
+        "price",
+        [float("nan"), float("inf"), float("-inf"), -0.5, -1e-12, 0.0, 1.5, 5.0],
+    )
+    def test_unusable_prices_are_rejected_with_no_state_touched(self, price):
+        from app.prediction_markets.execution import PredictionMarketExecutor, OrderStatus
+
+        executor = PredictionMarketExecutor(dry_run=True)
+        result = executor.execute(self._order(price))
+        assert result.status == OrderStatus.REJECTED, price
+        assert executor.positions == {}, price
+        assert executor.total_exposure == 0.0, price
+        assert executor.total_fees == 0.0, price
+
+    @pytest.mark.parametrize("price", [0.001, 0.42, 0.99, 1.0])
+    def test_every_price_a_contract_can_really_trade_at_still_fills(self, price):
+        from app.prediction_markets.execution import PredictionMarketExecutor, OrderStatus
+
+        executor = PredictionMarketExecutor(dry_run=True)
+        result = executor.execute(self._order(price))
+        assert result.status == OrderStatus.FILLED, price
+        assert "test_token" in executor.positions
