@@ -64,10 +64,9 @@ logger = logging.getLogger(__name__)
 
 # Wall-clock ceiling on the decision-time book fetch, in seconds.
 #
-# 15s MATCHES the timeout every other Polymarket call in this codebase already uses
-# (``PolymarketClient._get`` passes ``timeout=15`` to requests, and the MTM resolution
-# sweep relies on exactly that bound), so the capture introduces no new latency regime.
-# It is far SHORTER than the scan budget: the scan loop's interval is
+# Every other Polymarket call in this codebase uses 15s (``PolymarketClient._get`` passes
+# ``timeout=15`` to requests, and the MTM resolution sweep relies on that bound). This one
+# is deliberately tighter — see the note below. It is far SHORTER than the scan budget: the scan loop's interval is
 # ``scan_interval_sec`` (default 120s), and — importantly — that sleep happens AFTER the
 # cycle rather than on a fixed schedule, so even a worst-case capture stall delays the
 # NEXT cycle's start and can never cause two cycles to overlap or pile up.
@@ -76,7 +75,23 @@ logger = logging.getLogger(__name__)
 # because the inner timeout is the client's promise and this is ours: a client that hangs
 # for any reason (a stubbed one in a test, a socket that never returns) must still not be
 # able to wedge the scan loop.
-BOOK_CAPTURE_TIMEOUT_SEC = 15.0
+#
+# TIGHTENED to 3s from the 15s the other Polymarket calls use, because this one sits in a
+# place they do not. A reviewer pointed out that the capture is awaited SEQUENTIALLY before
+# the order is submitted, so its worst case is added latency between deciding and placing —
+# and while that cannot make a LIMIT order fill at a worse price (the price is fixed
+# earlier), it can make a time-sensitive fill miss entirely. 15s was defensible as "the same
+# timeout as everything else" and indefensible as a pre-submission delay. 3s is a real bound
+# on a public GET whose observed latency is well under a second, and a capture that cannot
+# complete in 3s is one worth losing: the snapshot is observation-only and a missing one is
+# recorded honestly as None.
+#
+# The remaining latency is disclosed rather than eliminated. Firing the capture CONCURRENTLY
+# with ``executor.execute`` would take it to zero, but on the live path the returned book
+# would then be one our own order may already have eaten into — a contaminated depth reading
+# is worse for the capacity corpus than a 3s delay on a gated-off path. Filed as the
+# follow-up if the live path ever runs a latency-sensitive strategy.
+BOOK_CAPTURE_TIMEOUT_SEC = 3.0
 
 # Environment switch for the capture. Read here rather than added to ``Settings`` so the
 # feature owns exactly one on/off surface and adds no boot-validated config; promoting it
